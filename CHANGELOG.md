@@ -9,6 +9,7 @@ All notable changes to WayExpand are documented here.
 - Published support matrix, contribution policy, pull request checklist, and
   privacy-safe bug-report template.
 - Continuous dependency advisory auditing in CI.
+- JSON output for safe expansion simulation through `test --json`.
 - Isolated release smoke test covering clean installation, validation, preview,
   hotkey resolution, diagnostics, and configuration permissions.
 - Tagged Linux x86_64 release workflow with bundled deployment files and

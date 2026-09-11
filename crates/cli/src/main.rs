@@ -26,11 +26,17 @@ fn main() -> Result<()> {
         Some("test") => {
             let trigger = args
                 .next()
-                .context("usage: wayexpand test <text> [config]")?;
-            let path = args
-                .next()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_config_path);
+                .context("usage: wayexpand test <text> [--json] [config]")?;
+            let next = args.next();
+            let requested_json = next.as_deref() == Some("--json");
+            let path = if requested_json {
+                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
+            } else {
+                next.map(PathBuf::from).unwrap_or_else(default_config_path)
+            };
+            if args.next().is_some() {
+                bail!("usage: wayexpand test <text> [--json] [config]");
+            }
             let config = Config::load(path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
@@ -39,9 +45,24 @@ fn main() -> Result<()> {
             })?;
             let mut results = engine.process(InputEvent::Text(trigger));
             results.extend(engine.process(InputEvent::Boundary));
-            match results.last() {
-                Some(result) => println!("{}", result.insert),
-                None => println!("no expansion matched"),
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "matched": !results.is_empty(),
+                        "results": results.iter().map(|result| serde_json::json!({
+                            "trigger_characters": result.trigger.chars().count(),
+                            "erase_characters": result.erase_chars,
+                            "replacement_bytes": result.insert.len(),
+                            "replacement": result.insert,
+                        })).collect::<Vec<_>>(),
+                    })
+                );
+            } else {
+                match results.last() {
+                    Some(result) => println!("{}", result.insert),
+                    None => println!("no expansion matched"),
+                }
             }
         }
         Some("test-hotkey") => {

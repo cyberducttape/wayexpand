@@ -5,6 +5,19 @@
 
 WayExpand is a Wayland-first text-expansion daemon. The expansion engine is platform-independent; input capture and text insertion are separate backends.
 
+Turn repetitive operational text into a reliable shortcut: type a trigger such
+as `;;hello`, and WayExpand replaces it with the approved text while keeping
+configuration validation, permissions, and runtime behavior explicit.
+
+![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
+
+## Why WayExpand?
+
+- Replace incident responses, runbook commands, ticket updates, and signatures
+  without retyping them.
+- Preview and validate every expansion before it reaches a real application.
+- Run it as a user service with privacy-safe logs and no root privileges.
+
 It is designed for privacy-conscious desktop automation: configuration is
 validated before activation, control surfaces are permission-checked, and the
 daemon never logs typed text or snippet contents.
@@ -63,6 +76,7 @@ pass-through still require compositor integration testing.
 ```sh
 cargo test
 cargo run -p wayexpand -- test ';;hello' expansions.toml
+cargo run -p wayexpand -- test ';;hello' --json expansions.toml
 cargo run -p wayexpand -- preview ':today' expansions.toml
 cargo run -p wayexpand -- list expansions.toml
 cargo run -p wayexpand -- validate expansions.toml
@@ -79,6 +93,10 @@ cargo run -p wayexpand -- backend
 cargo run -p wayexpand-ui -- expansions.toml
 cargo run -p wayexpand-gui -- expansions.toml
 ```
+
+`test` is the safe dry-run path: it simulates matching and prints the result;
+it never injects text into another application. Add `--json` when consuming
+the result from CI, scripts, or an editor integration.
 
 For a user-local installation with systemd units:
 

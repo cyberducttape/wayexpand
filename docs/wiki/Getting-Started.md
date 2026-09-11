@@ -1,5 +1,19 @@
 # Getting started
 
+WayExpand turns short triggers into reusable text. The safest first workflow
+is to validate a configuration and simulate an expansion before enabling any
+Wayland capture service.
+
+```sh
+wayexpand validate
+wayexpand test ';;hello'
+wayexpand test ';;hello' --json
+```
+
+The simulation is a dry run: it cannot type into another application. Once it
+produces the expected result, use `wayexpand doctor` and follow the backend
+support matrix before enabling a service.
+
 ## Requirements
 
 - Linux with a Wayland session for global input capture.
