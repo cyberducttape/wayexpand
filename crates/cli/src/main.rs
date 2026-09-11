@@ -285,12 +285,22 @@ fn main() -> Result<()> {
             println!("{} {}", value, trigger);
         }
         Some("doctor") => {
-            let config_path = args
-                .next()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_config_path);
+            let first = args.next();
+            let requested_json = first.as_deref() == Some("--json");
+            let config_path = if requested_json {
+                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
+            } else {
+                first.map(PathBuf::from).unwrap_or_else(default_config_path)
+            };
             if args.next().is_some() {
-                bail!("usage: wayexpand doctor [config]");
+                bail!("usage: wayexpand doctor [--json] [config]");
+            }
+            if requested_json {
+                let healthy = print_json_diagnostics(&config_path)?;
+                if !healthy {
+                    bail!("doctor found configuration or control-socket problems");
+                }
+                return Ok(());
             }
             println!(
                 "Session: {}",
@@ -344,7 +354,7 @@ fn main() -> Result<()> {
             }
         }
         Some("help") | Some("--help") | Some("-h") | None => println!(
-            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  doctor [config]                              Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
+            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
             env!("CARGO_PKG_VERSION"),
             default_config_path().display()
         ),
@@ -367,6 +377,50 @@ fn print_backend_diagnostics() {
             Err(error) => println!("input-method-v2 probe: unavailable ({error})"),
         }
     }
+}
+
+/// Stable, automation-friendly diagnostic output for service managers and
+/// fleet health checks. It deliberately avoids compositor probes that can
+/// block or mutate session state; those remain in the human doctor output.
+fn print_json_diagnostics(path: &Path) -> Result<bool> {
+    let config_result = Config::load(path);
+    let config_ok = config_result.is_ok();
+    let socket_path = std::env::var_os("WAYEXPAND_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
+        });
+    let socket_exists = socket_path.as_ref().is_some_and(|socket| socket.exists());
+    let backends: Vec<_> = discover_backends()
+        .into_iter()
+        .map(|status| {
+            serde_json::json!({
+                "kind": status.kind.to_string(),
+                "state": format!("{:?}", status.state),
+                "detail": status.detail,
+            })
+        })
+        .collect();
+    let healthy = config_ok && (socket_path.is_none() || socket_exists);
+    println!(
+        "{}",
+        serde_json::json!({
+            "healthy": healthy,
+            "wayland": std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            "config": {
+                "path": path,
+                "valid": config_ok,
+                "error": config_result.err().map(|error| error.safe_summary()),
+            },
+            "control_socket": {
+                "path": socket_path,
+                "configured": socket_path.is_some(),
+                "exists": socket_exists,
+            },
+            "backends": backends,
+        })
+    );
+    Ok(healthy)
 }
 
 fn status_as_json(response: &str) -> Result<serde_json::Value> {

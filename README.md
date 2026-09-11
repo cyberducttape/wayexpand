@@ -74,6 +74,7 @@ cargo run -p wayexpand -- import espanso ~/.config/espanso/match/base.yml > impo
 cargo run -p wayexpand-daemon -- expansions.toml
 cargo run -p wayexpand-daemon -- --source=input-method expansions.toml
 cargo run -p wayexpand -- doctor [config]
+cargo run -p wayexpand -- doctor --json [config]
 cargo run -p wayexpand -- backend
 cargo run -p wayexpand-ui -- expansions.toml
 cargo run -p wayexpand-gui -- expansions.toml
@@ -105,6 +106,8 @@ home, shell scripts, and systemd unit validation.
 The CLI's `list --json`, `preview --json`, and lifecycle `status --json`
 commands provide a machine-readable surface for settings frontends and desktop
 integrations; human-readable output remains the default.
+`doctor --json` provides a stable health snapshot for systemd checks, shell
+monitoring, and fleet diagnostics without running compositor probes.
 `set-enabled` and `set-mode` edit a single snippet through an atomic, validated replacement
 so a UI or script never needs to rewrite configuration unsafely.
 

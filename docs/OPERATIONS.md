@@ -286,3 +286,25 @@ session with bounded backoff. Because a transport failure may be ambiguous
 after queued events were sent, the current replacement is not replayed.
 Direct EIS handshakes and device discovery have a five-second I/O deadline so a
 stale endpoint cannot hang daemon startup indefinitely.
+## Monitoring and health checks
+
+Use the machine-readable doctor command from a service check or fleet probe:
+
+```sh
+wayexpand doctor --json ~/.config/wayexpand/expansions.toml
+```
+
+The JSON document contains `healthy`, `config`, `control_socket`, `wayland`,
+and `backends` fields. It exits non-zero when the configuration is invalid or
+when a configured runtime socket is missing. It intentionally does not run
+compositor connection probes, so checks remain bounded and side-effect free.
+
+For a running daemon, prefer the control API for liveness and operational
+state:
+
+```sh
+wayexpand status --json
+```
+
+The control socket is user-owned and mode `0600`; do not expose it through a
+shared filesystem or proxy it over a network.
