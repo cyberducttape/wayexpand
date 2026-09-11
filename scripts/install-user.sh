@@ -2,6 +2,21 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
+    exit 1
+fi
+cargo_bin=$(command -v cargo 2>/dev/null || true)
+if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    cargo_bin="$HOME/.cargo/bin/cargo"
+fi
+if [ -z "$cargo_bin" ]; then
+    printf '%s\n' "error: Cargo was not found" >&2
+    printf '%s\n' "install Rust with rustup, restart your shell, and rerun this script:" >&2
+    printf '%s\n' "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+    printf '%s\n' "  . \"\$HOME/.cargo/env\"" >&2
+    exit 127
+fi
 bin_dir="$HOME/.local/bin"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
@@ -14,7 +29,7 @@ case "$target_dir" in
 esac
 
 printf '%s\n' "Building WayExpand release binaries..."
-CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
+CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
     -p wayexpand-daemon \
     -p wayexpand \
