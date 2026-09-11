@@ -16,6 +16,10 @@ This installs release binaries under `~/.local/bin`, copies both user units to
 configuration path does not already exist. It does not overwrite an existing
 configuration or start a service. After installation, run `systemctl --user
 daemon-reload` and use `wayexpand doctor` before enabling one unit.
+Each unit validates the active configuration in `ExecStartPre` before starting
+the daemon. Logs are sent to the journal with a stable identifier, so startup
+and reload failures can be queried with `journalctl --user -u
+wayexpand-input-method.service`.
 
 The normal configuration path is:
 
