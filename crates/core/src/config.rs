@@ -1,0 +1,669 @@
+use crate::{render_template, TemplateContext, TemplateError};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    io::{Read, Write},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::Path,
+};
+use thiserror::Error;
+
+const MAX_TRIGGER_CHARS: usize = 128;
+const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
+const MAX_DESCRIPTION_CHARS: usize = 512;
+const MAX_TAGS: usize = 32;
+const MAX_TAG_CHARS: usize = 64;
+const MAX_COMMAND_ARGS: usize = 32;
+const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
+const MAX_COMMAND_ARG_CHARS: usize = 1024;
+const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
+const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
+const MAX_COMMAND_CACHE_MS: u64 = 60_000;
+const MAX_EXPANSIONS: usize = 10_000;
+const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    #[serde(default)]
+    pub expansion: Vec<ExpansionConfig>,
+    #[serde(default)]
+    pub settings: Settings,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Settings {
+    pub max_buffer_chars: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MatchMode {
+    #[default]
+    Immediate,
+    WordBoundary,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            max_buffer_chars: 128,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpansionConfig {
+    pub trigger: String,
+    pub replacement: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub match_mode: MatchMode,
+    #[serde(default)]
+    pub command: Option<CommandConfig>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CommandConfig {
+    pub program: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_command_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default)]
+    pub cache_ms: u64,
+}
+
+fn default_command_timeout_ms() -> u64 {
+    500
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("could not read {path}: {source}")]
+    Read {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("configuration {path} is not a regular file")]
+    NotRegular { path: String },
+    #[error("configuration {path} is writable by group or other users (mode {mode:04o})")]
+    InsecurePermissions { path: String, mode: u32 },
+    #[error("configuration {path} is owned by uid {uid}; expected the current user or root")]
+    InsecureOwner { path: String, uid: u32 },
+    #[error(
+        "configuration parent {path} is writable by group or other users without sticky protection (mode {mode:04o})"
+    )]
+    InsecureParent { path: String, mode: u32 },
+    #[error(
+        "configuration parent {path} is owned by uid {uid}; expected the current user or root"
+    )]
+    InsecureParentOwner { path: String, uid: u32 },
+    #[error("configuration {path} is not valid UTF-8: {source}")]
+    InvalidUtf8 {
+        path: String,
+        source: std::string::FromUtf8Error,
+    },
+    #[error("invalid TOML: {0}")]
+    Parse(#[from] toml::de::Error),
+    #[error("expansion {index} has an empty trigger")]
+    EmptyTrigger { index: usize },
+    #[error("expansion {index} {field} contains a NUL character")]
+    NulCharacter { index: usize, field: &'static str },
+    #[error("expansion {index} trigger is too long ({length} characters; maximum is {maximum})")]
+    TriggerTooLong {
+        index: usize,
+        length: usize,
+        maximum: usize,
+    },
+    #[error("expansion {index} replacement is too large ({length} bytes; maximum is {maximum})")]
+    ReplacementTooLarge {
+        index: usize,
+        length: usize,
+        maximum: usize,
+    },
+    #[error("expansion {index} description is too long (maximum is {maximum} characters)")]
+    DescriptionTooLong { index: usize, maximum: usize },
+    #[error("expansion {index} has invalid tags")]
+    InvalidTags { index: usize },
+    #[error("expansion {index} has an invalid command: {reason}")]
+    InvalidCommand { index: usize, reason: &'static str },
+    #[error("duplicate trigger {trigger:?} in expansions {first} and {second}")]
+    DuplicateTrigger {
+        trigger: String,
+        first: usize,
+        second: usize,
+    },
+    #[error("max_buffer_chars must be between 1 and 4096")]
+    InvalidBufferLimit,
+    #[error("configuration contains {count} expansions; maximum is {maximum}")]
+    TooManyExpansions { count: usize, maximum: usize },
+    #[error("enabled triggers contain {length} characters; maximum is {maximum}")]
+    TriggerDataTooLarge { length: usize, maximum: usize },
+    #[error("configuration is too large ({length} bytes; maximum is {maximum})")]
+    ConfigTooLarge { length: usize, maximum: usize },
+    #[error("could not serialize configuration: {0}")]
+    Serialize(#[from] toml::ser::Error),
+    #[error("expansion {index} has an invalid replacement template: {source}")]
+    InvalidTemplate { index: usize, source: TemplateError },
+}
+
+impl ConfigError {
+    /// Return operator-useful diagnostics without echoing configuration text.
+    /// The `Display` implementation remains detailed for library callers, but
+    /// user-facing health checks should use this boundary-safe form.
+    pub fn safe_summary(&self) -> String {
+        match self {
+            Self::Read { source, .. } => format!("read failed ({})", source.kind()),
+            Self::NotRegular { .. } => "path is not a regular file".into(),
+            Self::InsecurePermissions { mode, .. } => {
+                format!("file permissions are insecure (mode {mode:04o})")
+            }
+            Self::InsecureOwner { uid, .. } => format!("file owner is not trusted (uid {uid})"),
+            Self::InsecureParent { mode, .. } => {
+                format!("parent directory is insecure (mode {mode:04o})")
+            }
+            Self::InsecureParentOwner { uid, .. } => {
+                format!("parent directory owner is not trusted (uid {uid})")
+            }
+            Self::InvalidUtf8 { source, .. } => {
+                format!(
+                    "file is not valid UTF-8 (invalid at byte {})",
+                    source.utf8_error().valid_up_to()
+                )
+            }
+            Self::Parse(_) => "invalid TOML".into(),
+            Self::EmptyTrigger { index } => format!("expansion {index} has an empty trigger"),
+            Self::NulCharacter { index, field } => {
+                format!("expansion {index} {field} contains a NUL character")
+            }
+            Self::TriggerTooLong {
+                index,
+                length,
+                maximum,
+            } => format!("expansion {index} trigger is too long ({length}; maximum {maximum})"),
+            Self::ReplacementTooLarge {
+                index,
+                length,
+                maximum,
+            } => {
+                format!("expansion {index} replacement is too large ({length}; maximum {maximum})")
+            }
+            Self::DescriptionTooLong { index, maximum } => {
+                format!("expansion {index} description is too long (maximum {maximum})")
+            }
+            Self::InvalidTags { index } => format!("expansion {index} has invalid tags"),
+            Self::InvalidCommand { index, reason } => {
+                format!("expansion {index} has an invalid command ({reason})")
+            }
+            Self::DuplicateTrigger { first, second, .. } => {
+                format!("duplicate trigger in expansions {first} and {second}")
+            }
+            Self::InvalidBufferLimit => "max_buffer_chars is outside the allowed range".into(),
+            Self::TooManyExpansions { count, maximum } => {
+                format!("too many expansions ({count}; maximum {maximum})")
+            }
+            Self::TriggerDataTooLarge { length, maximum } => {
+                format!("enabled trigger data is too large ({length}; maximum {maximum})")
+            }
+            Self::ConfigTooLarge { length, maximum } => {
+                format!("configuration is too large ({length} bytes; maximum {maximum})")
+            }
+            Self::Serialize(_) => "configuration could not be serialized".into(),
+            Self::InvalidTemplate { index, source } => {
+                format!("expansion {index} has an invalid replacement template ({source})")
+            }
+        }
+    }
+}
+
+impl Config {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+        // Resolve symlinks before validating ancestors and opening the file.
+        // Validating the link's parent alone would allow a link swap to point
+        // at a file below an untrusted directory. Opening the resolved path
+        // also makes the validated location the one read by this call.
+        let resolved_path = fs::canonicalize(path).map_err(|source| ConfigError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
+        validate_parent_directories(&resolved_path)?;
+        // Open once and validate the resulting descriptor. O_NONBLOCK keeps a
+        // FIFO or device node from blocking the service before we can reject
+        // it, and descriptor metadata removes the path check/open race.
+        let descriptor = rustix::fs::open(
+            &resolved_path,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|source| ConfigError::Read {
+            path: path.display().to_string(),
+            source: source.into(),
+        })?;
+        let file = fs::File::from(descriptor);
+        let metadata = file.metadata().map_err(|source| ConfigError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
+        if !metadata.file_type().is_file() {
+            return Err(ConfigError::NotRegular {
+                path: path.display().to_string(),
+            });
+        }
+        let uid = metadata.uid();
+        let current_uid = rustix::process::geteuid().as_raw();
+        if uid != current_uid && uid != 0 {
+            return Err(ConfigError::InsecureOwner {
+                path: path.display().to_string(),
+                uid,
+            });
+        }
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode & 0o022 != 0 {
+            return Err(ConfigError::InsecurePermissions {
+                path: path.display().to_string(),
+                mode,
+            });
+        }
+        if metadata.len() > MAX_CONFIG_BYTES as u64 {
+            return Err(ConfigError::ConfigTooLarge {
+                length: usize::try_from(metadata.len()).unwrap_or(usize::MAX),
+                maximum: MAX_CONFIG_BYTES,
+            });
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_CONFIG_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| ConfigError::Read {
+                path: path.display().to_string(),
+                source,
+            })?;
+        if bytes.len() > MAX_CONFIG_BYTES {
+            return Err(ConfigError::ConfigTooLarge {
+                length: bytes.len(),
+                maximum: MAX_CONFIG_BYTES,
+            });
+        }
+        let text = String::from_utf8(bytes).map_err(|source| ConfigError::InvalidUtf8 {
+            path: path.display().to_string(),
+            source,
+        })?;
+        Self::parse(&text)
+    }
+
+    pub fn parse(text: &str) -> Result<Self, ConfigError> {
+        if text.len() > MAX_CONFIG_BYTES {
+            return Err(ConfigError::ConfigTooLarge {
+                length: text.len(),
+                maximum: MAX_CONFIG_BYTES,
+            });
+        }
+        let config: Self = toml::from_str(text)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Atomically replace a trusted configuration file. A missing target is
+    /// created with private permissions, which lets settings frontends
+    /// initialize a first-run library without weakening the same parent and
+    /// ownership checks used for existing files.
+    pub fn save_atomic(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+        self.validate()?;
+        let path = path.as_ref();
+        let resolved = match fs::canonicalize(path) {
+            Ok(resolved) => resolved,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                let parent = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .unwrap_or_else(|| Path::new("."));
+                let parent = fs::canonicalize(parent).map_err(|source| ConfigError::Read {
+                    path: parent.display().to_string(),
+                    source,
+                })?;
+                let file_name = path.file_name().ok_or_else(|| ConfigError::Read {
+                    path: path.display().to_string(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "configuration path has no file name",
+                    ),
+                })?;
+                parent.join(file_name)
+            }
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: path.display().to_string(),
+                    source,
+                })
+            }
+        };
+        validate_parent_directories(&resolved)?;
+        let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
+        let file_name = resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("expansions.toml");
+        let temp = parent.join(format!(".{file_name}.tmp.{}", std::process::id()));
+        let serialized = toml::to_string_pretty(self)?;
+        let result = (|| -> Result<(), ConfigError> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temp)
+                .map_err(|source| ConfigError::Read {
+                    path: temp.display().to_string(),
+                    source,
+                })?;
+            file.write_all(serialized.as_bytes())
+                .map_err(|source| ConfigError::Read {
+                    path: temp.display().to_string(),
+                    source,
+                })?;
+            file.sync_all().map_err(|source| ConfigError::Read {
+                path: temp.display().to_string(),
+                source,
+            })?;
+            fs::rename(&temp, &resolved).map_err(|source| ConfigError::Read {
+                path: resolved.display().to_string(),
+                source,
+            })?;
+            fs::File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|source| ConfigError::Read {
+                    path: parent.display().to_string(),
+                    source,
+                })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        result
+    }
+
+    /// Validate a configuration assembled through the public Rust API.
+    /// Parsing is not the only way callers can construct `Config`, so engine
+    /// construction and other consumers can enforce the same limits here.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.expansion.len() > MAX_EXPANSIONS {
+            return Err(ConfigError::TooManyExpansions {
+                count: self.expansion.len(),
+                maximum: MAX_EXPANSIONS,
+            });
+        }
+        if !(1..=4096).contains(&self.settings.max_buffer_chars) {
+            return Err(ConfigError::InvalidBufferLimit);
+        }
+        let mut total_trigger_chars = 0usize;
+        for (index, expansion) in self.expansion.iter().enumerate() {
+            if expansion.trigger.is_empty() {
+                return Err(ConfigError::EmptyTrigger { index });
+            }
+            if expansion.trigger.contains('\0') {
+                return Err(ConfigError::NulCharacter {
+                    index,
+                    field: "trigger",
+                });
+            }
+            if expansion.replacement.contains('\0') {
+                return Err(ConfigError::NulCharacter {
+                    index,
+                    field: "replacement",
+                });
+            }
+            let trigger_length = expansion.trigger.chars().count();
+            if trigger_length > MAX_TRIGGER_CHARS {
+                return Err(ConfigError::TriggerTooLong {
+                    index,
+                    length: trigger_length,
+                    maximum: MAX_TRIGGER_CHARS,
+                });
+            }
+            if expansion.replacement.len() > MAX_REPLACEMENT_BYTES {
+                return Err(ConfigError::ReplacementTooLarge {
+                    index,
+                    length: expansion.replacement.len(),
+                    maximum: MAX_REPLACEMENT_BYTES,
+                });
+            }
+            if expansion.description.chars().count() > MAX_DESCRIPTION_CHARS {
+                return Err(ConfigError::DescriptionTooLong {
+                    index,
+                    maximum: MAX_DESCRIPTION_CHARS,
+                });
+            }
+            if expansion.description.contains('\0') {
+                return Err(ConfigError::NulCharacter {
+                    index,
+                    field: "description",
+                });
+            }
+            if expansion.tags.len() > MAX_TAGS
+                || expansion
+                    .tags
+                    .iter()
+                    .any(|tag| tag.chars().count() > MAX_TAG_CHARS || tag.contains('\0'))
+            {
+                return Err(ConfigError::InvalidTags { index });
+            }
+            if let Some(command) = &expansion.command {
+                if command.program.trim().is_empty() {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "program is empty",
+                    });
+                }
+                if command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
+                    || command.program.contains('\0')
+                {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "program is too long or contains NUL",
+                    });
+                }
+                if command.args.len() > MAX_COMMAND_ARGS {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "too many arguments",
+                    });
+                }
+                let mut argument_chars = 0usize;
+                for argument in &command.args {
+                    if argument.chars().count() > MAX_COMMAND_ARG_CHARS || argument.contains('\0') {
+                        return Err(ConfigError::InvalidCommand {
+                            index,
+                            reason: "argument is too long or contains NUL",
+                        });
+                    }
+                    argument_chars = argument_chars.saturating_add(argument.chars().count());
+                    if argument_chars > MAX_COMMAND_ARG_DATA_CHARS {
+                        return Err(ConfigError::InvalidCommand {
+                            index,
+                            reason: "argument data is too large",
+                        });
+                    }
+                }
+                if !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&command.timeout_ms) {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "timeout must be between 1 and 5000 milliseconds",
+                    });
+                }
+                if command.cache_ms > MAX_COMMAND_CACHE_MS {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "cache must be between 0 and 60000 milliseconds",
+                    });
+                }
+            } else if let Err(source) =
+                render_template(&expansion.replacement, &TemplateContext::default())
+            {
+                return Err(ConfigError::InvalidTemplate { index, source });
+            }
+            if expansion.enabled {
+                total_trigger_chars = total_trigger_chars.saturating_add(trigger_length);
+                if total_trigger_chars > MAX_TOTAL_TRIGGER_CHARS {
+                    return Err(ConfigError::TriggerDataTooLarge {
+                        length: total_trigger_chars,
+                        maximum: MAX_TOTAL_TRIGGER_CHARS,
+                    });
+                }
+            }
+        }
+
+        // Sorting makes duplicate validation O(n log n) instead of comparing
+        // every enabled expansion with every other expansion. Prefixes are
+        // intentionally allowed; the matcher selects the longest suffix.
+        let mut enabled: Vec<_> = self
+            .expansion
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.enabled)
+            .map(|(index, entry)| (index, entry.trigger.as_str()))
+            .collect();
+        enabled
+            .sort_unstable_by(|left, right| left.1.cmp(right.1).then_with(|| left.0.cmp(&right.0)));
+        for pair in enabled.windows(2) {
+            let (first_index, first) = pair[0];
+            let (second_index, second) = pair[1];
+            if first == second {
+                return Err(ConfigError::DuplicateTrigger {
+                    trigger: first.to_owned(),
+                    first: first_index,
+                    second: second_index,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
+    let mut current = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    loop {
+        let metadata = fs::metadata(current).map_err(|source| ConfigError::Read {
+            path: current.display().to_string(),
+            source,
+        })?;
+        if !metadata.is_dir() {
+            return Err(ConfigError::Read {
+                path: current.display().to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "configuration parent is not a directory",
+                ),
+            });
+        }
+        let mode = metadata.permissions().mode() & 0o7777;
+        let sticky = mode & 0o1000 != 0;
+        let uid = metadata.uid();
+        let current_uid = rustix::process::geteuid().as_raw();
+        if uid != current_uid && uid != 0 {
+            return Err(ConfigError::InsecureParentOwner {
+                path: current.display().to_string(),
+                uid,
+            });
+        }
+        if mode & 0o022 != 0 && !sticky {
+            return Err(ConfigError::InsecureParent {
+                path: current.display().to_string(),
+                mode,
+            });
+        }
+        if current == Path::new("/") {
+            break;
+        }
+        current = current.parent().unwrap_or_else(|| Path::new("/"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn safe_summary_does_not_echo_trigger_contents() {
+        let error = ConfigError::DuplicateTrigger {
+            trigger: "secret-trigger".into(),
+            first: 1,
+            second: 2,
+        };
+        let summary = error.safe_summary();
+        assert!(summary.contains("1"));
+        assert!(summary.contains("2"));
+        assert!(!summary.contains("secret-trigger"));
+    }
+
+    #[test]
+    fn safe_summary_does_not_echo_untrusted_parent_path() {
+        let error = ConfigError::InsecureParentOwner {
+            path: "/home/user/private/secret-configs".into(),
+            uid: 1234,
+        };
+        let summary = error.safe_summary();
+        assert!(summary.contains("1234"));
+        assert!(!summary.contains("secret-configs"));
+    }
+
+    #[test]
+    fn save_atomic_replaces_a_valid_configuration_and_keeps_private_mode() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-config-save-{}.toml", std::process::id()));
+        fs::write(
+            &path,
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"old\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut config = Config::load(&path).unwrap();
+        config.expansion[0].replacement = "new".into();
+        config.save_atomic(&path).unwrap();
+        let reloaded = Config::load(&path).unwrap();
+        assert_eq!(reloaded.expansion[0].replacement, "new");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn save_atomic_creates_missing_private_file() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-config-create-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: Vec::new(),
+            settings: Settings::default(),
+        };
+        config.save_atomic(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap().expansion.len(), 0);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_file(path).unwrap();
+    }
+}

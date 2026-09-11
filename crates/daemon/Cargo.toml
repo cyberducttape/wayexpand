@@ -1,0 +1,16 @@
+[package]
+name = "wayexpand-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+signal-hook.workspace = true
+rustix = { workspace = true, features = ["process", "fs"] }
+wayexpand-core = { path = "../core" }
+wayexpand-backend-wlroots = { path = "../backend-wlroots" }
+wayexpand-backend-libei = { path = "../backend-libei" }
+wayexpand-backend-input-method = { path = "../backend-input-method" }

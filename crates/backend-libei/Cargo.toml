@@ -1,0 +1,13 @@
+[package]
+name = "wayexpand-backend-libei"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ashpd = "0.12.3"
+reis = "0.7.1"
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "time"] }
+rustix = { version = "1", features = ["event"] }
+wayexpand-core = { path = "../core" }

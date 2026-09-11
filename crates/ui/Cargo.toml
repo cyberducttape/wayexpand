@@ -1,0 +1,15 @@
+[package]
+name = "wayexpand-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wayexpand-ui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+crossterm.workspace = true
+rustix.workspace = true
+wayexpand-core = { path = "../core" }

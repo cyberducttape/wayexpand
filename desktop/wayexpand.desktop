@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WayExpand
+Comment=Wayland-native text expansion settings
+Exec=wayexpand-gui %f
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=text;expansion;snippets;Wayland;
+StartupNotify=true

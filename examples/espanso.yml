@@ -1,0 +1,7 @@
+matches:
+  - trigger: ":hello"
+    replace: "Hello from an imported snippet!"
+    label: "Imported greeting"
+  - trigger: ":today"
+    replace: "Today is {{date}}."
+    label: "Imported date"

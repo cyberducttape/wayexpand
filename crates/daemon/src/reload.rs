@@ -1,0 +1,350 @@
+use anyhow::Result;
+use std::{
+    fs,
+    hash::{Hash, Hasher},
+    io::Read,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
+};
+use tracing::{error, info};
+use wayexpand_core::{Config, ConfigError, ExpansionEngine};
+
+const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
+const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+pub struct ReloadableConfig {
+    path: PathBuf,
+    stamp: Option<FileStamp>,
+    observed: Option<FileStamp>,
+    last_fingerprint_check: Option<Instant>,
+    pub engine: ExpansionEngine,
+    healthy: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    modified: SystemTime,
+    length: u64,
+    inode: u64,
+    change_time: i64,
+    change_time_nsec: i64,
+    fingerprint: u64,
+}
+
+impl FileStamp {
+    fn metadata_matches(&self, metadata: (SystemTime, u64, u64, i64, i64)) -> bool {
+        (
+            self.modified,
+            self.length,
+            self.inode,
+            self.change_time,
+            self.change_time_nsec,
+        ) == metadata
+    }
+}
+
+fn file_metadata(path: &Path) -> Option<(SystemTime, u64, u64, i64, i64)> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.file_type().is_file() {
+        return None;
+    }
+    Some((
+        metadata.modified().ok()?,
+        metadata.len(),
+        metadata.ino(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ))
+}
+
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    // Open nonblocking and validate the resulting descriptor. The metadata
+    // check above is only an optimization; a path can be replaced between
+    // that check and the open, and a FIFO must never stall the reload loop.
+    let descriptor = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    let file = fs::File::from(descriptor);
+    let metadata = file.metadata().ok()?;
+    if !metadata.file_type().is_file() {
+        return None;
+    }
+    let modified = metadata.modified().ok()?;
+    let length = metadata.len();
+    let inode = metadata.ino();
+    let change_time = metadata.ctime();
+    let change_time_nsec = metadata.ctime_nsec();
+    let mut contents = Vec::new();
+    file.take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut contents)
+        .ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    contents.hash(&mut hasher);
+    Some(FileStamp {
+        modified,
+        length,
+        inode,
+        change_time,
+        change_time_nsec,
+        fingerprint: hasher.finish(),
+    })
+}
+
+impl ReloadableConfig {
+    pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
+        let path = path.into();
+        let (config, stamp) = load_consistent(&path)?;
+        let engine = ExpansionEngine::new(config)
+            .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
+        Ok(Self {
+            path,
+            stamp,
+            observed: stamp,
+            // Force a content fingerprint on the first polling cycle. This
+            // catches same-size edits on filesystems with coarse timestamps.
+            last_fingerprint_check: None,
+            engine,
+            healthy: true,
+        })
+    }
+
+    /// Parse first, then replace the live engine. Invalid edits leave the old
+    /// configuration running and are reported to the operator.
+    pub fn reload_if_changed(&mut self) {
+        let current = self.poll_stamp();
+        if current == self.observed {
+            return;
+        }
+        self.observed = current;
+        self.reload_current(current);
+    }
+
+    pub fn reload_now(&mut self) {
+        let current = file_stamp(&self.path);
+        self.last_fingerprint_check = Some(Instant::now());
+        self.observed = current;
+        self.reload_current(current);
+    }
+
+    fn reload_current(&mut self, current: Option<FileStamp>) {
+        match load_consistent(&self.path) {
+            Ok((config, stable_stamp)) => {
+                let count = config.expansion.len();
+                match ExpansionEngine::new(config) {
+                    Ok(engine) => {
+                        self.engine = engine;
+                        self.stamp = stable_stamp;
+                        self.observed = stable_stamp;
+                        self.last_fingerprint_check = Some(Instant::now());
+                        self.healthy = true;
+                        info!(expansions = count, "configuration reloaded");
+                    }
+                    Err(error) => {
+                        self.healthy = false;
+                        error!(
+                            reason = %safe_reload_error(&anyhow::Error::new(error)),
+                            "configuration reload rejected; keeping previous configuration"
+                        )
+                    }
+                }
+            }
+            Err(error) => {
+                self.healthy = false;
+                // Keep the pre-read stamp as the observed value. If the file
+                // changed while it was being read, the next polling cycle
+                // must retry instead of considering the unstable read settled.
+                self.observed = current;
+                error!(
+                    reason = %safe_reload_error(&error),
+                    "configuration reload rejected; keeping previous configuration"
+                )
+            }
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn healthy(&self) -> bool {
+        self.healthy
+    }
+
+    fn poll_stamp(&mut self) -> Option<FileStamp> {
+        let metadata = file_metadata(&self.path);
+        let metadata_unchanged = matches!((metadata, self.observed),
+            (Some(metadata), Some(previous)) if previous.metadata_matches(metadata));
+        if metadata_unchanged
+            && self
+                .last_fingerprint_check
+                .is_some_and(|checked| checked.elapsed() < FINGERPRINT_REFRESH_INTERVAL)
+        {
+            return self.observed;
+        }
+
+        let current = file_stamp(&self.path);
+        self.last_fingerprint_check = Some(Instant::now());
+        current
+    }
+}
+
+fn safe_reload_error(error: &anyhow::Error) -> String {
+    if let Some(error) = error.downcast_ref::<ConfigError>() {
+        return error.safe_summary();
+    }
+    "configuration could not be read consistently".into()
+}
+
+fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>)> {
+    for _attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
+        let before = file_stamp(path);
+        let config = Config::load(path)?;
+        let after = file_stamp(path);
+        if before == after {
+            return Ok((config, after));
+        }
+    }
+    anyhow::bail!(
+        "configuration changed while being read after {MAX_CONSISTENCY_ATTEMPTS} attempts"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use wayexpand_core::InputEvent;
+
+    fn temporary_config() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("wayexpand-reload-test-{nonce}.toml"))
+    }
+
+    fn config_text(replacement: &str) -> String {
+        format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
+    }
+
+    #[test]
+    fn valid_reload_replaces_active_engine() {
+        let path = temporary_config();
+        fs::write(&path, config_text("old")).unwrap();
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        fs::write(&path, config_text("new replacement")).unwrap();
+        config.reload_now();
+        assert!(config.healthy());
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new replacement");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_reload_keeps_previous_engine() {
+        let path = temporary_config();
+        fs::write(&path, config_text("stable")).unwrap();
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        fs::write(&path, "[[expansion]]\ntrigger = ").unwrap();
+        config.reload_now();
+        assert!(!config.healthy());
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "stable");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn missing_file_keeps_previous_engine_and_reloads_when_restored() {
+        let path = temporary_config();
+        fs::write(&path, config_text("before outage")).unwrap();
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        config.reload_now();
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "before outage");
+
+        fs::write(&path, config_text("after restore")).unwrap();
+        config.reload_now();
+        assert!(config.healthy());
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "after restore");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn in_place_same_size_edit_is_detected() {
+        let path = temporary_config();
+        fs::write(&path, config_text("old")).unwrap();
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        fs::write(&path, config_text("new")).unwrap();
+        config.reload_if_changed();
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn consistent_load_returns_the_stamp_for_the_loaded_file() {
+        let path = temporary_config();
+        fs::write(&path, config_text("stable read")).unwrap();
+
+        let (_config, stamp) = load_consistent(&path).unwrap();
+        assert_eq!(stamp, file_stamp(&path));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn unchanged_metadata_reuses_existing_fingerprint() {
+        let path = temporary_config();
+        fs::write(&path, config_text("stable metadata")).unwrap();
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        let stamp = config.observed.unwrap();
+        config.last_fingerprint_check = Some(Instant::now());
+        let reused = config.poll_stamp().unwrap();
+        assert_eq!(reused, stamp);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn reload_diagnostics_do_not_echo_configuration_details() {
+        let error = anyhow::Error::new(ConfigError::DuplicateTrigger {
+            trigger: ":secret-trigger".into(),
+            first: 1,
+            second: 2,
+        });
+        let summary = safe_reload_error(&error);
+        assert_eq!(summary, "duplicate trigger in expansions 1 and 2");
+        assert!(!summary.contains("secret-trigger"));
+    }
+}

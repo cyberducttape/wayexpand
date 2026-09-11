@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --workspace
+      - run: cargo test --locked --release --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
+      - run: cargo build --locked --workspace
+      - run: cargo run --locked -q -p wayexpand-ui -- --help
+      - run: cargo run --locked -q -p wayexpand-gui -- --help
+      - run: shellcheck scripts/*.sh
+      - run: bash scripts/smoke-daemon.sh
+      - run: bash scripts/test-doctor.sh
+      - run: bash scripts/test-ui.sh
+      - run: bash scripts/test-install-user.sh
+      - run: systemd-analyze verify systemd/wayexpand.service
+      - run: systemd-analyze verify systemd/wayexpand-input-method.service
+      - run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service

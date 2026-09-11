@@ -1,0 +1,16 @@
+[package]
+name = "wayexpand-backend-input-method"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+wayland-protocols-misc.workspace = true
+xkbcommon-rs = { workspace = true, features = ["server"] }
+xkeysym = "0.2.1"
+rustix = { version = "1", features = ["event"] }
+wayexpand-core = { path = "../core" }

@@ -1,0 +1,793 @@
+mod control;
+mod reload;
+
+use anyhow::Result;
+use reload::ReloadableConfig;
+use signal_hook::{
+    consts::{SIGINT, SIGTERM},
+    iterator::Signals,
+};
+use std::{
+    env,
+    io::{self, BufRead},
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+use tracing::{info, warn};
+use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_libei::LibeiInjector;
+use wayexpand_backend_wlroots::WlrootsInjector;
+use wayexpand_core::{
+    default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent, TextInjector,
+};
+
+const MAX_STDIN_LINE_BYTES: usize = 1024 * 1024;
+const MAX_PENDING_INPUT_LINES: usize = 64;
+
+#[derive(Debug)]
+struct EventError {
+    result: ExpansionResult,
+    source: ExpansionError,
+}
+
+#[derive(Debug)]
+struct OutputConnectError {
+    message: String,
+    retryable: bool,
+}
+
+impl std::fmt::Display for OutputConnectError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for OutputConnectError {}
+
+impl std::fmt::Display for EventError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.source)
+    }
+}
+
+impl std::error::Error for EventError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl EventError {
+    fn retryable(&self) -> bool {
+        match &self.source {
+            ExpansionError::Injection(error) => error.retryable,
+        }
+    }
+}
+
+fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+    let (path, source_name, backend_name) = parse_args()?;
+    let mut config = ReloadableConfig::load(&path).map_err(|_| {
+        anyhow::anyhow!(
+            "could not load configuration {}; run `wayexpand doctor` for details",
+            path.display()
+        )
+    })?;
+    let control = control::ControlServer::start()?;
+    let managed = control.path().is_some();
+    let signal_stop = control.stop_requested.clone();
+    let mut signals = Signals::new([SIGINT, SIGTERM])
+        .map_err(|error| anyhow::anyhow!("could not install signal handlers: {error}"))?;
+    thread::spawn(move || {
+        if signals.forever().next().is_some() {
+            signal_stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+    });
+    info!(path = %config.path().display(), "configuration loaded");
+    if let Some(socket) = control.path() {
+        info!(path = %socket.display(), "control socket ready");
+    } else {
+        warn!("XDG_RUNTIME_DIR unavailable; control socket disabled");
+    }
+    let mut input_method = match source_name.as_deref() {
+        None | Some("stdin") => None,
+        Some("input-method") => {
+            if backend_name.is_some() && backend_name.as_deref() != Some("none") {
+                anyhow::bail!(
+                    "input-method source is also its injector; do not combine it with an output backend"
+                );
+            }
+            Some(connect_input_method_with_retry(&control, &path)?)
+        }
+        Some(other) => anyhow::bail!("unknown source {other:?}; expected stdin or input-method"),
+    };
+    let input_method_mode = source_name.as_deref() == Some("input-method");
+    let active_source = source_name.as_deref().unwrap_or("stdin");
+    let mut reconnect_delay = Duration::from_millis(250);
+    let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
+        None
+    } else {
+        match backend_name.as_deref() {
+            None | Some("none") => None,
+            Some(backend @ ("wlroots" | "libei")) => {
+                let Some(injector) = connect_output_with_retry(
+                    &control,
+                    active_source,
+                    backend,
+                    &path,
+                    config.healthy(),
+                )?
+                else {
+                    anyhow::bail!("output backend startup cancelled while stopping")
+                };
+                Some(injector)
+            }
+            Some(other) => {
+                anyhow::bail!("unknown backend {other:?}; expected none, wlroots, or libei")
+            }
+        }
+    };
+    let active_backend = input_method
+        .as_ref()
+        .map(|_| "input-method-v2")
+        .or_else(|| injector.as_ref().map(|backend| backend.name()))
+        .unwrap_or("none");
+    let mut connection_state = if input_method_mode {
+        "connected"
+    } else {
+        "running"
+    };
+    let mut paused = false;
+    set_daemon_status(
+        &control,
+        active_source,
+        active_backend,
+        connection_state,
+        &path,
+        config.healthy(),
+    );
+    info!(
+        source = active_source,
+        backend = active_backend,
+        "input source active"
+    );
+
+    let receiver = if input_method.is_none() {
+        let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_INPUT_LINES);
+        thread::spawn(move || {
+            let mut reader = io::BufReader::new(io::stdin().lock());
+            loop {
+                match read_bounded_line(&mut reader) {
+                    Ok(Some(line)) => {
+                        if sender.send(line).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        warn!(%error, "stdin line rejected");
+                    }
+                }
+            }
+        });
+        Some(receiver)
+    } else {
+        None
+    };
+
+    let mut stdin_closed = false;
+    loop {
+        let requested_pause = control
+            .pause_requested
+            .load(std::sync::atomic::Ordering::Acquire);
+        if requested_pause != paused {
+            process_event(
+                &mut config.engine,
+                InputEvent::FocusChanged {
+                    sensitive: requested_pause,
+                },
+                None,
+            )?;
+            paused = requested_pause;
+            info!(paused, "expansion processing policy changed");
+        }
+        if control
+            .reload_requested
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            config.reload_now();
+        }
+        if control
+            .stop_requested
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            break;
+        }
+        config.reload_if_changed();
+        set_daemon_status(
+            &control,
+            active_source,
+            active_backend,
+            connection_state,
+            &path,
+            config.healthy(),
+        );
+        if input_method_mode {
+            if input_method.is_none() {
+                match InputMethodSource::connect() {
+                    Ok(source) => {
+                        input_method = Some(source);
+                        reconnect_delay = Duration::from_millis(250);
+                        connection_state = "connected";
+                        set_daemon_status(
+                            &control,
+                            active_source,
+                            active_backend,
+                            connection_state,
+                            &path,
+                            config.healthy(),
+                        );
+                        info!("input-method source reconnected");
+                    }
+                    Err(error) if error.is_retryable() => {
+                        warn!(%error, "input-method unavailable; retrying");
+                        if !wait_for_retry(&control.stop_requested, reconnect_delay) {
+                            break;
+                        }
+                        reconnect_delay = next_retry_delay(reconnect_delay);
+                    }
+                    Err(error) => {
+                        return Err(anyhow::anyhow!(
+                            "input-method reconnect failed permanently: {error}"
+                        ));
+                    }
+                }
+                continue;
+            }
+            let Some(source) = input_method.as_mut() else {
+                return Err(anyhow::anyhow!("input-method mode lost its input source"));
+            };
+            let event_result = source.next_event_timeout(Duration::from_millis(250));
+            match event_result {
+                Ok(Some(event)) => {
+                    let result = match input_method.as_mut() {
+                        Some(source) => process_event(&mut config.engine, event, Some(source)),
+                        None => {
+                            return Err(anyhow::anyhow!(
+                                "input-method source disappeared while processing an event"
+                            ));
+                        }
+                    };
+                    match result {
+                        Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Err(error) if error.retryable() => {
+                            warn!(
+                                error = %error,
+                                trigger_chars = error.result.trigger.chars().count(),
+                                insert_bytes = error.result.insert.len(),
+                                "input-method output failed; current expansion is not replayed"
+                            );
+                            input_method = None;
+                            connection_state = "reconnecting";
+                            process_event(
+                                &mut config.engine,
+                                InputEvent::FocusChanged { sensitive: true },
+                                None,
+                            )?;
+                            set_daemon_status(
+                                &control,
+                                active_source,
+                                active_backend,
+                                connection_state,
+                                &path,
+                                config.healthy(),
+                            );
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Ok(None) => {}
+                Err(error) if error.retryable => {
+                    warn!(%error, "input-method connection lost; reconnecting");
+                    input_method = None;
+                    connection_state = "reconnecting";
+                    process_event(
+                        &mut config.engine,
+                        InputEvent::FocusChanged { sensitive: true },
+                        None,
+                    )?;
+                    set_daemon_status(
+                        &control,
+                        active_source,
+                        active_backend,
+                        connection_state,
+                        &path,
+                        config.healthy(),
+                    );
+                }
+                Err(error) => {
+                    return Err(anyhow::anyhow!("input source failed: {error}"));
+                }
+            }
+            continue;
+        }
+        if stdin_closed {
+            thread::sleep(Duration::from_millis(250));
+            continue;
+        }
+        let Some(receiver) = receiver.as_ref() else {
+            break;
+        };
+        match receiver.recv_timeout(Duration::from_millis(250)) {
+            Ok(line) => {
+                if injector.is_some() {
+                    for character in line.chars() {
+                        let event = InputEvent::Text(character.to_string());
+                        let (result, backend) = if let Some(mut backend) = injector.take() {
+                            let result =
+                                process_event(&mut config.engine, event, Some(backend.as_mut()));
+                            (result, Some(backend))
+                        } else {
+                            (process_event(&mut config.engine, event, None), None)
+                        };
+                        injector = backend;
+                        if let Err(error) = result {
+                            if !error.retryable() {
+                                return Err(error.into());
+                            }
+                            warn!(
+                                error = %error,
+                                trigger_chars = error.result.trigger.chars().count(),
+                                insert_bytes = error.result.insert.len(),
+                                "output session failed; current expansion is not replayed"
+                            );
+                            drop(injector.take());
+                            config.engine.process(InputEvent::Boundary);
+                            connection_state = "reconnecting";
+                            set_daemon_status(
+                                &control,
+                                active_source,
+                                backend_name.as_deref().unwrap_or("none"),
+                                connection_state,
+                                &path,
+                                config.healthy(),
+                            );
+                            let backend_name = backend_name.as_deref().unwrap_or("none");
+                            let Some(reconnected) = connect_output_with_retry(
+                                &control,
+                                active_source,
+                                backend_name,
+                                &path,
+                                config.healthy(),
+                            )?
+                            else {
+                                break;
+                            };
+                            injector = Some(reconnected);
+                            connection_state = "connected";
+                        }
+                    }
+                    if let Some(backend) = injector.as_deref_mut() {
+                        process_event(&mut config.engine, InputEvent::Boundary, Some(backend))?;
+                    }
+                } else {
+                    process_event(&mut config.engine, InputEvent::Text(line), None)?;
+                    process_event(&mut config.engine, InputEvent::Boundary, None)?;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) if managed => {
+                warn!("stdin input source ended; daemon remains idle under control socket");
+                stdin_closed = true;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    warn!("input stream ended; daemon stopping");
+    Ok(())
+}
+
+fn next_retry_delay(delay: Duration) -> Duration {
+    delay.saturating_mul(2).min(Duration::from_secs(30))
+}
+
+fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+    let mut bytes = Vec::with_capacity(4096);
+    let mut oversized = false;
+
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            if bytes.is_empty() && !oversized {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = chunk.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(chunk.len(), |index| index + 1);
+        if !oversized {
+            let remaining = MAX_STDIN_LINE_BYTES + 1 - bytes.len();
+            let copied = consumed.min(remaining);
+            bytes.extend_from_slice(&chunk[..copied]);
+            if bytes.len() > MAX_STDIN_LINE_BYTES {
+                oversized = true;
+                bytes.clear();
+            }
+        }
+        reader.consume(consumed);
+        if newline.is_some() {
+            break;
+        }
+    }
+
+    if oversized {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("stdin line exceeds {MAX_STDIN_LINE_BYTES} bytes"),
+        ));
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    if bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn set_daemon_status(
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+) {
+    control.set_status(format!(
+        "source={source}\nbackend={backend}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}",
+        control
+            .pause_requested
+            .load(std::sync::atomic::Ordering::Acquire),
+        config_path.display(),
+        if config_healthy {
+            "ok"
+        } else {
+            "reload-rejected"
+        }
+    ));
+}
+
+fn connect_input_method_with_retry(
+    control: &control::ControlServer,
+    config_path: &Path,
+) -> Result<InputMethodSource> {
+    let mut retry_delay = Duration::from_millis(250);
+    loop {
+        match InputMethodSource::connect() {
+            Ok(source) => {
+                control.set_status(format!(
+                    "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\nconfig={}\nconfig_state=ok",
+                    config_path.display()
+                ));
+                return Ok(source);
+            }
+            Err(error) if error.is_retryable() => {
+                warn!(%error, ?retry_delay, "input-method unavailable at startup; retrying");
+                control.set_status(format!(
+                    "source=input-method\nbackend=input-method-v2\nstate=reconnecting\npaused=false\nconfig={}\nconfig_state=ok",
+                    config_path.display()
+                ));
+                if !wait_for_retry(&control.stop_requested, retry_delay) {
+                    anyhow::bail!("input-method startup cancelled while waiting to reconnect");
+                }
+                retry_delay = next_retry_delay(retry_delay);
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "connecting input-method-v2 source failed permanently: {error}"
+                ));
+            }
+        }
+    }
+}
+
+fn wait_for_retry(stop: &std::sync::atomic::AtomicBool, delay: Duration) -> bool {
+    let deadline = Instant::now() + delay;
+    while !stop.load(std::sync::atomic::Ordering::Acquire) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return true;
+        }
+        thread::sleep(remaining.min(Duration::from_millis(250)));
+    }
+    false
+}
+
+fn connect_output_backend(
+    name: &str,
+) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
+    match name {
+        "wlroots" => WlrootsInjector::connect()
+            .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
+            .map_err(|error| OutputConnectError {
+                retryable: error.is_retryable(),
+                message: format!("connecting wlroots output backend: {error}"),
+            }),
+        "libei" => LibeiInjector::connect()
+            .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
+            .map_err(|error| OutputConnectError {
+                retryable: error.is_retryable(),
+                message: format!("connecting libei output backend: {error}"),
+            }),
+        other => Err(OutputConnectError {
+            retryable: false,
+            message: format!("unknown output backend {other:?}"),
+        }),
+    }
+}
+
+fn connect_output_with_retry(
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    config_path: &Path,
+    config_healthy: bool,
+) -> Result<Option<Box<dyn TextInjector>>> {
+    let mut retry_delay = Duration::from_millis(250);
+    loop {
+        match connect_output_backend(backend) {
+            Ok(injector) => {
+                set_daemon_status(
+                    control,
+                    source,
+                    backend,
+                    "connected",
+                    config_path,
+                    config_healthy,
+                );
+                info!(backend, "output backend reconnected");
+                return Ok(Some(injector));
+            }
+            Err(error) if error.retryable => {
+                warn!(%error, backend, ?retry_delay, "output backend unavailable; retrying");
+                set_daemon_status(
+                    control,
+                    source,
+                    backend,
+                    "reconnecting",
+                    config_path,
+                    config_healthy,
+                );
+                if !wait_for_retry(&control.stop_requested, retry_delay) {
+                    return Ok(None);
+                }
+                retry_delay = next_retry_delay(retry_delay);
+            }
+            Err(error) => return Err(anyhow::Error::new(error)),
+        }
+    }
+}
+
+fn process_event(
+    engine: &mut ExpansionEngine,
+    event: InputEvent,
+    mut injector: Option<&mut dyn TextInjector>,
+) -> std::result::Result<(), EventError> {
+    for result in engine.process(event) {
+        if let Some(backend) = injector.as_deref_mut() {
+            if let Err(source) = ExpansionEngine::apply(backend, &result) {
+                return Err(EventError { result, source });
+            }
+            info!(
+                trigger_chars = result.trigger.chars().count(),
+                insert_bytes = result.insert.len(),
+                "expansion injected"
+            );
+        } else {
+            info!(
+                trigger_chars = result.trigger.chars().count(),
+                erase_chars = result.erase_chars,
+                insert_bytes = result.insert.len(),
+                "expansion matched"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
+    let mut path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
+    let mut backend = env::var("WAYEXPAND_BACKEND").ok();
+    let mut source = env::var("WAYEXPAND_SOURCE").ok();
+    for argument in env::args().skip(1) {
+        if let Some(value) = argument.strip_prefix("--backend=") {
+            backend = Some(value.to_string());
+        } else if let Some(value) = argument.strip_prefix("--source=") {
+            source = Some(value.to_string());
+        } else if argument == "--help" {
+            println!("usage: wayexpand-daemon [--source=stdin|input-method] [--backend=none|wlroots|libei] [config]");
+            std::process::exit(0);
+        } else if argument.starts_with('-') {
+            anyhow::bail!("unknown option {argument:?}; try --help");
+        } else if path.is_some() {
+            anyhow::bail!("multiple configuration paths supplied");
+        } else {
+            path = Some(PathBuf::from(argument));
+        }
+    }
+    Ok((path.unwrap_or_else(default_config_path), source, backend))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufReader, Cursor};
+    use wayexpand_core::{Config, InjectorError};
+
+    struct RecordingInjector {
+        calls: Vec<String>,
+    }
+
+    impl TextInjector for RecordingInjector {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+
+        fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+            self.calls.push(format!("erase:{trigger}"));
+            Ok(())
+        }
+
+        fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+            self.calls.push(format!("insert:{text}"));
+            Ok(())
+        }
+    }
+
+    struct FailingInjector;
+
+    impl TextInjector for FailingInjector {
+        fn name(&self) -> &'static str {
+            "failing-test"
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Err(InjectorError {
+                backend: "failing-test",
+                message: "connection lost".into(),
+                retryable: true,
+            })
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            unreachable!("erase fails first")
+        }
+    }
+
+    #[test]
+    fn process_event_applies_all_matches_in_order() {
+        let config = Config::parse(
+            r#"
+                [[expansion]]
+                trigger = ":a"
+                replacement = "alpha"
+
+                [[expansion]]
+                trigger = ":b"
+                replacement = "beta"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Text(":a:b".into()),
+            Some(&mut injector),
+        )
+        .unwrap();
+        assert_eq!(
+            injector.calls,
+            ["erase::a", "insert:alpha", "erase::b", "insert:beta"]
+        );
+    }
+
+    #[test]
+    fn reconnect_backoff_is_bounded() {
+        let initial = Duration::from_millis(250);
+        assert_eq!(next_retry_delay(initial), Duration::from_millis(500));
+        assert_eq!(
+            next_retry_delay(Duration::from_secs(20)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            next_retry_delay(Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn unsupported_output_backend_fails_without_retry() {
+        let error = match connect_output_backend("unknown") {
+            Ok(_) => panic!("unknown backend unexpectedly connected"),
+            Err(error) => error,
+        };
+        assert!(!error.retryable);
+        assert!(error.message.contains("unknown output backend"));
+    }
+
+    #[test]
+    fn bounded_line_reader_matches_lines_semantics() {
+        let mut reader = BufReader::new(Cursor::new(b"first\r\nsecond\n"));
+        assert_eq!(
+            read_bounded_line(&mut reader).unwrap().as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            read_bounded_line(&mut reader).unwrap().as_deref(),
+            Some("second")
+        );
+        assert_eq!(read_bounded_line(&mut reader).unwrap(), None);
+    }
+
+    #[test]
+    fn oversized_and_invalid_lines_are_rejected_without_unbounded_allocation() {
+        let oversized = vec![b'a'; MAX_STDIN_LINE_BYTES + 1];
+        let mut reader = BufReader::new(Cursor::new(oversized));
+        let error = read_bounded_line(&mut reader).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+
+        let mut reader = BufReader::new(Cursor::new(vec![0xff, b'\n']));
+        let error = read_bounded_line(&mut reader).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn stdin_queue_applies_backpressure_at_a_bounded_capacity() {
+        let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_INPUT_LINES);
+        for _ in 0..MAX_PENDING_INPUT_LINES {
+            sender.try_send(String::from("line")).unwrap();
+        }
+        assert!(matches!(
+            sender.try_send(String::from("overflow")),
+            Err(mpsc::TrySendError::Full(_))
+        ));
+        drop(receiver);
+    }
+
+    #[test]
+    fn process_event_can_match_without_an_injector() {
+        let config = Config::parse(
+            r#"[[expansion]]
+            trigger = ":x"
+            replacement = "ok""#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        process_event(&mut engine, InputEvent::Text(":x".into()), None).unwrap();
+    }
+
+    #[test]
+    fn retryable_injection_failure_preserves_ambiguous_result() {
+        let config = Config::parse(
+            r#"[[expansion]]
+            trigger = ":x"
+            replacement = "ok""#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let error = process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut FailingInjector),
+        )
+        .unwrap_err();
+        assert!(error.retryable());
+        assert_eq!(error.result.trigger, ":x");
+        assert_eq!(error.result.insert, "ok");
+    }
+}

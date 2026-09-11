@@ -1,0 +1,14 @@
+[package]
+name = "wayexpand-backend-wlroots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+wayland-client.workspace = true
+wayland-protocols-misc.workspace = true
+rustix = { version = "1", features = ["event"] }
+xkbcommon-rs.workspace = true
+wayexpand-core = { path = "../core" }
