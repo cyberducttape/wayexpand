@@ -43,7 +43,7 @@ jobs:
           install -m 0644 systemd/*.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
           install -m 0644 README.md LICENSE SECURITY.md CHANGELOG.md "$root/"
-          cp -R docs "$root/docs/"
+          cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
       - name: Publish GitHub release

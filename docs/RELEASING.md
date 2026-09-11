@@ -29,7 +29,9 @@ git tag -a v0.1.0 -m "WayExpand 0.1.0"
 git push origin v0.1.0
 ```
 
-The release workflow builds the Linux x86_64 binaries with the locked
+The initial `0.1.0` release is experimental: the support matrix still marks
+global key pass-through and compositor coverage as incomplete. The release
+workflow builds the Linux x86_64 binaries with the locked
 dependency graph and publishes a tarball containing binaries, systemd units,
 the desktop entry, documentation, license, and security policy. A SHA256
 checksum is published beside the archive.

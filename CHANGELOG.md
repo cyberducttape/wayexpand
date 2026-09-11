@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+Future changes will be listed here.
+
+## [0.1.0] - 2026-09-10
+
 ### Added
 
 - Published support matrix, contribution policy, pull request checklist, and
@@ -59,4 +63,5 @@ All notable changes to WayExpand are documented here.
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/main...HEAD
+[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.1.0
