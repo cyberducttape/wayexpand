@@ -34,6 +34,7 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
       - run: cargo build --locked --workspace
+      - run: bash scripts/test-release.sh
       - run: cargo run --locked -q -p wayexpand-ui -- --help
       - run: cargo run --locked -q -p wayexpand-gui -- --help
       - run: shellcheck scripts/*.sh

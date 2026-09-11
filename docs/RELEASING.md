@@ -8,13 +8,19 @@ mismatch before publishing artifacts.
 
 1. Run the complete verification suite from
    [`docs/wiki/Contributing.md`](wiki/Contributing.md).
-2. Review the support boundary in
+2. Run the isolated release smoke test:
+
+   ```sh
+   bash scripts/test-release.sh
+   ```
+
+3. Review the support boundary in
    [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
-3. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
+4. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
    section.
-4. Update the workspace version in `Cargo.toml` and regenerate `Cargo.lock` if
+5. Update the workspace version in `Cargo.toml` and regenerate `Cargo.lock` if
    required.
-5. Commit the version and changelog update.
+6. Commit the version and changelog update.
 
 ## Publish
 
