@@ -42,6 +42,10 @@ The default daemon mode is a deterministic stdin harness. Global desktop
 capture is explicit with `--source=input-method`; output backends are explicit
 with `--backend=wlroots` or `--backend=libei`.
 
+Hotkey work begins with the shared core key-chord model. `Ctrl+Alt+M`,
+`Super+Enter`, and common modifier aliases normalize to one representation so
+future backends and the script runtime can dispatch consistently.
+
 ## Design promises
 
 1. Invalid configuration never replaces the last known-good engine.
