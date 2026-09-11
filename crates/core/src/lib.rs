@@ -13,8 +13,10 @@ pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorError, InputSource,
     InputSourceError, TextInjector,
 };
-pub use config::{CommandConfig, Config, ConfigError, ExpansionConfig, MatchMode, Settings};
-pub use engine::{ExpansionEngine, ExpansionError, ExpansionResult, InputEvent};
+pub use config::{
+    CommandConfig, Config, ConfigError, ExpansionConfig, HotkeyConfig, MatchMode, Settings,
+};
+pub use engine::{ExpansionEngine, ExpansionError, ExpansionResult, HotkeyResult, InputEvent};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{import_espanso, EspansoImport, MigrationError};

@@ -61,6 +61,7 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
     }
     let config = Config {
         expansion,
+        hotkey: Vec::new(),
         settings: Settings::default(),
     };
     config.validate()?;

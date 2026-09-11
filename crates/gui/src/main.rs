@@ -93,6 +93,7 @@ impl GuiApp {
                 }
                 let config = Config {
                     expansion: Vec::new(),
+                    hotkey: Vec::new(),
                     settings: Settings::default(),
                 };
                 config.save_atomic(&path).map_err(|error| {
@@ -1121,6 +1122,7 @@ mod tests {
                     enabled: true,
                 },
             ],
+            hotkey: Vec::new(),
             settings: Settings::default(),
         };
         let _ = fs::remove_file(&path);
@@ -1161,6 +1163,7 @@ mod tests {
         for _ in 0..(MAX_UNDO_HISTORY + 8) {
             app.remember_undo(Config {
                 expansion: Vec::new(),
+                hotkey: Vec::new(),
                 settings: Settings::default(),
             });
         }

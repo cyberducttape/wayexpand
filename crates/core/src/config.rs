@@ -1,4 +1,4 @@
-use crate::{render_template, TemplateContext, TemplateError};
+use crate::{render_template, KeyChord, TemplateContext, TemplateError};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -20,6 +20,8 @@ const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
 const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
 const MAX_COMMAND_CACHE_MS: u64 = 60_000;
 const MAX_EXPANSIONS: usize = 10_000;
+const MAX_HOTKEYS: usize = 1_024;
+const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
 const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
 
@@ -29,7 +31,21 @@ pub struct Config {
     #[serde(default)]
     pub expansion: Vec<ExpansionConfig>,
     #[serde(default)]
+    pub hotkey: Vec<HotkeyConfig>,
+    #[serde(default)]
     pub settings: Settings,
+}
+
+/// A keyboard chord which invokes a bounded direct program action.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HotkeyConfig {
+    pub chord: String,
+    #[serde(default)]
+    pub description: String,
+    pub command: CommandConfig,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -151,6 +167,16 @@ pub enum ConfigError {
     InvalidBufferLimit,
     #[error("configuration contains {count} expansions; maximum is {maximum}")]
     TooManyExpansions { count: usize, maximum: usize },
+    #[error("configuration contains {count} hotkeys; maximum is {maximum}")]
+    TooManyHotkeys { count: usize, maximum: usize },
+    #[error("hotkey {index} is invalid: {reason}")]
+    InvalidHotkey { index: usize, reason: &'static str },
+    #[error("duplicate hotkey {chord:?} in entries {first} and {second}")]
+    DuplicateHotkey {
+        chord: String,
+        first: usize,
+        second: usize,
+    },
     #[error("enabled triggers contain {length} characters; maximum is {maximum}")]
     TriggerDataTooLarge { length: usize, maximum: usize },
     #[error("configuration is too large ({length} bytes; maximum is {maximum})")]
@@ -215,6 +241,15 @@ impl ConfigError {
             Self::InvalidBufferLimit => "max_buffer_chars is outside the allowed range".into(),
             Self::TooManyExpansions { count, maximum } => {
                 format!("too many expansions ({count}; maximum {maximum})")
+            }
+            Self::TooManyHotkeys { count, maximum } => {
+                format!("too many hotkeys ({count}; maximum {maximum})")
+            }
+            Self::InvalidHotkey { index, reason } => {
+                format!("hotkey {index} is invalid ({reason})")
+            }
+            Self::DuplicateHotkey { first, second, .. } => {
+                format!("duplicate hotkey in entries {first} and {second}")
             }
             Self::TriggerDataTooLarge { length, maximum } => {
                 format!("enabled trigger data is too large ({length}; maximum {maximum})")
@@ -408,6 +443,71 @@ impl Config {
         }
         if !(1..=4096).contains(&self.settings.max_buffer_chars) {
             return Err(ConfigError::InvalidBufferLimit);
+        }
+        if self.hotkey.len() > MAX_HOTKEYS {
+            return Err(ConfigError::TooManyHotkeys {
+                count: self.hotkey.len(),
+                maximum: MAX_HOTKEYS,
+            });
+        }
+        let mut hotkeys = Vec::new();
+        for (index, binding) in self.hotkey.iter().enumerate() {
+            let chord =
+                KeyChord::parse(&binding.chord).map_err(|_| ConfigError::InvalidHotkey {
+                    index,
+                    reason: "chord is empty, ambiguous, or contains an unknown modifier",
+                })?;
+            if binding.description.chars().count() > MAX_HOTKEY_DESCRIPTION_CHARS
+                || binding.description.contains('\0')
+            {
+                return Err(ConfigError::InvalidHotkey {
+                    index,
+                    reason: "description is too long or contains NUL",
+                });
+            }
+            if binding.command.program.trim().is_empty()
+                || binding.command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
+                || binding.command.program.contains('\0')
+                || binding.command.args.len() > MAX_COMMAND_ARGS
+                || !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&binding.command.timeout_ms)
+                || binding.command.cache_ms > MAX_COMMAND_CACHE_MS
+            {
+                return Err(ConfigError::InvalidHotkey {
+                    index,
+                    reason: "command limits are invalid",
+                });
+            }
+            let mut argument_chars = 0usize;
+            for argument in &binding.command.args {
+                if argument.chars().count() > MAX_COMMAND_ARG_CHARS || argument.contains('\0') {
+                    return Err(ConfigError::InvalidHotkey {
+                        index,
+                        reason: "command argument is too long or contains NUL",
+                    });
+                }
+                argument_chars = argument_chars.saturating_add(argument.chars().count());
+                if argument_chars > MAX_COMMAND_ARG_DATA_CHARS {
+                    return Err(ConfigError::InvalidHotkey {
+                        index,
+                        reason: "command argument data is too large",
+                    });
+                }
+            }
+            if binding.enabled {
+                hotkeys.push((index, chord.to_string()));
+            }
+        }
+        hotkeys.sort_unstable_by(|left, right| {
+            left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0))
+        });
+        for pair in hotkeys.windows(2) {
+            if pair[0].1 == pair[1].1 {
+                return Err(ConfigError::DuplicateHotkey {
+                    chord: pair[0].1.clone(),
+                    first: pair[0].0,
+                    second: pair[1].0,
+                });
+            }
         }
         let mut total_trigger_chars = 0usize;
         for (index, expansion) in self.expansion.iter().enumerate() {
@@ -656,6 +756,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let config = Config {
             expansion: Vec::new(),
+            hotkey: Vec::new(),
             settings: Settings::default(),
         };
         config.save_atomic(&path).unwrap();

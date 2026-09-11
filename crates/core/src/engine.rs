@@ -1,6 +1,6 @@
 use crate::{
-    render_template, CommandConfig, Config, ConfigError, MatchMode, Matcher, TemplateContext,
-    TextInjector,
+    render_template, CommandConfig, Config, ConfigError, HotkeyConfig, KeyChord, MatchMode,
+    Matcher, TemplateContext, TextInjector,
 };
 use std::{
     collections::VecDeque,
@@ -34,6 +34,13 @@ pub struct ExpansionResult {
     pub insert: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotkeyResult {
+    pub chord: KeyChord,
+    pub description: String,
+    pub command: CommandConfig,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExpansionError {
     #[error("injection failed: {0}")]
@@ -48,6 +55,7 @@ pub struct ExpansionEngine {
     max_buffer_chars: usize,
     capture_enabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
+    hotkeys: Vec<(KeyChord, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +78,17 @@ impl ExpansionEngine {
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
         let max_buffer_chars = config.settings.max_buffer_chars;
         let command_cache = vec![None; config.expansion.len()];
+        let hotkeys = config
+            .hotkey
+            .iter()
+            .enumerate()
+            .filter(|(_, binding)| binding.enabled)
+            .filter_map(|(index, binding)| {
+                KeyChord::parse(&binding.chord)
+                    .ok()
+                    .map(|chord| (chord, index))
+            })
+            .collect();
         Ok(Self {
             config,
             matcher,
@@ -78,7 +97,29 @@ impl ExpansionEngine {
             max_buffer_chars,
             capture_enabled: true,
             command_cache,
+            hotkeys,
         })
+    }
+
+    /// Resolve a normalized key chord into configured actions. This method is
+    /// side-effect free; the daemon or script runtime owns execution policy,
+    /// cancellation, and capability checks.
+    pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {
+        if !self.capture_enabled {
+            return Vec::new();
+        }
+        self.hotkeys
+            .iter()
+            .filter(|(configured, _)| configured.matches(chord))
+            .filter_map(|(_, index)| {
+                let binding: &HotkeyConfig = self.config.hotkey.get(*index)?;
+                Some(HotkeyResult {
+                    chord: chord.clone(),
+                    description: binding.description.clone(),
+                    command: binding.command.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Process an event stream. A text event may contain multiple Unicode
@@ -346,6 +387,31 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_enabled_hotkey_actions_without_side_effects() {
+        let config = Config::parse(
+            r#"
+            [[hotkey]]
+            chord = "Ctrl+Alt+M"
+            description = "Open meeting helper"
+            [hotkey.command]
+            program = "/bin/true"
+            timeout_ms = 100
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let chord = KeyChord::parse("control+option+m").unwrap();
+        let result = engine.process_key(&chord);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].chord.to_string(), "Ctrl+Alt+M");
+        assert_eq!(result[0].description, "Open meeting helper");
+        assert_eq!(result[0].command.program, "/bin/true");
+
+        engine.process(InputEvent::FocusChanged { sensitive: true });
+        assert!(engine.process_key(&chord).is_empty());
+    }
+
+    #[test]
     fn command_expansion_uses_direct_program_output() {
         let config = Config::parse(
             r#"
@@ -439,6 +505,7 @@ mod tests {
                 command: None,
                 enabled: true,
             }],
+            hotkey: Vec::new(),
             settings: crate::Settings::default(),
         };
         assert!(matches!(

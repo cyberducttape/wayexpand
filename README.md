@@ -45,6 +45,7 @@ paths:
 - native Wayland-capable graphical editor with diagnostics, settings, import,
   template helpers, duplication, and bounded undo history
 - shared normalized key-chord model ready for cross-backend hotkey dispatch
+- validated hotkey action declarations with sensitive-focus-aware dispatch
 
 The default daemon mode remains a stdin harness. An explicit
 `--source=input-method` mode can use the input-method-v2 source as both the
