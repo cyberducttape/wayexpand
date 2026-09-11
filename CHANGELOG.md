@@ -6,6 +6,11 @@ All notable changes to WayExpand are documented here.
 
 ### Added
 
+- `wayexpand test-hotkey` to resolve configured hotkeys without executing
+  actions or requiring a compositor.
+- `wayexpand backup` to create a private, non-overwriting configuration
+  backup.
+- Hotkeys in `list --json` output for inventory and deployment tooling.
 - Normalized key-chord parsing for `Ctrl`, `Alt`, `Shift`, and `Super`
   bindings, including common modifier aliases.
 - Validated hotkey action configuration with duplicate detection and bounded

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::{
     env, fs,
     io::{Read, Write},
-    os::unix::fs::{FileTypeExt, MetadataExt},
+    os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     time::Duration,
@@ -42,6 +42,50 @@ fn main() -> Result<()> {
             match results.last() {
                 Some(result) => println!("{}", result.insert),
                 None => println!("no expansion matched"),
+            }
+        }
+        Some("test-hotkey") => {
+            let chord_text = args
+                .next()
+                .context("usage: wayexpand test-hotkey <chord> [--json] [config]")?;
+            let next = args.next();
+            let requested_json = next.as_deref() == Some("--json");
+            let path = if requested_json {
+                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
+            } else {
+                next.map(PathBuf::from).unwrap_or_else(default_config_path)
+            };
+            if args.next().is_some() {
+                bail!("usage: wayexpand test-hotkey <chord> [--json] [config]");
+            }
+            let chord = wayexpand_core::KeyChord::parse(&chord_text)
+                .map_err(|error| anyhow::anyhow!("invalid hotkey chord: {error}"))?;
+            let config = Config::load(&path).map_err(|error| {
+                anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
+            })?;
+            let engine = ExpansionEngine::new(config).map_err(|error| {
+                anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
+            })?;
+            let actions = engine.process_key(&chord);
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "chord": chord.to_string(),
+                        "matched": !actions.is_empty(),
+                        "actions": actions.iter().map(|action| serde_json::json!({
+                            "description": action.description,
+                            "program": action.command.program,
+                            "args": action.command.args,
+                        })).collect::<Vec<_>>(),
+                    })
+                );
+            } else if actions.is_empty() {
+                println!("no hotkey matched {}", chord);
+            } else {
+                for action in actions {
+                    println!("{} → {}", chord, action.description);
+                }
             }
         }
         Some("preview") => {
@@ -109,7 +153,9 @@ fn main() -> Result<()> {
                     serde_json::json!({
                         "config": path,
                         "count": config.expansion.len(),
+                        "hotkey_count": config.hotkey.len(),
                         "expansions": config.expansion,
+                        "hotkeys": config.hotkey,
                     })
                 );
             } else {
@@ -284,6 +330,30 @@ fn main() -> Result<()> {
             })?;
             println!("{} {}", value, trigger);
         }
+        Some("backup") => {
+            let source = args.next().map(PathBuf::from).unwrap_or_else(default_config_path);
+            let destination = args.next().map(PathBuf::from).unwrap_or_else(|| {
+                let mut path = source.clone();
+                path.set_extension("toml.bak");
+                path
+            });
+            if args.next().is_some() {
+                bail!("usage: wayexpand backup [config] [destination]");
+            }
+            if destination.exists() {
+                bail!("refusing to overwrite existing backup {}", destination.display());
+            }
+            let metadata = fs::metadata(&source)
+                .with_context(|| format!("reading configuration {}", source.display()))?;
+            if !metadata.is_file() {
+                bail!("configuration is not a regular file: {}", source.display());
+            }
+            fs::copy(&source, &destination).with_context(|| {
+                format!("creating configuration backup {}", destination.display())
+            })?;
+            fs::set_permissions(&destination, fs::Permissions::from_mode(0o600))?;
+            println!("created configuration backup {}", destination.display());
+        }
         Some("doctor") => {
             let first = args.next();
             let requested_json = first.as_deref() == Some("--json");
@@ -354,7 +424,7 @@ fn main() -> Result<()> {
             }
         }
         Some("help") | Some("--help") | Some("-h") | None => println!(
-            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
+            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  test-hotkey <chord> [--json] [config]       Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions and hotkeys\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  backup [config] [destination]                Create a non-overwriting config backup\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
             env!("CARGO_PKG_VERSION"),
             default_config_path().display()
         ),
