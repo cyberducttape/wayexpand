@@ -117,6 +117,18 @@ owned by the current user or root. Symlinked configuration paths are
 supported, but validation and loading use the resolved target path so the
 target's ancestor directories are held to the same rules.
 
+If an existing home configuration directory is group/world-writable, tighten
+it before validation:
+
+```sh
+chmod go-w ~/.config
+chmod go-w ~/.config/wayexpand
+wayexpand doctor
+```
+
+This check is intentional: a writable ancestor could replace a trusted config
+file between validation and reload.
+
 ## Diagnostics
 
 Print the installed component versions when collecting a bug report:

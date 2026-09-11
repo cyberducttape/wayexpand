@@ -99,6 +99,7 @@ printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service"
 printf '%s\n' "  wayexpand-gui"
 
 if [ "$enable_service" -eq 1 ]; then
+    "$bin_dir/wayexpand" validate "$config_path"
     if ! command -v systemctl >/dev/null 2>&1; then
         printf '%s\n' "error: systemctl is required for --enable" >&2
         exit 127

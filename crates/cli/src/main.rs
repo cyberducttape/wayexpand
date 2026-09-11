@@ -609,6 +609,7 @@ fn print_config_parent_diagnostics(path: &Path) {
                 current.display(),
                 mode & 0o7777
             );
+            println!("Config fix: chmod go-w {}", current.display());
         }
         if current == Path::new("/") {
             return;
