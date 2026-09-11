@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 ### Added
 
+- Published support matrix, contribution policy, pull request checklist, and
+  privacy-safe bug-report template.
+- Continuous dependency advisory auditing in CI.
 - A clearer GUI empty state, filtered-search state, library counts, and
   contextual editor guidance.
 - Explicit delete confirmation in the GUI while retaining undo recovery.

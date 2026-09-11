@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible WayExpand problem
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include typed text, snippets, credentials, or replacement contents.
+  - type: input
+    id: version
+    attributes:
+      label: WayExpand version
+      placeholder: 0.1.0 or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Desktop environment
+      placeholder: compositor, desktop, and Wayland session
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include commands and sanitized logs, but never private text.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste `wayexpand doctor --json` after removing paths if needed.

@@ -12,6 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/audit@v1
+
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -102,6 +102,9 @@ Operational and security constraints are documented in [docs/OPERATIONS.md](docs
 The repository runs formatting, workspace tests, and Clippy in CI.
 CI also exercises the daemon smoke test, installer idempotence in an isolated
 home, shell scripts, and systemd unit validation.
+Dependency advisories are checked in a separate CI supply-chain job. The
+[support matrix](docs/SUPPORT_MATRIX.md) distinguishes tested behavior from
+experimental backends and explicitly records the current pass-through gap.
 
 The CLI's `list --json`, `preview --json`, and lifecycle `status --json`
 commands provide a machine-readable surface for settings frontends and desktop
