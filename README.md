@@ -104,6 +104,18 @@ For a user-local installation with systemd units:
 ./scripts/install-user.sh
 ```
 
+The installer is intentionally non-destructive by default. After reviewing
+`wayexpand doctor`, the complete setup can be requested explicitly:
+
+```sh
+./scripts/install-user.sh --enable \
+  --service=wayexpand-input-method.service
+```
+
+Do not run the installer with `sudo`; it installs user binaries and user
+systemd units. Use `./scripts/install-user.sh --help` for the supported
+options.
+
 The installer builds release binaries, installs them under `~/.local/bin`,
 installs both user units, registers the graphical editor with the desktop
 application menu, and creates the example configuration only when one does not

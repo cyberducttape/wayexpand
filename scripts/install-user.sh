@@ -2,6 +2,31 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+enable_service=0
+service_name=wayexpand-input-method.service
+for argument in "$@"; do
+    case "$argument" in
+        --enable)
+            enable_service=1
+            ;;
+        --service=wayexpand.service)
+            service_name=wayexpand.service
+            ;;
+        --service=wayexpand-input-method.service)
+            service_name=wayexpand-input-method.service
+            ;;
+        --help|-h)
+            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand.service|wayexpand-input-method.service]"
+            printf '%s\n' "  --enable   daemon-reload and enable the selected user service"
+            printf '%s\n' "  --service  select the service when --enable is used"
+            exit 0
+            ;;
+        *)
+            printf '%s\n' "error: unknown option $argument; try --help" >&2
+            exit 2
+            ;;
+    esac
+done
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
     printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
     exit 1
@@ -67,3 +92,14 @@ printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' "  systemctl --user daemon-reload"
 printf '%s\n' "  wayexpand doctor"
 printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service"
+
+if [ "$enable_service" -eq 1 ]; then
+    if ! command -v systemctl >/dev/null 2>&1; then
+        printf '%s\n' "error: systemctl is required for --enable" >&2
+        exit 127
+    fi
+    printf '%s\n' "Enabling user service: $service_name"
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$service_name"
+    printf '%s\n' "Enabled $service_name"
+fi

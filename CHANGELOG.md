@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
   privacy-safe bug-report template.
 - Continuous dependency advisory auditing in CI.
 - JSON output for safe expansion simulation through `test --json`.
+- Optional installer service activation with explicit `--enable` and
+  `--service` controls, plus clear `sudo` and dependency guidance.
 - Isolated release smoke test covering clean installation, validation, preview,
   hotkey resolution, diagnostics, and configuration permissions.
 - Tagged Linux x86_64 release workflow with bundled deployment files and
