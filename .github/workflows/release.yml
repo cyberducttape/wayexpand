@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64 release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify version tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${GITHUB_REF_NAME#v}"
+          actual=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+          test "$actual" = "$expected" || {
+            echo "tag $GITHUB_REF_NAME does not match workspace version $actual" >&2
+            exit 1
+          }
+      - name: Build release binaries
+        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
+      - name: Package release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          root="wayexpand-${version}-linux-x86_64"
+          mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs"
+          install -m 0755 target/release/wayexpand "$root/bin/"
+          install -m 0755 target/release/wayexpand-daemon "$root/bin/"
+          install -m 0755 target/release/wayexpand-ui "$root/bin/"
+          install -m 0755 target/release/wayexpand-gui "$root/bin/"
+          install -m 0644 systemd/*.service "$root/systemd/"
+          install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
+          install -m 0644 README.md LICENSE SECURITY.md CHANGELOG.md "$root/"
+          cp -R docs "$root/docs/"
+          tar -czf "${root}.tar.gz" "$root"
+          sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            wayexpand-*.tar.gz
+            wayexpand-*.sha256

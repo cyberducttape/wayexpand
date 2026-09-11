@@ -105,6 +105,8 @@ home, shell scripts, and systemd unit validation.
 Dependency advisories are checked in a separate CI supply-chain job. The
 [support matrix](docs/SUPPORT_MATRIX.md) distinguishes tested behavior from
 experimental backends and explicitly records the current pass-through gap.
+Tagged releases are built by CI with the locked dependency graph and publish a
+Linux x86_64 archive plus SHA256 checksum; see [docs/RELEASING.md](docs/RELEASING.md).
 
 The CLI's `list --json`, `preview --json`, and lifecycle `status --json`
 commands provide a machine-readable surface for settings frontends and desktop
