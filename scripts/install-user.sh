@@ -27,8 +27,12 @@ for argument in "$@"; do
             ;;
     esac
 done
-if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
-    printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
+if [ "$(id -u)" -eq 0 ]; then
+    if [ -n "${SUDO_USER:-}" ]; then
+        printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
+    else
+        printf '%s\n' "error: this is a per-user installer; run it as your desktop user, not root" >&2
+    fi
     exit 1
 fi
 cargo_bin=$(command -v cargo 2>/dev/null || true)
@@ -92,6 +96,7 @@ printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' "  systemctl --user daemon-reload"
 printf '%s\n' "  wayexpand doctor"
 printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service"
+printf '%s\n' "  wayexpand-gui"
 
 if [ "$enable_service" -eq 1 ]; then
     if ! command -v systemctl >/dev/null 2>&1; then

@@ -12,6 +12,8 @@ All notable changes to WayExpand are documented here.
 - JSON output for safe expansion simulation through `test --json`.
 - Optional installer service activation with explicit `--enable` and
   `--service` controls, plus clear `sudo` and dependency guidance.
+- Installer now rejects all root execution and prints the GUI as an explicit
+  post-install next step.
 - Isolated release smoke test covering clean installation, validation, preview,
   hotkey resolution, diagnostics, and configuration permissions.
 - Tagged Linux x86_64 release workflow with bundled deployment files and

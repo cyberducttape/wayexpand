@@ -112,9 +112,9 @@ The installer is intentionally non-destructive by default. After reviewing
   --service=wayexpand-input-method.service
 ```
 
-Do not run the installer with `sudo`; it installs user binaries and user
-systemd units. Use `./scripts/install-user.sh --help` for the supported
-options.
+Do not run the installer as root or with `sudo`; it installs user binaries and
+user systemd units and must inherit the desktop user's Wayland environment.
+Use `./scripts/install-user.sh --help` for the supported options.
 
 The installer builds release binaries, installs them under `~/.local/bin`,
 installs both user units, registers the graphical editor with the desktop
