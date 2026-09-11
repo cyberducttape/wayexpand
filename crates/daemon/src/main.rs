@@ -608,8 +608,11 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
             backend = Some(value.to_string());
         } else if let Some(value) = argument.strip_prefix("--source=") {
             source = Some(value.to_string());
-        } else if argument == "--help" {
-            println!("usage: wayexpand-daemon [--source=stdin|input-method] [--backend=none|wlroots|libei] [config]");
+        } else if matches!(argument.as_str(), "--help" | "-h") {
+            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method] [--backend=none|wlroots|libei] [config]", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        } else if matches!(argument.as_str(), "--version" | "-V") {
+            println!("wayexpand-daemon {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         } else if argument.starts_with('-') {
             anyhow::bail!("unknown option {argument:?}; try --help");

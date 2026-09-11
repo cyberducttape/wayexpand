@@ -1,6 +1,19 @@
 # WayExpand
 
+[![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 WayExpand is a Wayland-first text-expansion daemon. The expansion engine is platform-independent; input capture and text insertion are separate backends.
+
+It is designed for privacy-conscious desktop automation: configuration is
+validated before activation, control surfaces are permission-checked, and the
+daemon never logs typed text or snippet contents.
+
+## Documentation
+
+The [project wiki](docs/wiki/README.md) includes a guided installation,
+configuration reference, GUI walkthrough with screenshots, operations runbook,
+security model, troubleshooting playbook, and contributor release checklist.
 
 ## Current milestone
 

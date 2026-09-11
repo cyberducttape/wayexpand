@@ -20,6 +20,9 @@ use wayexpand_core::{
 fn main() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("--version") | Some("-V") | Some("version") => {
+            println!("wayexpand {}", env!("CARGO_PKG_VERSION"));
+        }
         Some("test") => {
             let trigger = args
                 .next()
@@ -340,8 +343,9 @@ fn main() -> Result<()> {
                 print!("{response}");
             }
         }
-        Some("help") | None => println!(
-            "usage: wayexpand test <text> [config]\n       wayexpand preview <trigger> [config]\n       wayexpand list [config]\n       wayexpand validate [config]\n       wayexpand search <query> [config]\n       wayexpand import espanso <file>\n       wayexpand set-enabled <trigger> <on|off> [config]\n       wayexpand set-mode <trigger> <immediate|word-boundary> [config]\n       wayexpand doctor [config]\n       wayexpand backend\n       wayexpand status|reload|pause|resume|stop\n\nDefault config: {}",
+        Some("help") | Some("--help") | Some("-h") | None => println!(
+            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  doctor [config]                              Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
+            env!("CARGO_PKG_VERSION"),
             default_config_path().display()
         ),
         Some(command) => bail!("unknown command {command:?}; try `wayexpand help`"),

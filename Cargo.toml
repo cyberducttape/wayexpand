@@ -15,6 +15,12 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "A secure, Wayland-first text expansion daemon"
+repository = "https://github.com/itchyitchy123/wayexpand"
+homepage = "https://github.com/itchyitchy123/wayexpand"
+readme = "README.md"
+keywords = ["wayland", "text-expansion", "snippets", "accessibility"]
+categories = ["accessibility", "command-line-utilities"]
 
 [workspace.dependencies]
 anyhow = "1"

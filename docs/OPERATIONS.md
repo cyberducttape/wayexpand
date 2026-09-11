@@ -111,6 +111,13 @@ target's ancestor directories are held to the same rules.
 
 ## Diagnostics
 
+Print the installed component versions when collecting a bug report:
+
+```sh
+wayexpand --version
+wayexpand-daemon --version
+```
+
 ```sh
 wayexpand doctor [config]
 wayexpand backend

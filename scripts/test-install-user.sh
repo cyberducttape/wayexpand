@@ -4,7 +4,16 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-install-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
-export CARGO_TARGET_DIR="$test_root/target"
+# Keep Cargo's dependency cache from the invoking environment. The test
+# deliberately changes HOME to isolate user-installed files; without this,
+# Cargo also looks in a fresh empty home and clean CI runners fail before the
+# installer can be exercised.
+cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+export CARGO_HOME="$cargo_home"
+# Reuse the target directory populated by earlier CI checks when the caller
+# did not provide one. This keeps the installer test focused on installation
+# behavior instead of recompiling the entire GUI dependency graph from zero.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-"$project_dir/target"}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 mkdir -p "$test_root/home" "$test_root/config"
