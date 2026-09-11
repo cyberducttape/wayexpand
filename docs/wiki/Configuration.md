@@ -56,9 +56,11 @@ timeout_ms = 1000
 
 Hotkeys are normalized across backends. Modifier aliases such as `Control`,
 `Option`, `Meta`, `Win`, and `Logo` are accepted and canonicalized to
-`Ctrl`, `Alt`, and `Super`. Each enabled chord must be unique. Hotkey commands
-are declarations only in this slice; compositor event capture and action
-execution will be added by the automation runtime.
+`Ctrl`, `Alt`, and `Super`. Each enabled chord must be unique. The input-method
+backend emits normalized key events and the daemon executes matching actions
+without a shell, with bounded arguments and a per-action timeout. Actions are
+currently best suited to compositor-safe helper programs; general key
+pass-through and additional backends remain active roadmap work.
 
 The entire file is capped at 16 MiB and 10,000 entries. Enabled trigger data
 is capped to keep matching memory bounded.

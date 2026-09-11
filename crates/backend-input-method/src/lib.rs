@@ -14,7 +14,9 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use wayexpand_core::{InjectorError, InputEvent, InputSource, InputSourceError, TextInjector};
+use wayexpand_core::{
+    InjectorError, InputEvent, InputSource, InputSourceError, KeyChord, Modifiers, TextInjector,
+};
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
     Connection, Dispatch, EventQueue, QueueHandle, WEnum,
@@ -23,8 +25,8 @@ use wayland_protocols_misc::zwp_input_method_v2::client::{
     zwp_input_method_keyboard_grab_v2::ZwpInputMethodKeyboardGrabV2,
     zwp_input_method_manager_v2::ZwpInputMethodManagerV2, zwp_input_method_v2::ZwpInputMethodV2,
 };
-use xkbcommon_rs::xkb_state::KeyDirection;
-use xkbcommon_rs::{Context, Keymap, KeymapFormat, State};
+use xkbcommon_rs::xkb_state::{KeyDirection, StateComponent};
+use xkbcommon_rs::{keysym::keysym_get_name, Context, Keymap, KeymapFormat, State};
 
 const SOURCE_NAME: &str = "input-method-v2";
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
@@ -362,6 +364,13 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 state: WEnum::Value(key_state),
                 ..
             } => {
+                if key_state == wl_keyboard::KeyState::Pressed {
+                    if let Some(keyboard_state) = state.keyboard_state.as_ref() {
+                        if let Some(chord) = key_chord(keyboard_state, key) {
+                            state.queue_event(InputEvent::Key(chord));
+                        }
+                    }
+                }
                 let action = state
                     .keyboard_state
                     .as_mut()
@@ -416,6 +425,37 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
             _ => {}
         }
     }
+}
+
+fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
+    let keycode = key.checked_add(8)?;
+    let keysym = keyboard_state.key_get_one_sym(keycode)?;
+    let key_name = keysym_get_name(&keysym)?;
+    let key = match key_name.to_ascii_uppercase().as_str() {
+        "RETURN" | "KP_ENTER" => "ENTER".to_string(),
+        "BACKSPACE" => "BACKSPACE".to_string(),
+        "ESCAPE" => "ESC".to_string(),
+        "SPACE" => "SPACE".to_string(),
+        "TAB" => "TAB".to_string(),
+        name => name.to_string(),
+    };
+    let effective = StateComponent::MODS_EFFECTIVE;
+    let active = |names: &[&str]| {
+        names.iter().any(|name| {
+            keyboard_state
+                .mod_name_is_active(*name, effective)
+                .unwrap_or(false)
+        })
+    };
+    Some(KeyChord {
+        modifiers: Modifiers {
+            ctrl: active(&["Control", "Ctrl"]),
+            alt: active(&["Mod1", "Alt"]),
+            shift: active(&["Shift"]),
+            super_key: active(&["Mod4", "Super"]),
+        },
+        key,
+    })
 }
 
 fn is_modifier_keysym(raw_keysym: u32) -> bool {

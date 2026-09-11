@@ -16,7 +16,9 @@ pub use backend::{
 pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, HotkeyConfig, MatchMode, Settings,
 };
-pub use engine::{ExpansionEngine, ExpansionError, ExpansionResult, HotkeyResult, InputEvent};
+pub use engine::{
+    ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent,
+};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{import_espanso, EspansoImport, MigrationError};

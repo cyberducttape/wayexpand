@@ -577,6 +577,15 @@ fn process_event(
     event: InputEvent,
     mut injector: Option<&mut dyn TextInjector>,
 ) -> std::result::Result<(), EventError> {
+    if let InputEvent::Key(chord) = event {
+        for action in engine.process_key(&chord) {
+            match ExpansionEngine::execute_hotkey(&action) {
+                Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
+                Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
+            }
+        }
+        return Ok(());
+    }
     for result in engine.process(event) {
         if let Some(backend) = injector.as_deref_mut() {
             if let Err(source) = ExpansionEngine::apply(backend, &result) {
