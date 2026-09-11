@@ -403,9 +403,9 @@ fn main() -> Result<()> {
             );
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
-            print_backend_diagnostics();
-            if !config_ok || !control_socket_ok {
-                bail!("doctor found configuration or control-socket problems");
+            let capture_ready = print_backend_diagnostics();
+            if !config_ok || !control_socket_ok || !capture_ready {
+                bail!("doctor found configuration, runtime, or backend problems");
             }
         }
         Some("backend") => {
@@ -454,7 +454,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_backend_diagnostics() {
+fn print_backend_diagnostics() -> bool {
+    let mut capture_ready = false;
     for status in discover_backends() {
         println!("{:28} {:?} ({})", status.kind, status.state, status.detail);
     }
@@ -464,10 +465,26 @@ fn print_backend_diagnostics() {
             Err(error) => println!("wlroots probe: unavailable ({error})"),
         }
         match InputMethodSource::probe() {
-            Ok(_) => println!("input-method-v2 probe: manager and seat connection succeeded"),
+            Ok(_) => {
+                capture_ready = true;
+                println!("input-method-v2 probe: manager and seat connection succeeded")
+            }
             Err(error) => println!("input-method-v2 probe: unavailable ({error})"),
         }
+        if !capture_ready {
+            println!(
+                "Capture readiness: NOT READY (no supported global input source was detected)"
+            );
+            println!(
+                "Next step: use a compositor with input-method-v2 support or configure the libei source."
+            );
+        } else {
+            println!("Capture readiness: READY");
+        }
     }
+    // Doctor is also used in CI and for validating a config outside a desktop
+    // session. In that context there is no capture claim to validate.
+    !std::env::var_os("WAYLAND_DISPLAY").is_some() || capture_ready
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
