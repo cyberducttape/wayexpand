@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 ### Added
 
+- A clearer GUI empty state, filtered-search state, library counts, and
+  contextual editor guidance.
+- Explicit delete confirmation in the GUI while retaining undo recovery.
 - `wayexpand test-hotkey` to resolve configured hotkeys without executing
   actions or requiring a compositor.
 - `wayexpand backup` to create a private, non-overwriting configuration
@@ -22,6 +25,8 @@ All notable changes to WayExpand are documented here.
 
 ### Changed
 
+- The GUI now surfaces unsaved work, runtime controls, and command-backed
+  expansion risk closer to the relevant workflow.
 - Hotkey actions are disabled automatically while sensitive input is focused.
 - Hotkey action failures are isolated and logged without terminating the
   daemon.

@@ -4,6 +4,27 @@ The graphical editor is a native Wayland-capable application. It edits the
 same TOML file used by the daemon and saves changes atomically. The terminal UI
 (`wayexpand-ui`) provides the same workflow for minimal environments.
 
+The graphical editor is organized around the daily operator workflow:
+
+1. Search or select a snippet in the library.
+2. Edit the trigger and replacement in the central editor.
+3. Use the live preview to verify the result.
+4. Save explicitly; the configuration is validated and written atomically.
+
+The library shows enabled state and total counts. An empty library provides a
+first-action prompt, while an empty search provides a clear-search action.
+Deleting a snippet always requires confirmation and saved changes remain
+recoverable through Undo.
+
+Command-backed expansions are intentionally labeled as advanced behavior. The
+editor explains that a local executable is invoked directly when the trigger
+matches; shell syntax is not interpreted. Keep these entries limited to
+trusted, reviewed programs.
+
+The toolbar exposes Reload, Pause/Resume, Diagnostics, Import, and Settings.
+Use Diagnostics before troubleshooting an expansion: it reports daemon state,
+backend capability, and non-mutating protocol probes.
+
 ## Snippet dashboard
 
 ![WayExpand snippet dashboard](assets/snippets-dashboard.png)

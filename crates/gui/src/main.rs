@@ -305,6 +305,10 @@ impl GuiApp {
         if matches!(&action, PendingAction::Select(index) if self.selected == Some(*index)) {
             return;
         }
+        if matches!(&action, PendingAction::Delete) && !self.draft_is_dirty() {
+            self.pending_action = Some(action);
+            return;
+        }
         if self.draft_is_dirty() {
             self.pending_action = Some(action);
         } else {
@@ -628,6 +632,11 @@ impl eframe::App for GuiApp {
                 ui.heading("WayExpand");
                 ui.separator();
                 ui.label("Snippet library");
+                ui.separator();
+                ui.label(format!("{} snippets", self.config.expansion.len()));
+                if !self.config.hotkey.is_empty() {
+                    ui.label(format!("{} hotkeys", self.config.hotkey.len()));
+                }
                 if self.draft_is_dirty() {
                     ui.label(RichText::new("● Unsaved changes").color(Color32::YELLOW));
                 }
@@ -771,6 +780,15 @@ impl eframe::App for GuiApp {
             .resizable(true)
             .default_size(330.0)
             .show(ui, |ui| {
+                ui.label(
+                    RichText::new(if self.filter.is_empty() {
+                        "Your reusable text library"
+                    } else {
+                        "Filtered snippets"
+                    })
+                    .small()
+                    .color(Color32::GRAY),
+                );
                 ui.horizontal(|ui| {
                     if ui.button("＋ New").clicked() {
                         self.request_action(PendingAction::New);
@@ -783,8 +801,9 @@ impl eframe::App for GuiApp {
                     }
                 });
                 ui.separator();
+                let visible_indices = self.visible_indices();
                 ScrollArea::vertical().show(ui, |ui| {
-                    for index in self.visible_indices() {
+                    for index in visible_indices {
                         let expansion = &self.config.expansion[index];
                         let title = format!(
                             "{}  {}",
@@ -806,11 +825,31 @@ impl eframe::App for GuiApp {
                             self.request_action(PendingAction::Select(index));
                         }
                     }
+                    if self.config.expansion.is_empty() {
+                        ui.add_space(12.0);
+                        ui.label("No snippets yet.");
+                        if ui.button("Create your first snippet").clicked() {
+                            self.request_action(PendingAction::New);
+                        }
+                    } else if self.visible_indices().is_empty() {
+                        ui.add_space(12.0);
+                        ui.label("No snippets match this search.");
+                        if ui.button("Clear search").clicked() {
+                            self.filter.clear();
+                        }
+                    }
                 });
             });
         egui::CentralPanel::default().show(ui, |ui| {
             let Some(index) = self.selected else {
-                ui.centered_and_justified(|ui| ui.label("Create a snippet to get started."));
+                ui.vertical_centered(|ui| {
+                    ui.add_space(80.0);
+                    ui.heading("Build your first expansion");
+                    ui.label("Turn repetitive text into a fast, reliable shortcut.");
+                    if ui.button("＋ Create snippet").clicked() {
+                        self.request_action(PendingAction::New);
+                    }
+                });
                 return;
             };
             let command_backed = self.config.expansion[index].command.is_some();
@@ -824,6 +863,11 @@ impl eframe::App for GuiApp {
                             .desired_width(300.0),
                     );
                 });
+                ui.label(
+                    RichText::new("Tip: use a distinctive prefix such as ;; or : to avoid accidental matches.")
+                        .small()
+                        .color(Color32::GRAY),
+                );
                 ui.horizontal(|ui| {
                     ui.label("Description");
                     ui.add(TextEdit::singleline(&mut draft.description).desired_width(420.0));
@@ -891,6 +935,12 @@ impl eframe::App for GuiApp {
                     .small()
                     .color(Color32::GRAY),
                 );
+                if draft.command_enabled {
+                    ui.colored_label(
+                        Color32::YELLOW,
+                        "Advanced: this runs a local executable when the trigger matches.",
+                    );
+                }
                 ui.add_enabled_ui(draft.command_enabled, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Program");
@@ -922,7 +972,7 @@ impl eframe::App for GuiApp {
                 if ui.button("Save changes").clicked() {
                     self.save_selected();
                 }
-                if ui.button("Delete").clicked() {
+                if ui.button("Delete…").clicked() {
                     self.request_action(PendingAction::Delete);
                 }
             });
@@ -962,18 +1012,33 @@ impl eframe::App for GuiApp {
                         Some(PendingAction::Reload) => "reloading the configuration",
                         None => "continuing",
                     };
-                    ui.label(format!("Save changes before {action}?"));
-                    ui.horizontal(|ui| {
-                        if ui.button("Save and continue").clicked() {
-                            self.save_and_execute_pending();
-                        }
-                        if ui.button("Discard").clicked() {
-                            self.discard_pending();
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.pending_action = None;
-                        }
-                    });
+                    if self.draft_is_dirty() {
+                        ui.label(format!("Save changes before {action}?"));
+                        ui.horizontal(|ui| {
+                            if ui.button("Save and continue").clicked() {
+                                self.save_and_execute_pending();
+                            }
+                            if ui.button("Discard").clicked() {
+                                self.discard_pending();
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.pending_action = None;
+                            }
+                        });
+                    } else if matches!(self.pending_action, Some(PendingAction::Delete)) {
+                        ui.label(
+                            "Delete this snippet? This cannot be recovered except through Undo.",
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button("Delete snippet").clicked() {
+                                self.pending_action = None;
+                                self.execute_action(PendingAction::Delete);
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.pending_action = None;
+                            }
+                        });
+                    }
                 });
         }
     }
