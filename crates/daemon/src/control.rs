@@ -402,6 +402,10 @@ mod tests {
         let parent =
             std::env::temp_dir().join(format!("wayexpand-control-parent-{}", std::process::id()));
         fs::create_dir(&parent).unwrap();
+        // Explicit mode rather than the ambient umask: a default of 002
+        // (Debian/Ubuntu user-private-group setups) creates this 0775, which
+        // this check correctly rejects as group-writable.
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
         let socket = parent.join("wayexpand.sock");
         assert!(validate_socket_parent(&socket).is_ok());
 

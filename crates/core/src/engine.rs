@@ -889,6 +889,12 @@ replacement = "bad\u0000value""#;
             "[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"\n",
         )
         .unwrap();
+        // Set both modes explicitly rather than inheriting the umask: a
+        // default of 002 (Debian/Ubuntu user-private-group setups) yields a
+        // group-writable 0775 directory and 0664 file, which `Config::load`
+        // correctly rejects, failing this test for the wrong reason.
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(Config::load(&link).is_ok());
         std::fs::remove_file(link).unwrap();

@@ -196,6 +196,7 @@ mod tests {
     use super::*;
     use std::{
         fs,
+        os::unix::fs::PermissionsExt,
         time::{SystemTime, UNIX_EPOCH},
     };
     use wayexpand_core::InputEvent;
@@ -212,12 +213,21 @@ mod tests {
         format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
     }
 
+    /// Writes a fixture with an explicit private mode. Relying on the
+    /// ambient umask fails under a default of 002 (Debian/Ubuntu
+    /// user-private-group setups), where the file lands group-writable 0664
+    /// and `Config::load` correctly refuses to load it.
+    fn write_config(path: &Path, contents: &str) {
+        fs::write(path, contents).unwrap();
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
     #[test]
     fn valid_reload_replaces_active_engine() {
         let path = temporary_config();
-        fs::write(&path, config_text("old")).unwrap();
+        write_config(&path, &config_text("old"));
         let mut config = ReloadableConfig::load(&path).unwrap();
-        fs::write(&path, config_text("new replacement")).unwrap();
+        write_config(&path, &config_text("new replacement"));
         config.reload_now();
         assert!(config.healthy());
 
@@ -233,9 +243,9 @@ mod tests {
     #[test]
     fn invalid_reload_keeps_previous_engine() {
         let path = temporary_config();
-        fs::write(&path, config_text("stable")).unwrap();
+        write_config(&path, &config_text("stable"));
         let mut config = ReloadableConfig::load(&path).unwrap();
-        fs::write(&path, "[[expansion]]\ntrigger = ").unwrap();
+        write_config(&path, "[[expansion]]\ntrigger = ");
         config.reload_now();
         assert!(!config.healthy());
 
@@ -251,7 +261,7 @@ mod tests {
     #[test]
     fn missing_file_keeps_previous_engine_and_reloads_when_restored() {
         let path = temporary_config();
-        fs::write(&path, config_text("before outage")).unwrap();
+        write_config(&path, &config_text("before outage"));
         let mut config = ReloadableConfig::load(&path).unwrap();
         fs::remove_file(&path).unwrap();
         config.reload_now();
@@ -262,7 +272,7 @@ mod tests {
             .unwrap();
         assert_eq!(result.insert, "before outage");
 
-        fs::write(&path, config_text("after restore")).unwrap();
+        write_config(&path, &config_text("after restore"));
         config.reload_now();
         assert!(config.healthy());
         let result = config
@@ -277,9 +287,9 @@ mod tests {
     #[test]
     fn in_place_same_size_edit_is_detected() {
         let path = temporary_config();
-        fs::write(&path, config_text("old")).unwrap();
+        write_config(&path, &config_text("old"));
         let mut config = ReloadableConfig::load(&path).unwrap();
-        fs::write(&path, config_text("new")).unwrap();
+        write_config(&path, &config_text("new"));
         config.reload_if_changed();
 
         let result = config
@@ -294,7 +304,7 @@ mod tests {
     #[test]
     fn consistent_load_returns_the_stamp_for_the_loaded_file() {
         let path = temporary_config();
-        fs::write(&path, config_text("stable read")).unwrap();
+        write_config(&path, &config_text("stable read"));
 
         let (_config, stamp) = load_consistent(&path).unwrap();
         assert_eq!(stamp, file_stamp(&path));
@@ -305,7 +315,7 @@ mod tests {
     #[test]
     fn unchanged_metadata_reuses_existing_fingerprint() {
         let path = temporary_config();
-        fs::write(&path, config_text("stable metadata")).unwrap();
+        write_config(&path, &config_text("stable metadata"));
         let mut config = ReloadableConfig::load(&path).unwrap();
         let stamp = config.observed.unwrap();
         config.last_fingerprint_check = Some(Instant::now());
