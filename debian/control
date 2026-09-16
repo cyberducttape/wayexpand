@@ -6,6 +6,7 @@ Homepage: https://github.com/itchyitchy123/wayexpand
 Standards-Version: 4.6.0
 Build-Depends:
     debhelper-compat (= 13),
+    dh-cargo,
     rustc,
     cargo,
     pkg-config,
