@@ -3,24 +3,43 @@
 [![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-WayExpand is a Wayland-first text-expansion daemon. The expansion engine is platform-independent; input capture and text insertion are separate backends.
+**Text expansion built for Wayland, rather than adapted to it.**
 
-Turn repetitive operational text into a reliable shortcut: type a trigger such
-as `;;hello`, and WayExpand replaces it with the approved text while keeping
-configuration validation, permissions, and runtime behavior explicit.
+WayExpand is a privacy-first text expander for Linux Wayland desktops. Type a
+short trigger like `;;hello` and it replaces it with a saved snippet —
+signatures, runbook commands, ticket responses, code, dates, or anything else
+you retype often.
+
+Written in Rust, with native Wayland input and output backends, GUI and CLI
+snippet management, Espanso import, parse-before-swap configuration reloads,
+and local-only operation that never logs your typed text.
+
+Privacy-first • Rust • Wayland-native • GUI + CLI • Espanso import
 
 ![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
 
 ## Why WayExpand?
 
-- Replace incident responses, runbook commands, ticket updates, and signatures
-  without retyping them.
-- Preview and validate every expansion before it reaches a real application.
-- Run it as a user service with privacy-safe logs and no root privileges.
+- **Wayland-native architecture.** The expansion engine is
+  platform-independent; input capture and text insertion are separate,
+  explicitly selected backends (`input-method-v2`, wlroots virtual-keyboard,
+  libei/EIS, and an evdev capture fallback) rather than an X11 design with
+  Wayland bolted on.
+- **Local and private by default.** No account, no cloud, no telemetry. The
+  daemon never logs typed text or snippet contents, matching is suspended in
+  password fields on backends that report them, and control surfaces are
+  permission-checked.
+- **Explicit over magical.** Configuration is validated before it replaces
+  live state, elevated permissions are separate opt-in steps you run
+  yourself, and `wayexpand doctor` explains exactly what your compositor does
+  and does not support.
+- **Both audiences.** Manage snippets in a native GUI without touching TOML,
+  or drive the whole thing from the CLI and keep your configuration in Git.
 
-It is designed for privacy-conscious desktop automation: configuration is
-validated before activation, control surfaces are permission-checked, and the
-daemon never logs typed text or snippet contents.
+Compositor coverage is still uneven, and that is a property of Wayland rather
+than a shipping omission: see the [support matrix](docs/SUPPORT_MATRIX.md) for
+what is tested versus experimental, and run `wayexpand doctor` to see which
+backends your own session can actually use.
 
 ## Documentation
 
@@ -43,7 +62,9 @@ paths:
 - parse-then-swap configuration reloads while the daemon is running
 - sensitive-focus events disable matching and clear buffered input
 - isolated wlroots virtual-keyboard output backend
-- isolated libei/EIS output backend using UTF-8 text insertion
+- isolated libei/EIS output backend using UTF-8 text insertion, with a
+  layout-dependent keysym-synthesis fallback when the EIS server does not
+  offer `ei_text`
 - isolated input-method-v2 source with timeout-aware daemon integration
 - protected Unix control socket with status/reload/stop commands
 - longest-match trigger families (for example `:a` and `:address`)
@@ -70,6 +91,39 @@ the daemon. Output backends remain explicit:
 loss, plus runtime output-session loss in the stdin harness, are recovered with
 bounded backoff. Compositor coverage, preedit support, and ordinary non-text
 pass-through still require compositor integration testing.
+
+For compositors that do not advertise `zwp_input_method_manager_v2` or
+`zwp_virtual_keyboard_manager_v1` at all (for example KWin/KDE Plasma as of
+KWin 6.6), an experimental `--source=evdev` mode reads keyboard events
+directly from the kernel instead, paired with an independent
+`--backend=wlroots` or `--backend=libei` output. This works on any
+compositor but requires `input` group membership and has **no sensitive-field
+signal**, so matching is never suspended in password fields; read
+[SECURITY.md](SECURITY.md) before enabling it. Granting the required
+permission is a separate, explicit, root-requiring step, never run
+automatically by the installers above:
+
+```sh
+sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
+sudo ./scripts/install-evdev-permissions.sh             # then apply
+```
+
+Once `wayexpand doctor` reports capture readiness, `wayexpand-evdev.service` runs
+this combination (`--source=evdev --backend=libei` by default; edit the unit
+to `--backend=wlroots` if your compositor supports the wlroots
+virtual-keyboard protocol instead):
+
+```sh
+systemctl --user enable --now wayexpand-evdev.service
+```
+
+Unlike the other two units, this one does not auto-restart on failure. The
+`libei` backend connects through the desktop RemoteDesktop portal without
+persisting consent (see `crates/backend-libei`), so every connection attempt
+shows a fresh permission dialog; auto-restarting would re-show it faster than
+you can respond. `enable --now` starts it once so you can grant that consent;
+after any later failure (compositor restart, portal hiccup), restart it
+yourself with `systemctl --user restart wayexpand-evdev.service`.
 
 ## Try it
 
@@ -98,13 +152,22 @@ cargo run -p wayexpand-gui -- expansions.toml
 it never injects text into another application. Add `--json` when consuming
 the result from CI, scripts, or an editor integration.
 
-For a user-local installation with systemd units:
+For a user-local installation with systemd units, built from source:
 
 ```sh
 ./scripts/install-user.sh
 ```
 
-The installer is intentionally non-destructive by default. After reviewing
+Installing from a downloaded [release](https://github.com/itchyitchy123/wayexpand/releases)
+tarball instead uses the prebuilt binaries and does not require Cargo:
+
+```sh
+tar -xzf wayexpand-*-linux-x86_64.tar.gz
+cd wayexpand-*-linux-x86_64
+./scripts/install-release.sh
+```
+
+Both installers are intentionally non-destructive by default. After reviewing
 `wayexpand doctor`, the complete setup can be requested explicitly:
 
 ```sh
@@ -112,14 +175,19 @@ The installer is intentionally non-destructive by default. After reviewing
   --service=wayexpand-input-method.service
 ```
 
-Do not run the installer as root or with `sudo`; it installs user binaries and
-user systemd units and must inherit the desktop user's Wayland environment.
-Use `./scripts/install-user.sh --help` for the supported options.
+Do not run either installer as root or with `sudo`; they install user binaries
+and user systemd units and must inherit the desktop user's Wayland
+environment. Use `--help` on either script for the supported options.
 
-The installer builds release binaries, installs them under `~/.local/bin`,
-installs both user units, registers the graphical editor with the desktop
-application menu, and creates the example configuration only when one does not
-already exist. It does not enable or start a service automatically.
+`install-user.sh` builds release binaries from source before installing them;
+`install-release.sh` installs the prebuilt binaries already present in the
+extracted tarball. Both install to `~/.local/bin`, install all three user
+units, register the graphical editor with the desktop application menu, and create
+the example configuration only when one does not already exist. Neither
+enables or starts a service automatically unless `--enable` is passed. To
+remove an installation made by either script, run
+`./scripts/uninstall-user.sh` (add `--purge` to also delete the configuration
+directory).
 
 Espanso users can migrate without replacing their existing files. The importer
 writes converted TOML to standard output and leaves the source untouched;
