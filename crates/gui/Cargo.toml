@@ -12,7 +12,7 @@ categories.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-eframe = { version = "0.36", default-features = false, features = ["wayland", "default_fonts", "glow"] }
+eframe = { version = "0.35", default-features = false, features = ["wayland", "default_fonts", "glow"] }
 wayexpand-core = { path = "../core" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
