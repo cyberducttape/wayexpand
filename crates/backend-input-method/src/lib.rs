@@ -591,7 +591,9 @@ fn backspace_delete_lengths(surrounding: Option<&SurroundingText>) -> Option<(u3
             Some((0, u32::try_from(anchor - cursor).ok()?))
         };
     }
-    let previous = surrounding.text[..cursor].grapheme_indices(true).last();
+    let previous = surrounding.text[..cursor]
+        .grapheme_indices(true)
+        .next_back();
     let start = previous.map_or(cursor, |(index, _)| index);
     Some((u32::try_from(cursor - start).ok()?, 0))
 }

@@ -543,7 +543,7 @@ fn print_backend_diagnostics() -> bool {
     }
     // Doctor is also used in CI and for validating a config outside a desktop
     // session. In that context there is no capture claim to validate.
-    !std::env::var_os("WAYLAND_DISPLAY").is_some() || capture_ready
+    std::env::var_os("WAYLAND_DISPLAY").is_none() || capture_ready
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
