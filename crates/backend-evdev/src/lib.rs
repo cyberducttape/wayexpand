@@ -35,9 +35,9 @@
 mod device;
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     os::fd::BorrowedFd,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use thiserror::Error;
@@ -87,6 +87,12 @@ pub struct EvdevSource {
     devices: Vec<device::KeyboardDevice>,
     state: State,
     pending: VecDeque<InputEvent>,
+    /// Evdev keycodes currently held down. Capture is non-exclusive, so the
+    /// application receives these presses too, and a match necessarily fires
+    /// while the trigger's last key is still down. Injecting that same
+    /// keycode then collides with the physical one -- see
+    /// `wait_for_key_release`.
+    pressed: HashSet<u32>,
 }
 
 impl EvdevSource {
@@ -112,6 +118,7 @@ impl EvdevSource {
             devices: discovery.keyboards,
             state: State::new(keymap),
             pending: VecDeque::new(),
+            pressed: HashSet::new(),
         })
     }
 
@@ -204,6 +211,14 @@ impl EvdevSource {
             // Kernel auto-repeat (2) is not yet forwarded; see module docs.
             _ => return,
         };
+        match key_state {
+            KeyState::Pressed => {
+                self.pressed.insert(keycode);
+            }
+            _ => {
+                self.pressed.remove(&keycode);
+            }
+        }
         if key_state == KeyState::Pressed {
             if let Some(chord) = key_chord(&self.state, keycode) {
                 self.pending.push_back(InputEvent::Key(chord));
@@ -222,6 +237,43 @@ impl EvdevSource {
         if let Some(event) = translated {
             self.pending.push_back(event);
         }
+    }
+
+    /// Whether any key is physically held right now.
+    pub fn keys_held(&self) -> bool {
+        !self.pressed.is_empty()
+    }
+
+    /// Blocks until every physically held key has been released, or until
+    /// `timeout` elapses.
+    ///
+    /// Callers must do this before injecting a replacement. A match fires on
+    /// key-down, so the trigger's last key is still held at that moment;
+    /// injecting the same keycode while the compositor already considers it
+    /// pressed makes the duplicate press read as auto-repeat and the
+    /// matching release cancel the physical one, silently eating exactly
+    /// those characters from the replacement.
+    ///
+    /// Events that arrive while waiting are queued as usual, so nothing is
+    /// dropped and ordering is preserved; they are simply processed after
+    /// the expansion.
+    pub fn wait_for_key_release(&mut self, timeout: Duration) -> Result<(), InputSourceError> {
+        let deadline = Instant::now() + timeout;
+        while self.keys_held() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                // A key genuinely held down (or a missed release) must not
+                // stall expansion forever.
+                break;
+            }
+            self.poll_once(remaining.min(POLL_TIMEOUT))
+                .map_err(|error| InputSourceError {
+                    source: SOURCE_NAME,
+                    retryable: error.is_retryable(),
+                    message: error.to_string(),
+                })?;
+        }
+        Ok(())
     }
 
     /// Bounded-wait event fetch used by the daemon's main loop instead of
@@ -286,6 +338,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(state, test_state()),
             pending: VecDeque::new(),
+            pressed: HashSet::new(),
         };
         source.translate(event);
         *state = source.state;
@@ -325,6 +378,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
+            pressed: HashSet::new(),
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), None);
@@ -338,8 +392,48 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
+            pressed: HashSet::new(),
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), None);
+    }
+
+    #[test]
+    fn held_keys_are_tracked_until_released() {
+        let mut state = test_state();
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: std::mem::replace(&mut state, test_state()),
+            pending: VecDeque::new(),
+            pressed: HashSet::new(),
+        };
+        assert!(!source.keys_held());
+
+        // KEY_A = 30, KEY_B = 48. Overlapping presses, as a fast typist
+        // produces, must all be seen as held: injecting while any of them is
+        // down is what ate characters from a replacement.
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        assert!(source.keys_held());
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 48, 1));
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0));
+        assert!(source.keys_held(), "the second key is still down");
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 48, 0));
+        assert!(!source.keys_held());
+    }
+
+    #[test]
+    fn auto_repeat_does_not_clear_the_held_key() {
+        let mut state = test_state();
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: std::mem::replace(&mut state, test_state()),
+            pending: VecDeque::new(),
+            pressed: HashSet::new(),
+        };
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        // Value 2 is kernel auto-repeat, which this source does not forward.
+        // It must not be mistaken for a release.
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 2));
+        assert!(source.keys_held());
     }
 }

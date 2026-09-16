@@ -24,6 +24,10 @@ use wayexpand_core::{
     default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent, TextInjector,
 };
 
+/// How long to wait for physically held keys to be released before injecting
+/// an expansion in evdev mode. Generous enough to cover a deliberate
+/// keypress, bounded so a genuinely held key cannot stall expansion.
+const KEY_RELEASE_TIMEOUT: Duration = Duration::from_millis(400);
 const MAX_STDIN_LINE_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_INPUT_LINES: usize = 64;
 
@@ -114,9 +118,9 @@ fn main() -> Result<()> {
     };
     match source_name.as_deref() {
         None | Some("stdin") | Some("input-method") | Some("evdev") => {}
-        Some(other) => anyhow::bail!(
-            "unknown source {other:?}; expected stdin, input-method, or evdev"
-        ),
+        Some(other) => {
+            anyhow::bail!("unknown source {other:?}; expected stdin, input-method, or evdev")
+        }
     }
     let input_method_mode = source_name.as_deref() == Some("input-method");
     let evdev_mode = source_name.as_deref() == Some("evdev");
@@ -354,7 +358,9 @@ fn main() -> Result<()> {
                         reconnect_delay = next_retry_delay(reconnect_delay);
                     }
                     Err(error) => {
-                        return Err(anyhow::anyhow!("evdev reconnect failed permanently: {error}"));
+                        return Err(anyhow::anyhow!(
+                            "evdev reconnect failed permanently: {error}"
+                        ));
                     }
                 }
                 continue;
@@ -366,7 +372,19 @@ fn main() -> Result<()> {
             match event_result {
                 Ok(Some(event)) => {
                     let result = if let Some(mut backend) = injector.take() {
-                        let result = process_event(&mut config.engine, event, Some(backend.as_mut()));
+                        // Capture is non-exclusive and a match fires on
+                        // key-down, so the trigger's last key is still held
+                        // right now. Injecting before it comes up makes the
+                        // compositor treat our duplicate press as auto-repeat
+                        // and our release as cancelling the physical one,
+                        // eating exactly those characters.
+                        if let Some(source) = evdev.as_mut() {
+                            if let Err(error) = source.wait_for_key_release(KEY_RELEASE_TIMEOUT) {
+                                warn!(%error, "waiting for key release failed; injecting anyway");
+                            }
+                        }
+                        let result =
+                            process_event(&mut config.engine, event, Some(backend.as_mut()));
                         injector = Some(backend);
                         result
                     } else {

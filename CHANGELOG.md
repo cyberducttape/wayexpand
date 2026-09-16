@@ -43,10 +43,18 @@ All notable changes to WayExpand are documented here.
   ancestors once a directory owned by the current user is confirmed, instead
   of continuing to `/`. Under a systemd sandbox the real root owner of `/` is
   remapped to the overflow uid and was rejected as untrusted.
+- Expansions no longer lose the characters matching the trigger's final
+  keys (`:hello` produced "Hell from Wayland!", `:sig` produced "Reards,").
+  evdev capture is non-exclusive and a match fires on key-down, so those
+  keys are still physically held when injection starts; the compositor read
+  our duplicate press as auto-repeat and our release as cancelling the
+  physical one. `EvdevSource` now tracks held keys and the daemon waits
+  (bounded) for them to be released before injecting. This also prevents a
+  replacement being uppercased when the trigger needed Shift.
 - Synthesized keystrokes in the libei `ei_keyboard` fallback are paced and
   flushed per character, and the trigger erase is flushed before typing
-  begins. A burst delivered back-to-back lost a variable number of
-  characters from a replacement.
+  begins, matching what other synthetic-input tools do. Note this was not
+  what caused the dropped characters above.
 - Replaced GUI glyphs that egui's bundled fonts do not cover and which
   rendered as missing-glyph boxes, including the `＋` on the New and Create
   snippet buttons.
