@@ -1,8 +1,14 @@
 [package]
 name = "wayexpand-daemon"
+description = "Daemon runtime for the WayExpand text-expansion service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -14,3 +20,4 @@ wayexpand-core = { path = "../core" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
+wayexpand-backend-evdev = { path = "../backend-evdev" }

@@ -1,4 +1,28 @@
-# Security model
+# Security policy
+
+## Reporting a vulnerability
+
+Please report suspected security vulnerabilities privately, not through a
+public GitHub issue.
+
+- Preferred: open a
+  [private security advisory](https://github.com/itchyitchy123/wayexpand/security/advisories/new)
+  on GitHub ("Security" tab → "Report a vulnerability"). This reaches
+  maintainers directly without disclosing the issue publicly.
+- Include the affected version/commit, the backend(s) involved, reproduction
+  steps or a proof of concept, and the impact you believe it has.
+
+We aim to acknowledge new reports within 5 business days and to provide a
+status update (triage result, expected timeline) within 14 days. If a report
+is confirmed, we will coordinate a disclosure timeline with the reporter and
+credit them in the release notes unless they prefer to stay anonymous. This
+project is experimental (pre-1.0); fixes ship as patch releases as soon as
+they are ready rather than on a fixed embargo schedule.
+
+Do not report non-security bugs through the advisory process — use a regular
+GitHub issue for those.
+
+## Security model
 
 WayExpand is intended to run as the unprivileged desktop user. It must not be
 run as root.
@@ -45,6 +69,25 @@ non-text key or determine a UTF-8-safe Backspace range from surrounding text.
 Unsupported ordinary non-text keys are discarded individually and clear the
 pending matcher state; malformed protocol state remains fatal rather than
 risking text corruption.
+
+The evdev source (`--source=evdev`) trades away a real security property the
+other sources have: it reads keyboard events directly from the kernel
+(`/dev/input/event*`) rather than through a Wayland protocol, so it has no
+way to learn which application field has focus. It therefore **never**
+suspends matching in password or other sensitive fields the way the
+input-method source does. Only enable it where that tradeoff is acceptable.
+It also requires the user to be in the `input` group, a broader grant than
+the Wayland sources need, since that group can read every keystroke typed
+anywhere in the session -- including other users' sessions and password
+prompts -- not only ones passed to WayExpand's own matcher. Granting this is
+a separate, explicit, root-requiring step
+(`scripts/install-evdev-permissions.sh`, `--dry-run` first), never run
+automatically by the user installers, which install
+`udev/71-wayexpand-evdev.rules` (reasserting the standard
+`SUBSYSTEM=="input", GROUP="input"` default most systemd distributions
+already ship, rather than granting anything broader) and add the invoking
+user to `input`. Run `sudo scripts/install-evdev-permissions.sh --uninstall`
+to reverse it.
 
 Backends must document their permission requirements explicitly:
 

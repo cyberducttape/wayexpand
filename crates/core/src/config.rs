@@ -22,7 +22,7 @@ const MAX_COMMAND_CACHE_MS: u64 = 60_000;
 const MAX_EXPANSIONS: usize = 10_000;
 const MAX_HOTKEYS: usize = 1_024;
 const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
-const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -658,6 +658,7 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    let current_uid = rustix::process::geteuid().as_raw();
     loop {
         let metadata = fs::metadata(current).map_err(|source| ConfigError::Read {
             path: current.display().to_string(),
@@ -675,7 +676,6 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
         let mode = metadata.permissions().mode() & 0o7777;
         let sticky = mode & 0o1000 != 0;
         let uid = metadata.uid();
-        let current_uid = rustix::process::geteuid().as_raw();
         if uid != current_uid && uid != 0 {
             return Err(ConfigError::InsecureParentOwner {
                 path: current.display().to_string(),
@@ -687,6 +687,20 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
                 path: current.display().to_string(),
                 mode,
             });
+        }
+        // A directory that is already confirmed trusted (owned by us, or by
+        // root, and not writable by anyone else) cannot have been swapped in
+        // by an untrusted party regardless of what is above it: reaching it
+        // required write access to its own parent, which this same check
+        // would already have rejected. Stopping here -- rather than walking
+        // on to "/" -- also sidesteps a real-world false positive: under a
+        // systemd sandbox (e.g. a `--user` unit with ProtectHome=/
+        // ProtectSystem=), higher ancestors like "/" are visible only through
+        // an implicit private user namespace, in which the *real* root owner
+        // is remapped to the overflow uid (65534) and would otherwise be
+        // rejected as untrusted even though nothing is actually wrong.
+        if uid == current_uid {
+            return Ok(());
         }
         if current == Path::new("/") {
             break;

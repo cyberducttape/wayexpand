@@ -82,6 +82,7 @@ impl std::error::Error for InjectorError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     InputMethodV2,
+    Evdev,
     Libei,
     WlrootsVirtualKeyboard,
     Uinput,
@@ -101,6 +102,7 @@ impl fmt::Display for BackendKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             Self::InputMethodV2 => "input-method-v2",
+            Self::Evdev => "evdev",
             Self::Libei => "libei",
             Self::WlrootsVirtualKeyboard => "wlroots-virtual-keyboard",
             Self::Uinput => "uinput",
@@ -150,6 +152,14 @@ pub fn discover_backends() -> Vec<BackendStatus> {
             state: BackendState::Implemented,
             detail: "output implemented; requires compositor protocol probe".into(),
         },
+        {
+            let (state, detail) = discover_evdev();
+            BackendStatus {
+                kind: BackendKind::Evdev,
+                state,
+                detail,
+            }
+        },
         BackendStatus {
             kind: BackendKind::Uinput,
             state: uinput_state,
@@ -161,6 +171,56 @@ pub fn discover_backends() -> Vec<BackendStatus> {
             detail: "clipboard mutation is not implemented".into(),
         },
     ]
+}
+
+/// A lightweight, dependency-free probe mirroring what
+/// `wayexpand-backend-evdev` would find; kept here (rather than depending on
+/// that backend crate from core) so core stays free of backend-specific
+/// device access, matching how it never depends on wayland-client either.
+fn discover_evdev() -> (BackendState, String) {
+    let Ok(entries) = std::fs::read_dir("/dev/input") else {
+        return (
+            BackendState::Unavailable,
+            "/dev/input is unavailable".into(),
+        );
+    };
+    let mut total = 0usize;
+    let mut readable = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("event") {
+            continue;
+        }
+        total += 1;
+        if OpenOptions::new().read(true).open(entry.path()).is_ok() {
+            readable += 1;
+        }
+    }
+    if total == 0 {
+        (
+            BackendState::Unavailable,
+            "no /dev/input/event* device nodes found".into(),
+        )
+    } else if readable == 0 {
+        (
+            BackendState::RequiresPermission,
+            format!(
+                "{total} input device(s) exist but none are readable by this user; \
+                 add your user to the `input` group and log in again. If this still fails after \
+                 logging out and back in, your systemd --user manager likely did not restart and \
+                 is still running with your old group list -- run `loginctl terminate-user \
+                 $USER` (ends all your sessions) or reboot, then retry"
+            ),
+        )
+    } else {
+        (
+            BackendState::Implemented,
+            format!("{readable}/{total} input device(s) readable; keyboard filtering happens at connect time"),
+        )
+    }
 }
 
 fn discover_uinput() -> (BackendState, String) {

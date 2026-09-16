@@ -9,6 +9,7 @@ members = [
     "crates/backend-wlroots",
     "crates/backend-input-method",
     "crates/backend-libei",
+    "crates/backend-evdev",
 ]
 
 [workspace.package]
@@ -38,3 +39,4 @@ wayland-client = "0.31"
 wayland-protocols = "0.32.13"
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 xkbcommon-rs = { version = "0.1.2", features = ["client"] }
+unicode-segmentation = "1"

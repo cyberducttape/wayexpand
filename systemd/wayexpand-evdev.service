@@ -1,0 +1,69 @@
+[Unit]
+Description=WayExpand evdev capture text expansion daemon (experimental)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStartPre=/usr/bin/env wayexpand validate
+# --backend=libei is the default pairing: it goes through the desktop portal,
+# which is broadly available even on compositors (e.g. KWin) that do not
+# advertise zwp_input_method_manager_v2 or a wlroots virtual-keyboard
+# protocol. Edit this line to --backend=wlroots if your compositor supports
+# the wlroots virtual-keyboard protocol instead.
+ExecStart=/usr/bin/env wayexpand-daemon --source=evdev --backend=libei
+# No Restart=: unlike the other two units, this backend connects through the
+# desktop RemoteDesktop portal with PersistMode::DoNot (crates/backend-libei),
+# so every connection attempt shows a fresh consent dialog by design -- no
+# grant is ever persisted. Auto-restarting on failure would re-show that
+# dialog every RestartSec, faster than a person can respond to it, and keep
+# doing so forever after any transient failure. Start this unit manually
+# (`systemctl --user restart wayexpand-evdev.service`) when ready to grant
+# consent; once connected, the daemon's own internal reconnect-with-backoff
+# (crates/daemon/src/main.rs) handles output loss while it keeps running.
+SuccessExitStatus=SIGTERM
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wayexpand-evdev
+NoNewPrivileges=yes
+UMask=0077
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
+# are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
+# CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
+# respectively) from the bounding set, which requires CAP_SETPCAP. A
+# `systemctl --user` service never has that, so any of these crash-loops the
+# unit with "Failed to drop capabilities: Operation not permitted" (exit
+# 218/CAPABILITIES) on an ordinary desktop login. The unprivileged uid this
+# runs as could never use those capabilities anyway. PrivateDevices= would
+# additionally block the very /dev/input/event* access this source needs.
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+TasksMax=16
+LimitNOFILE=64
+
+# The daemon reads the user's config, reads keyboard event nodes under
+# /dev/input (granted via scripts/install-evdev-permissions.sh, not by this
+# unit), and writes only its user runtime socket.
+ReadWritePaths=%t
+
+[Install]
+WantedBy=graphical-session.target

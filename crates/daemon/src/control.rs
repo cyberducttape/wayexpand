@@ -171,7 +171,15 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
                 current.display()
             );
         }
-        if current == Path::new("/") {
+        // A directory already confirmed to be ours (and not writable by
+        // anyone else) cannot have been swapped in by an untrusted party
+        // regardless of what is above it, so there is nothing higher up left
+        // to validate. Stopping here also avoids a false positive under a
+        // systemd sandbox (e.g. ProtectHome=/ProtectSystem= on a `--user`
+        // unit): higher ancestors like "/" are seen only through an implicit
+        // private user namespace, where the *real* root owner is remapped to
+        // the overflow uid and would otherwise be rejected as untrusted.
+        if metadata.uid() == current_uid || current == Path::new("/") {
             break;
         }
         current = current.parent().unwrap_or_else(|| Path::new("/"));

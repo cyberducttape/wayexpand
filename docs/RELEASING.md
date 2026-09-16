@@ -31,10 +31,15 @@ git push origin v0.1.0
 
 The initial `0.1.0` release is experimental: the support matrix still marks
 global key pass-through and compositor coverage as incomplete. The release
-workflow builds the Linux x86_64 binaries with the locked
-dependency graph and publishes a tarball containing binaries, systemd units,
-the desktop entry, documentation, license, and security policy. A SHA256
-checksum is published beside the archive.
+workflow runs the full CI verification suite (`ci.yml`) before packaging, and
+publishing is skipped if it fails. It then builds the Linux x86_64 binaries
+with the locked dependency graph and publishes a tarball containing binaries,
+systemd units, the desktop entry, an example configuration, documentation,
+license, security policy, `scripts/install-release.sh` /
+`scripts/uninstall-user.sh`, and (for the optional `--source=evdev` capture
+fallback) `scripts/install-evdev-permissions.sh` plus
+`udev/71-wayexpand-evdev.rules`. A SHA256 checksum is published beside the
+archive.
 
 Do not call a release stable while the support matrix still marks key
 pass-through or compositor coverage as unsupported. Release notes must name
@@ -52,3 +57,13 @@ tar -tzf wayexpand-0.1.0-linux-x86_64.tar.gz
 Install only from a verified release artifact. Keep the previous binary and
 configuration backup available until the new service has passed `wayexpand
 doctor --json` and a real expansion test.
+
+```sh
+tar -xzf wayexpand-0.1.0-linux-x86_64.tar.gz
+cd wayexpand-0.1.0-linux-x86_64
+./scripts/install-release.sh --enable
+```
+
+To remove a release-tarball or source-tree installation later, run
+`scripts/uninstall-user.sh` (pass `--purge` to also delete the configuration
+directory).

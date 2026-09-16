@@ -4,7 +4,57 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-Future changes will be listed here.
+### Added
+
+- Experimental `--source=evdev` capture backend (`wayexpand-backend-evdev`),
+  a compositor-agnostic fallback that reads keyboard events directly from
+  `/dev/input` for compositors without `zwp_input_method_manager_v2` or
+  `zwp_virtual_keyboard_manager_v1` support (for example KWin/KDE Plasma).
+  It has no sensitive-field signal and requires `input` group membership;
+  see `docs/SECURITY.md` and `docs/SUPPORT_MATRIX.md`.
+- `scripts/install-evdev-permissions.sh` and `udev/71-wayexpand-evdev.rules`,
+  a separate, explicit, root-requiring step to grant `--source=evdev`
+  permission (never run automatically by the user installers).
+- `systemd/wayexpand-evdev.service` for running `--source=evdev` with a
+  `--backend=libei` output as a user service, installed and removed by the
+  user installers and uninstaller. It deliberately does not auto-restart:
+  the libei backend requests desktop-control consent per connection, and
+  restarting on failure re-shows that portal dialog faster than a person can
+  answer it.
+- `ei_keyboard` fallback in the libei output backend for EIS servers that
+  never offer `ei_text` (observed with xdg-desktop-portal-kde on KWin 6.6).
+  Characters are looked up in the keymap the server itself supplies, so the
+  fallback is layout-dependent; a replacement containing a character the
+  current layout cannot produce is rejected before anything is typed rather
+  than partially inserted.
+- Refreshed GUI visual design: layered surfaces, a typographic scale,
+  custom-painted snippet rows with status and command badges, primary and
+  destructive button styles, status-colored messages, and a light/dark theme
+  toggle.
+
+### Fixed
+
+- User services no longer fail to start with `218/CAPABILITIES`.
+  `CapabilityBoundingSet=`, `PrivateDevices=`, `ProtectClock=`,
+  `ProtectKernelLogs=`, and `ProtectKernelModules=` each try to shrink the
+  capability bounding set, which requires `CAP_SETPCAP` that a
+  `systemctl --user` service never has.
+- Configuration and control-socket directory trust checks stop walking
+  ancestors once a directory owned by the current user is confirmed, instead
+  of continuing to `/`. Under a systemd sandbox the real root owner of `/` is
+  remapped to the overflow uid and was rejected as untrusted.
+- Synthesized keystrokes in the libei `ei_keyboard` fallback are paced and
+  flushed per character, and the trigger erase is flushed before typing
+  begins. A burst delivered back-to-back lost a variable number of
+  characters from a replacement.
+- Replaced GUI glyphs that egui's bundled fonts do not cover and which
+  rendered as missing-glyph boxes, including the `＋` on the New and Create
+  snippet buttons.
+
+### Changed
+
+- Repositioned the project description and Cargo keywords around
+  Wayland-native text expansion rather than accessibility tooling.
 
 ## [0.1.0] - 2026-09-10
 

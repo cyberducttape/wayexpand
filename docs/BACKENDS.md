@@ -27,9 +27,16 @@ uses the pure-Rust `reis` implementation and can use either `LIBEI_SOCKET` or
 the XDG RemoteDesktop portal; select it explicitly with `--backend=libei`. It
 requests both `ei_text` for UTF-8 insertion and `ei_keyboard` for Backspace
 erasure. Long replacements are split at Unicode boundaries to respect the
-protocol's per-request text limit. Portal use is never automatic: selecting this backend may request
-desktop-control consent and the portal session is retained for the injector's
-lifetime.
+protocol's per-request text limit. When the EIS server resumes a keyboard
+device without `ei_text` (observed with xdg-desktop-portal-kde on KWin 6.6),
+the backend falls back to synthesizing individual key presses over
+`ei_keyboard` using the keymap the server itself supplies. That fallback is
+layout-dependent -- only characters the current layout can actually produce
+via an unshifted or Shift-level keysym are typeable -- and a replacement
+containing an unreachable character is rejected with an error before
+anything is typed, rather than partially or incorrectly inserted. Portal use
+is never automatic: selecting this backend may request desktop-control
+consent and the portal session is retained for the injector's lifetime.
 The backend also caps direct text submissions at 1 MiB and validates them before
 queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an

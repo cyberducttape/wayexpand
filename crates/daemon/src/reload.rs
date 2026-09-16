@@ -32,32 +32,6 @@ struct FileStamp {
     fingerprint: u64,
 }
 
-impl FileStamp {
-    fn metadata_matches(&self, metadata: (SystemTime, u64, u64, i64, i64)) -> bool {
-        (
-            self.modified,
-            self.length,
-            self.inode,
-            self.change_time,
-            self.change_time_nsec,
-        ) == metadata
-    }
-}
-
-fn file_metadata(path: &Path) -> Option<(SystemTime, u64, u64, i64, i64)> {
-    let metadata = fs::metadata(path).ok()?;
-    if !metadata.file_type().is_file() {
-        return None;
-    }
-    Some((
-        metadata.modified().ok()?,
-        metadata.len(),
-        metadata.ino(),
-        metadata.ctime(),
-        metadata.ctime_nsec(),
-    ))
-}
-
 fn file_stamp(path: &Path) -> Option<FileStamp> {
     // Open nonblocking and validate the resulting descriptor. The metadata
     // check above is only an optimization; a path can be replaced between
@@ -174,15 +148,19 @@ impl ReloadableConfig {
         self.healthy
     }
 
+    /// Rate-limited to at most one full read-and-hash per
+    /// `FINGERPRINT_REFRESH_INTERVAL`, regardless of how often this is
+    /// polled or how often the file's metadata appears to change. A path
+    /// whose mtime is touched every poll cycle without content changing
+    /// (a noisy watcher, an editor that re-saves repeatedly) must not turn
+    /// into a full config read on every call: this runs on the daemon's
+    /// main event-processing thread. The tradeoff is that a genuine edit
+    /// can take up to one interval longer to be observed.
     fn poll_stamp(&mut self) -> Option<FileStamp> {
-        let metadata = file_metadata(&self.path);
-        let metadata_unchanged = matches!((metadata, self.observed),
-            (Some(metadata), Some(previous)) if previous.metadata_matches(metadata));
-        if metadata_unchanged
-            && self
-                .last_fingerprint_check
-                .is_some_and(|checked| checked.elapsed() < FINGERPRINT_REFRESH_INTERVAL)
-        {
+        let too_soon = self
+            .last_fingerprint_check
+            .is_some_and(|checked| checked.elapsed() < FINGERPRINT_REFRESH_INTERVAL);
+        if too_soon {
             return self.observed;
         }
 

@@ -63,11 +63,18 @@ impl Matcher {
     }
 
     /// Returns the expansion index when the buffer ends in a trigger.
-    pub fn find_suffix(&self, buffer: &str) -> Option<(usize, usize)> {
+    ///
+    /// Takes the buffer's characters in reverse (last-typed character
+    /// first) so callers can walk a `VecDeque<char>` directly instead of
+    /// materializing the whole buffer into a `String` on every call.
+    pub fn find_suffix<I>(&self, chars_rev: I) -> Option<(usize, usize)>
+    where
+        I: IntoIterator<Item = char>,
+    {
         let mut node = &self.root;
         let mut length = 0;
         let mut best = None;
-        for character in buffer.chars().rev() {
+        for character in chars_rev {
             let Some(next) = node.children.get(&character) else {
                 break;
             };
@@ -91,20 +98,23 @@ mod tests {
     #[test]
     fn finds_only_a_suffix() {
         let matcher = Matcher::new(["ab".into(), "xyz".into()]);
-        assert_eq!(matcher.find_suffix("prefixab"), Some((0, 2)));
-        assert_eq!(matcher.find_suffix("prefixx"), None);
+        assert_eq!(matcher.find_suffix("prefixab".chars().rev()), Some((0, 2)));
+        assert_eq!(matcher.find_suffix("prefixx".chars().rev()), None);
     }
 
     #[test]
     fn matches_unicode_by_scalar_value() {
         let matcher = Matcher::new(["🙂x".into()]);
-        assert_eq!(matcher.find_suffix("a🙂x"), Some((0, 2)));
+        assert_eq!(matcher.find_suffix("a🙂x".chars().rev()), Some((0, 2)));
     }
 
     #[test]
     fn prefers_the_longest_matching_suffix() {
         let matcher = Matcher::new([":a".into(), ":address".into()]);
-        assert_eq!(matcher.find_suffix("email :address"), Some((1, 8)));
-        assert_eq!(matcher.find_suffix("email :a"), Some((0, 2)));
+        assert_eq!(
+            matcher.find_suffix("email :address".chars().rev()),
+            Some((1, 8))
+        );
+        assert_eq!(matcher.find_suffix("email :a".chars().rev()), Some((0, 2)));
     }
 }

@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{InjectorError, TextInjector};
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
@@ -354,7 +355,7 @@ impl TextInjector for WlrootsInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        self.send_keys(std::iter::repeat_n(8, trigger.chars().count()))
+        self.send_keys(std::iter::repeat_n(8, trigger.graphemes(true).count()))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -387,7 +388,7 @@ impl TextInjector for WlrootsInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        let mut keycodes = vec![8; trigger.chars().count()];
+        let mut keycodes = vec![8; trigger.graphemes(true).count()];
         keycodes.extend(text.chars().map(|character| self.mappings[&character]));
         self.send_keys(keycodes).map_err(|error| InjectorError {
             backend: BACKEND_NAME,

@@ -9,8 +9,9 @@ Wayland session alone does not imply that a backend is usable.
 | CLI, JSON diagnostics, and config tooling | Supported | CLI and daemon smoke tests |
 | systemd user services | Supported | `systemd-analyze verify` and installer test |
 | wlroots virtual-keyboard output | Experimental | Target-compositor insertion test |
-| libei/EIS output | Experimental | Portal consent, revocation, and reconnect tests |
+| libei/EIS output | Experimental | Portal consent, revocation, and reconnect tests; on-device tests for the `ei_keyboard`-only keysym-synthesis fallback (no `ei_text`), including non-US layouts |
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
+| evdev capture (`--source=evdev`) | Experimental | Compositor-agnostic fallback for compositors without input-method-v2/virtual-keyboard support (e.g. KWin); has no sensitive-field signal (see `docs/SECURITY.md`) and does not yet forward key auto-repeat |
 | Global hotkeys | Experimental | Backend capture and action tests |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |
 | Preedit/IME composition | Not supported | Native toolkit and compose/dead-key tests |

@@ -1,7 +1,10 @@
 #!/bin/sh
+# Installs a downloaded WayExpand release tarball for the current user.
+# Run this from inside the extracted tarball directory
+# (the one containing bin/, systemd/, desktop/, and expansions.toml).
 set -eu
 
-project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+release_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 enable_service=0
 service_name=wayexpand-input-method.service
 for argument in "$@"; do
@@ -38,58 +41,38 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     exit 1
 fi
-cargo_bin=$(command -v cargo 2>/dev/null || true)
-if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
-    cargo_bin="$HOME/.cargo/bin/cargo"
-fi
-if [ -z "$cargo_bin" ]; then
-    printf '%s\n' "error: Cargo was not found" >&2
-    printf '%s\n' "install Rust with rustup, restart your shell, and rerun this script:" >&2
-    printf '%s\n' "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
-    printf '%s\n' "  . \"\$HOME/.cargo/env\"" >&2
-    exit 127
-fi
+for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui; do
+    if [ ! -x "$release_dir/bin/$binary" ]; then
+        printf '%s\n' "error: $release_dir/bin/$binary not found" >&2
+        printf '%s\n' "run this script from inside the extracted release tarball" >&2
+        exit 1
+    fi
+done
+
 bin_dir="$HOME/.local/bin"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
-target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
-case "$target_dir" in
-    /*) ;;
-    *) target_dir="$project_dir/$target_dir" ;;
-esac
 
-printf '%s\n' "Building WayExpand release binaries..."
-CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
-    --manifest-path "$project_dir/Cargo.toml" \
-    -p wayexpand-daemon \
-    -p wayexpand \
-    -p wayexpand-ui \
-    -p wayexpand-gui
-
-install -Dm755 "$target_dir/release/wayexpand-daemon" \
-    "$bin_dir/wayexpand-daemon"
-install -Dm755 "$target_dir/release/wayexpand" \
-    "$bin_dir/wayexpand"
-install -Dm755 "$target_dir/release/wayexpand-ui" \
-    "$bin_dir/wayexpand-ui"
-install -Dm755 "$target_dir/release/wayexpand-gui" \
-    "$bin_dir/wayexpand-gui"
-install -Dm644 "$project_dir/systemd/wayexpand.service" \
+install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
+install -Dm755 "$release_dir/bin/wayexpand" "$bin_dir/wayexpand"
+install -Dm755 "$release_dir/bin/wayexpand-ui" "$bin_dir/wayexpand-ui"
+install -Dm755 "$release_dir/bin/wayexpand-gui" "$bin_dir/wayexpand-gui"
+install -Dm644 "$release_dir/systemd/wayexpand.service" \
     "$unit_dir/wayexpand.service"
-install -Dm644 "$project_dir/systemd/wayexpand-input-method.service" \
+install -Dm644 "$release_dir/systemd/wayexpand-input-method.service" \
     "$unit_dir/wayexpand-input-method.service"
-install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
+install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
-install -Dm644 "$project_dir/desktop/wayexpand.desktop" \
+install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 
 config_path="$config_dir/expansions.toml"
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
-else
-    install -Dm600 "$project_dir/expansions.toml" "$config_path"
+elif [ -f "$release_dir/expansions.toml" ]; then
+    install -Dm600 "$release_dir/expansions.toml" "$config_path"
     printf '%s\n' "Installed example configuration: $config_path"
 fi
 
@@ -106,6 +89,7 @@ printf '%s\n' "If \`doctor\` reports no input-method-v2/virtual-keyboard support
 printf '%s\n' "example on KWin/KDE Plasma), read docs/SECURITY.md and consider:"
 printf '%s\n' "  sudo ./scripts/install-evdev-permissions.sh --dry-run"
 printf '%s\n' "  systemctl --user enable --now wayexpand-evdev.service"
+printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
 
 if [ "$enable_service" -eq 1 ]; then
     "$bin_dir/wayexpand" validate "$config_path"

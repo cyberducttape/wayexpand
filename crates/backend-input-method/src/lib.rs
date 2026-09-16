@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{
     InjectorError, InputEvent, InputSource, InputSourceError, KeyChord, Modifiers, TextInjector,
 };
@@ -42,7 +43,11 @@ fn connection_poll_failed(flags: rustix::event::PollFlags) -> bool {
     )
 }
 
-fn classify_keysym(raw_keysym: u32) -> Option<InputEvent> {
+/// Shared with `wayexpand-backend-evdev`, which drives the same xkb
+/// `State` from raw evdev keycodes instead of Wayland `wl_keyboard` events.
+/// Kept here rather than in `wayexpand-core` so the core engine stays
+/// independent of xkbcommon.
+pub fn classify_keysym(raw_keysym: u32) -> Option<InputEvent> {
     if raw_keysym == xkeysym::key::BackSpace {
         return Some(InputEvent::Backspace);
     }
@@ -84,7 +89,8 @@ fn content_type_is_sensitive(
     }
 }
 
-enum KeyAction {
+/// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
+pub enum KeyAction {
     Delete,
     Commit(&'static str),
     Text(String),
@@ -262,11 +268,18 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
         proxy: &ZwpInputMethodV2,
         event: wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event,
         _: &(),
-        _: &Connection,
+        connection: &Connection,
         qh: &QueueHandle<Self>,
     ) {
         match event {
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Activate => {
+                // The compositor may activate without an intervening
+                // Deactivate; release the outgoing grab object so it does not
+                // leak on the compositor side.
+                if let Some(previous) = state.keyboard.take() {
+                    previous.release();
+                    let _ = connection.flush();
+                }
                 state.keyboard = Some(proxy.grab_keyboard(qh, ()));
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
@@ -276,7 +289,10 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.queue_event(InputEvent::FocusChanged { sensitive: true });
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Deactivate => {
-                state.keyboard = None;
+                if let Some(previous) = state.keyboard.take() {
+                    previous.release();
+                    let _ = connection.flush();
+                }
                 state.keyboard_state = None;
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
@@ -415,19 +431,21 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 }
             }
             Event::Key {
-                state: WEnum::Unknown(value),
+                state: WEnum::Unknown(_),
                 ..
             } => {
-                state.error = Some(InputMethodError::Protocol(format!(
-                    "unknown keyboard key state {value}"
-                )));
+                // An unrecognized key-state enum is a single malformed event,
+                // not a reason to tear down the whole source: discard it the
+                // same way an unsupported key is discarded.
+                state.queue_event(matcher_event_for_unsupported_key());
             }
             _ => {}
         }
     }
 }
 
-fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
+/// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
+pub fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
     let keycode = key.checked_add(8)?;
     let keysym = keyboard_state.key_get_one_sym(keycode)?;
     let key_name = keysym_get_name(&keysym)?;
@@ -458,7 +476,8 @@ fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
     })
 }
 
-fn is_modifier_keysym(raw_keysym: u32) -> bool {
+/// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
+pub fn is_modifier_keysym(raw_keysym: u32) -> bool {
     matches!(
         raw_keysym,
         xkeysym::key::Shift_L
@@ -474,7 +493,10 @@ fn is_modifier_keysym(raw_keysym: u32) -> bool {
     )
 }
 
-fn key_action_and_update(
+/// Shared with `wayexpand-backend-evdev`, which calls this with raw evdev
+/// keycodes and a `KeyState` it constructs from `EventSummary::Key`'s value
+/// field (0 = released, 1 = pressed; repeats are not passed here).
+pub fn key_action_and_update(
     keyboard_state: &mut State,
     key: u32,
     key_state: wl_keyboard::KeyState,
@@ -569,7 +591,7 @@ fn backspace_delete_lengths(surrounding: Option<&SurroundingText>) -> Option<(u3
             Some((0, u32::try_from(anchor - cursor).ok()?))
         };
     }
-    let previous = surrounding.text[..cursor].char_indices().last();
+    let previous = surrounding.text[..cursor].grapheme_indices(true).last();
     let start = previous.map_or(cursor, |(index, _)| index);
     Some((u32::try_from(cursor - start).ok()?, 0))
 }
@@ -921,6 +943,19 @@ fn validate_commit_text(text: &str) -> Result<(), InjectorError> {
             retryable: false,
         });
     }
+    if let Some(character) = text
+        .chars()
+        .find(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(InjectorError {
+            backend: SOURCE_NAME,
+            message: format!(
+                "replacement contains unsupported control character U+{:04X}",
+                character as u32
+            ),
+            retryable: false,
+        });
+    }
     Ok(())
 }
 
@@ -1036,6 +1071,12 @@ mod tests {
     }
 
     #[test]
+    fn input_method_control_characters_are_rejected_before_injection() {
+        assert!(validate_commit_text("\u{0001}").is_err());
+        assert!(validate_commit_text("safe\ntext\r\t").is_ok());
+    }
+
+    #[test]
     fn connection_poll_errors_are_terminal() {
         use rustix::event::PollFlags;
 
@@ -1062,6 +1103,19 @@ mod tests {
             anchor: 5,
         };
         assert_eq!(backspace_delete_lengths(Some(&surrounding)), Some((2, 0)));
+    }
+
+    #[test]
+    fn backspace_deletes_whole_grapheme_cluster() {
+        // "e" (1 byte) + combining acute accent U+0301 (2 bytes) is a single
+        // extended grapheme cluster; Backspace must remove both codepoints,
+        // not just the trailing combining mark.
+        let surrounding = SurroundingText {
+            text: "e\u{0301}".into(),
+            cursor: 3,
+            anchor: 3,
+        };
+        assert_eq!(backspace_delete_lengths(Some(&surrounding)), Some((3, 0)));
     }
 
     #[test]

@@ -21,21 +21,24 @@ StandardError=journal
 SyslogIdentifier=wayexpand
 NoNewPrivileges=yes
 UMask=0077
-CapabilityBoundingSet=
 PrivateTmp=yes
-PrivateDevices=yes
 PrivateMounts=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ProtectClock=yes
-ProtectKernelLogs=yes
 ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=pid
 SystemCallArchitectures=native
 ProtectKernelTunables=yes
-ProtectKernelModules=yes
 ProtectControlGroups=yes
+# PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
+# are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
+# CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
+# respectively) from the bounding set, which requires CAP_SETPCAP. A
+# `systemctl --user` service never has that, so any of these crash-loops the
+# unit with "Failed to drop capabilities: Operation not permitted" (exit
+# 218/CAPABILITIES) on an ordinary desktop login. The unprivileged uid this
+# runs as could never use those capabilities anyway.
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes

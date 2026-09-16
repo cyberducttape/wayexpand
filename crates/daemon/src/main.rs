@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
+use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::LibeiInjector;
 use wayexpand_backend_wlroots::WlrootsInjector;
@@ -92,7 +93,6 @@ fn main() -> Result<()> {
         warn!("XDG_RUNTIME_DIR unavailable; control socket disabled");
     }
     let mut input_method = match source_name.as_deref() {
-        None | Some("stdin") => None,
         Some("input-method") => {
             if backend_name.is_some() && backend_name.as_deref() != Some("none") {
                 anyhow::bail!(
@@ -101,9 +101,25 @@ fn main() -> Result<()> {
             }
             Some(connect_input_method_with_retry(&control, &path)?)
         }
-        Some(other) => anyhow::bail!("unknown source {other:?}; expected stdin or input-method"),
+        _ => None,
     };
+    let mut evdev = match source_name.as_deref() {
+        Some("evdev") => Some(connect_evdev_with_retry(
+            &control,
+            &path,
+            backend_name.as_deref(),
+            config.healthy(),
+        )?),
+        _ => None,
+    };
+    match source_name.as_deref() {
+        None | Some("stdin") | Some("input-method") | Some("evdev") => {}
+        Some(other) => anyhow::bail!(
+            "unknown source {other:?}; expected stdin, input-method, or evdev"
+        ),
+    }
     let input_method_mode = source_name.as_deref() == Some("input-method");
+    let evdev_mode = source_name.as_deref() == Some("evdev");
     let active_source = source_name.as_deref().unwrap_or("stdin");
     let mut reconnect_delay = Duration::from_millis(250);
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
@@ -134,7 +150,7 @@ fn main() -> Result<()> {
         .map(|_| "input-method-v2")
         .or_else(|| injector.as_ref().map(|backend| backend.name()))
         .unwrap_or("none");
-    let mut connection_state = if input_method_mode {
+    let mut connection_state = if input_method_mode || evdev_mode {
         "connected"
     } else {
         "running"
@@ -154,7 +170,7 @@ fn main() -> Result<()> {
         "input source active"
     );
 
-    let receiver = if input_method.is_none() {
+    let receiver = if input_method.is_none() && evdev.is_none() {
         let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_INPUT_LINES);
         thread::spawn(move || {
             let mut reader = io::BufReader::new(io::stdin().lock());
@@ -298,6 +314,107 @@ fn main() -> Result<()> {
                         InputEvent::FocusChanged { sensitive: true },
                         None,
                     )?;
+                    set_daemon_status(
+                        &control,
+                        active_source,
+                        active_backend,
+                        connection_state,
+                        &path,
+                        config.healthy(),
+                    );
+                }
+                Err(error) => {
+                    return Err(anyhow::anyhow!("input source failed: {error}"));
+                }
+            }
+            continue;
+        }
+        if evdev_mode {
+            if evdev.is_none() {
+                match EvdevSource::connect() {
+                    Ok(source) => {
+                        evdev = Some(source);
+                        reconnect_delay = Duration::from_millis(250);
+                        connection_state = "connected";
+                        set_daemon_status(
+                            &control,
+                            active_source,
+                            active_backend,
+                            connection_state,
+                            &path,
+                            config.healthy(),
+                        );
+                        info!("evdev source reconnected");
+                    }
+                    Err(error) if error.is_retryable() => {
+                        warn!(%error, "evdev source unavailable; retrying");
+                        if !wait_for_retry(&control.stop_requested, reconnect_delay) {
+                            break;
+                        }
+                        reconnect_delay = next_retry_delay(reconnect_delay);
+                    }
+                    Err(error) => {
+                        return Err(anyhow::anyhow!("evdev reconnect failed permanently: {error}"));
+                    }
+                }
+                continue;
+            }
+            let Some(source) = evdev.as_mut() else {
+                return Err(anyhow::anyhow!("evdev mode lost its input source"));
+            };
+            let event_result = source.next_event_timeout(Duration::from_millis(250));
+            match event_result {
+                Ok(Some(event)) => {
+                    let result = if let Some(mut backend) = injector.take() {
+                        let result = process_event(&mut config.engine, event, Some(backend.as_mut()));
+                        injector = Some(backend);
+                        result
+                    } else {
+                        process_event(&mut config.engine, event, None)
+                    };
+                    match result {
+                        Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Err(error) if error.retryable() => {
+                            warn!(
+                                error = %error,
+                                trigger_chars = error.result.trigger.chars().count(),
+                                insert_bytes = error.result.insert.len(),
+                                "evdev output failed; current expansion is not replayed"
+                            );
+                            drop(injector.take());
+                            config.engine.process(InputEvent::Boundary);
+                            connection_state = "reconnecting";
+                            set_daemon_status(
+                                &control,
+                                active_source,
+                                active_backend,
+                                connection_state,
+                                &path,
+                                config.healthy(),
+                            );
+                            let backend = backend_name.as_deref().unwrap_or("none");
+                            let Some(reconnected) = connect_output_with_retry(
+                                &control,
+                                active_source,
+                                backend,
+                                &path,
+                                config.healthy(),
+                            )?
+                            else {
+                                break;
+                            };
+                            injector = Some(reconnected);
+                            connection_state = "connected";
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Ok(None) => {}
+                Err(error) if error.retryable => {
+                    warn!(%error, "evdev connection lost; reconnecting");
+                    evdev = None;
+                    connection_state = "reconnecting";
+                    config.engine.process(InputEvent::Boundary);
                     set_daemon_status(
                         &control,
                         active_source,
@@ -489,6 +606,51 @@ fn connect_input_method_with_retry(
             Err(error) => {
                 return Err(anyhow::anyhow!(
                     "connecting input-method-v2 source failed permanently: {error}"
+                ));
+            }
+        }
+    }
+}
+
+fn connect_evdev_with_retry(
+    control: &control::ControlServer,
+    config_path: &Path,
+    backend_name: Option<&str>,
+    config_healthy: bool,
+) -> Result<EvdevSource> {
+    let backend = backend_name.unwrap_or("none");
+    let mut retry_delay = Duration::from_millis(250);
+    loop {
+        match EvdevSource::connect() {
+            Ok(source) => {
+                set_daemon_status(
+                    control,
+                    "evdev",
+                    backend,
+                    "connected",
+                    config_path,
+                    config_healthy,
+                );
+                return Ok(source);
+            }
+            Err(error) if error.is_retryable() => {
+                warn!(%error, ?retry_delay, "evdev source unavailable at startup; retrying");
+                set_daemon_status(
+                    control,
+                    "evdev",
+                    backend,
+                    "reconnecting",
+                    config_path,
+                    config_healthy,
+                );
+                if !wait_for_retry(&control.stop_requested, retry_delay) {
+                    anyhow::bail!("evdev startup cancelled while waiting to reconnect");
+                }
+                retry_delay = next_retry_delay(retry_delay);
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "connecting evdev source failed permanently: {error}"
                 ));
             }
         }

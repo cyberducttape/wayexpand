@@ -179,9 +179,7 @@ impl ExpansionEngine {
                     return results;
                 }
                 for character in text.chars() {
-                    let pending = self
-                        .matcher
-                        .find_suffix(&self.buffer.iter().collect::<String>());
+                    let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
                         if let Some(config_index) = self.matcher_indices.get(index).copied() {
                             let trigger = &self.config.expansion[config_index].trigger;
@@ -218,8 +216,9 @@ impl ExpansionEngine {
                     while self.buffer.len() > self.max_buffer_chars {
                         self.buffer.pop_front();
                     }
-                    let buffer: String = self.buffer.iter().collect();
-                    if let Some((index, length)) = self.matcher.find_suffix(&buffer) {
+                    if let Some((index, length)) =
+                        self.matcher.find_suffix(self.buffer.iter().rev().copied())
+                    {
                         let config_index = self.matcher_indices.get(index).copied();
                         let Some(config_index) = config_index else {
                             self.buffer.clear();
@@ -267,7 +266,7 @@ impl ExpansionEngine {
             InputEvent::Boundary => {
                 let result = self
                     .matcher
-                    .find_suffix(&self.buffer.iter().collect::<String>())
+                    .find_suffix(self.buffer.iter().rev().copied())
                     .and_then(|(index, length)| {
                         self.matcher_indices
                             .get(index)

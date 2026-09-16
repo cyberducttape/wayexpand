@@ -1,8 +1,14 @@
 [package]
 name = "wayexpand-core"
+description = "Core matching and configuration engine for WayExpand"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde.workspace = true

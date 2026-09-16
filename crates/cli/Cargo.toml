@@ -1,8 +1,14 @@
 [package]
 name = "wayexpand"
+description = "Command-line interface for WayExpand, a Wayland-first text-expansion daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow.workspace = true

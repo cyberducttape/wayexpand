@@ -1,6 +1,6 @@
 [package]
-name = "wayexpand-backend-wlroots"
-description = "wlroots virtual-keyboard output backend for WayExpand"
+name = "wayexpand-backend-evdev"
+description = "Compositor-agnostic raw evdev keyboard capture source for WayExpand"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,11 +11,11 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 thiserror.workspace = true
-wayland-client.workspace = true
-wayland-protocols-misc.workspace = true
-rustix = { version = "1", features = ["event"] }
+tracing.workspace = true
+rustix = { version = "1", features = ["event", "fs"] }
 xkbcommon-rs.workspace = true
-unicode-segmentation.workspace = true
+wayland-client.workspace = true
+evdev = "0.13"
 wayexpand-core = { path = "../core" }
+wayexpand-backend-input-method = { path = "../backend-input-method" }

@@ -1,24 +1,50 @@
 //! Output backend using the libei/EIS protocol.
 //!
-//! This backend uses the `ei_text` interface, so insertion is UTF-8 rather
-//! than keyboard-layout-dependent key synthesis. It accepts a direct
-//! `LIBEI_SOCKET` or the XDG RemoteDesktop portal, but portal access is only
-//! attempted when this backend is explicitly selected.
+//! This backend prefers the `ei_text` interface, so insertion is UTF-8
+//! rather than keyboard-layout-dependent key synthesis. When the EIS server
+//! offers a keyboard device without `ei_text` (as of this writing, some
+//! portal backends -- e.g. xdg-desktop-portal-kde on KWin 6.6 -- connect but
+//! never resume a device with `ei_text`), this backend falls back to
+//! synthesizing individual key presses over `ei_keyboard` instead. That
+//! fallback is layout-dependent and strictly weaker: the EIS server, not
+//! this client, owns the keyboard's keymap, so only characters already
+//! reachable on the *current* layout via an unshifted or Shift-level keysym
+//! can be typed. A character the layout cannot produce is reported as an
+//! error before anything is typed, rather than silently dropped or
+//! mistyped. It accepts a direct `LIBEI_SOCKET` or the XDG RemoteDesktop
+//! portal, but portal access is only attempted when this backend is
+//! explicitly selected.
 
 use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
+    collections::HashMap,
+    fs::File,
+    io::{Read as _, Seek, SeekFrom},
+    os::fd::OwnedFd,
     os::unix::net::UnixStream,
     path::PathBuf,
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{InjectorError, TextInjector};
+use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
 
 const BACKEND_NAME: &str = "libei";
 const KEY_BACKSPACE: u32 = 14;
 const EI_TEXT_MAX_UTF8_BYTES: usize = 254;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
+const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
 const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Pause between synthesized key events in the `ei_keyboard` fallback. Set
+/// from the same ballpark as other synthetic-input tools (`xdotool`
+/// defaults to 12ms); below roughly this, compositors and toolkits start
+/// dropping keys out of a burst.
+const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
+// XKB keycodes carry the legacy X11 offset of 8 over the Linux evdev codes
+// that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
+// below, which is already evdev-numbered).
+const XKB_KEYCODE_OFFSET: u32 = 8;
 
 #[derive(Debug, Error)]
 pub enum LibeiError {
@@ -34,10 +60,19 @@ pub enum LibeiError {
     Disconnected(String),
     #[error("libei connection flush failed: {0}")]
     Flush(String),
-    #[error("EIS server did not provide a device with ei_text and ei_keyboard")]
+    #[error("EIS server did not provide a device with ei_text or ei_keyboard")]
     MissingRequiredDevice,
+    #[error("could not decode the EIS keyboard keymap: {0}")]
+    Keymap(String),
+    #[error(
+        "character U+{0:04X} is not reachable on the current keyboard layout via the ei_keyboard \
+         fallback (no ei_text interface was offered); the expansion was not typed"
+    )]
+    UnsupportedCharacter(u32),
     #[error("text is {length} bytes; maximum is {maximum}")]
     TextTooLarge { length: usize, maximum: usize },
+    #[error("text contains unsupported control character U+{0:04X}")]
+    ControlCharacter(u32),
 }
 
 impl LibeiError {
@@ -72,11 +107,95 @@ struct PortalKeepalive {
 pub struct LibeiInjector {
     connection: reis::event::Connection,
     device: reis::event::Device,
-    text: ei::Text,
+    mode: TextMode,
     keyboard: ei::Keyboard,
     sequence: u32,
     started_at: Instant,
     _portal: Option<PortalKeepalive>,
+}
+
+enum TextMode {
+    /// Direct UTF-8 insertion. Layout-independent; used whenever the EIS
+    /// server offers it.
+    Text(ei::Text),
+    /// Fallback for a server that only offers `ei_keyboard`: individual
+    /// characters are looked up in the keymap the server itself sent and
+    /// typed as key presses. Limited to whatever that layout can produce.
+    Keysym(KeysymTyper),
+}
+
+/// Maps characters to a keycode (and whether Shift is needed) reachable on
+/// the EIS server's own keymap, built once at connect time.
+struct KeysymTyper {
+    /// Evdev keycode of a Shift key, pressed around characters that need it.
+    shift_keycode: u32,
+    /// Linux evdev keycode, and whether the Shift level was needed to reach
+    /// it, keyed by the character it produces.
+    chars: HashMap<char, (u32, bool)>,
+}
+
+impl KeysymTyper {
+    fn build(keymap: &XkbKeymap) -> Result<Self, LibeiError> {
+        let shift_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Shift_L)
+            .or_else(|| find_keycode_for_keysym(keymap, xkeysym::key::Shift_R))
+            .ok_or_else(|| LibeiError::Keymap("current keymap has no Shift key".into()))?;
+        let mut chars = HashMap::new();
+        for &xkb_keycode in keymap.iter_keycodes() {
+            let Some(evdev_keycode) = xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET) else {
+                continue;
+            };
+            for (level, shift) in [(0, false), (1, true)] {
+                let Ok(syms) = keymap.key_get_syms_by_level(xkb_keycode, 0, level) else {
+                    continue;
+                };
+                for sym in syms {
+                    let Some(character) = sym.key_char() else {
+                        continue;
+                    };
+                    // Prefer the lowest (first-found) level for a character,
+                    // matching the simplest, most likely-correct chord.
+                    chars.entry(character).or_insert((evdev_keycode, shift));
+                }
+            }
+        }
+        Ok(Self {
+            shift_keycode,
+            chars,
+        })
+    }
+}
+
+fn find_keycode_for_keysym(keymap: &XkbKeymap, raw_keysym: xkeysym::RawKeysym) -> Option<u32> {
+    let target = xkeysym::Keysym::new(raw_keysym);
+    keymap.iter_keycodes().find_map(|&xkb_keycode| {
+        let syms = keymap.key_get_syms_by_level(xkb_keycode, 0, 0).ok()?;
+        syms.contains(&target)
+            .then(|| xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET))
+            .flatten()
+    })
+}
+
+fn decode_keymap(fd: OwnedFd, size: u32) -> Result<XkbKeymap, LibeiError> {
+    if size == 0 || size > MAX_KEYMAP_BYTES {
+        return Err(LibeiError::Keymap(format!("invalid keymap size {size} bytes")));
+    }
+    let mut file = File::from(fd);
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| LibeiError::Keymap(error.to_string()))?;
+    let mut bytes = vec![0; size as usize];
+    file.read_exact(&mut bytes)
+        .map_err(|error| LibeiError::Keymap(error.to_string()))?;
+    if bytes.last() == Some(&0) {
+        bytes.pop();
+    }
+    let text = String::from_utf8(bytes).map_err(|error| LibeiError::Keymap(error.to_string()))?;
+    XkbKeymap::new_from_string(
+        Context::new(0).map_err(|error| LibeiError::Keymap(error.to_string()))?,
+        &text,
+        KeymapFormat::TextV1,
+        0,
+    )
+    .map_err(|error| LibeiError::Keymap(error.to_string()))
 }
 
 struct EventPump {
@@ -233,7 +352,7 @@ impl LibeiInjector {
         let (connection, mut events) = handshake_with_timeout(&context, EIS_HANDSHAKE_TIMEOUT)?;
 
         let device_deadline = Instant::now() + EIS_HANDSHAKE_TIMEOUT;
-        let (device, text, keyboard) = loop {
+        let (device, mode, keyboard) = loop {
             let event = match events.next(device_deadline.saturating_duration_since(Instant::now()))
             {
                 Ok(event) => event,
@@ -255,12 +374,24 @@ impl LibeiInjector {
                         .map_err(|error| LibeiError::Flush(error.to_string()))?;
                 }
                 reis::event::EiEvent::DeviceResumed(resumed) => {
-                    if let (Some(text), Some(keyboard)) = (
-                        resumed.device.interface::<ei::Text>(),
-                        resumed.device.interface::<ei::Keyboard>(),
-                    ) {
-                        break (resumed.device, text, keyboard);
+                    let Some(keyboard) = resumed.device.interface::<ei::Keyboard>() else {
+                        continue;
+                    };
+                    if let Some(text) = resumed.device.interface::<ei::Text>() {
+                        break (resumed.device, TextMode::Text(text), keyboard);
                     }
+                    // No ei_text on this device: fall back to keysym
+                    // synthesis if the server also gave us a keymap to
+                    // synthesize against. A keyboard device without either
+                    // is not usable and keeps waiting for another device.
+                    let Some(keymap) = resumed.device.keymap() else {
+                        continue;
+                    };
+                    let keymap_fd = rustix::io::dup(&keymap.fd)
+                        .map_err(|error| LibeiError::Keymap(error.to_string()))?;
+                    let xkb_keymap = decode_keymap(keymap_fd, keymap.size)?;
+                    let typer = KeysymTyper::build(&xkb_keymap)?;
+                    break (resumed.device, TextMode::Keysym(typer), keyboard);
                 }
                 reis::event::EiEvent::Disconnected(disconnected) => {
                     return Err(LibeiError::Disconnected(
@@ -276,7 +407,7 @@ impl LibeiInjector {
         Ok(Self {
             connection,
             device,
-            text,
+            mode,
             keyboard,
             sequence: 1,
             started_at: Instant::now(),
@@ -284,12 +415,33 @@ impl LibeiInjector {
         })
     }
 
+    /// Rejects a character the current mode cannot type before anything is
+    /// sent, rather than typing part of a replacement and failing partway
+    /// through it. `Text` mode can insert any validated UTF-8, so this only
+    /// constrains `Keysym` mode, which is limited to the server's own
+    /// keymap.
+    fn ensure_representable(&self, text: &str) -> Result<(), LibeiError> {
+        if let TextMode::Keysym(typer) = &self.mode {
+            if let Some(character) = text.chars().find(|c| !typer.chars.contains_key(c)) {
+                return Err(LibeiError::UnsupportedCharacter(character as u32));
+            }
+        }
+        Ok(())
+    }
+
+    /// Queues `text` through the `ei_text` interface. Only valid in
+    /// `TextMode::Text`; `TextMode::Keysym` types through `type_keys`
+    /// instead, because synthesized key events have to be paced.
     fn send_text_unflushed(&mut self, text: &str) {
+        let TextMode::Text(text_interface) = &self.mode else {
+            return;
+        };
+        let text_interface = text_interface.clone();
         for chunk in split_text_chunks(text) {
             let serial = self.connection.serial();
             self.device.device().start_emulating(serial, self.sequence);
             self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-            self.text.utf8(chunk);
+            text_interface.utf8(chunk);
             self.device
                 .device()
                 .frame(serial, self.started_at.elapsed().as_micros() as u64);
@@ -297,8 +449,60 @@ impl LibeiInjector {
         }
     }
 
+    /// Types `text` one character at a time over `ei_keyboard`, flushing and
+    /// pausing between characters.
+    ///
+    /// The pacing is not incidental. A burst of synthesized key events
+    /// delivered back-to-back is silently dropped in part by compositors and
+    /// toolkits -- which is why every synthetic-input tool has an inter-key
+    /// delay (`xdotool --delay`, which defaults to 12ms, `wtype -d`,
+    /// `ydotool --key-delay`). Without it, a replacement loses a variable
+    /// number of characters from wherever the receiving side stopped
+    /// keeping up.
+    ///
+    /// This blocks the caller for `KEY_EVENT_INTERVAL` per character. That
+    /// is a deliberate trade: a correct expansion that takes a moment beats
+    /// an instant mangled one.
+    fn type_keys(&mut self, text: &str) -> Result<(), LibeiError> {
+        let TextMode::Keysym(typer) = &self.mode else {
+            return Ok(());
+        };
+        // `ensure_representable` rejects unknown characters before anything
+        // is typed, so this lookup cannot fail here.
+        let keys: Vec<(u32, bool)> = text.chars().map(|c| typer.chars[&c]).collect();
+        let shift_keycode = typer.shift_keycode;
+        for (keycode, shift) in keys {
+            let serial = self.connection.serial();
+            self.device.device().start_emulating(serial, self.sequence);
+            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+            if shift {
+                self.keyboard
+                    .key(shift_keycode, ei::keyboard::KeyState::Press);
+            }
+            self.keyboard.key(keycode, ei::keyboard::KeyState::Press);
+            self.keyboard.key(keycode, ei::keyboard::KeyState::Released);
+            if shift {
+                self.keyboard
+                    .key(shift_keycode, ei::keyboard::KeyState::Released);
+            }
+            self.device
+                .device()
+                .frame(serial, self.started_at.elapsed().as_micros() as u64);
+            self.device.device().stop_emulating(serial);
+            self.connection
+                .flush()
+                .map_err(|error| LibeiError::Flush(error.to_string()))?;
+            std::thread::sleep(KEY_EVENT_INTERVAL);
+        }
+        Ok(())
+    }
+
     fn send_text(&mut self, text: &str) -> Result<(), LibeiError> {
         validate_text(text)?;
+        self.ensure_representable(text)?;
+        if matches!(self.mode, TextMode::Keysym(_)) {
+            return self.type_keys(text);
+        }
         self.send_text_unflushed(text);
         if !text.is_empty() {
             self.connection
@@ -417,7 +621,7 @@ impl TextInjector for LibeiInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.send_backspaces(trigger.chars().count())
+        self.send_backspaces(trigger.graphemes(true).count())
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -439,7 +643,31 @@ impl TextInjector for LibeiInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        self.send_backspaces_unflushed(trigger.chars().count());
+        // Checked before erasing the trigger: if the replacement cannot be
+        // typed, the trigger should not be removed either.
+        self.ensure_representable(text).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })?;
+        self.send_backspaces_unflushed(trigger.graphemes(true).count());
+        if matches!(self.mode, TextMode::Keysym(_)) {
+            // Send the erase on its own and let it land before typing: in
+            // keysym mode both halves are key events on the same device, so
+            // batching them into one flush lets a late-applied backspace eat
+            // a character that was already typed.
+            self.connection.flush().map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: LibeiError::Flush(error.to_string()).to_string(),
+                retryable: true,
+            })?;
+            std::thread::sleep(KEY_EVENT_INTERVAL);
+            return self.type_keys(text).map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            });
+        }
         self.send_text_unflushed(text);
         if !trigger.is_empty() || !text.is_empty() {
             self.connection.flush().map_err(|error| InjectorError {
@@ -458,6 +686,12 @@ fn validate_text(text: &str) -> Result<(), LibeiError> {
             length: text.len(),
             maximum: MAX_TEXT_BYTES,
         });
+    }
+    if let Some(character) = text
+        .chars()
+        .find(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(LibeiError::ControlCharacter(character as u32));
     }
     Ok(())
 }
@@ -519,6 +753,15 @@ mod tests {
     }
 
     #[test]
+    fn control_characters_are_rejected_before_injection() {
+        assert!(matches!(
+            super::validate_text("\u{0001}"),
+            Err(super::LibeiError::ControlCharacter(1))
+        ));
+        assert!(super::validate_text("safe\ntext\r\t").is_ok());
+    }
+
+    #[test]
     fn transport_failures_are_retryable_but_validation_is_not() {
         assert!(super::LibeiError::Connect(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
@@ -550,5 +793,40 @@ mod tests {
             maximum: 1,
         }
         .is_retryable());
+        assert!(!super::LibeiError::ControlCharacter(1).is_retryable());
+        assert!(!super::LibeiError::Keymap("bad keymap".into()).is_retryable());
+        assert!(!super::LibeiError::UnsupportedCharacter('a' as u32).is_retryable());
+    }
+
+    fn default_keymap() -> super::XkbKeymap {
+        super::XkbKeymap::new_from_names(super::Context::new(0).unwrap(), None, 0).unwrap()
+    }
+
+    #[test]
+    fn keysym_typer_maps_shifted_and_unshifted_letters_to_the_same_key() {
+        let keymap = default_keymap();
+        let typer = super::KeysymTyper::build(&keymap).unwrap();
+        let (lower_keycode, lower_shift) = typer.chars[&'a'];
+        let (upper_keycode, upper_shift) = typer.chars[&'A'];
+        assert!(!lower_shift);
+        assert!(upper_shift);
+        assert_eq!(
+            lower_keycode, upper_keycode,
+            "'a' and 'A' are the same physical key, differing only by Shift"
+        );
+        assert_ne!(
+            upper_keycode, typer.shift_keycode,
+            "Shift itself must not be reported as a typeable character's key"
+        );
+    }
+
+    #[test]
+    fn keysym_typer_does_not_claim_unreachable_characters() {
+        let keymap = default_keymap();
+        let typer = super::KeysymTyper::build(&keymap).unwrap();
+        // No ordinary keyboard layout has a direct, unshifted/Shift-level
+        // keysym for CJK ideographs -- those need an input method, which the
+        // fallback deliberately cannot provide (see the module docs).
+        assert!(!typer.chars.contains_key(&'中'));
     }
 }

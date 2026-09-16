@@ -9,8 +9,13 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    name: Verify
+    uses: ./.github/workflows/ci.yml
+
   linux-x86_64:
     name: Linux x86_64 release
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,7 +40,7 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           root="wayexpand-${version}-linux-x86_64"
-          mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs"
+          mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev"
           install -m 0755 target/release/wayexpand "$root/bin/"
           install -m 0755 target/release/wayexpand-daemon "$root/bin/"
           install -m 0755 target/release/wayexpand-ui "$root/bin/"
@@ -43,6 +48,11 @@ jobs:
           install -m 0644 systemd/*.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
           install -m 0644 README.md LICENSE SECURITY.md CHANGELOG.md "$root/"
+          install -m 0600 expansions.toml "$root/expansions.toml"
+          install -m 0755 scripts/install-release.sh "$root/scripts/"
+          install -m 0755 scripts/uninstall-user.sh "$root/scripts/"
+          install -m 0755 scripts/install-evdev-permissions.sh "$root/scripts/"
+          install -m 0644 udev/71-wayexpand-evdev.rules "$root/udev/"
           cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"

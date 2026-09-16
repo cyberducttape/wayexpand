@@ -17,7 +17,50 @@ use wayexpand_core::{
     MatchMode,
 };
 
-fn main() -> Result<()> {
+/// Pulls the first `--json` flag out of `args`, wherever it appears, so
+/// subcommands accept it in any position rather than one fixed slot.
+fn take_json_flag(args: &mut Vec<String>) -> bool {
+    if let Some(position) = args.iter().position(|arg| arg == "--json") {
+        args.remove(position);
+        true
+    } else {
+        false
+    }
+}
+
+const EXIT_USAGE: i32 = 2;
+const EXIT_CONFIG: i32 = 3;
+const EXIT_DAEMON: i32 = 4;
+
+/// Classifies an error by the message conventions this CLI already uses
+/// consistently ("usage: ...", "configuration invalid", daemon-socket
+/// context messages) so callers can distinguish failure causes without
+/// parsing free-form text, while avoiding a bespoke error type per site.
+fn exit_code_for(error: &anyhow::Error) -> i32 {
+    let message = error.to_string();
+    if message.starts_with("usage:") || message.starts_with("unknown command") {
+        EXIT_USAGE
+    } else if message.contains("configuration invalid") {
+        EXIT_CONFIG
+    } else if message.contains("connecting to")
+        || message.contains("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")
+        || message.contains("daemon control response")
+        || message.contains("daemon returned a non-UTF-8")
+    {
+        EXIT_DAEMON
+    } else {
+        1
+    }
+}
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("Error: {error:?}");
+        std::process::exit(exit_code_for(&error));
+    }
+}
+
+fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("--version") | Some("-V") | Some("version") => {
@@ -27,16 +70,16 @@ fn main() -> Result<()> {
             let trigger = args
                 .next()
                 .context("usage: wayexpand test <text> [--json] [config]")?;
-            let next = args.next();
-            let requested_json = next.as_deref() == Some("--json");
-            let path = if requested_json {
-                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
-            } else {
-                next.map(PathBuf::from).unwrap_or_else(default_config_path)
-            };
-            if args.next().is_some() {
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
                 bail!("usage: wayexpand test <text> [--json] [config]");
             }
+            let path = rest
+                .into_iter()
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_config_path);
             let config = Config::load(path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
@@ -69,16 +112,16 @@ fn main() -> Result<()> {
             let chord_text = args
                 .next()
                 .context("usage: wayexpand test-hotkey <chord> [--json] [config]")?;
-            let next = args.next();
-            let requested_json = next.as_deref() == Some("--json");
-            let path = if requested_json {
-                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
-            } else {
-                next.map(PathBuf::from).unwrap_or_else(default_config_path)
-            };
-            if args.next().is_some() {
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
                 bail!("usage: wayexpand test-hotkey <chord> [--json] [config]");
             }
+            let path = rest
+                .into_iter()
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_config_path);
             let chord = wayexpand_core::KeyChord::parse(&chord_text)
                 .map_err(|error| anyhow::anyhow!("invalid hotkey chord: {error}"))?;
             let config = Config::load(&path).map_err(|error| {
@@ -112,20 +155,17 @@ fn main() -> Result<()> {
         Some("preview") => {
             let trigger = args
                 .next()
-                .context("usage: wayexpand preview <trigger> [config]")?;
-            let mut requested_json = false;
-            let next = args.next();
-            let path = if next.as_deref() == Some("--json") {
-                requested_json = true;
-                args.next()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(default_config_path)
-            } else {
-                next.map(PathBuf::from).unwrap_or_else(default_config_path)
-            };
-            if args.next().is_some() {
-                bail!("usage: wayexpand preview <trigger> [config]");
+                .context("usage: wayexpand preview <trigger> [--json] [config]")?;
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
+                bail!("usage: wayexpand preview <trigger> [--json] [config]");
             }
+            let path = rest
+                .into_iter()
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_config_path);
             let config = Config::load(&path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
@@ -153,18 +193,16 @@ fn main() -> Result<()> {
             }
         }
         Some("list") => {
-            let next = args.next();
-            let requested_json = next.as_deref() == Some("--json");
-            let path = if requested_json {
-                args.next()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(default_config_path)
-            } else {
-                next.map(PathBuf::from).unwrap_or_else(default_config_path)
-            };
-            if args.next().is_some() {
-                bail!("usage: wayexpand list [config]");
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
+                bail!("usage: wayexpand list [--json] [config]");
             }
+            let path = rest
+                .into_iter()
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_config_path);
             let config = Config::load(&path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
@@ -196,28 +234,51 @@ fn main() -> Result<()> {
             }
         }
         Some("search") => {
-            let query = args.next().context("usage: wayexpand search <query> [config]")?;
-            let path = args
+            let query = args
+                .next()
+                .context("usage: wayexpand search <query> [--json] [config]")?;
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
+                bail!("usage: wayexpand search <query> [--json] [config]");
+            }
+            let path = rest
+                .into_iter()
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            if args.next().is_some() {
-                bail!("usage: wayexpand search <query> [config]");
-            }
-            let query = query.to_lowercase();
+            let query_lower = query.to_lowercase();
             let config = Config::load(&path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
-            let mut found = 0;
-            for expansion in config.expansion {
-                let searchable = format!(
-                    "{} {} {}",
-                    expansion.trigger,
-                    expansion.description,
-                    expansion.tags.join(" ")
-                )
-                .to_lowercase();
-                if searchable.contains(&query) {
+            let matches: Vec<_> = config
+                .expansion
+                .into_iter()
+                .filter(|expansion| {
+                    format!(
+                        "{} {} {}",
+                        expansion.trigger,
+                        expansion.description,
+                        expansion.tags.join(" ")
+                    )
+                    .to_lowercase()
+                    .contains(&query_lower)
+                })
+                .collect();
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "query": query,
+                        "config": path,
+                        "count": matches.len(),
+                        "expansions": matches,
+                    })
+                );
+            } else if matches.is_empty() {
+                println!("no expansions matched {query:?}");
+            } else {
+                for expansion in &matches {
                     println!(
                         "{} {}{}",
                         if expansion.enabled { "[on ]" } else { "[off]" },
@@ -228,11 +289,7 @@ fn main() -> Result<()> {
                             format!(" — {}", expansion.description)
                         }
                     );
-                    found += 1;
                 }
-            }
-            if found == 0 {
-                println!("no expansions matched {query:?}");
             }
         }
         Some("validate") => {
@@ -376,16 +433,16 @@ fn main() -> Result<()> {
             println!("created configuration backup {}", destination.display());
         }
         Some("doctor") => {
-            let first = args.next();
-            let requested_json = first.as_deref() == Some("--json");
-            let config_path = if requested_json {
-                args.next().map(PathBuf::from).unwrap_or_else(default_config_path)
-            } else {
-                first.map(PathBuf::from).unwrap_or_else(default_config_path)
-            };
-            if args.next().is_some() {
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
                 bail!("usage: wayexpand doctor [--json] [config]");
             }
+            let config_path = rest
+                .into_iter()
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_config_path);
             if requested_json {
                 let healthy = print_json_diagnostics(&config_path)?;
                 if !healthy {
@@ -445,7 +502,7 @@ fn main() -> Result<()> {
             }
         }
         Some("help") | Some("--help") | Some("-h") | None => println!(
-            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  test-hotkey <chord> [--json] [config]       Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions and hotkeys\n  search <query> [config]                      Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  backup [config] [destination]                Create a non-overwriting config backup\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
+            "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [config]                         Simulate input and print a match\n  test-hotkey <chord> [--json] [config]       Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions and hotkeys\n  search <query> [--json] [config]             Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  backup [config] [destination]                Create a non-overwriting config backup\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
             env!("CARGO_PKG_VERSION"),
             default_config_path().display()
         ),
@@ -476,7 +533,9 @@ fn print_backend_diagnostics() -> bool {
                 "Capture readiness: NOT READY (no supported global input source was detected)"
             );
             println!(
-                "Next step: use a compositor with input-method-v2 support or configure the libei source."
+                "Next step: use a compositor with input-method-v2 support, or fall back to \
+                 `--source=evdev` (requires `input` group membership; see SECURITY.md for the \
+                 sensitive-field tradeoff) paired with `--backend=wlroots` or `--backend=libei`."
             );
         } else {
             println!("Capture readiness: READY");
@@ -752,5 +811,44 @@ mod tests {
         assert_eq!(value["source"], "stdin");
         assert_eq!(value["paused"], true);
         assert_eq!(value["config_state"], "ok");
+    }
+
+    #[test]
+    fn json_flag_is_recognized_in_any_position() {
+        let mut args = vec!["expansions.toml".to_string(), "--json".to_string()];
+        assert!(take_json_flag(&mut args));
+        assert_eq!(args, vec!["expansions.toml".to_string()]);
+
+        let mut args = vec!["--json".to_string(), "expansions.toml".to_string()];
+        assert!(take_json_flag(&mut args));
+        assert_eq!(args, vec!["expansions.toml".to_string()]);
+
+        let mut args = vec!["expansions.toml".to_string()];
+        assert!(!take_json_flag(&mut args));
+        assert_eq!(args, vec!["expansions.toml".to_string()]);
+    }
+
+    #[test]
+    fn exit_codes_classify_known_error_shapes() {
+        assert_eq!(
+            exit_code_for(&anyhow::anyhow!("usage: wayexpand test <text> [--json] [config]")),
+            EXIT_USAGE
+        );
+        assert_eq!(
+            exit_code_for(&anyhow::anyhow!("unknown command \"bogus\"; try `wayexpand help`")),
+            EXIT_USAGE
+        );
+        assert_eq!(
+            exit_code_for(&anyhow::anyhow!("configuration invalid: parse error")),
+            EXIT_CONFIG
+        );
+        assert_eq!(
+            exit_code_for(&anyhow::anyhow!("connecting to /run/user/1000/wayexpand.sock")),
+            EXIT_DAEMON
+        );
+        assert_eq!(
+            exit_code_for(&anyhow::anyhow!("some other unexpected failure")),
+            1
+        );
     }
 }
