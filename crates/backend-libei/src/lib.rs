@@ -129,6 +129,10 @@ enum TextMode {
 struct KeysymTyper {
     /// Evdev keycode of a Shift key, pressed around characters that need it.
     shift_keycode: u32,
+    /// Evdev keycode for Return/Enter key (for newlines).
+    return_keycode: u32,
+    /// Evdev keycode for Tab key (for horizontal tabs).
+    tab_keycode: u32,
     /// Linux evdev keycode, and whether the Shift level was needed to reach
     /// it, keyed by the character it produces.
     chars: HashMap<char, (u32, bool)>,
@@ -139,6 +143,10 @@ impl KeysymTyper {
         let shift_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Shift_L)
             .or_else(|| find_keycode_for_keysym(keymap, xkeysym::key::Shift_R))
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Shift key".into()))?;
+        let return_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Return)
+            .ok_or_else(|| LibeiError::Keymap("current keymap has no Return key".into()))?;
+        let tab_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Tab)
+            .ok_or_else(|| LibeiError::Keymap("current keymap has no Tab key".into()))?;
         let mut chars = HashMap::new();
         for &xkb_keycode in keymap.iter_keycodes() {
             let Some(evdev_keycode) = xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET) else {
@@ -160,6 +168,8 @@ impl KeysymTyper {
         }
         Ok(Self {
             shift_keycode,
+            return_keycode,
+            tab_keycode,
             chars,
         })
     }
@@ -469,11 +479,17 @@ impl LibeiInjector {
         let TextMode::Keysym(typer) = &self.mode else {
             return Ok(());
         };
-        // `ensure_representable` rejects unknown characters before anything
-        // is typed, so this lookup cannot fail here.
-        let keys: Vec<(u32, bool)> = text.chars().map(|c| typer.chars[&c]).collect();
         let shift_keycode = typer.shift_keycode;
-        for (keycode, shift) in keys {
+        let return_keycode = typer.return_keycode;
+        let tab_keycode = typer.tab_keycode;
+
+        for c in text.chars() {
+            let (keycode, shift) = match c {
+                '\n' => (return_keycode, false),
+                '\t' => (tab_keycode, false),
+                _ => typer.chars[&c],
+            };
+
             let serial = self.connection.serial();
             self.device.device().start_emulating(serial, self.sequence);
             self.sequence = self.sequence.checked_add(1).unwrap_or(1);
