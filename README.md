@@ -155,6 +155,33 @@ cargo run -p wayexpand-gui -- expansions.toml
 it never injects text into another application. Add `--json` when consuming
 the result from CI, scripts, or an editor integration.
 
+### Installation via Package Manager
+
+**Ubuntu/Debian (PPA):**
+
+```sh
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+```
+
+**Arch Linux (AUR):**
+
+```sh
+yay -S wayexpand
+# or
+git clone https://aur.archlinux.org/wayexpand.git
+cd wayexpand
+makepkg -si
+```
+
+**Fedora (Copr - coming soon):**
+
+```sh
+sudo dnf copr enable cyberducttape/wayexpand
+sudo dnf install wayexpand
+```
+
 For a user-local installation with systemd units, built from source:
 
 ```sh
