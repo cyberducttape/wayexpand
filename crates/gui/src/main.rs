@@ -1,3 +1,5 @@
+mod theme;
+
 use anyhow::{Context, Result};
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use std::{
@@ -7,6 +9,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+use theme::Palette;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
@@ -71,6 +74,8 @@ struct GuiApp {
     import_preview: Option<(Config, usize)>,
     settings_open: bool,
     settings_buffer: String,
+    settings_error: Option<String>,
+    dark_mode: bool,
 }
 
 impl GuiApp {
@@ -137,6 +142,8 @@ impl GuiApp {
             import_preview: None,
             settings_open: false,
             settings_buffer,
+            settings_error: None,
+            dark_mode: true,
         })
     }
 
@@ -182,15 +189,18 @@ impl GuiApp {
         let max_buffer_chars = match self.settings_buffer.trim().parse::<usize>() {
             Ok(value) => value,
             Err(error) => {
-                self.message =
-                    format!("Settings invalid: buffer limit must be an integer ({error})");
+                let error = format!("buffer limit must be an integer ({error})");
+                self.message = format!("Settings invalid: {error}");
+                self.settings_error = Some(error);
                 return;
             }
         };
         let mut candidate = self.config.clone();
         candidate.settings.max_buffer_chars = max_buffer_chars;
         if let Err(error) = candidate.validate() {
-            self.message = format!("Settings rejected: {}", error.safe_summary());
+            let error = error.safe_summary();
+            self.message = format!("Settings rejected: {error}");
+            self.settings_error = Some(error);
             return;
         }
         match candidate.save_atomic(&self.path) {
@@ -199,10 +209,15 @@ impl GuiApp {
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
                 self.settings_open = false;
+                self.settings_error = None;
                 self.message = "Settings saved atomically".into();
                 let _ = control_command("reload");
             }
-            Err(error) => self.message = format!("Settings save failed: {}", error.safe_summary()),
+            Err(error) => {
+                let error = error.safe_summary();
+                self.message = format!("Settings save failed: {error}");
+                self.settings_error = Some(error);
+            }
         }
     }
 
@@ -627,84 +642,141 @@ impl Draft {
 
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("WayExpand");
-                ui.separator();
-                ui.label("Snippet library");
-                ui.separator();
-                ui.label(format!("{} snippets", self.config.expansion.len()));
-                if !self.config.hotkey.is_empty() {
-                    ui.label(format!("{} hotkeys", self.config.hotkey.len()));
-                }
-                if self.draft_is_dirty() {
-                    ui.label(RichText::new("● Unsaved changes").color(Color32::YELLOW));
-                }
-                ui.add(
-                    TextEdit::singleline(&mut self.filter)
-                        .hint_text("Search triggers, descriptions, or tags…"),
-                );
-                if ui.button("Reload").clicked() {
-                    self.request_action(PendingAction::Reload);
-                }
-                if ui
-                    .button(if self.paused { "Resume" } else { "Pause" })
-                    .clicked()
-                {
-                    self.toggle_pause();
-                }
-                if ui.button("Diagnostics").clicked() {
-                    self.diagnostics_open = true;
-                    self.refresh_diagnostics();
-                }
-                if ui.button("Import Espanso").clicked() {
-                    self.import_open = true;
-                    self.import_preview = None;
-                }
-                if ui.button("Settings").clicked() {
-                    self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
-                    self.settings_open = true;
-                }
+        let palette = Palette::for_mode(self.dark_mode);
+        egui::Panel::top("toolbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.surface)
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .stroke(egui::Stroke::NONE)
+                    .shadow(egui::Shadow {
+                        offset: [0, 6],
+                        blur: 14,
+                        spread: 0,
+                        color: Color32::from_black_alpha(if self.dark_mode { 60 } else { 18 }),
+                    }),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
+                    ui.label(RichText::new("WayExpand").heading().strong());
+                    ui.label(RichText::new("Snippet library").color(palette.muted));
+                    ui.add_space(6.0);
+                    theme::pill(
+                        ui,
+                        format!("{} snippets", self.config.expansion.len()),
+                        palette.muted,
+                        palette.surface_hover,
+                    );
+                    if !self.config.hotkey.is_empty() {
+                        theme::pill(
+                            ui,
+                            format!("{} hotkeys", self.config.hotkey.len()),
+                            palette.muted,
+                            palette.surface_hover,
+                        );
+                    }
+                    if self.draft_is_dirty() {
+                        theme::pill(
+                            ui,
+                            "● Unsaved changes",
+                            palette.warning,
+                            theme::tint(palette.warning, 38),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button(if self.dark_mode { "☀" } else { "🌙" })
+                            .on_hover_text("Toggle light/dark theme")
+                            .clicked()
+                        {
+                            self.dark_mode = !self.dark_mode;
+                            ui.ctx().set_theme(if self.dark_mode {
+                                egui::ThemePreference::Dark
+                            } else {
+                                egui::ThemePreference::Light
+                            });
+                        }
+                        if ui.button("⚙ Settings").clicked() {
+                            self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                            self.settings_error = None;
+                            self.settings_open = true;
+                        }
+                        if ui.button("📥 Import Espanso").clicked() {
+                            self.import_open = true;
+                            self.import_preview = None;
+                        }
+                        if ui.button("🖥 Diagnostics").clicked() {
+                            self.diagnostics_open = true;
+                            self.refresh_diagnostics();
+                        }
+                        if ui
+                            .button(if self.paused { "▶ Resume" } else { "⏸ Pause" })
+                            .clicked()
+                        {
+                            self.toggle_pause();
+                        }
+                        if ui.button("↻ Reload").clicked() {
+                            self.request_action(PendingAction::Reload);
+                        }
+                        ui.add(
+                            TextEdit::singleline(&mut self.filter)
+                                .hint_text("Search triggers, descriptions, or tags…")
+                                .desired_width(220.0),
+                        );
+                    });
+                });
             });
-        });
         if self.diagnostics_open {
             let mut open = self.diagnostics_open;
-            egui::Window::new("WayExpand diagnostics")
+            egui::Window::new("🖥  WayExpand diagnostics")
                 .open(&mut open)
                 .resizable(true)
+                .min_width(420.0)
                 .show(ui.ctx(), |ui| {
-                    ui.heading("Runtime health");
-                    ui.label("Daemon");
-                    ui.group(|ui| ui.label(&self.daemon_status));
-                    ui.separator();
+                    theme::section_header(ui, "🖥", "Runtime health");
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Daemon").color(palette.muted).small());
+                    egui::Frame::group(ui.style())
+                        .fill(palette.surface_hover)
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(&self.daemon_status).monospace());
+                        });
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        ui.label("Backends");
-                        if ui.button("Refresh").clicked() {
+                        theme::section_header(ui, "🔌", "Backends");
+                        if ui.small_button("↻ Refresh").clicked() {
                             self.refresh_diagnostics();
                         }
                     });
+                    ui.add_space(4.0);
                     for status in &self.backend_status {
                         let color = match status.state {
-                            BackendState::Available | BackendState::Implemented => {
-                                Color32::from_rgb(90, 190, 110)
-                            }
-                            BackendState::RequiresPermission => Color32::YELLOW,
+                            BackendState::Available | BackendState::Implemented => palette.success,
+                            BackendState::RequiresPermission => palette.warning,
                             BackendState::Unavailable | BackendState::NotImplemented => {
-                                Color32::GRAY
+                                palette.muted
                             }
                         };
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{:?}", status.state)).color(color));
-                            ui.label(status.kind.to_string());
+                            theme::pill(
+                                ui,
+                                format!("{:?}", status.state),
+                                color,
+                                theme::tint(color, 32),
+                            );
+                            ui.label(RichText::new(status.kind.to_string()).strong());
                         });
-                        ui.label(RichText::new(&status.detail).small().color(Color32::GRAY));
+                        ui.label(RichText::new(&status.detail).small().color(palette.muted));
+                        ui.add_space(4.0);
                     }
                     ui.separator();
-                    ui.label("Non-mutating protocol probes");
+                    theme::section_header(ui, "📡", "Non-mutating protocol probes");
+                    ui.add_space(4.0);
                     for (name, detail) in &self.protocol_probes {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(name).strong());
-                            ui.label(detail);
+                            ui.label(RichText::new(detail).color(palette.muted));
                         });
                     }
                 });
@@ -712,9 +784,10 @@ impl eframe::App for GuiApp {
         }
         if self.import_open {
             let mut open = self.import_open;
-            egui::Window::new("Import Espanso library")
+            egui::Window::new("📥  Import Espanso library")
                 .open(&mut open)
                 .resizable(false)
+                .min_width(420.0)
                 .show(ui.ctx(), |ui| {
                     ui.label("Source YAML file");
                     ui.add(
@@ -727,10 +800,11 @@ impl eframe::App for GuiApp {
                             "Import is previewed first and replaces this library only after explicit confirmation.",
                         )
                         .small()
-                        .color(Color32::GRAY),
+                        .color(palette.muted),
                     );
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Load preview").clicked() {
+                        if theme::primary_button(ui, &palette, "Load preview").clicked() {
                             self.preview_import();
                         }
                         if ui.button("Cancel").clicked() {
@@ -745,7 +819,8 @@ impl eframe::App for GuiApp {
                             config.expansion.len(),
                             skipped
                         ));
-                        if ui.button("Replace current library").clicked() {
+                        if theme::primary_button(ui, &palette, "Replace current library").clicked()
+                        {
                             self.apply_import();
                         }
                     }
@@ -754,19 +829,25 @@ impl eframe::App for GuiApp {
         }
         if self.settings_open {
             let mut open = self.settings_open;
-            egui::Window::new("WayExpand settings")
+            egui::Window::new("⚙  WayExpand settings")
                 .open(&mut open)
                 .resizable(false)
+                .min_width(360.0)
                 .show(ui.ctx(), |ui| {
                     ui.label("Matcher buffer limit");
                     ui.add(TextEdit::singleline(&mut self.settings_buffer).desired_width(120.0));
                     ui.label(
                         RichText::new("Characters retained while looking for a trigger (1–4096).")
                             .small()
-                            .color(Color32::GRAY),
+                            .color(palette.muted),
                     );
+                    if let Some(error) = &self.settings_error {
+                        ui.add_space(4.0);
+                        ui.colored_label(palette.danger, format!("⚠ {error}"));
+                    }
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Save settings").clicked() {
+                        if theme::primary_button(ui, &palette, "Save settings").clicked() {
                             self.save_settings();
                         }
                         if ui.button("Close").clicked() {
@@ -778,7 +859,12 @@ impl eframe::App for GuiApp {
         }
         egui::Panel::left("snippets")
             .resizable(true)
-            .default_size(330.0)
+            .default_size(340.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.surface)
+                    .inner_margin(egui::Margin::symmetric(14, 14)),
+            )
             .show(ui, |ui| {
                 ui.label(
                     RichText::new(if self.filter.is_empty() {
@@ -787,87 +873,140 @@ impl eframe::App for GuiApp {
                         "Filtered snippets"
                     })
                     .small()
-                    .color(Color32::GRAY),
+                    .color(palette.muted),
                 );
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.button("＋ New").clicked() {
+                    if theme::primary_button(ui, &palette, "+ New").clicked() {
                         self.request_action(PendingAction::New);
                     }
-                    if ui.button("Duplicate").clicked() {
+                    if ui.button("⎘ Duplicate").clicked() {
                         self.request_action(PendingAction::Duplicate);
                     }
-                    if ui.button(format!("Undo ({})", self.undo.len())).clicked() {
+                    if ui.button(format!("↺ Undo ({})", self.undo.len())).clicked() {
                         self.undo();
                     }
                 });
+                ui.add_space(10.0);
                 ui.separator();
+                ui.add_space(4.0);
                 let visible_indices = self.visible_indices();
                 ScrollArea::vertical().show(ui, |ui| {
                     for index in visible_indices {
                         let expansion = &self.config.expansion[index];
-                        let title = format!(
-                            "{}  {}",
-                            if expansion.enabled { "●" } else { "○" },
-                            expansion.trigger
-                        );
                         let detail = if expansion.command.is_some() {
-                            "command".to_owned()
+                            "Command-backed snippet".to_owned()
                         } else {
                             expansion.description.clone()
                         };
-                        if ui
-                            .selectable_label(
-                                self.selected == Some(index),
-                                format!("{title}\n{detail}"),
-                            )
-                            .clicked()
-                        {
+                        let response = theme::snippet_row(
+                            ui,
+                            &palette,
+                            theme::SnippetRow {
+                                selected: self.selected == Some(index),
+                                enabled: expansion.enabled,
+                                command_backed: expansion.command.is_some(),
+                                trigger: &expansion.trigger,
+                                detail: &detail,
+                            },
+                        );
+                        if response.clicked() {
                             self.request_action(PendingAction::Select(index));
                         }
                     }
                     if self.config.expansion.is_empty() {
-                        ui.add_space(12.0);
-                        ui.label("No snippets yet.");
-                        if ui.button("Create your first snippet").clicked() {
-                            self.request_action(PendingAction::New);
-                        }
+                        ui.add_space(16.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new("📭").size(28.0));
+                            ui.label(RichText::new("No snippets yet.").color(palette.muted));
+                            ui.add_space(6.0);
+                            if theme::primary_button(ui, &palette, "Create your first snippet")
+                                .clicked()
+                            {
+                                self.request_action(PendingAction::New);
+                            }
+                        });
                     } else if self.visible_indices().is_empty() {
-                        ui.add_space(12.0);
-                        ui.label("No snippets match this search.");
-                        if ui.button("Clear search").clicked() {
-                            self.filter.clear();
-                        }
+                        ui.add_space(16.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new("🔍").size(28.0));
+                            ui.label(
+                                RichText::new("No snippets match this search.")
+                                    .color(palette.muted),
+                            );
+                            ui.add_space(6.0);
+                            if ui.button("Clear search").clicked() {
+                                self.filter.clear();
+                            }
+                        });
                     }
                 });
             });
-        egui::CentralPanel::default().show(ui, |ui| {
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(if self.dark_mode {
+                        Color32::from_rgb(0x14, 0x16, 0x1A)
+                    } else {
+                        Color32::from_rgb(0xF5, 0xF6, 0xF8)
+                    })
+                    .inner_margin(egui::Margin::symmetric(22, 18)),
+            )
+            .show(ui, |ui| {
             let Some(index) = self.selected else {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(80.0);
+                    ui.add_space(70.0);
+                    ui.label(RichText::new("✨").size(40.0));
+                    ui.add_space(6.0);
                     ui.heading("Build your first expansion");
-                    ui.label("Turn repetitive text into a fast, reliable shortcut.");
-                    if ui.button("＋ Create snippet").clicked() {
+                    ui.label(
+                        RichText::new("Turn repetitive text into a fast, reliable shortcut.")
+                            .color(palette.muted),
+                    );
+                    ui.add_space(10.0);
+                    if theme::primary_button(ui, &palette, "+ Create snippet").clicked() {
                         self.request_action(PendingAction::New);
                     }
                 });
                 return;
             };
+            if index >= self.config.expansion.len() {
+                self.selected = None;
+                self.draft = None;
+                ui.label("Selection is out of date; choose a snippet again.");
+                return;
+            }
+            if self.draft.is_none() {
+                self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
+            }
             let command_backed = self.config.expansion[index].command.is_some();
-            {
-                let draft = self.draft.as_mut().expect("selected snippets have drafts");
+            egui::Frame::new()
+                .fill(palette.surface)
+                .stroke(egui::Stroke::new(1.0, palette.border))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(14))
+                .show(ui, |ui| {
+                theme::section_header(ui, "✏", "Snippet details");
+                ui.add_space(6.0);
+                let Some(draft) = self.draft.as_mut() else {
+                    ui.label("Snippet draft unavailable; choose a snippet again.");
+                    return;
+                };
                 ui.horizontal(|ui| {
                     ui.label("Trigger");
                     ui.add(
                         TextEdit::singleline(&mut draft.trigger)
                             .hint_text(";;hello")
+                            .font(egui::TextStyle::Monospace)
                             .desired_width(300.0),
                     );
                 });
                 ui.label(
                     RichText::new("Tip: use a distinctive prefix such as ;; or : to avoid accidental matches.")
                         .small()
-                        .color(Color32::GRAY),
+                        .color(palette.muted),
                 );
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("Description");
                     ui.add(TextEdit::singleline(&mut draft.description).desired_width(420.0));
@@ -880,8 +1019,10 @@ impl eframe::App for GuiApp {
                             .desired_width(420.0),
                     );
                 });
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut draft.enabled, "Enabled");
+                    ui.separator();
                     ui.radio_value(&mut draft.match_mode, MatchMode::Immediate, "Immediate");
                     ui.radio_value(
                         &mut draft.match_mode,
@@ -889,39 +1030,48 @@ impl eframe::App for GuiApp {
                         "Word boundary",
                     );
                 });
+                ui.add_space(4.0);
                 ui.label("Replacement");
                 ui.add(
                     TextEdit::multiline(&mut draft.replacement)
+                        .font(egui::TextStyle::Monospace)
                         .desired_rows(9)
                         .desired_width(f32::INFINITY),
                 );
-            }
+            });
             if command_backed {
+                ui.add_space(6.0);
                 ui.label(
                     RichText::new(
                         "This snippet is command-backed; replacement is stored fallback text.",
                     )
-                    .italics(),
+                    .italics()
+                    .color(palette.muted),
                 );
             }
-            ui.collapsing("Template variables", |ui| {
+            ui.add_space(10.0);
+            ui.collapsing("🔣 Template variables", |ui| {
                 ui.label(
                     RichText::new("Insert a safe built-in value into the replacement.")
                         .small()
-                        .color(Color32::GRAY),
+                        .color(palette.muted),
                 );
                 ui.horizontal_wrapped(|ui| {
                     for (variable, description) in TEMPLATE_VARIABLES {
                         if ui.button(*variable).on_hover_text(*description).clicked() {
-                            let draft = self.draft.as_mut().expect("selected snippets have drafts");
-                            draft.replacement.push_str(variable);
+                            if let Some(draft) = self.draft.as_mut() {
+                                draft.replacement.push_str(variable);
+                            }
                         }
                     }
                 });
             });
-            ui.separator();
-            ui.collapsing("Dynamic command (optional)", |ui| {
-                let draft = self.draft.as_mut().expect("selected snippets have drafts");
+            ui.add_space(4.0);
+            ui.collapsing("🛠 Dynamic command (optional)", |ui| {
+                let Some(draft) = self.draft.as_mut() else {
+                    ui.label("Snippet draft unavailable; choose a snippet again.");
+                    return;
+                };
                 ui.checkbox(
                     &mut draft.command_enabled,
                     "Run a direct program when this snippet matches",
@@ -933,13 +1083,19 @@ impl eframe::App for GuiApp {
                             + "Arguments are entered one per line.",
                     )
                     .small()
-                    .color(Color32::GRAY),
+                    .color(palette.muted),
                 );
                 if draft.command_enabled {
-                    ui.colored_label(
-                        Color32::YELLOW,
-                        "Advanced: this runs a local executable when the trigger matches.",
-                    );
+                    egui::Frame::new()
+                        .fill(theme::tint(palette.warning, 30))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(8, 5))
+                        .show(ui, |ui| {
+                            ui.colored_label(
+                                palette.warning,
+                                "⚠ Advanced: this runs a local executable when the trigger matches.",
+                            );
+                        });
                 }
                 ui.add_enabled_ui(draft.command_enabled, |ui| {
                     ui.horizontal(|ui| {
@@ -968,16 +1124,18 @@ impl eframe::App for GuiApp {
                     );
                 });
             });
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Save changes").clicked() {
+                if theme::primary_button(ui, &palette, "💾 Save changes").clicked() {
                     self.save_selected();
                 }
-                if ui.button("Delete…").clicked() {
+                if theme::danger_button(ui, &palette, "🗑 Delete…").clicked() {
                     self.request_action(PendingAction::Delete);
                 }
             });
-            ui.separator();
-            ui.label(RichText::new("Preview").strong());
+            ui.add_space(14.0);
+            theme::section_header(ui, "▶", "Preview");
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label("Input");
                 ui.add(
@@ -993,14 +1151,31 @@ impl eframe::App for GuiApp {
                         .unwrap_or_default();
                 }
             });
-            ui.group(|ui| {
-                ui.label(self.preview());
-            });
-            ui.separator();
-            ui.label(RichText::new(&self.message).color(Color32::GRAY));
+            ui.add_space(4.0);
+            egui::Frame::new()
+                .fill(if self.dark_mode {
+                    Color32::from_rgb(0x0F, 0x11, 0x15)
+                } else {
+                    Color32::from_rgb(0xFB, 0xFB, 0xFC)
+                })
+                .stroke(egui::Stroke::new(1.0, palette.accent))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(self.preview()).monospace());
+                });
+            ui.add_space(12.0);
+            let (message_color, message_bg) = status_tone(&self.message, &palette);
+            egui::Frame::new()
+                .fill(message_bg)
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(&self.message).color(message_color));
+                });
         });
         if self.pending_action.is_some() {
-            egui::Window::new("Unsaved changes")
+            egui::Window::new("⚠  Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
@@ -1014,8 +1189,9 @@ impl eframe::App for GuiApp {
                     };
                     if self.draft_is_dirty() {
                         ui.label(format!("Save changes before {action}?"));
+                        ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Save and continue").clicked() {
+                            if theme::primary_button(ui, &palette, "Save and continue").clicked() {
                                 self.save_and_execute_pending();
                             }
                             if ui.button("Discard").clicked() {
@@ -1029,8 +1205,9 @@ impl eframe::App for GuiApp {
                         ui.label(
                             "Delete this snippet? This cannot be recovered except through Undo.",
                         );
+                        ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Delete snippet").clicked() {
+                            if theme::danger_button(ui, &palette, "Delete snippet").clicked() {
                                 self.pending_action = None;
                                 self.execute_action(PendingAction::Delete);
                             }
@@ -1066,6 +1243,32 @@ fn control_command(command: &str) -> Result<String> {
     String::from_utf8(response).context("daemon returned a non-UTF-8 control response")
 }
 
+/// Colors the status bar from the free-form message text set throughout this
+/// file (e.g. "Snippet saved atomically", "Save failed: ..."). Wording
+/// changes to a message stay in whatever function sets it; this only needs
+/// to recognize the handful of words those messages already consistently
+/// use for success versus failure.
+fn status_tone(message: &str, palette: &Palette) -> (Color32, Color32) {
+    let lower = message.to_lowercase();
+    let is_failure = ["failed", "invalid", "rejected", "unavailable", "error"]
+        .iter()
+        .any(|word| lower.contains(word));
+    let is_success = !is_failure
+        && [
+            "saved", "created", "duplicated", "reloaded", "imported", "deleted", "undid",
+            "paused", "resumed", "refreshed",
+        ]
+        .iter()
+        .any(|word| lower.contains(word));
+    if is_failure {
+        (palette.danger, theme::tint(palette.danger, 26))
+    } else if is_success {
+        (palette.success, theme::tint(palette.success, 26))
+    } else {
+        (palette.muted, Color32::TRANSPARENT)
+    }
+}
+
 fn expand_user_path(value: &str) -> PathBuf {
     let Some(home) = env::var_os("HOME") else {
         return PathBuf::from(value);
@@ -1088,15 +1291,21 @@ fn main() -> Result<()> {
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
-    let app = GuiApp::load(path)?;
+    let mut app = GuiApp::load(path)?;
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 760.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1180.0, 780.0])
+            .with_min_inner_size([760.0, 480.0]),
         ..Default::default()
     };
     eframe::run_native(
         "WayExpand",
         options,
-        Box::new(|_creation_context| Ok(Box::new(app))),
+        Box::new(|creation_context| {
+            theme::install(&creation_context.egui_ctx);
+            app.dark_mode = creation_context.egui_ctx.theme() == egui::Theme::Dark;
+            Ok(Box::new(app))
+        }),
     )
     .map_err(|error| anyhow::anyhow!("GUI failed: {error}"))
 }

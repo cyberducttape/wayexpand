@@ -1,0 +1,273 @@
+//! Visual theme: color palette, egui `Style` construction, and the small set
+//! of custom-painted widgets (snippet rows, pills, section headers) that
+//! `selectable_label`/`label` alone cannot express.
+
+use eframe::egui::{
+    self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle,
+    Vec2,
+};
+
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub accent: Color32,
+    pub accent_weak: Color32,
+    /// Text color with strong contrast against `accent` (fixed per palette
+    /// since the two accent colors sit at different lightness).
+    pub accent_text: Color32,
+    pub success: Color32,
+    pub warning: Color32,
+    pub danger: Color32,
+    pub muted: Color32,
+    pub border: Color32,
+    pub surface: Color32,
+    pub surface_hover: Color32,
+}
+
+impl Palette {
+    pub fn for_mode(dark: bool) -> Self {
+        if dark {
+            Self {
+                accent: Color32::from_rgb(0x7C, 0x9C, 0xFF),
+                accent_weak: Color32::from_rgb(0x2A, 0x33, 0x52),
+                accent_text: Color32::from_rgb(0x10, 0x14, 0x24),
+                success: Color32::from_rgb(0x4E, 0xD1, 0x8C),
+                warning: Color32::from_rgb(0xF2, 0xB8, 0x4B),
+                danger: Color32::from_rgb(0xF2, 0x7A, 0x7A),
+                muted: Color32::from_rgb(0x9A, 0xA1, 0xAE),
+                border: Color32::from_rgb(0x2A, 0x2F, 0x3A),
+                surface: Color32::from_rgb(0x1B, 0x1E, 0x24),
+                surface_hover: Color32::from_rgb(0x24, 0x28, 0x31),
+            }
+        } else {
+            Self {
+                accent: Color32::from_rgb(0x4F, 0x6B, 0xED),
+                accent_weak: Color32::from_rgb(0xE4, 0xE9, 0xFC),
+                accent_text: Color32::WHITE,
+                success: Color32::from_rgb(0x1F, 0x9D, 0x55),
+                warning: Color32::from_rgb(0xB2, 0x77, 0x0A),
+                danger: Color32::from_rgb(0xD6, 0x45, 0x45),
+                muted: Color32::from_rgb(0x6B, 0x72, 0x80),
+                border: Color32::from_rgb(0xE1, 0xE4, 0xEA),
+                surface: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+                surface_hover: Color32::from_rgb(0xEE, 0xF0, 0xF4),
+            }
+        }
+    }
+}
+
+/// Builds and installs a refined `Style` for both themes on top of egui's
+/// own dark/light baselines, rather than replacing them wholesale: this
+/// keeps every widget (color pickers, sliders, ...) that the app does not
+/// explicitly restyle looking correct instead of falling back to mismatched
+/// defaults. Called once at startup for both themes so switching between
+/// them (via the toolbar toggle, which just flips `Context::set_theme`) is
+/// instant.
+pub fn install(ctx: &egui::Context) {
+    apply_for(ctx, egui::Theme::Dark);
+    apply_for(ctx, egui::Theme::Light);
+}
+
+fn apply_for(ctx: &egui::Context, theme: egui::Theme) {
+    let dark = theme == egui::Theme::Dark;
+    let palette = Palette::for_mode(dark);
+    let mut style = (*ctx.style_of(theme)).clone();
+    let mut visuals = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+
+    visuals.override_text_color = None;
+    visuals.hyperlink_color = palette.accent;
+    visuals.selection.bg_fill = palette.accent_weak;
+    visuals.selection.stroke = Stroke::new(1.0, palette.accent);
+    visuals.window_fill = palette.surface;
+    visuals.panel_fill = if dark {
+        Color32::from_rgb(0x14, 0x16, 0x1A)
+    } else {
+        Color32::from_rgb(0xF5, 0xF6, 0xF8)
+    };
+    visuals.faint_bg_color = palette.surface_hover;
+    visuals.extreme_bg_color = if dark {
+        Color32::from_rgb(0x0F, 0x11, 0x15)
+    } else {
+        Color32::from_rgb(0xFB, 0xFB, 0xFC)
+    };
+    visuals.code_bg_color = visuals.extreme_bg_color;
+    visuals.warn_fg_color = palette.warning;
+    visuals.error_fg_color = palette.danger;
+    visuals.window_corner_radius = CornerRadius::same(12);
+    visuals.window_stroke = Stroke::new(1.0, palette.border);
+    visuals.window_shadow = Shadow {
+        offset: [0, 10],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(if dark { 120 } else { 40 }),
+    };
+    visuals.menu_corner_radius = CornerRadius::same(10);
+    visuals.popup_shadow = visuals.window_shadow;
+
+    for widgets in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widgets.corner_radius = CornerRadius::same(8);
+    }
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.accent);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette.accent);
+
+    style.visuals = visuals;
+    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
+    style.spacing.button_padding = Vec2::new(14.0, 7.0);
+    style.spacing.window_margin = Margin::same(18);
+    style.spacing.menu_margin = Margin::same(10);
+    style.spacing.indent = 20.0;
+    style.spacing.icon_width = 16.0;
+    style.spacing.scroll.bar_width = 8.0;
+
+    style.text_styles = [
+        (TextStyle::Heading, FontId::new(21.0, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
+        (TextStyle::Button, FontId::new(14.5, FontFamily::Proportional)),
+        (TextStyle::Small, FontId::new(12.0, FontFamily::Proportional)),
+        (TextStyle::Monospace, FontId::new(14.0, FontFamily::Monospace)),
+    ]
+    .into();
+
+    ctx.set_style_of(theme, style);
+}
+
+/// A bold, icon-prefixed label used above a group of related fields.
+pub fn section_header(ui: &mut egui::Ui, icon: &str, title: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(icon).size(15.0));
+        ui.label(egui::RichText::new(title).strong().size(15.0));
+    });
+}
+
+/// A small rounded, colored badge (snippet/hotkey counts, status words).
+pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32) {
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(CornerRadius::same(255))
+        .inner_margin(Margin::symmetric(9, 3))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).color(fg).size(12.0).strong());
+        });
+}
+
+/// An accent-filled call-to-action button, for the one primary action in a
+/// given context (Save changes, Create snippet, ...).
+pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(palette.accent_text).strong())
+            .fill(palette.accent)
+            .stroke(Stroke::NONE),
+    )
+}
+
+/// An outlined, danger-colored button for destructive actions.
+pub fn danger_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(palette.danger))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, palette.danger)),
+    )
+}
+
+pub struct SnippetRow<'a> {
+    pub selected: bool,
+    pub enabled: bool,
+    pub command_backed: bool,
+    pub trigger: &'a str,
+    pub detail: &'a str,
+}
+
+/// A custom-painted sidebar list entry: a status dot, the trigger in
+/// monospace, a muted detail line, and (for command-backed snippets) a small
+/// badge -- laid out as a rounded card that highlights on hover and tints
+/// with the accent color when selected.
+pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) -> egui::Response {
+    let width = ui.available_width();
+    let height = 48.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        let bg = if row.selected {
+            palette.accent_weak
+        } else if hovered {
+            palette.surface_hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(8), bg);
+        if row.selected {
+            let bar = egui::Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
+            painter.rect_filled(bar, CornerRadius::same(2), palette.accent);
+        }
+
+        let dot_color = if row.enabled { palette.success } else { palette.muted };
+        let dot_center = rect.left_center() + Vec2::new(16.0, 0.0);
+        painter.circle_filled(dot_center, 4.0, dot_color);
+
+        let text_left = rect.left() + 30.0;
+        let trigger_pos = egui::pos2(text_left, rect.top() + 9.0);
+        painter.text(
+            trigger_pos,
+            egui::Align2::LEFT_TOP,
+            row.trigger,
+            FontId::new(14.5, FontFamily::Monospace),
+            ui.visuals().text_color(),
+        );
+        if row.command_backed {
+            let galley = painter.layout_no_wrap(
+                row.trigger.to_owned(),
+                FontId::new(14.5, FontFamily::Monospace),
+                Color32::TRANSPARENT,
+            );
+            let badge_pos = trigger_pos + Vec2::new(galley.size().x + 8.0, 1.0);
+            painter.text(
+                badge_pos,
+                egui::Align2::LEFT_TOP,
+                "cmd",
+                FontId::new(10.5, FontFamily::Proportional),
+                palette.warning,
+            );
+        }
+        let detail = if row.detail.is_empty() {
+            "No description"
+        } else {
+            row.detail
+        };
+        painter.text(
+            egui::pos2(text_left, rect.top() + 27.0),
+            egui::Align2::LEFT_TOP,
+            truncate(detail, 46),
+            FontId::new(12.0, FontFamily::Proportional),
+            palette.muted,
+        );
+    }
+
+    response
+}
+
+/// A translucent tint of `color`, for a badge background that should read
+/// as "this color, faintly" against either theme's surface.
+pub fn tint(color: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
+fn truncate(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_owned();
+    }
+    let mut truncated: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    truncated.push('…');
+    truncated
+}
