@@ -33,7 +33,7 @@ thiserror = "1"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-signal-hook = "0.3"
+signal-hook = "0.4"
 rustix = { version = "1", features = ["process"] }
 wayland-client = "0.31"
 wayland-protocols = "0.32.13"
