@@ -831,11 +831,15 @@ mod tests {
     #[test]
     fn exit_codes_classify_known_error_shapes() {
         assert_eq!(
-            exit_code_for(&anyhow::anyhow!("usage: wayexpand test <text> [--json] [config]")),
+            exit_code_for(&anyhow::anyhow!(
+                "usage: wayexpand test <text> [--json] [config]"
+            )),
             EXIT_USAGE
         );
         assert_eq!(
-            exit_code_for(&anyhow::anyhow!("unknown command \"bogus\"; try `wayexpand help`")),
+            exit_code_for(&anyhow::anyhow!(
+                "unknown command \"bogus\"; try `wayexpand help`"
+            )),
             EXIT_USAGE
         );
         assert_eq!(
@@ -843,7 +847,9 @@ mod tests {
             EXIT_CONFIG
         );
         assert_eq!(
-            exit_code_for(&anyhow::anyhow!("connecting to /run/user/1000/wayexpand.sock")),
+            exit_code_for(&anyhow::anyhow!(
+                "connecting to /run/user/1000/wayexpand.sock"
+            )),
             EXIT_DAEMON
         );
         assert_eq!(

@@ -177,7 +177,9 @@ fn find_keycode_for_keysym(keymap: &XkbKeymap, raw_keysym: xkeysym::RawKeysym) -
 
 fn decode_keymap(fd: OwnedFd, size: u32) -> Result<XkbKeymap, LibeiError> {
     if size == 0 || size > MAX_KEYMAP_BYTES {
-        return Err(LibeiError::Keymap(format!("invalid keymap size {size} bytes")));
+        return Err(LibeiError::Keymap(format!(
+            "invalid keymap size {size} bytes"
+        )));
     }
     let mut file = File::from(fd);
     file.seek(SeekFrom::Start(0))
@@ -645,11 +647,12 @@ impl TextInjector for LibeiInjector {
         })?;
         // Checked before erasing the trigger: if the replacement cannot be
         // typed, the trigger should not be removed either.
-        self.ensure_representable(text).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })?;
+        self.ensure_representable(text)
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })?;
         self.send_backspaces_unflushed(trigger.graphemes(true).count());
         if matches!(self.mode, TextMode::Keysym(_)) {
             // Send the erase on its own and let it land before typing: in

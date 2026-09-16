@@ -33,7 +33,9 @@ fn is_keyboard(device: &Device) -> bool {
     let Some(keys) = device.supported_keys() else {
         return false;
     };
-    keys.contains(KeyCode::KEY_A) && keys.contains(KeyCode::KEY_Z) && keys.contains(KeyCode::KEY_SPACE)
+    keys.contains(KeyCode::KEY_A)
+        && keys.contains(KeyCode::KEY_Z)
+        && keys.contains(KeyCode::KEY_SPACE)
 }
 
 /// Discovery outcome, distinguishing "no keyboard hardware present" from

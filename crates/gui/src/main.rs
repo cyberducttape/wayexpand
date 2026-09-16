@@ -698,7 +698,8 @@ impl eframe::App for GuiApp {
                             });
                         }
                         if ui.button("⚙ Settings").clicked() {
-                            self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                            self.settings_buffer =
+                                self.config.settings.max_buffer_chars.to_string();
                             self.settings_error = None;
                             self.settings_open = true;
                         }
@@ -711,7 +712,11 @@ impl eframe::App for GuiApp {
                             self.refresh_diagnostics();
                         }
                         if ui
-                            .button(if self.paused { "▶ Resume" } else { "⏸ Pause" })
+                            .button(if self.paused {
+                                "▶ Resume"
+                            } else {
+                                "⏸ Pause"
+                            })
                             .clicked()
                         {
                             self.toggle_pause();
@@ -1255,8 +1260,16 @@ fn status_tone(message: &str, palette: &Palette) -> (Color32, Color32) {
         .any(|word| lower.contains(word));
     let is_success = !is_failure
         && [
-            "saved", "created", "duplicated", "reloaded", "imported", "deleted", "undid",
-            "paused", "resumed", "refreshed",
+            "saved",
+            "created",
+            "duplicated",
+            "reloaded",
+            "imported",
+            "deleted",
+            "undid",
+            "paused",
+            "resumed",
+            "refreshed",
         ]
         .iter()
         .any(|word| lower.contains(word));

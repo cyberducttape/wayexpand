@@ -3,8 +3,7 @@
 //! `selectable_label`/`label` alone cannot express.
 
 use eframe::egui::{
-    self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle,
-    Vec2,
+    self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle, Vec2,
 };
 
 #[derive(Clone, Copy)]
@@ -130,11 +129,23 @@ fn apply_for(ctx: &egui::Context, theme: egui::Theme) {
     style.spacing.scroll.bar_width = 8.0;
 
     style.text_styles = [
-        (TextStyle::Heading, FontId::new(21.0, FontFamily::Proportional)),
+        (
+            TextStyle::Heading,
+            FontId::new(21.0, FontFamily::Proportional),
+        ),
         (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
-        (TextStyle::Button, FontId::new(14.5, FontFamily::Proportional)),
-        (TextStyle::Small, FontId::new(12.0, FontFamily::Proportional)),
-        (TextStyle::Monospace, FontId::new(14.0, FontFamily::Monospace)),
+        (
+            TextStyle::Button,
+            FontId::new(14.5, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Small,
+            FontId::new(12.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Monospace,
+            FontId::new(14.0, FontFamily::Monospace),
+        ),
     ]
     .into();
 
@@ -164,9 +175,13 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
 /// given context (Save changes, Create snippet, ...).
 pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
     ui.add(
-        egui::Button::new(egui::RichText::new(text).color(palette.accent_text).strong())
-            .fill(palette.accent)
-            .stroke(Stroke::NONE),
+        egui::Button::new(
+            egui::RichText::new(text)
+                .color(palette.accent_text)
+                .strong(),
+        )
+        .fill(palette.accent)
+        .stroke(Stroke::NONE),
     )
 }
 
@@ -212,7 +227,11 @@ pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) ->
             painter.rect_filled(bar, CornerRadius::same(2), palette.accent);
         }
 
-        let dot_color = if row.enabled { palette.success } else { palette.muted };
+        let dot_color = if row.enabled {
+            palette.success
+        } else {
+            palette.muted
+        };
         let dot_center = rect.left_center() + Vec2::new(16.0, 0.0);
         painter.circle_filled(dot_center, 4.0, dot_color);
 
