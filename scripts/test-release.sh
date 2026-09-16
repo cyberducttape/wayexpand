@@ -18,6 +18,11 @@ bin_dir="$test_root/home/.local/bin"
 config_dir="$test_root/home/.config/wayexpand"
 runtime_dir="$test_root/runtime"
 mkdir -p "$bin_dir" "$config_dir" "$runtime_dir"
+# mkdir honors the umask, and a default of 002 (Debian/Ubuntu
+# user-private-group setups) leaves these group-writable at 0775, which the
+# configuration directory trust check correctly refuses to load from. Assert
+# the mode the fixture means instead of inheriting the developer's shell.
+chmod -R go-w "$test_root"
 install -m 0755 "$target_dir/release/wayexpand" "$bin_dir/"
 install -m 0755 "$target_dir/release/wayexpand-daemon" "$bin_dir/"
 install -m 0755 "$target_dir/release/wayexpand-ui" "$bin_dir/"
