@@ -1,8 +1,25 @@
 #!/bin/sh
 set -eu
 
+# Debug environment for CI troubleshooting
+if [ -n "${CI:-}" ]; then
+    echo "CI environment detected. System info:"
+    echo "  TMPDIR=${TMPDIR:-unset}"
+    echo "  GITHUB_WORKSPACE=${GITHUB_WORKSPACE:-unset}"
+    echo "  HOME=$HOME"
+    echo "  PWD=$PWD"
+    df -h / 2>/dev/null | head -2 || true
+fi
+
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-install-test.XXXXXX")
+# Ensure TMPDIR is set for mktemp; some CI runners don't set it, and mktemp
+# fails silently or behaves unexpectedly without it.
+: "${TMPDIR:=/tmp}"
+export TMPDIR
+if ! test_root=$(mktemp -d "${TMPDIR}/wayexpand-install-test.XXXXXX" 2>&1); then
+    echo "error: mktemp failed: $test_root (TMPDIR=$TMPDIR)" >&2
+    exit 1
+fi
 trap 'rm -rf "$test_root"' EXIT INT TERM
 # Keep Cargo's dependency cache from the invoking environment. The test
 # deliberately changes HOME to isolate user-installed files; without this,

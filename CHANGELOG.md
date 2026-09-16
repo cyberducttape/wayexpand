@@ -6,6 +6,14 @@ All notable changes to WayExpand are documented here.
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [0.2.0] - 2026-09-16
+
+### Added
+
 - Experimental `--source=evdev` capture backend (`wayexpand-backend-evdev`),
   a compositor-agnostic fallback that reads keyboard events directly from
   `/dev/input` for compositors without `zwp_input_method_manager_v2` or
