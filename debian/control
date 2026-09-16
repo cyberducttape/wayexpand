@@ -1,0 +1,32 @@
+Source: wayexpand
+Section: utils
+Priority: optional
+Maintainer: Stephan Loesevitz <stephan.loesevitz@gmail.com>
+Homepage: https://github.com/itchyitchy123/wayexpand
+Standards-Version: 4.6.0
+Build-Depends:
+    debhelper-compat (= 13),
+    rustc,
+    cargo,
+    pkg-config,
+    libwayland-dev,
+    libxkbcommon-dev
+
+Package: wayexpand
+Architecture: amd64
+Depends:
+    ${shlibs:Depends},
+    ${misc:Depends},
+    libwayland-client0,
+    libxkbcommon0
+Description: Wayland-native text expander for Linux
+ WayExpand is a privacy-first text expander designed for Wayland desktop
+ environments. Type a short trigger like ;;hello and it automatically
+ expands to your saved snippet.
+ .
+ Features:
+  - Wayland-native with support for multiple compositors (GNOME, KDE, Sway, etc.)
+  - Native graphical editor (GUI) and command-line interface (CLI)
+  - No cloud, no telemetry, configuration stored locally
+  - Experimental support for compositors without input-method-v2 (via evdev backend)
+  - Espanso configuration import support

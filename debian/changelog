@@ -1,0 +1,17 @@
+wayexpand (0.2.0-1) focal; urgency=medium
+
+  * Release v0.2.0: evdev backend, GUI redesign, character-drop fix
+  * Add experimental evdev capture backend for KWin/KDE Plasma support
+  * Refresh GUI with theme system, custom snippet rows, dark/light modes
+  * Fix character dropping in keysym synthesis with per-character pacing
+  * Add ei_keyboard fallback for EIS servers without ei_text interface
+  * Fix systemd user service startup failures (218/CAPABILITIES)
+  * Replace unavailable emoji with font-verified alternatives
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Mon, 16 Sep 2026 01:00:00 +0000
+
+wayexpand (0.1.0-1) focal; urgency=medium
+
+  * Initial Debian package release
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Tue, 10 Sep 2026 01:00:00 +0000

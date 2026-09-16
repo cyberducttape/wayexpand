@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+export CARGO_NET_OFFLINE=true
+
+%:
+	dh $@ --buildsystem=cargo
+
+override_dh_auto_build:
+	dh_auto_build -- --release --locked
+
+override_dh_auto_test:
+	dh_auto_test -- --locked --workspace
+
+override_dh_install:
+	dh_install --package=wayexpand target/release/wayexpand usr/bin/
+	dh_install --package=wayexpand target/release/wayexpand-daemon usr/bin/
+	dh_install --package=wayexpand target/release/wayexpand-gui usr/bin/
+	dh_install --package=wayexpand target/release/wayexpand-ui usr/bin/
+	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
+	dh_install --package=wayexpand systemd/wayexpand.service usr/lib/systemd/user/
+	dh_install --package=wayexpand systemd/wayexpand-input-method.service usr/lib/systemd/user/
+	dh_install --package=wayexpand systemd/wayexpand-evdev.service usr/lib/systemd/user/
+	dh_install --package=wayexpand udev/71-wayexpand-evdev.rules usr/lib/udev/rules.d/
+	dh_install --package=wayexpand expansions.toml etc/wayexpand/expansions.toml.example
