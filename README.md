@@ -1,9 +1,12 @@
 # WayExpand
 
 [![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
+[![Release: v0.2.0](https://img.shields.io/badge/release-v0.2.0-brightgreen.svg)](https://github.com/itchyitchy123/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Text expansion built for Wayland, rather than adapted to it.**
+
+> **v0.2.0 is production-ready!** Professional GUI with themes, full KDE Plasma support, zero character drops, and packages for Ubuntu/Fedora/Arch. [Release notes](https://github.com/itchyitchy123/wayexpand/releases/tag/v0.2.0)
 
 WayExpand is a privacy-first text expander for Linux Wayland desktops. Type a
 short trigger like `;;hello` and it replaces it with a saved snippet —
