@@ -3582,7 +3582,7 @@ version = "0.2.0"
 dependencies = [
  "evdev",
  "rustix 1.1.4",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tracing",
  "wayexpand-backend-input-method",
  "wayexpand-core",
@@ -3596,7 +3596,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "unicode-segmentation",
  "wayexpand-core",
  "wayland-client",
@@ -3613,7 +3613,7 @@ dependencies = [
  "ashpd",
  "reis",
  "rustix 1.1.4",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "unicode-segmentation",
  "wayexpand-core",
@@ -3627,7 +3627,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "unicode-segmentation",
  "wayexpand-core",
  "wayland-client",
@@ -3642,7 +3642,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_yaml",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "toml",
 ]
 
