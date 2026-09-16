@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ashpd = "0.12.3"
+ashpd = "0.13.13"
 reis = "0.7.1"
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "time"] }
