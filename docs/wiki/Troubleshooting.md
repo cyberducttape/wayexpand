@@ -64,3 +64,73 @@ Transport failures are retried with bounded backoff. The failed replacement is
 not replayed because the compositor may have accepted part of it. Once
 `state=connected` returns, type a fresh trigger. Permanent protocol or
 validation errors require operator action and are not retried indefinitely.
+
+## KDE Plasma (KWin) - app_filter / window tracking issues
+
+### Window tracking unavailable or unreliable
+
+App-scoped expansions (`app_filter`) rely on KWin's scripting interface to
+track the focused window. This is a KDE privacy choice: no Wayland protocol
+exposes window identity, so we use KWin's `org.kde.kwin.Scripting` D-Bus API.
+
+**Symptoms:**
+- `wayexpand doctor` reports "window tracker not reachable"
+- App filters are silently ignored (fail-closed behavior)
+
+**Causes:**
+- KWin < 6.0 or KWin built without scripting support
+- D-Bus session bus connectivity issues
+- KWin scripting engine crashed or reloaded
+
+**Solution:**
+1. Verify KWin version: `kwin_wayland --version` should be 6.0+
+2. Check D-Bus: `dbus-send --session --print-reply --dest=org.kde.KWin /Scripting org.freedesktop.DBus.Introspectable.Introspect`
+3. Restart KWin if the above fails: Log out and back in, or restart the session
+
+### KWin script registration delay
+
+When enabling app filters, you may see a 1-2 second delay before the GUI
+responds to "Use current app". This is a known race condition:
+
+**Root cause:**
+- `org.kde.kwin.Scripting.loadScript()` returns before the `/Scripting/ScriptN`
+  D-Bus object is fully registered on the session bus
+- WayExpand retries the `run()` call up to 15 times with 150ms delays (total
+  ~2.25 seconds) to work around this
+
+**Solution:**
+- This is expected. The delay only happens on first enable; subsequent calls
+  are instant.
+- To adjust retry behavior (advanced users), rebuild with different constants
+  in `crates/backend-kwin-window/src/lib.rs`:
+  ```rust
+  const LOAD_RETRY_ATTEMPTS: u32 = 15;      // Number of attempts
+  const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);  // Delay between attempts
+  ```
+
+### Stale KWin scripts after daemon crash
+
+If the WayExpand daemon is killed ungracefully (`kill -9`), leftover KWin
+scripts may remain:
+- D-Bus service: `org.wayexpand.WindowTracker.pid<PID>` (unregistered but gone)
+- Script file: `/tmp/wayexpand-window-tracker-<PID>.js` (orphaned)
+
+**Impact:** Low — subsequent daemon restarts use a different PID and register a
+new service/script with no collision.
+
+**Cleanup (if concerned):**
+```sh
+rm /tmp/wayexpand-window-tracker-*.js
+```
+
+Normal daemon shutdown cleans these up automatically.
+
+## Wlroots Compositors (Sway, Hyprland) - Coming in 1.1
+
+Window tracking (`app_filter`) is not yet implemented for wlroots compositors.
+The feature is planned for 1.1 using the standard `wlr-foreign-toplevel-management`
+protocol.
+
+**Workaround:** Disable app filters until 1.1, or use global expansions only.
+
+**Tracking:** See the [1.0 checklist](../../RELEASE_1.0_CHECKLIST.md#5-this-sessions-own-follow-through-items).
