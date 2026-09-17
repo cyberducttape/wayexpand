@@ -83,6 +83,9 @@ paths:
   template helpers, duplication, and bounded undo history
 - shared normalized key-chord model ready for cross-backend hotkey dispatch
 - validated hotkey action declarations with sensitive-focus-aware dispatch
+- app-scoped expansions (`app_filter`) with a KDE Plasma (KWin) focused-window
+  tracker; fails closed (never matches) rather than matching everywhere when
+  window tracking is unavailable
 
 The default daemon mode remains a stdin harness. An explicit
 `--source=input-method` mode can use the input-method-v2 source as both the

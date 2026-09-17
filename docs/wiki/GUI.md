@@ -31,13 +31,19 @@ backend capability, and non-mutating protocol probes.
 
 The dashboard is organized around fast retrieval:
 
-- Search matches triggers, descriptions, and tags.
-- The list shows enabled state and a short description.
+- Search matches triggers, descriptions, tags, and categories.
+- Category chips filter the list to one category at a time; click the active
+  chip again (or "All") to clear the filter.
+- The list shows enabled state, category, and a short description. Click the
+  status dot directly to enable or disable a snippet without opening the
+  editor -- it does not disturb an unsaved draft elsewhere in the library.
 - New snippet creates a valid, unique trigger automatically.
 - Selecting a row opens the editor without losing an unsaved draft; the app
   asks whether to save or discard before switching.
 - Duplicate keeps the content but generates a unique `-copy` trigger.
 - Delete is persisted atomically and can be undone.
+- `Ctrl+N` creates a snippet, `Ctrl+S` saves the current draft, and `Esc`
+  closes the Diagnostics/Import windows.
 
 ## Editing and live preview
 
@@ -46,11 +52,19 @@ The dashboard is organized around fast retrieval:
 The editor exposes every expansion field without requiring TOML knowledge:
 
 1. Set the trigger that users type.
-2. Add a useful description and comma-separated tags.
-3. Write replacement text or enable a bounded direct command.
-4. Choose `Immediate` or `Word boundary` matching.
-5. Review the live preview, including safe template rendering.
-6. Save changes.
+2. Add a useful description, comma-separated tags, and an optional category
+   (pick an existing one from the dropdown to avoid spelling drift).
+3. Optionally restrict the snippet to specific applications with "Only in
+   these apps" -- "Use current app" fills it in from whichever window was
+   focused just before switching to WayExpand. This fails closed: if window
+   tracking is unavailable on the running compositor (KDE Plasma only for
+   now), an app-restricted snippet never matches, rather than matching
+   everywhere.
+4. Write replacement text or enable a bounded direct command.
+5. Choose `Immediate` or `Word boundary` matching.
+6. Review the live preview, including safe template rendering; "Copy" copies
+   the previewed output to the clipboard.
+7. Save changes.
 
 Every save validates the complete candidate configuration first. If validation
 fails, the active file is untouched and the error is shown in the status area.
@@ -65,7 +79,8 @@ Diagnostics refreshes configuration validation, control-socket security,
 Wayland detection, backend discovery, protocol probes, and daemon status in one
 view. Treat a warning as actionable context rather than proof that every
 backend is usable: permissions and compositor protocol support are separate
-questions.
+questions. The `window-tracker` entry reports whether `app_filter`-scoped
+snippets can work on this compositor at all.
 
 ## Importing Espanso
 

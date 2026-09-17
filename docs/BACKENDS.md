@@ -86,6 +86,45 @@ Activation starts with capture disabled until the compositor reports the
 current content type. Password, hidden-text, sensitive-data, and unknown
 content values remain disabled.
 
+## Focused-window tracking (`app_filter`)
+
+Expansions can be scoped to specific applications with `app_filter` --
+a list of case-insensitive substrings matched against the focused window's
+app id or title. This needs to know which window is focused, and unlike
+text capture and injection there is no Wayland protocol for that which
+works across compositors: `wlr-foreign-toplevel-management-unstable-v1`
+covers wlroots compositors (Sway, Hyprland), but KDE Plasma's KWin
+implements neither it nor the newer `ext-foreign-toplevel-list-v1`
+staging protocol -- a deliberate privacy stance, the same one that keeps
+KWin off `zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1`
+(see the evdev fallback above).
+
+`wayexpand-backend-kwin-window` bridges this gap for KDE Plasma the only
+way currently available: KWin's scripting engine, reached over the session
+D-Bus (`org.kde.kwin.Scripting`). This is the same mechanism community
+tools like `kdotool` rely on for the same reason. The daemon loads a small
+bundled script (`src/window-tracker.js`) that watches
+`workspace.windowActivated` and calls back into a private D-Bus service
+this process hosts for exactly that purpose, named uniquely per process
+(`org.wayexpand.WindowTracker.pid<pid>`) so multiple daemon instances do
+not collide. `loadScript` returns before the resulting
+`/Scripting/ScriptN` object is reliably reachable -- observed directly
+against a live KWin 6.6 session, where calling `run()` immediately after
+`loadScript` fails with "No such object path" for roughly the first
+second -- so starting the tracker retries `run()` with a short bounded
+backoff rather than guessing a fixed delay.
+
+An `app_filter`-scoped expansion fails closed rather than matching
+everywhere when window tracking is unavailable (no tracker for this
+compositor, or the KWin bridge failed to start): `ExpansionEngine` only
+allows the match once a `WindowChanged` event has reported a window whose
+app id or title actually contains one of the filter strings. Unfiltered
+expansions are entirely unaffected.
+
+wlroots compositor support (via `wlr-foreign-toplevel-management-unstable-v1`)
+is not implemented yet; GNOME (Mutter) exposes no equivalent bridge without
+a shell extension, so no fully evidence-based path exists there today.
+
 ## wlroots virtual keyboard and uinput
 
 These are fallback or compositor-specific mechanisms. Virtual-keyboard support
