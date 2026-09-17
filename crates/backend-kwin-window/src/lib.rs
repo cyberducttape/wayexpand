@@ -11,8 +11,7 @@
 //! public API exists for it.
 
 use std::{
-    fs,
-    process,
+    fs, process,
     sync::{mpsc, Mutex},
     time::Duration,
 };

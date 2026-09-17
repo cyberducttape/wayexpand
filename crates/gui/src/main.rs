@@ -714,8 +714,10 @@ impl Draft {
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let palette = Palette::for_mode(self.dark_mode);
-        let modal_open =
-            self.diagnostics_open || self.import_open || self.settings_open || self.pending_action.is_some();
+        let modal_open = self.diagnostics_open
+            || self.import_open
+            || self.settings_open
+            || self.pending_action.is_some();
         let (want_save, want_new, want_escape) = ui.ctx().input(|input| {
             (
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),

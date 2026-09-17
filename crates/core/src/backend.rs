@@ -249,7 +249,11 @@ fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
             format!(
                 "app_filter-scoped expansions need a compositor-specific window tracker; \
                  only KDE Plasma (KWin) is implemented so far (detected desktop: {})",
-                if desktop.is_empty() { "unknown" } else { &desktop }
+                if desktop.is_empty() {
+                    "unknown"
+                } else {
+                    &desktop
+                }
             ),
         )
     }

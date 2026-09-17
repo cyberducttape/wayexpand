@@ -23,8 +23,8 @@ use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_libei::LibeiInjector;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent, TextInjector,
-    WindowContext, WindowTracker,
+    default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent,
+    TextInjector, WindowContext, WindowTracker,
 };
 
 /// How long to wait for physically held keys to be released before injecting

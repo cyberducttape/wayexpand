@@ -87,10 +87,7 @@ impl ClipboardInjector {
 
     fn trigger_paste(&self) -> Result<(), ClipboardError> {
         // Use xdotool to simulate Ctrl+V paste
-        let result = Command::new("xdotool")
-            .arg("key")
-            .arg("ctrl+v")
-            .output();
+        let result = Command::new("xdotool").arg("key").arg("ctrl+v").output();
 
         match result {
             Ok(output) if output.status.success() => Ok(()),

@@ -241,7 +241,11 @@ pub struct SnippetRowResponse {
 /// monospace, a muted detail line, and (for command-backed snippets) a small
 /// badge -- laid out as a rounded card that highlights on hover and tints
 /// with the accent color when selected.
-pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) -> SnippetRowResponse {
+pub fn snippet_row(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    row: SnippetRow<'_>,
+) -> SnippetRowResponse {
     let width = ui.available_width();
     let height = 48.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
@@ -307,7 +311,11 @@ pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) ->
                 trigger_pos + Vec2::new(galley.size().x + 8.0, -1.0),
                 badge_size,
             );
-            painter.rect_filled(badge_rect, CornerRadius::same(255), tint(palette.warning, 34));
+            painter.rect_filled(
+                badge_rect,
+                CornerRadius::same(255),
+                tint(palette.warning, 34),
+            );
             painter.text(
                 badge_rect.center(),
                 egui::Align2::CENTER_CENTER,
