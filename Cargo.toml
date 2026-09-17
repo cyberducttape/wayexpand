@@ -10,6 +10,8 @@ members = [
     "crates/backend-input-method",
     "crates/backend-libei",
     "crates/backend-evdev",
+    "crates/backend-clipboard",
+    "crates/backend-kwin-window",
 ]
 
 [workspace.package]

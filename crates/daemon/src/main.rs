@@ -16,12 +16,15 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
+use wayexpand_backend_clipboard::ClipboardInjector;
 use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_libei::LibeiInjector;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent, TextInjector,
+    WindowContext, WindowTracker,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -197,8 +200,19 @@ fn main() -> Result<()> {
         None
     };
 
+    let window_tracker = spawn_window_tracker();
+
     let mut stdin_closed = false;
     loop {
+        if let Some(receiver) = window_tracker.as_ref() {
+            let mut latest = None;
+            while let Ok(window) = receiver.try_recv() {
+                latest = Some(window);
+            }
+            if let Some(window) = latest {
+                process_event(&mut config.engine, InputEvent::WindowChanged(window), None)?;
+            }
+        }
         let requested_pause = control
             .pause_requested
             .load(std::sync::atomic::Ordering::Acquire);
@@ -524,6 +538,49 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Starts the focused-window tracker in the background when one is
+/// available, feeding `WindowChanged` events into the main loop through a
+/// channel so `app_filter`-scoped expansions can gate on it. Returns `None`
+/// (not an error) when no tracker applies to this session -- window
+/// tracking is inherently compositor-specific and today only KDE Plasma
+/// (KWin) is implemented; `app_filter`-scoped expansions simply fail closed
+/// everywhere else, exactly as they would if this thread were never
+/// started.
+fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
+    if let Err(error) = KwinWindowTracker::probe() {
+        info!(%error, "window tracking unavailable; app_filter-scoped expansions will not match");
+        return None;
+    }
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut tracker = match KwinWindowTracker::new() {
+            Ok(tracker) => tracker,
+            Err(error) => {
+                warn!(%error, "window tracker failed to start after a successful probe");
+                return;
+            }
+        };
+        info!("window tracker active (KWin scripting bridge)");
+        loop {
+            match tracker.next_window_timeout(Duration::from_secs(2)) {
+                Ok(Some(window)) => {
+                    if sender.send(window).is_err() {
+                        break;
+                    }
+                }
+                // Nothing changed within the timeout: expected and frequent
+                // (focus is usually stable), just poll again.
+                Ok(None) => {}
+                Err(error) => {
+                    warn!(%error, "window tracker stopped");
+                    break;
+                }
+            }
+        }
+    });
+    Some(receiver)
+}
+
 fn next_retry_delay(delay: Duration) -> Duration {
     delay.saturating_mul(2).min(Duration::from_secs(30))
 }
@@ -752,6 +809,10 @@ fn connect_output_with_retry(
     }
 }
 
+fn text_contains_newlines(text: &str) -> bool {
+    text.contains('\n') || text.contains('\r')
+}
+
 fn process_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
@@ -768,7 +829,26 @@ fn process_event(
     }
     for result in engine.process(event) {
         if let Some(backend) = injector.as_deref_mut() {
-            if let Err(source) = ExpansionEngine::apply(backend, &result) {
+            // Auto-detect newlines and try clipboard backend if needed
+            let use_clipboard = text_contains_newlines(&result.insert);
+
+            let inject_result = if use_clipboard {
+                // Try clipboard backend for text with newlines
+                match ClipboardInjector::new() {
+                    Ok(mut clipboard) => {
+                        info!("using clipboard backend for expansion with newlines");
+                        ExpansionEngine::apply(&mut clipboard, &result)
+                    }
+                    Err(error) => {
+                        warn!(%error, "clipboard backend unavailable, falling back to primary backend");
+                        ExpansionEngine::apply(backend, &result)
+                    }
+                }
+            } else {
+                ExpansionEngine::apply(backend, &result)
+            };
+
+            if let Err(source) = inject_result {
                 return Err(EventError { result, source });
             }
             info!(

@@ -265,6 +265,8 @@ impl App {
                     replacement: input,
                     description: String::new(),
                     tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
                     match_mode: wayexpand_core::MatchMode::Immediate,
                     command: None,
                     enabled: true,

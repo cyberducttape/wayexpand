@@ -28,6 +28,20 @@ pub enum InputEvent {
     FocusChanged {
         sensitive: bool,
     },
+    /// Reports which application is now focused, for `app_filter`-scoped
+    /// expansions. `None` means unknown (no window tracker running, or the
+    /// compositor does not support one) -- app-restricted expansions fail
+    /// closed in that case rather than matching everywhere.
+    WindowChanged(Option<WindowContext>),
+}
+
+/// The focused window's identity, as reported by a window tracker backend.
+/// Both fields are best-effort and compositor-dependent: a toplevel may
+/// expose an app id but not a title, or vice versa.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowContext {
+    pub app_id: Option<String>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +83,7 @@ pub struct ExpansionEngine {
     capture_enabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
+    current_window: Option<WindowContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +126,26 @@ impl ExpansionEngine {
             capture_enabled: true,
             command_cache,
             hotkeys,
+            current_window: None,
         })
+    }
+
+    /// The currently known focused window, if any. Used to carry window
+    /// context across a config reload: reload replaces the whole engine
+    /// (parse-then-swap), which would otherwise silently forget the last
+    /// known window until the next real focus change -- wrongly
+    /// fail-closing `app_filter`-scoped expansions for a window the user
+    /// never actually left.
+    pub fn current_window(&self) -> Option<&WindowContext> {
+        self.current_window.as_ref()
+    }
+
+    /// Restores window context captured via `current_window` before this
+    /// engine replaced a previous one. Does not clear the match buffer,
+    /// matching `InputEvent::WindowChanged`'s own behavior (see its
+    /// handler for why that clear is unnecessary).
+    pub fn set_current_window(&mut self, window: Option<WindowContext>) {
+        self.current_window = window;
     }
 
     /// Resolve a normalized key chord into configured actions. This method is
@@ -281,6 +315,18 @@ impl ExpansionEngine {
                 self.buffer.clear();
                 Vec::new()
             }
+            InputEvent::WindowChanged(window) => {
+                // No buffer clear here, unlike `FocusChanged`: `app_filter`
+                // is re-checked against `current_window` at match time (see
+                // `app_filter_allows`), not against whatever window the
+                // buffer started accumulating in, so an in-progress trigger
+                // is evaluated correctly regardless. Clearing on every
+                // focus change would instead cost completely unfiltered
+                // expansions their in-progress buffer on any incidental
+                // window switch (e.g. a brief alt-tab mid-trigger).
+                self.current_window = window;
+                Vec::new()
+            }
         }
     }
 
@@ -324,11 +370,40 @@ impl ExpansionEngine {
     }
 
     fn match_allowed(&self, config_index: usize, length: usize) -> bool {
-        if self.config.expansion[config_index].match_mode != MatchMode::WordBoundary {
+        let expansion = &self.config.expansion[config_index];
+        if !self.app_filter_allows(expansion) {
+            return false;
+        }
+        if expansion.match_mode != MatchMode::WordBoundary {
             return true;
         }
         let preceding = self.buffer.iter().rev().nth(length);
         preceding.is_none_or(|character| !is_word_character(*character))
+    }
+
+    /// An expansion with an empty `app_filter` matches everywhere. A
+    /// non-empty filter requires a known focused window whose app id or
+    /// title contains one of the filter substrings (case-insensitive); if
+    /// window tracking is unavailable, this fails closed rather than
+    /// matching unconditionally.
+    fn app_filter_allows(&self, expansion: &crate::ExpansionConfig) -> bool {
+        if expansion.app_filter.is_empty() {
+            return true;
+        }
+        let Some(window) = &self.current_window else {
+            return false;
+        };
+        expansion.app_filter.iter().any(|filter| {
+            let filter = filter.to_lowercase();
+            window
+                .app_id
+                .as_deref()
+                .is_some_and(|id| id.to_lowercase().contains(&filter))
+                || window
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| title.to_lowercase().contains(&filter))
+        })
     }
 
     /// Apply an expansion. Backends may perform the replacement atomically;
@@ -429,6 +504,124 @@ mod tests {
             .unwrap();
         assert_eq!(result.erase_chars, 5);
         assert_eq!(result.insert, "café ☕");
+    }
+
+    #[test]
+    fn app_filtered_expansion_fails_closed_without_window_tracking() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards"
+            app_filter = ["thunderbird"]
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut results = engine.process(InputEvent::Text(":sig".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert!(
+            results.is_empty(),
+            "app-restricted expansion must not fire without a known focused window"
+        );
+    }
+
+    #[test]
+    fn app_filtered_expansion_matches_by_app_id_case_insensitively() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards"
+            app_filter = ["Thunderbird"]
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.mozilla.thunderbird".into()),
+            title: None,
+        })));
+        let mut results = engine.process(InputEvent::Text(":sig".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert_eq!(results.pop().unwrap().insert, "Regards");
+    }
+
+    #[test]
+    fn current_window_can_be_carried_across_a_replacement_engine() {
+        // Simulates what a config reload must do: a fresh `ExpansionEngine`
+        // starts with no window context, which would otherwise wrongly
+        // fail-close every `app_filter`-scoped expansion until the next
+        // real focus change even though the user's window never changed.
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards"
+            app_filter = ["thunderbird"]
+        "#,
+        )
+        .unwrap();
+        let mut old_engine = ExpansionEngine::new(config.clone()).unwrap();
+        old_engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.mozilla.thunderbird".into()),
+            title: None,
+        })));
+
+        let mut new_engine = ExpansionEngine::new(config).unwrap();
+        assert!(new_engine.current_window().is_none());
+        new_engine.set_current_window(old_engine.current_window().cloned());
+
+        let mut results = new_engine.process(InputEvent::Text(":sig".into()));
+        results.extend(new_engine.process(InputEvent::Boundary));
+        assert_eq!(results.pop().unwrap().insert, "Regards");
+    }
+
+    #[test]
+    fn app_filtered_expansion_ignores_other_windows() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards"
+            app_filter = ["thunderbird"]
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("konsole".into()),
+        })));
+        let mut results = engine.process(InputEvent::Text(":sig".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn unfiltered_expansion_matches_regardless_of_window_tracking() {
+        let mut engine = engine();
+        let mut results = engine.process(InputEvent::Text(":hello".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
+    }
+
+    #[test]
+    fn window_changed_does_not_discard_an_in_progress_unfiltered_trigger() {
+        // A focus change mid-typing (a brief alt-tab, a notification) must
+        // not cost an unrelated, unfiltered trigger its buffered progress:
+        // `app_filter` is re-checked against the window at match time, not
+        // against whatever window the buffer started accumulating in, so
+        // there is nothing to protect by clearing here.
+        let mut engine = engine();
+        engine.process(InputEvent::Text(":hel".into()));
+        engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.kde.kate".into()),
+            title: None,
+        })));
+        let mut results = engine.process(InputEvent::Text("lo".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
     }
 
     #[test]
@@ -566,6 +759,8 @@ mod tests {
                 replacement: "value".into(),
                 description: String::new(),
                 tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
                 match_mode: MatchMode::Immediate,
                 command: None,
                 enabled: true,

@@ -91,6 +91,8 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             replacement,
             description: item.label.unwrap_or_default(),
             tags: vec!["imported".into()],
+            category: String::new(),
+            app_filter: Vec::new(),
             match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,

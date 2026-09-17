@@ -16,3 +16,4 @@ eframe = { version = "0.35", default-features = false, features = ["wayland", "d
 wayexpand-core = { path = "../core" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
+wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }

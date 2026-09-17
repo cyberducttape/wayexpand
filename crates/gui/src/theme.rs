@@ -171,6 +171,32 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
         });
 }
 
+/// A small, clickable rounded chip used for the category filter row --
+/// visually similar to `pill` but interactive, filling solid with the accent
+/// color when `selected`.
+pub fn chip(ui: &mut egui::Ui, palette: &Palette, text: &str, selected: bool) -> egui::Response {
+    let font = FontId::new(12.0, FontFamily::Proportional);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), Color32::TRANSPARENT);
+    let size = Vec2::new(galley.size().x + 20.0, 24.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        let (fg, bg) = if selected {
+            (palette.accent_text, palette.accent)
+        } else if hovered {
+            (ui.visuals().text_color(), palette.surface_hover)
+        } else {
+            (palette.muted, tint(palette.border, 140))
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(255), bg);
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, font, fg);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// An accent-filled call-to-action button, for the one primary action in a
 /// given context (Save changes, Create snippet, ...).
 pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
@@ -200,16 +226,36 @@ pub struct SnippetRow<'a> {
     pub command_backed: bool,
     pub trigger: &'a str,
     pub detail: &'a str,
+    pub category: &'a str,
+}
+
+/// The two independently clickable zones of a `snippet_row`: the row body
+/// (select this snippet) and the small status dot (toggle enabled, without
+/// touching selection or any in-progress unsaved draft).
+pub struct SnippetRowResponse {
+    pub row: egui::Response,
+    pub toggle: egui::Response,
 }
 
 /// A custom-painted sidebar list entry: a status dot, the trigger in
 /// monospace, a muted detail line, and (for command-backed snippets) a small
 /// badge -- laid out as a rounded card that highlights on hover and tints
 /// with the accent color when selected.
-pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) -> egui::Response {
+pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) -> SnippetRowResponse {
     let width = ui.available_width();
     let height = 48.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+
+    let dot_center = rect.left_center() + Vec2::new(16.0, 0.0);
+    let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(20.0));
+    let toggle_response = ui
+        .interact(toggle_rect, response.id.with("toggle"), Sense::click())
+        .on_hover_text(if row.enabled {
+            "Click to disable"
+        } else {
+            "Click to enable"
+        })
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
 
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
@@ -232,7 +278,9 @@ pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) ->
         } else {
             palette.muted
         };
-        let dot_center = rect.left_center() + Vec2::new(16.0, 0.0);
+        if toggle_response.hovered() {
+            painter.circle_stroke(dot_center, 7.0, Stroke::new(1.5, dot_color));
+        }
         painter.circle_filled(dot_center, 4.0, dot_color);
 
         let text_left = rect.left() + 30.0;
@@ -250,13 +298,44 @@ pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) ->
                 FontId::new(14.5, FontFamily::Monospace),
                 Color32::TRANSPARENT,
             );
-            let badge_pos = trigger_pos + Vec2::new(galley.size().x + 8.0, 1.0);
+            let badge_font = FontId::new(10.0, FontFamily::Proportional);
+            let text_galley =
+                painter.layout_no_wrap("cmd".to_owned(), badge_font.clone(), Color32::TRANSPARENT);
+            let pad = Vec2::new(6.0, 2.0);
+            let badge_size = text_galley.size() + pad * 2.0;
+            let badge_rect = egui::Rect::from_min_size(
+                trigger_pos + Vec2::new(galley.size().x + 8.0, -1.0),
+                badge_size,
+            );
+            painter.rect_filled(badge_rect, CornerRadius::same(255), tint(palette.warning, 34));
             painter.text(
-                badge_pos,
-                egui::Align2::LEFT_TOP,
+                badge_rect.center(),
+                egui::Align2::CENTER_CENTER,
                 "cmd",
-                FontId::new(10.5, FontFamily::Proportional),
+                badge_font,
                 palette.warning,
+            );
+        }
+        if !row.category.is_empty() {
+            let category_font = FontId::new(10.5, FontFamily::Proportional);
+            let galley = painter.layout_no_wrap(
+                row.category.to_owned(),
+                category_font.clone(),
+                Color32::TRANSPARENT,
+            );
+            let pad = Vec2::new(8.0, 3.0);
+            let chip_size = galley.size() + pad * 2.0;
+            let chip_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - chip_size.x - 10.0, rect.top() + 9.0),
+                chip_size,
+            );
+            painter.rect_filled(chip_rect, CornerRadius::same(255), tint(palette.accent, 30));
+            painter.text(
+                chip_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                row.category,
+                category_font,
+                palette.accent,
             );
         }
         let detail = if row.detail.is_empty() {
@@ -273,7 +352,10 @@ pub fn snippet_row(ui: &mut egui::Ui, palette: &Palette, row: SnippetRow<'_>) ->
         );
     }
 
-    response
+    SnippetRowResponse {
+        row: response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        toggle: toggle_response,
+    }
 }
 
 /// A translucent tint of `color`, for a badge background that should read

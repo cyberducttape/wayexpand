@@ -36,6 +36,8 @@ struct Draft {
     trigger: String,
     description: String,
     tags: String,
+    category: String,
+    app_filter: String,
     replacement: String,
     enabled: bool,
     match_mode: MatchMode,
@@ -59,6 +61,7 @@ struct GuiApp {
     config: Config,
     selected: Option<usize>,
     filter: String,
+    category_filter: Option<String>,
     preview_input: String,
     draft: Option<Draft>,
     undo: Vec<Config>,
@@ -127,6 +130,7 @@ impl GuiApp {
             config,
             selected,
             filter: String::new(),
+            category_filter: None,
             preview_input,
             draft,
             undo: Vec::new(),
@@ -274,17 +278,36 @@ impl GuiApp {
             .iter()
             .enumerate()
             .filter(|(_, expansion)| {
+                self.category_filter
+                    .as_deref()
+                    .is_none_or(|category| expansion.category == category)
+            })
+            .filter(|(_, expansion)| {
                 query.is_empty()
                     || format!(
-                        "{} {} {}",
+                        "{} {} {} {}",
                         expansion.trigger,
                         expansion.description,
-                        expansion.tags.join(" ")
+                        expansion.tags.join(" "),
+                        expansion.category
                     )
                     .to_lowercase()
                     .contains(&query)
             })
             .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Distinct, sorted, non-empty categories currently in use — drives the
+    /// sidebar filter chips and the editor's "pick existing" combo box.
+    fn categories(&self) -> Vec<String> {
+        self.config
+            .expansion
+            .iter()
+            .map(|expansion| expansion.category.clone())
+            .filter(|category| !category.is_empty())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect()
     }
 
@@ -306,6 +329,14 @@ impl GuiApp {
             || draft.tags
                 != expansion
                     .tags
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            || draft.category != expansion.category
+            || draft.app_filter
+                != expansion
+                    .app_filter
                     .iter()
                     .map(String::as_str)
                     .collect::<Vec<_>>()
@@ -394,6 +425,14 @@ impl GuiApp {
             .filter(|tag| !tag.is_empty())
             .map(str::to_owned)
             .collect();
+        candidate.expansion[index].category = draft.category.clone();
+        candidate.expansion[index].app_filter = draft
+            .app_filter
+            .split(',')
+            .map(str::trim)
+            .filter(|filter| !filter.is_empty())
+            .map(str::to_owned)
+            .collect();
         candidate.expansion[index].replacement = draft.replacement.clone();
         candidate.expansion[index].enabled = draft.enabled;
         candidate.expansion[index].match_mode = draft.match_mode;
@@ -462,6 +501,8 @@ impl GuiApp {
             replacement: String::new(),
             description: "New snippet".into(),
             tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
             match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,
@@ -535,6 +576,34 @@ impl GuiApp {
         }
     }
 
+    /// Flips a snippet's enabled flag directly from the sidebar dot and
+    /// saves immediately, independent of selection or any in-progress
+    /// unsaved draft. If the toggled row is the one currently being edited,
+    /// only its `enabled` field is synced so other unsaved edits survive.
+    fn toggle_enabled(&mut self, index: usize) {
+        let mut candidate = self.config.clone();
+        candidate.expansion[index].enabled = !candidate.expansion[index].enabled;
+        let now_enabled = candidate.expansion[index].enabled;
+        let trigger = candidate.expansion[index].trigger.clone();
+        match candidate.save_atomic(&self.path) {
+            Ok(()) => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.remember_undo(previous);
+                if self.selected == Some(index) {
+                    if let Some(draft) = self.draft.as_mut() {
+                        draft.enabled = now_enabled;
+                    }
+                }
+                self.message = format!(
+                    "{trigger} {}",
+                    if now_enabled { "enabled" } else { "disabled" }
+                );
+                let _ = control_command("reload");
+            }
+            Err(error) => self.message = format!("Toggle failed: {}", error.safe_summary()),
+        }
+    }
+
     fn preview(&self) -> String {
         let Some(index) = self.selected else {
             return "No snippet selected".into();
@@ -596,6 +665,8 @@ impl Draft {
             trigger: expansion.trigger.clone(),
             description: expansion.description.clone(),
             tags: expansion.tags.join(", "),
+            category: expansion.category.clone(),
+            app_filter: expansion.app_filter.join(", "),
             replacement: expansion.replacement.clone(),
             enabled: expansion.enabled,
             match_mode: expansion.match_mode,
@@ -643,6 +714,28 @@ impl Draft {
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let palette = Palette::for_mode(self.dark_mode);
+        let modal_open =
+            self.diagnostics_open || self.import_open || self.settings_open || self.pending_action.is_some();
+        let (want_save, want_new, want_escape) = ui.ctx().input(|input| {
+            (
+                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
+                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
+                input.key_pressed(egui::Key::Escape),
+            )
+        });
+        if want_save && self.selected.is_some() {
+            self.save_selected();
+        }
+        if want_new {
+            self.request_action(PendingAction::New);
+        }
+        if want_escape {
+            if self.diagnostics_open {
+                self.diagnostics_open = false;
+            } else if self.import_open && self.import_preview.is_none() {
+                self.import_open = false;
+            }
+        }
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
@@ -850,6 +943,24 @@ impl eframe::App for GuiApp {
                         ui.add_space(4.0);
                         ui.colored_label(palette.danger, format!("⚠ {error}"));
                     }
+
+                    ui.add_space(12.0);
+                    theme::section_header(ui, "🖥", "Backend status");
+                    ui.add_space(6.0);
+
+                    for status in &self.backend_status {
+                        use wayexpand_core::BackendState;
+                        let status_color = match status.state {
+                            BackendState::Available | BackendState::Implemented => palette.success,
+                            _ => palette.muted,
+                        };
+                        let state_text = format!("{:?}", status.state);
+                        ui.horizontal(|ui| {
+                            ui.colored_label(status_color, "●");
+                            ui.label(format!("{:?}: {}", status.kind, state_text));
+                        });
+                    }
+
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if theme::primary_button(ui, &palette, "Save settings").clicked() {
@@ -882,7 +993,10 @@ impl eframe::App for GuiApp {
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if theme::primary_button(ui, &palette, "+ New").clicked() {
+                    if theme::primary_button(ui, &palette, "+ New")
+                        .on_hover_text("Create a new snippet (Ctrl+N)")
+                        .clicked()
+                    {
                         self.request_action(PendingAction::New);
                     }
                     if ui.button("⎘ Duplicate").clicked() {
@@ -895,6 +1009,28 @@ impl eframe::App for GuiApp {
                 ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(4.0);
+                let categories = self.categories();
+                if !categories.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        if theme::chip(ui, &palette, "All", self.category_filter.is_none())
+                            .clicked()
+                        {
+                            self.category_filter = None;
+                        }
+                        for category in &categories {
+                            let selected =
+                                self.category_filter.as_deref() == Some(category.as_str());
+                            if theme::chip(ui, &palette, category, selected).clicked() {
+                                self.category_filter = if selected {
+                                    None
+                                } else {
+                                    Some(category.clone())
+                                };
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
                 let visible_indices = self.visible_indices();
                 ScrollArea::vertical().show(ui, |ui| {
                     for index in visible_indices {
@@ -913,9 +1049,12 @@ impl eframe::App for GuiApp {
                                 command_backed: expansion.command.is_some(),
                                 trigger: &expansion.trigger,
                                 detail: &detail,
+                                category: &expansion.category,
                             },
                         );
-                        if response.clicked() {
+                        if response.toggle.clicked() {
+                            self.toggle_enabled(index);
+                        } else if response.row.clicked() {
                             self.request_action(PendingAction::Select(index));
                         }
                     }
@@ -935,13 +1074,21 @@ impl eframe::App for GuiApp {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
                             ui.label(RichText::new("🔍").size(28.0));
-                            ui.label(
-                                RichText::new("No snippets match this search.")
-                                    .color(palette.muted),
-                            );
+                            let reason = match (self.filter.is_empty(), &self.category_filter) {
+                                (false, Some(category)) => {
+                                    format!("No matches for \"{}\" in {category}.", self.filter)
+                                }
+                                (false, None) => format!("No matches for \"{}\".", self.filter),
+                                (true, Some(category)) => {
+                                    format!("No snippets in {category}.")
+                                }
+                                (true, None) => "No snippets match this filter.".to_owned(),
+                            };
+                            ui.label(RichText::new(reason).color(palette.muted));
                             ui.add_space(6.0);
-                            if ui.button("Clear search").clicked() {
+                            if ui.button("Clear filters").clicked() {
                                 self.filter.clear();
+                                self.category_filter = None;
                             }
                         });
                     }
@@ -985,6 +1132,11 @@ impl eframe::App for GuiApp {
                 self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
             }
             let command_backed = self.config.expansion[index].command.is_some();
+            let mut detect_app_clicked = false;
+            ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .id_salt("editor_scroll")
+                .show(ui, |ui| {
             egui::Frame::new()
                 .fill(palette.surface)
                 .stroke(egui::Stroke::new(1.0, palette.border))
@@ -993,6 +1145,7 @@ impl eframe::App for GuiApp {
                 .show(ui, |ui| {
                 theme::section_header(ui, "✏", "Snippet details");
                 ui.add_space(6.0);
+                let categories = self.categories();
                 let Some(draft) = self.draft.as_mut() else {
                     ui.label("Snippet draft unavailable; choose a snippet again.");
                     return;
@@ -1006,11 +1159,27 @@ impl eframe::App for GuiApp {
                             .desired_width(300.0),
                     );
                 });
-                ui.label(
-                    RichText::new("Tip: use a distinctive prefix such as ;; or : to avoid accidental matches.")
-                        .small()
-                        .color(palette.muted),
-                );
+                let duplicate_trigger = !draft.trigger.is_empty()
+                    && self
+                        .config
+                        .expansion
+                        .iter()
+                        .enumerate()
+                        .any(|(other_index, other)| {
+                            other_index != index && other.trigger == draft.trigger
+                        });
+                if duplicate_trigger {
+                    ui.colored_label(
+                        palette.danger,
+                        "⚠ Another snippet already uses this trigger; saving will be rejected.",
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("Tip: use a distinctive prefix such as ;; or : to avoid accidental matches.")
+                            .small()
+                            .color(palette.muted),
+                    );
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("Description");
@@ -1024,6 +1193,57 @@ impl eframe::App for GuiApp {
                             .desired_width(420.0),
                     );
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Category");
+                    ui.add(
+                        TextEdit::singleline(&mut draft.category)
+                            .hint_text("productivity, shortcuts, custom")
+                            .desired_width(260.0),
+                    );
+                    if !categories.is_empty() {
+                        egui::ComboBox::from_id_salt("category_picker")
+                            .selected_text("Existing ▾")
+                            .width(140.0)
+                            .show_ui(ui, |ui| {
+                                for category in &categories {
+                                    if ui
+                                        .selectable_label(draft.category == *category, category)
+                                        .clicked()
+                                    {
+                                        draft.category = category.clone();
+                                    }
+                                }
+                            });
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Only in these apps");
+                    ui.add(
+                        TextEdit::singleline(&mut draft.app_filter)
+                            .hint_text("thunderbird, konsole (leave empty to match everywhere)")
+                            .desired_width(300.0),
+                    );
+                    if ui
+                        .button("🎯 Use current app")
+                        .on_hover_text(
+                            "Detect the app you were last focused on before switching to WayExpand \
+                             (KDE Plasma only for now)",
+                        )
+                        .clicked()
+                    {
+                        detect_app_clicked = true;
+                    }
+                });
+                if !draft.app_filter.trim().is_empty() {
+                    ui.label(
+                        RichText::new(
+                            "⚠ If window tracking isn't available on your compositor, this \
+                             snippet will never match rather than matching everywhere.",
+                        )
+                        .small()
+                        .color(palette.muted),
+                    );
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut draft.enabled, "Enabled");
@@ -1044,6 +1264,53 @@ impl eframe::App for GuiApp {
                         .desired_width(f32::INFINITY),
                 );
             });
+            if detect_app_clicked {
+                // Bounded so a KWin version mismatch, a D-Bus hiccup, or any
+                // other reason the tracker's script never calls back cannot
+                // freeze the GUI: this runs synchronously on the UI thread.
+                use wayexpand_backend_kwin_window::KwinWindowTracker;
+                use wayexpand_core::{WindowContext, WindowTracker};
+                enum Detection {
+                    Found(WindowContext),
+                    NoWindow,
+                    Unavailable,
+                }
+                let detection = match KwinWindowTracker::new() {
+                    Ok(mut tracker) => {
+                        match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
+                            Ok(Some(Some(window))) => Detection::Found(window),
+                            Ok(Some(None)) => Detection::NoWindow,
+                            Ok(None) | Err(_) => Detection::Unavailable,
+                        }
+                    }
+                    Err(_) => Detection::Unavailable,
+                };
+                match detection {
+                    Detection::Found(window) => {
+                        let value = window.app_id.or(window.title).unwrap_or_default();
+                        if value.is_empty() {
+                            self.message = "Could not identify the focused window".into();
+                        } else if let Some(draft) = self.draft.as_mut() {
+                            if draft.app_filter.trim().is_empty() {
+                                draft.app_filter = value.clone();
+                            } else {
+                                draft.app_filter.push_str(", ");
+                                draft.app_filter.push_str(&value);
+                            }
+                            self.message = format!("Added \"{value}\" to the app filter");
+                        }
+                    }
+                    Detection::NoWindow => {
+                        self.message = "No focused window to detect (focus is on the desktop)"
+                            .into();
+                    }
+                    Detection::Unavailable => {
+                        self.message =
+                            "Window detection is unavailable here (KDE Plasma only for now)"
+                                .into();
+                    }
+                }
+            }
             if command_backed {
                 ui.add_space(6.0);
                 ui.label(
@@ -1131,7 +1398,10 @@ impl eframe::App for GuiApp {
             });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if theme::primary_button(ui, &palette, "💾 Save changes").clicked() {
+                if theme::primary_button(ui, &palette, "💾 Save changes")
+                    .on_hover_text("Save changes (Ctrl+S)")
+                    .clicked()
+                {
                     self.save_selected();
                 }
                 if theme::danger_button(ui, &palette, "🗑 Delete…").clicked() {
@@ -1157,6 +1427,7 @@ impl eframe::App for GuiApp {
                 }
             });
             ui.add_space(4.0);
+            let preview_text = self.preview();
             egui::Frame::new()
                 .fill(if self.dark_mode {
                     Color32::from_rgb(0x0F, 0x11, 0x15)
@@ -1167,7 +1438,19 @@ impl eframe::App for GuiApp {
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(self.preview()).monospace());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&preview_text).monospace());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            if ui
+                                .small_button("⧉ Copy")
+                                .on_hover_text("Copy the previewed output")
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(preview_text.clone());
+                                self.message = "Preview copied to clipboard".into();
+                            }
+                        });
+                    });
                 });
             ui.add_space(12.0);
             let (message_color, message_bg) = status_tone(&self.message, &palette);
@@ -1178,6 +1461,7 @@ impl eframe::App for GuiApp {
                 .show(ui, |ui| {
                     ui.label(RichText::new(&self.message).color(message_color));
                 });
+            });
         });
         if self.pending_action.is_some() {
             egui::Window::new("⚠  Unsaved changes")
@@ -1267,6 +1551,8 @@ fn status_tone(message: &str, palette: &Palette) -> (Color32, Color32) {
             "imported",
             "deleted",
             "undid",
+            "enabled",
+            "copied",
             "paused",
             "resumed",
             "refreshed",
@@ -1305,10 +1591,15 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let mut app = GuiApp::load(path)?;
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!(
+        "../../../assets/icon/hicolor/256x256/apps/wayexpand.png"
+    ))
+    .expect("bundled app icon is a valid PNG");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
-            .with_min_inner_size([760.0, 480.0]),
+            .with_min_inner_size([760.0, 480.0])
+            .with_icon(icon),
         ..Default::default()
     };
     eframe::run_native(
@@ -1333,6 +1624,8 @@ mod tests {
             trigger: ":cmd".into(),
             description: String::new(),
             tags: String::new(),
+            category: String::new(),
+            app_filter: String::new(),
             replacement: "fallback".into(),
             enabled: true,
             match_mode: MatchMode::Immediate,
@@ -1395,6 +1688,8 @@ mod tests {
                     replacement: "one".into(),
                     description: String::new(),
                     tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
                     match_mode: MatchMode::Immediate,
                     command: None,
                     enabled: true,
@@ -1404,6 +1699,8 @@ mod tests {
                     replacement: "two".into(),
                     description: String::new(),
                     tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
                     match_mode: MatchMode::Immediate,
                     command: None,
                     enabled: true,
