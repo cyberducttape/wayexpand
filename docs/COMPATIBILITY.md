@@ -1,0 +1,420 @@
+# Compatibility & Stability Guarantees
+
+This document defines the stability guarantees for WayExpand 1.x. Third-party tools, automation, and integrations can rely on these surfaces remaining stable across minor versions.
+
+**Stability levels:**
+- 🔒 **Stable** — guaranteed backward-compatible within 1.x; breaking changes require major version
+- 🟡 **Experimental** — may change between 1.x releases; changes documented in release notes
+- ⚠️ **Unstable** — subject to change without notice; not intended for external consumption
+
+---
+
+## CLI Exit Codes
+
+All WayExpand commands use standardized exit codes, enabling reliable automation and service monitoring.
+
+| Code | Category | Meaning | Examples |
+|------|----------|---------|----------|
+| **0** | Success | Command completed successfully | Any successful command |
+| **1** | Generic Error | I/O, network, or other transient failure | File not found, socket timeout |
+| **2** | Usage Error | Invalid command or arguments | Unknown command, missing required arg, malformed hotkey chord |
+| **3** | Configuration Error | Invalid or malformed configuration | Syntax error in TOML, invalid expansion trigger, missing required field |
+| **4** | Daemon Error | Daemon communication failure | Cannot connect to control socket, daemon unresponsive, non-UTF-8 response |
+
+**Stability:** 🔒 **Stable** — guaranteed stable across 1.x
+
+**Usage example (CI/monitoring):**
+```bash
+#!/bin/bash
+wayexpand validate "$CONFIG_PATH"
+case $? in
+  0) echo "Config OK" ;;
+  3) echo "Config invalid (exit 3)" >&2; exit 1 ;;
+  *) echo "Unexpected error" >&2; exit 1 ;;
+esac
+```
+
+---
+
+## JSON Output Formats
+
+Commands with `--json` flag produce structured output suitable for parsing by external tools. Each command's JSON shape is stable within 1.x.
+
+### `wayexpand test --json [config]`
+
+Tests a text input against the expansion engine and returns matching results.
+
+**Output shape:**
+```json
+{
+  "matched": true,
+  "results": [
+    {
+      "trigger_characters": 5,
+      "erase_characters": 5,
+      "replacement_bytes": 23,
+      "replacement": "example@example.com"
+    }
+  ]
+}
+```
+
+**Field stability:**
+- `matched` (bool): Always present; true if one or more results
+- `results` (array): Always present; empty if no matches
+  - `trigger_characters` (int): Number of characters in trigger (Unicode grapheme count)
+  - `erase_characters` (int): Number of characters to erase (may differ from trigger for multi-char sequences)
+  - `replacement_bytes` (int): Byte length of replacement (for buffer sizing)
+  - `replacement` (string): The expanded text to insert
+
+**Stability:** 🔒 **Stable** — fields guaranteed present; new fields added after existing ones with opt-in via consumer code
+
+---
+
+### `wayexpand test-hotkey --json <chord> [config]`
+
+Tests a key chord against hotkey triggers without executing actions.
+
+**Output shape:**
+```json
+{
+  "chord": "Ctrl+Alt+M",
+  "matched": true,
+  "actions": [
+    {
+      "description": "Insert daily standup template",
+      "program": "/usr/bin/true",
+      "args": ["template", "--type=standup"]
+    }
+  ]
+}
+```
+
+**Field stability:**
+- `chord` (string): Canonical representation of the key chord
+- `matched` (bool): True if one or more actions match
+- `actions` (array): Array of matching hotkey actions (empty if no matches)
+  - `description` (string): Human-readable description of the hotkey
+  - `program` (string): Executable program name (first component of command)
+  - `args` (array of strings): Command arguments (does not include program name)
+
+**Stability:** 🔒 **Stable** — guaranteed present; new fields added after existing
+
+---
+
+### `wayexpand preview --json <trigger> [config]`
+
+Shows what an expansion would produce without actually expanding.
+
+**Output shape (matched):**
+```json
+{
+  "matched": true,
+  "trigger": ";email",
+  "replacement": "user@example.com"
+}
+```
+
+**Output shape (no match):**
+```json
+{
+  "matched": false
+}
+```
+
+**Field stability:**
+- `matched` (bool): Always present
+- `trigger` (string): Present only if `matched: true`
+- `replacement` (string): Present only if `matched: true`
+
+**Stability:** 🔒 **Stable** — presence of optional fields conditional on `matched`
+
+---
+
+### `wayexpand list --json [config]`
+
+Lists all configured expansions and hotkeys.
+
+**Output shape:**
+```json
+{
+  "config": "/home/user/.config/wayexpand/expansions.toml",
+  "count": 12,
+  "hotkey_count": 3,
+  "expansions": [
+    {
+      "trigger": ";email",
+      "replacement": "user@example.com",
+      "description": "Personal email",
+      "enabled": true,
+      "tags": ["contact"],
+      "mode": "word-boundary",
+      "app_filter": null,
+      "category": "Personal"
+    }
+  ],
+  "hotkeys": [
+    {
+      "chord": "Ctrl+Alt+M",
+      "description": "Standup template",
+      "action": {
+        "description": "Insert template",
+        "command": {
+          "program": "/usr/bin/cat",
+          "args": ["/home/user/templates/standup"]
+        }
+      },
+      "enabled": true,
+      "category": "Work"
+    }
+  ]
+}
+```
+
+**Field stability:**
+- `config` (string): Path to configuration file
+- `count` (int): Number of expansions
+- `hotkey_count` (int): Number of hotkeys
+- `expansions` (array): Full expansion configurations (see TOML schema below)
+- `hotkeys` (array): Full hotkey configurations
+
+**Note:** `expansions` and `hotkeys` contain the complete configuration objects; their schema is covered by TOML config stability guarantees.
+
+**Stability:** 🔒 **Stable** — top-level counts and paths stable; contents follow config schema stability
+
+---
+
+### `wayexpand search --json <query> [config]`
+
+Searches expansions by trigger, description, and tags.
+
+**Output shape:**
+```json
+{
+  "query": "email",
+  "config": "/home/user/.config/wayexpand/expansions.toml",
+  "count": 2,
+  "expansions": [
+    {
+      "trigger": ";email",
+      "replacement": "user@example.com",
+      "description": "Personal email",
+      "enabled": true,
+      "tags": ["contact"],
+      "mode": "word-boundary",
+      "app_filter": null,
+      "category": "Personal"
+    }
+  ]
+}
+```
+
+**Field stability:**
+- `query` (string): The search query (echoed back)
+- `config` (string): Path to configuration file
+- `count` (int): Number of matching expansions
+- `expansions` (array): Matching expansion objects
+
+**Stability:** 🔒 **Stable** — same as `list` output
+
+---
+
+### `wayexpand doctor --json [config]`
+
+Diagnostic output suitable for health checks and monitoring systems.
+
+**Output shape:**
+```json
+{
+  "healthy": true,
+  "wayland": true,
+  "config": {
+    "path": "/home/user/.config/wayexpand/expansions.toml",
+    "valid": true,
+    "error": null
+  },
+  "control_socket": {
+    "path": "/run/user/1000/wayexpand.sock",
+    "configured": true,
+    "exists": true
+  },
+  "backends": [
+    {
+      "kind": "input-method-v2",
+      "state": "Implemented",
+      "detail": "manager available; seat connection pending"
+    },
+    {
+      "kind": "wlroots-virtual-keyboard",
+      "state": "Implemented",
+      "detail": "virtual keyboard globals available"
+    }
+  ]
+}
+```
+
+**Field stability:**
+- `healthy` (bool): Overall health (config valid AND socket operational if configured)
+- `wayland` (bool): Wayland session detected
+- `config.path` (string): Configuration file path
+- `config.valid` (bool): Configuration syntax valid
+- `config.error` (string|null): Error message if invalid (safe summary, not a stack trace)
+- `control_socket.path` (string|null): Socket path (null if WAYEXPAND_SOCKET and XDG_RUNTIME_DIR both unset)
+- `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
+- `control_socket.exists` (bool): Socket file exists on filesystem
+- `backends` (array): Available backends
+  - `kind` (string): Backend name (e.g., "input-method-v2", "wlroots-virtual-keyboard", "libei", "evdev")
+  - `state` (string): "Implemented", "RequiresPermission", "Unavailable", "Experimental"
+  - `detail` (string): Human-readable details (e.g., reason for unavailability)
+
+**Stability:** 🔒 **Stable** — guaranteed to include `healthy`, `config`, `control_socket`, `backends`; new backend states may be added
+
+**Usage example (systemd health check):**
+```bash
+#!/bin/bash
+# systemd ExecStartPost health check
+wayexpand doctor --json | jq -e '.healthy' >/dev/null || exit 1
+```
+
+---
+
+### `wayexpand status --json`
+
+Current daemon status (requires running daemon).
+
+**Output shape:**
+```json
+{
+  "uptime_seconds": 3600,
+  "config_reloads": 2,
+  "state": "active",
+  "paused": false,
+  "expansions_evaluated": 45000
+}
+```
+
+**Field stability:**
+- `uptime_seconds` (int): Seconds since daemon started
+- `config_reloads` (int): Number of successful config reloads
+- `state` (string): "active", "paused", "stopped"
+- `paused` (bool): Whether daemon is currently paused (expansion matching disabled)
+- `expansions_evaluated` (int): Total expansions evaluated (cumulative counter)
+
+**Stability:** 🔒 **Stable** — these fields guaranteed; new counters/metrics may be added as new fields
+
+---
+
+## TOML Configuration Schema Stability
+
+The configuration file format (`~/.config/wayexpand/expansions.toml`) is stable within 1.x.
+
+### Schema Guarantees
+
+**Existing fields** (0.1.0+):
+- `[[expansion]]` section with `trigger`, `replacement`, `description`, `enabled`, `mode`
+- `[[hotkey]]` section with `chord`, `action.description`, `action.command`
+- Global `[settings]` section with `max_buffer_chars`
+
+These fields are guaranteed present and backward-compatible. Missing fields use `#[serde(default)]` to provide sensible defaults.
+
+**New fields** (0.2.0+):
+- `ExpansionConfig::category` — optional categorization
+- `ExpansionConfig::app_filter` — optional app-scoped restrictions
+- `ExpansionConfig::tags` — optional searchable tags
+
+All new fields default to `null` or empty if absent from old configurations.
+
+**Backward compatibility guarantee:**
+```toml
+# Old config (0.1.0) still loads in 1.x
+[[expansion]]
+trigger = ":email"
+replacement = "user@example.com"
+```
+
+**Forward compatibility guarantee:**
+A config file written by 1.x continues to load in future minor versions (1.1, 1.2, etc.):
+- New fields are added with `#[serde(default)]` or explicit default values
+- Existing fields retain their meaning and type
+- Fields are never removed within 1.x
+
+**Stability:** 🔒 **Stable** — guaranteed backward and forward compatible within 1.x
+
+---
+
+## Breaking Changes & Major Version Bumps
+
+To make a **breaking change** that violates the above guarantees, a new major version is required (2.0.0).
+
+Examples of breaking changes:
+- Changing the type of an existing field (e.g., `enabled: bool` → `enabled: string`)
+- Removing a field or CLI command
+- Changing the meaning of an exit code
+- Removing fields from JSON output
+
+Breaking changes **must**:
+1. Be documented prominently in release notes
+2. Be accompanied by a migration guide
+3. Bump to major version (X.0.0)
+4. Provide tooling or clear instructions for config migration if applicable
+
+---
+
+## Configuration Migration & Future Changes
+
+**For hypothetical breaking changes in future major versions:**
+
+1. **At-risk period:** Users of version N.x will have until version (N+1).0 to migrate
+2. **Migration path:** 
+   - Release notes include step-by-step migration instructions
+   - Automated migration tool provided if applicable (e.g., `wayexpand migrate-config <old> <new>`)
+   - Old format continues to load if possible (with deprecation warning)
+3. **Testing:** Test suite includes regression tests for old config format (like `config::tests::pre_category_config_without_new_fields_still_parses`)
+
+---
+
+## Dependency Stability
+
+**Runtime dependencies:**
+- Wayland protocol implementations (input-method-v2, wlroots, libei, EIS)
+- systemd user services (for daemon auto-start)
+- Optional: xclip/xsel/xdotool (for clipboard fallback)
+
+**Build dependencies:**
+- Rust 1.93+ (as per Cargo.lock)
+- Standard development libraries (libwayland-dev, libxkbcommon-dev, pkg-config)
+
+These are not guaranteed stable across 1.x (new systemd versions, wayland protocol updates), but breaking changes are flagged with upstream deprecation warnings. Distro package maintainers should test before publishing major distro updates.
+
+**Stability:** 🟡 **Experimental** — external dependencies subject to upstream changes; WayExpand follows upstream semver
+
+---
+
+## What's NOT Stable
+
+The following surfaces are **not** guaranteed stable and may change between minor versions:
+
+- **Internal crate API** (non-public re-exports, internal modules)
+- **Daemon control protocol** (socket communication format) — may be extended but not changed
+- **Config reload behavior** (exact timing of propagation, error handling edge cases)
+- **Performance characteristics** (matching algorithm, memory usage)
+- **Error messages** (may be reworded for clarity; do not parse error text)
+- **Diagnostic output** (human-readable `wayexpand doctor` text output without `--json`)
+
+---
+
+## Testing & Validation
+
+All stable surfaces are covered by regression tests in the test suite:
+
+- Exit codes verified per command (see `crates/cli/src/main.rs` exit_code_for)
+- JSON output shapes validated (see serde json! macros throughout CLI)
+- Config backward compatibility tested (see config::tests::pre_category_config_without_new_fields_still_parses)
+
+Developers adding new features must maintain these stability guarantees or bump to the next major version.
+
+---
+
+## Questions?
+
+For clarification on what's stable for your use case, open an issue on GitHub with your integration scenario.
