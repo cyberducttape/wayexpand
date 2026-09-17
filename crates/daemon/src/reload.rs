@@ -109,7 +109,13 @@ impl ReloadableConfig {
             Ok((config, stable_stamp)) => {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
-                    Ok(engine) => {
+                    Ok(mut engine) => {
+                        // A fresh engine has no window context yet. Without
+                        // this, any reload (e.g. every GUI save) would
+                        // wrongly fail-close `app_filter`-scoped expansions
+                        // until the next real focus change, even though the
+                        // user's actual window never changed.
+                        engine.set_current_window(self.engine.current_window().cloned());
                         self.engine = engine;
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;
@@ -220,6 +226,39 @@ mod tests {
     fn write_config(path: &Path, contents: &str) {
         fs::write(path, contents).unwrap();
         fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[test]
+    fn reload_preserves_window_context_for_app_filtered_expansions() {
+        use wayexpand_core::WindowContext;
+
+        let path = temporary_config();
+        write_config(
+            &path,
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"kate\"]\n",
+        );
+        let mut config = ReloadableConfig::load(&path).unwrap();
+        config.engine.set_current_window(Some(WindowContext {
+            app_id: Some("org.kde.kate".into()),
+            title: None,
+        }));
+
+        // Any reload -- including one an unrelated GUI edit would trigger --
+        // must not forget the window the user is actually still in.
+        write_config(
+            &path,
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"kate\"]\n",
+        );
+        config.reload_now();
+        assert!(config.healthy());
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "z");
+        let _ = fs::remove_file(path);
     }
 
     #[test]

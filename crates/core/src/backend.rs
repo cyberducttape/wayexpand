@@ -1,7 +1,45 @@
 use std::fmt;
+use std::time::Duration;
 use std::{fs::OpenOptions, path::Path};
 
-use crate::InputEvent;
+use crate::{InputEvent, WindowContext};
+
+/// Reports which application is currently focused, for `app_filter`-scoped
+/// expansions. Unlike `InputSource`, a tracker is polled/subscribed
+/// independently of the typing stream -- there is no Wayland protocol that
+/// works across compositors for this, so implementations are inherently
+/// compositor-specific (see `crates/backend-kwin-window`) and callers should
+/// treat every one of them as best-effort.
+pub trait WindowTracker {
+    fn name(&self) -> &'static str;
+    /// Waits up to `timeout` for the focused window to change. Returns
+    /// `Ok(None)` if nothing changed before the deadline -- the underlying
+    /// notification mechanism (a compositor script/D-Bus callback, for the
+    /// only implementation today) has no protocol-level health signal, so a
+    /// bounded wait is the only way a caller can tell "not connected" apart
+    /// from "connected but nothing happened yet" without risking an
+    /// unbounded hang. `Ok(Some(None))` means the change was observed but
+    /// could not be resolved to a window (e.g. focus moved to the desktop).
+    fn next_window_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<Option<WindowContext>>, WindowTrackerError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowTrackerError {
+    pub backend: &'static str,
+    pub message: String,
+    pub retryable: bool,
+}
+
+impl fmt::Display for WindowTrackerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.backend, self.message)
+    }
+}
+
+impl std::error::Error for WindowTrackerError {}
 
 /// Source of normalized input events. A source may be compositor-, portal-,
 /// or test-backed; the matcher must not know which.
@@ -87,6 +125,7 @@ pub enum BackendKind {
     WlrootsVirtualKeyboard,
     Uinput,
     Clipboard,
+    WindowTracker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +146,7 @@ impl fmt::Display for BackendKind {
             Self::WlrootsVirtualKeyboard => "wlroots-virtual-keyboard",
             Self::Uinput => "uinput",
             Self::Clipboard => "clipboard",
+            Self::WindowTracker => "window-tracker",
         };
         f.write_str(name)
     }
@@ -167,10 +207,52 @@ pub fn discover_backends() -> Vec<BackendStatus> {
         },
         BackendStatus {
             kind: BackendKind::Clipboard,
-            state: BackendState::NotImplemented,
-            detail: "clipboard mutation is not implemented".into(),
+            state: BackendState::Implemented,
+            detail: "paste-based fallback implemented; requires xclip/xsel and xdotool".into(),
+        },
+        {
+            let (state, detail) = discover_window_tracker(wayland);
+            BackendStatus {
+                kind: BackendKind::WindowTracker,
+                state,
+                detail,
+            }
         },
     ]
+}
+
+/// Environment-level guess at whether `app_filter`-scoped expansions can
+/// work here. No Wayland protocol reports focused-window identity across
+/// compositors, so this can only name which compositor-specific bridge (if
+/// any) applies; live availability still depends on that bridge actually
+/// connecting (KWin's scripting D-Bus interface, a wlroots
+/// foreign-toplevel-management protocol, and so on).
+fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
+    if !wayland {
+        return (
+            BackendState::Unavailable,
+            "Wayland session not detected".into(),
+        );
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    if desktop.to_lowercase().contains("kde") {
+        (
+            BackendState::Implemented,
+            "KDE Plasma detected; uses KWin's scripting D-Bus interface (org.kde.kwin.Scripting), \
+             the same mechanism tools like kdotool rely on since KWin exposes no window-listing \
+             Wayland protocol"
+                .into(),
+        )
+    } else {
+        (
+            BackendState::NotImplemented,
+            format!(
+                "app_filter-scoped expansions need a compositor-specific window tracker; \
+                 only KDE Plasma (KWin) is implemented so far (detected desktop: {})",
+                if desktop.is_empty() { "unknown" } else { &desktop }
+            ),
+        )
+    }
 }
 
 /// A lightweight, dependency-free probe mirroring what
@@ -258,7 +340,7 @@ mod tests {
             .expect("clipboard status is always reported");
 
         assert_ne!(uinput.state, BackendState::Available);
-        assert_eq!(clipboard.state, BackendState::NotImplemented);
+        assert_eq!(clipboard.state, BackendState::Implemented);
     }
 
     #[test]

@@ -111,6 +111,8 @@ pub struct LibeiInjector {
     keyboard: ei::Keyboard,
     sequence: u32,
     started_at: Instant,
+    return_keycode: u32,
+    tab_keycode: u32,
     _portal: Option<PortalKeepalive>,
 }
 
@@ -416,6 +418,28 @@ impl LibeiInjector {
             }
         };
 
+        // Extract control keycodes from keymap if available (for Text mode to use)
+        let (return_keycode, tab_keycode) = match &mode {
+            TextMode::Keysym(typer) => (typer.return_keycode, typer.tab_keycode),
+            TextMode::Text(_) => {
+                // Try to get them from the device's keymap if available
+                if let Some(keymap_data) = device.keymap() {
+                    let keymap_fd = rustix::io::dup(&keymap_data.fd)
+                        .map_err(|error| LibeiError::Keymap(error.to_string()))?;
+                    let xkb_keymap = decode_keymap(keymap_fd, keymap_data.size)?;
+                    let return_code = find_keycode_for_keysym(&xkb_keymap, xkeysym::key::Return)
+                        .ok_or_else(|| LibeiError::Keymap("no Return key in keymap".into()))?;
+                    let tab_code = find_keycode_for_keysym(&xkb_keymap, xkeysym::key::Tab)
+                        .ok_or_else(|| LibeiError::Keymap("no Tab key in keymap".into()))?;
+                    (return_code, tab_code)
+                } else {
+                    // Fallback: use standard Linux evdev keycodes
+                    // KEY_RETURN = 28, KEY_TAB = 15
+                    (28, 15)
+                }
+            }
+        };
+
         Ok(Self {
             connection,
             device,
@@ -423,6 +447,8 @@ impl LibeiInjector {
             keyboard,
             sequence: 1,
             started_at: Instant::now(),
+            return_keycode,
+            tab_keycode,
             _portal: portal,
         })
     }
@@ -434,7 +460,10 @@ impl LibeiInjector {
     /// keymap.
     fn ensure_representable(&self, text: &str) -> Result<(), LibeiError> {
         if let TextMode::Keysym(typer) = &self.mode {
-            if let Some(character) = text.chars().find(|c| !typer.chars.contains_key(c)) {
+            if let Some(character) = text.chars().find(|c| {
+                // Newline and tab are handled specially in type_keys
+                !matches!(c, '\n' | '\t') && !typer.chars.contains_key(c)
+            }) {
                 return Err(LibeiError::UnsupportedCharacter(character as u32));
             }
         }
@@ -449,16 +478,63 @@ impl LibeiInjector {
             return;
         };
         let text_interface = text_interface.clone();
-        for chunk in split_text_chunks(text) {
-            let serial = self.connection.serial();
-            self.device.device().start_emulating(serial, self.sequence);
-            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-            text_interface.utf8(chunk);
-            self.device
-                .device()
-                .frame(serial, self.started_at.elapsed().as_micros() as u64);
-            self.device.device().stop_emulating(serial);
+        // Split on newlines and tabs since ei_text doesn't handle control characters.
+        // We'll send printable text via ei_text and handle control chars via keyboard events.
+        let mut current_text = String::new();
+        for c in text.chars() {
+            match c {
+                '\n' | '\t' => {
+                    // Send accumulated text first
+                    if !current_text.is_empty() {
+                        for chunk in split_text_chunks(&current_text) {
+                            let serial = self.connection.serial();
+                            self.device.device().start_emulating(serial, self.sequence);
+                            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+                            text_interface.utf8(chunk);
+                            self.device
+                                .device()
+                                .frame(serial, self.started_at.elapsed().as_micros() as u64);
+                            self.device.device().stop_emulating(serial);
+                        }
+                        current_text.clear();
+                    }
+                    // Send control character as keyboard event
+                    // (Will be flushed and handled separately)
+                    self.send_control_char(c);
+                }
+                _ => current_text.push(c),
+            }
         }
+        // Send any remaining text
+        if !current_text.is_empty() {
+            for chunk in split_text_chunks(&current_text) {
+                let serial = self.connection.serial();
+                self.device.device().start_emulating(serial, self.sequence);
+                self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+                text_interface.utf8(chunk);
+                self.device
+                    .device()
+                    .frame(serial, self.started_at.elapsed().as_micros() as u64);
+                self.device.device().stop_emulating(serial);
+            }
+        }
+    }
+
+    fn send_control_char(&mut self, c: char) {
+        let keycode = match c {
+            '\n' => self.return_keycode,
+            '\t' => self.tab_keycode,
+            _ => return,
+        };
+        let serial = self.connection.serial();
+        self.device.device().start_emulating(serial, self.sequence);
+        self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+        self.keyboard.key(keycode, ei::keyboard::KeyState::Press);
+        self.keyboard.key(keycode, ei::keyboard::KeyState::Released);
+        self.device
+            .device()
+            .frame(serial, self.started_at.elapsed().as_micros() as u64);
+        self.device.device().stop_emulating(serial);
     }
 
     /// Types `text` one character at a time over `ei_keyboard`, flushing and

@@ -1,0 +1,16 @@
+[package]
+name = "wayexpand-backend-clipboard"
+description = "Clipboard-based text injection backend for WayExpand (fallback for newlines)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+wayexpand-core = { path = "../core" }
+x11-clipboard = "0.9"
+thiserror.workspace = true

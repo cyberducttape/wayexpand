@@ -17,6 +17,14 @@ override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand-gui usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-ui usr/bin/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
+	dh_install --package=wayexpand assets/icon/hicolor/16x16/apps/wayexpand.png usr/share/icons/hicolor/16x16/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/24x24/apps/wayexpand.png usr/share/icons/hicolor/24x24/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/32x32/apps/wayexpand.png usr/share/icons/hicolor/32x32/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/48x48/apps/wayexpand.png usr/share/icons/hicolor/48x48/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/64x64/apps/wayexpand.png usr/share/icons/hicolor/64x64/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/128x128/apps/wayexpand.png usr/share/icons/hicolor/128x128/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/256x256/apps/wayexpand.png usr/share/icons/hicolor/256x256/apps/
+	dh_install --package=wayexpand assets/icon/hicolor/512x512/apps/wayexpand.png usr/share/icons/hicolor/512x512/apps/
 	dh_install --package=wayexpand systemd/wayexpand.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-input-method.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-evdev.service usr/lib/systemd/user/

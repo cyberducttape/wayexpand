@@ -11,13 +11,14 @@ mod template;
 
 pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorError, InputSource,
-    InputSourceError, TextInjector,
+    InputSourceError, TextInjector, WindowTracker, WindowTrackerError,
 };
 pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, HotkeyConfig, MatchMode, Settings,
 };
 pub use engine::{
     ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent,
+    WindowContext,
 };
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;

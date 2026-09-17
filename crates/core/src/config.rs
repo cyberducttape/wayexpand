@@ -13,6 +13,8 @@ const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
 const MAX_DESCRIPTION_CHARS: usize = 512;
 const MAX_TAGS: usize = 32;
 const MAX_TAG_CHARS: usize = 64;
+const MAX_APP_FILTERS: usize = 32;
+const MAX_APP_FILTER_CHARS: usize = 256;
 const MAX_COMMAND_ARGS: usize = 32;
 const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
 const MAX_COMMAND_ARG_CHARS: usize = 1024;
@@ -79,6 +81,14 @@ pub struct ExpansionConfig {
     pub description: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub category: String,
+    /// Case-insensitive substrings matched against the focused window's
+    /// app id or title. Empty means unrestricted. If window tracking is
+    /// unavailable on the running compositor, a non-empty filter fails
+    /// closed (the expansion never matches) rather than firing everywhere.
+    #[serde(default)]
+    pub app_filter: Vec<String>,
     #[serde(default)]
     pub match_mode: MatchMode,
     #[serde(default)]
@@ -155,6 +165,8 @@ pub enum ConfigError {
     DescriptionTooLong { index: usize, maximum: usize },
     #[error("expansion {index} has invalid tags")]
     InvalidTags { index: usize },
+    #[error("expansion {index} has an invalid app filter")]
+    InvalidAppFilter { index: usize },
     #[error("expansion {index} has an invalid command: {reason}")]
     InvalidCommand { index: usize, reason: &'static str },
     #[error("duplicate trigger {trigger:?} in expansions {first} and {second}")]
@@ -232,6 +244,9 @@ impl ConfigError {
                 format!("expansion {index} description is too long (maximum {maximum})")
             }
             Self::InvalidTags { index } => format!("expansion {index} has invalid tags"),
+            Self::InvalidAppFilter { index } => {
+                format!("expansion {index} has an invalid app filter")
+            }
             Self::InvalidCommand { index, reason } => {
                 format!("expansion {index} has an invalid command ({reason})")
             }
@@ -561,6 +576,15 @@ impl Config {
             {
                 return Err(ConfigError::InvalidTags { index });
             }
+            if expansion.app_filter.len() > MAX_APP_FILTERS
+                || expansion.app_filter.iter().any(|filter| {
+                    filter.is_empty()
+                        || filter.chars().count() > MAX_APP_FILTER_CHARS
+                        || filter.contains('\0')
+                })
+            {
+                return Err(ConfigError::InvalidAppFilter { index });
+            }
             if let Some(command) = &expansion.command {
                 if command.program.trim().is_empty() {
                     return Err(ConfigError::InvalidCommand {
@@ -759,6 +783,53 @@ mod tests {
             0o600
         );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn pre_category_config_without_new_fields_still_parses() {
+        // A config written before `category`/`app_filter` existed: neither
+        // field is present. `#[serde(default)]` must keep this loadable
+        // indefinitely -- an old config file must never fail to parse just
+        // because the schema grew new optional fields.
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":legacy"
+            replacement = "still works"
+            description = "written before category/app_filter existed"
+            tags = ["old"]
+            match_mode = "immediate"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        let expansion = &config.expansion[0];
+        assert_eq!(expansion.trigger, ":legacy");
+        assert_eq!(expansion.category, "");
+        assert!(expansion.app_filter.is_empty());
+    }
+
+    #[test]
+    fn app_filter_rejects_empty_entries_and_excess_count() {
+        let empty_entry = Config::parse(
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"\"]\n",
+        );
+        assert!(matches!(
+            empty_entry,
+            Err(ConfigError::InvalidAppFilter { index: 0 })
+        ));
+
+        let too_many = format!(
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [{}]\n",
+            (0..MAX_APP_FILTERS + 1)
+                .map(|n| format!("\"app{n}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        assert!(matches!(
+            Config::parse(&too_many),
+            Err(ConfigError::InvalidAppFilter { index: 0 })
+        ));
     }
 
     #[test]
