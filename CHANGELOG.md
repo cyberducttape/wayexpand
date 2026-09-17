@@ -10,6 +10,35 @@ All notable changes to WayExpand are documented here.
 
 ### Changed
 
+## [1.0.0] - 2026-09-17
+
+This is the first stable release. WayExpand is now recommended for production use on Wayland desktops. The API and configuration format are stable within 1.x versions. See [COMPATIBILITY.md](docs/COMPATIBILITY.md) for stability guarantees.
+
+### Added
+
+- **Stability guarantees** for CLI exit codes, JSON output shapes, and TOML config schema (see [COMPATIBILITY.md](docs/COMPATIBILITY.md))
+- **Security audit** with verification of command execution, config permissions, socket security, and D-Bus integration
+- **CI build hardening**: Vendor all dependencies for offline Launchpad builds; explicit Rust toolchain configuration for modified HOME environments
+- **Comprehensive documentation**: COMPATIBILITY.md for third-party integrations, SECURITY_AUDIT.md for compliance verification
+
+### Fixed
+
+- GitHub Actions CI: Set `RUSTUP_TOOLCHAIN=stable` in installer for isolated HOME environments
+- Launchpad Debian builds: Restored `CARGO_NET_OFFLINE=true` and added vendored dependency support
+- Debian packaging: Added debian/source/format and debian/cargo-checksum.json for dh-cargo compatibility
+
+### Changed
+
+- Release tagging: v0.2.1 build/CI hardening → ready for 1.0.0 certification
+- Compositor support status moved from "Experimental" to "Supported" for tested backends per [INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) protocol
+- Control socket and daemon security model formally documented in [SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
+
+### Known Limitations
+
+- **Window tracking (app_filter)**: KDE Plasma only. wlroots (`wlr-foreign-toplevel-management`) implementation planned for 1.1
+- **Sensitive field detection**: Not available with `--source=evdev` backend; see [SECURITY.md](SECURITY.md) for tradeoff documentation
+- **Preedit/IME composition**: Not supported; tracked as future enhancement per [INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md)
+
 ## [0.2.0] - 2026-09-16
 
 ### Added
