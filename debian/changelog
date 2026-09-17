@@ -1,3 +1,15 @@
+wayexpand (1.0.0-1) focal; urgency=medium
+
+  * Release v1.0.0: Production-ready with stability guarantees
+  * Add stability guarantees for CLI exit codes, JSON outputs, config schema
+  * Complete security audit against threat model (no vulnerabilities found)
+  * Comprehensive documentation: COMPATIBILITY.md, SECURITY_AUDIT.md, roadmaps
+  * Known limitations documented with clear 1.1 roadmap
+  * Build system hardened: vendored dependencies, fixed CI on GitHub and Launchpad
+  * Verified new crates (backend-clipboard, backend-kwin-window)
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Wed, 17 Sep 2026 13:00:00 +0000
+
 wayexpand (0.2.0-1) focal; urgency=medium
 
   * Release v0.2.0: evdev backend, GUI redesign, character-drop fix
