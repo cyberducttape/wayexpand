@@ -1,6 +1,6 @@
 use crate::{
-    render_template, CommandConfig, Config, ConfigError, HotkeyConfig, KeyChord, MatchMode,
-    Matcher, TemplateContext, TextInjector,
+    render_template_with_cursor, CommandConfig, Config, ConfigError, HotkeyConfig, KeyChord,
+    MatchMode, Matcher, TextInjector,
 };
 use std::{
     collections::VecDeque,
@@ -49,6 +49,11 @@ pub struct ExpansionResult {
     pub trigger: String,
     pub erase_chars: usize,
     pub insert: String,
+    /// Characters to move the cursor left after `insert` is typed, from a
+    /// `{{cursor}}` marker in the replacement. `None`/`Some(0)` leave the
+    /// cursor at the end, matching every replacement written before this
+    /// existed.
+    pub cursor_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +96,14 @@ pub struct ExpansionEngine {
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
     current_window: Option<WindowContext>,
+    undo_chord: Option<KeyChord>,
+    /// The most recent successful expansion, kept only until the very next
+    /// event of any other kind (see `process`): `(text to type back,
+    /// characters to erase)`. Not set for a result with a `{{cursor}}`
+    /// marker, since undoing after the user has typed more text at that
+    /// repositioned cursor has no single well-defined "erase N characters
+    /// backward" meaning.
+    last_expansion: Option<(String, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +146,13 @@ impl ExpansionEngine {
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
         let max_buffer_chars = config.settings.max_buffer_chars;
+        // `validate()` above already confirmed this parses; a config that
+        // fails to load is never used to construct an engine.
+        let undo_chord = config
+            .settings
+            .undo_chord
+            .as_deref()
+            .and_then(|chord| KeyChord::parse(chord).ok());
         let command_cache = vec![None; config.expansion.len()];
         let hotkeys = config
             .hotkey
@@ -156,6 +176,8 @@ impl ExpansionEngine {
             command_cache,
             hotkeys,
             current_window: None,
+            undo_chord,
+            last_expansion: None,
         })
     }
 
@@ -198,6 +220,29 @@ impl ExpansionEngine {
             .collect()
     }
 
+    /// If `chord` matches the configured `settings.undo_chord` and an
+    /// undoable expansion is still pending (see `last_expansion`), consumes
+    /// it and returns the `ExpansionResult` that reverts it: erase what was
+    /// inserted, type the original trigger back. The caller applies this
+    /// exactly like a normal expansion (`ExpansionEngine::apply`). Returns
+    /// `None` if undo is unconfigured, paused, the chord doesn't match, or
+    /// nothing is pending to undo.
+    pub fn try_undo(&mut self, chord: &KeyChord) -> Option<ExpansionResult> {
+        if !self.capture_enabled {
+            return None;
+        }
+        if !self.undo_chord.as_ref()?.matches(chord) {
+            return None;
+        }
+        let (restore_text, erase_chars) = self.last_expansion.take()?;
+        Some(ExpansionResult {
+            trigger: String::new(),
+            erase_chars,
+            insert: restore_text,
+            cursor_offset: None,
+        })
+    }
+
     /// Execute one validated hotkey action without invoking a shell. Output
     /// is discarded and the process is bounded by the configured timeout.
     pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
@@ -233,6 +278,14 @@ impl ExpansionEngine {
     /// Process an event stream. A text event may contain multiple Unicode
     /// scalar values; matching is performed after each one.
     pub fn process(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
+        // A pending undo is valid only immediately after the expansion it
+        // would revert, with no other event in between. `InputEvent::Key`
+        // is exempt: it never touches the buffer or produces a result here
+        // (see below), and is how the undo chord itself arrives -- clearing
+        // on it would make undo impossible to ever trigger.
+        if !matches!(event, InputEvent::Key(_)) {
+            self.last_expansion = None;
+        }
         match event {
             InputEvent::Key(_) => Vec::new(),
             InputEvent::Text(text) => {
@@ -315,7 +368,8 @@ impl ExpansionEngine {
                         if !self.match_allowed(config_index, length) {
                             continue;
                         }
-                        let Ok(mut insert) = self.render_expansion(config_index) else {
+                        let Ok((mut insert, cursor_offset)) = self.render_expansion(config_index)
+                        else {
                             self.clear_buffer();
                             continue;
                         };
@@ -329,10 +383,14 @@ impl ExpansionEngine {
                             break;
                         }
                         result_bytes = result_bytes.saturating_add(expansion_bytes);
+                        if cursor_offset.is_none() {
+                            self.last_expansion = Some((typed.clone(), insert.chars().count()));
+                        }
                         results.push(ExpansionResult {
                             trigger,
                             erase_chars: length,
                             insert,
+                            cursor_offset,
                         });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
@@ -386,35 +444,49 @@ impl ExpansionEngine {
         let propagate_case = self.config.expansion[config_index].propagate_case;
         // Read the actually-typed trigger text (which may be an uppercase
         // or capitalized variant registered in the matcher for this entry;
-        // see `ExpansionEngine::new`) before it is popped off below.
-        let typed_case_source = propagate_case.then(|| {
+        // see `ExpansionEngine::new`) before it is popped off below. Needed
+        // both for case propagation and as the text an undo restores.
+        let typed: String = {
             let start = self.buffer.len().saturating_sub(length);
-            self.buffer.iter().skip(start).collect::<String>()
-        });
-        let mut insert = self.render_expansion(config_index).ok()?;
-        if let Some(typed) = typed_case_source {
+            self.buffer.iter().skip(start).collect()
+        };
+        let (mut insert, cursor_offset) = self.render_expansion(config_index).ok()?;
+        if propagate_case {
             insert = apply_case_style(&typed, &insert);
         }
         for _ in 0..length {
             self.buffer.pop_back();
         }
+        if cursor_offset.is_none() {
+            self.last_expansion = Some((typed, insert.chars().count()));
+        }
         Some(ExpansionResult {
             trigger,
             erase_chars: length,
             insert,
+            cursor_offset,
         })
     }
 
-    fn render_expansion(&mut self, config_index: usize) -> Result<String, ()> {
+    /// Renders an expansion's text and, for a plain (non-command-backed)
+    /// template containing a `{{cursor}}` marker, the number of characters
+    /// from the end of the rendered text the cursor should land at.
+    /// Command output is used verbatim -- it is not hand-authored per
+    /// invocation the way a template is, so `{{cursor}}` is not recognized
+    /// in it.
+    fn render_expansion(&mut self, config_index: usize) -> Result<(String, Option<usize>), ()> {
         let expansion = &self.config.expansion[config_index];
         let Some(command) = &expansion.command else {
-            return render_template(&expansion.replacement, &TemplateContext::system())
-                .map_err(|_| ());
+            return render_template_with_cursor(
+                &expansion.replacement,
+                &crate::TemplateContext::system(),
+            )
+            .map_err(|_| ());
         };
         if command.cache_ms > 0 {
             if let Some(entry) = self.command_cache[config_index].as_ref() {
                 if entry.expires_at > Instant::now() {
-                    return Ok(entry.value.clone());
+                    return Ok((entry.value.clone(), None));
                 }
             }
         }
@@ -425,7 +497,7 @@ impl ExpansionEngine {
                 value: value.clone(),
             });
         }
-        Ok(value)
+        Ok((value, None))
     }
 
     /// Resets the matcher buffer to a known boundary. Always use this
@@ -487,6 +559,12 @@ impl ExpansionEngine {
         result: &ExpansionResult,
     ) -> Result<(), ExpansionError> {
         injector.replace(&result.trigger, &result.insert)?;
+        // Best-effort: a `{{cursor}}` marker's placement failing (or being
+        // unsupported by this backend) does not mean the expansion itself
+        // failed, since the replacement text above was already inserted.
+        if let Some(offset) = result.cursor_offset.filter(|offset| *offset > 0) {
+            let _ = injector.move_cursor_left(offset);
+        }
         Ok(())
     }
 }
@@ -494,6 +572,7 @@ impl ExpansionEngine {
 fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
+
 
 /// Uppercases the first alphabetic character in `text`, leaving everything
 /// else (including a non-alphabetic prefix like `:` in a trigger) as-is.
@@ -1059,6 +1138,7 @@ replacement = "bad\u0000value""#;
             trigger: ":x".into(),
             erase_chars: 2,
             insert: "value".into(),
+            cursor_offset: None,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1094,6 +1174,7 @@ replacement = "bad\u0000value""#;
             trigger: ":x".into(),
             erase_chars: 2,
             insert: "value".into(),
+            cursor_offset: None,
         };
         let mut injector = AtomicInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1394,5 +1475,137 @@ replacement = "bad\u0000value""#;
             engine.process(InputEvent::Text(":sig".into()))[0].insert,
             "regards"
         );
+    }
+
+    #[test]
+    fn cursor_marker_splits_replacement_and_reports_trailing_length() {
+        let config =
+            Config::parse("[[expansion]]\ntrigger = \":paren\"\nreplacement = \"(){{cursor}}!\"")
+                .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = engine.process(InputEvent::Text(":paren".into()))[0].clone();
+        assert_eq!(result.insert, "()!");
+        // "!" is the one character after the marker, so the cursor should
+        // land between "(" and ")": one character back from the end.
+        assert_eq!(result.cursor_offset, Some(1));
+    }
+
+    #[test]
+    fn cursor_marker_is_optional_and_defaults_to_end_of_text() {
+        let config =
+            Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"").unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = engine.process(InputEvent::Text(":sig".into()))[0].clone();
+        assert_eq!(result.insert, "regards");
+        assert_eq!(result.cursor_offset, None);
+    }
+
+    #[test]
+    fn cursor_marker_works_alongside_other_template_variables() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":hi\"\nreplacement = \"Hi {{cursor}}, {{username}}!\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = engine.process(InputEvent::Text(":hi".into()))[0].clone();
+        let expected_tail = format!(", {}!", crate::TemplateContext::system().username);
+        assert_eq!(result.insert, format!("Hi {expected_tail}"));
+        assert_eq!(result.cursor_offset, Some(expected_tail.chars().count()));
+    }
+
+    #[test]
+    fn cursor_marker_is_not_recognized_in_command_output() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"fallback\"\n[expansion.command]\nprogram = \"printf\"\nargs = [\"literal {{cursor}} text\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = engine.process(InputEvent::Text(":cmd".into()))[0].clone();
+        assert_eq!(result.insert, "literal {{cursor}} text");
+        assert_eq!(result.cursor_offset, None);
+    }
+
+    #[test]
+    fn undo_reverts_the_expansion_immediately_following_it() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let expansion = engine.process(InputEvent::Text(":sig".into()))[0].clone();
+        assert_eq!(expansion.insert, "regards");
+        let undo = engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("an expansion is pending to undo");
+        // Erases the full inserted replacement and types the original
+        // trigger back.
+        assert_eq!(undo.erase_chars, "regards".chars().count());
+        assert_eq!(undo.insert, ":sig");
+    }
+
+    #[test]
+    fn undo_is_a_one_shot_and_does_nothing_without_a_pending_expansion() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::Text(":sig".into()));
+        let chord = KeyChord::parse("Ctrl+Z").unwrap();
+        assert!(engine.try_undo(&chord).is_some());
+        // A second press right after has nothing left to undo.
+        assert!(engine.try_undo(&chord).is_none());
+    }
+
+    #[test]
+    fn undo_is_invalidated_by_any_typing_in_between() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::Text(":sig".into()));
+        engine.process(InputEvent::Text("x".into()));
+        assert!(engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn undo_is_disabled_when_not_configured() {
+        let config =
+            Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"").unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::Text(":sig".into()));
+        assert!(engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn undo_does_not_apply_to_a_cursor_marker_expansion() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":paren\"\nreplacement = \"(){{cursor}}\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::Text(":paren".into()));
+        assert!(engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn undo_restores_the_case_variant_actually_typed() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"\npropagate_case = true",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.process(InputEvent::Text(":SIG".into()));
+        let undo = engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .unwrap();
+        assert_eq!(undo.insert, ":SIG");
     }
 }

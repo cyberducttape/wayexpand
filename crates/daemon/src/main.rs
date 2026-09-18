@@ -840,6 +840,14 @@ fn process_event(
                 Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
             }
         }
+        if let Some(result) = engine.try_undo(&chord) {
+            if let Some(backend) = injector.as_deref_mut() {
+                if let Err(source) = ExpansionEngine::apply(backend, &result) {
+                    return Err(EventError { result, source });
+                }
+                info!("expansion undone");
+            }
+        }
         return Ok(());
     }
     for result in engine.process(event) {

@@ -238,6 +238,24 @@ impl Strings {
         }
     }
 
+    pub fn undo_chord(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Undo shortcut",
+            Language::German => "Rückgängig-Tastenkombination",
+        }
+    }
+
+    pub fn undo_chord_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Pressed right after an expansion with nothing typed in between, reverts it. Leave empty to disable."
+            }
+            Language::German => {
+                "Direkt nach einer Erweiterung gedrückt (ohne dazwischen zu tippen), macht sie rückgängig. Leer lassen zum Deaktivieren."
+            }
+        }
+    }
+
     pub fn backend_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Backend status",

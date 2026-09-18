@@ -1,4 +1,4 @@
-use crate::{render_template, KeyChord, TemplateContext, TemplateError};
+use crate::{render_template_with_cursor, KeyChord, TemplateContext, TemplateError};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -54,6 +54,12 @@ pub struct HotkeyConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub max_buffer_chars: usize,
+    /// A key chord (e.g. `"Ctrl+Z"`) that, pressed immediately after a
+    /// successful expansion with no other keystroke in between, reverts it
+    /// -- erasing the inserted replacement and typing the original trigger
+    /// back. `None` (the default) disables this entirely, matching every
+    /// config written before it existed.
+    pub undo_chord: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -68,6 +74,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             max_buffer_chars: 128,
+            undo_chord: None,
         }
     }
 }
@@ -183,6 +190,8 @@ pub enum ConfigError {
     },
     #[error("max_buffer_chars must be between 1 and 4096")]
     InvalidBufferLimit,
+    #[error("settings.undo_chord is empty, ambiguous, or contains an unknown modifier")]
+    InvalidUndoChord,
     #[error("configuration contains {count} expansions; maximum is {maximum}")]
     TooManyExpansions { count: usize, maximum: usize },
     #[error("configuration contains {count} hotkeys; maximum is {maximum}")]
@@ -260,6 +269,7 @@ impl ConfigError {
                 format!("duplicate trigger in expansions {first} and {second}")
             }
             Self::InvalidBufferLimit => "max_buffer_chars is outside the allowed range".into(),
+            Self::InvalidUndoChord => "settings.undo_chord is invalid".into(),
             Self::TooManyExpansions { count, maximum } => {
                 format!("too many expansions ({count}; maximum {maximum})")
             }
@@ -465,6 +475,9 @@ impl Config {
         if !(1..=4096).contains(&self.settings.max_buffer_chars) {
             return Err(ConfigError::InvalidBufferLimit);
         }
+        if let Some(undo_chord) = &self.settings.undo_chord {
+            KeyChord::parse(undo_chord).map_err(|_| ConfigError::InvalidUndoChord)?;
+        }
         if self.hotkey.len() > MAX_HOTKEYS {
             return Err(ConfigError::TooManyHotkeys {
                 count: self.hotkey.len(),
@@ -641,7 +654,7 @@ impl Config {
                     });
                 }
             } else if let Err(source) =
-                render_template(&expansion.replacement, &TemplateContext::default())
+                render_template_with_cursor(&expansion.replacement, &TemplateContext::default())
             {
                 return Err(ConfigError::InvalidTemplate { index, source });
             }

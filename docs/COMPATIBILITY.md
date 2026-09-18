@@ -53,7 +53,8 @@ Tests a text input against the expansion engine and returns matching results.
       "trigger_characters": 5,
       "erase_characters": 5,
       "replacement_bytes": 23,
-      "replacement": "example@example.com"
+      "replacement": "example@example.com",
+      "cursor_offset": null
     }
   ]
 }
@@ -66,6 +67,7 @@ Tests a text input against the expansion engine and returns matching results.
   - `erase_characters` (int): Number of characters to erase (may differ from trigger for multi-char sequences)
   - `replacement_bytes` (int): Byte length of replacement (for buffer sizing)
   - `replacement` (string): The expanded text to insert
+  - `cursor_offset` (int or null, 1.0.1+): Characters to move the cursor left after typing `replacement`, from a `{{cursor}}` marker in the source template; `null` when the replacement has no marker (cursor stays at the end, matching every replacement written before this field existed)
 
 **Stability:** 🔒 **Stable** — fields guaranteed present; new fields added after existing ones with opt-in via consumer code
 
@@ -328,6 +330,16 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   casing to the replacement (e.g. trigger `:sig` typed as `:SIG` yields an
   uppercased replacement). Off by default, so existing configs are
   unaffected; matching stays strictly literal unless a snippet opts in.
+- `Settings::undo_chord` (string or absent, default absent) — a key chord
+  (e.g. `"Ctrl+Z"`) that, pressed immediately after a successful expansion
+  with no other keystroke in between, reverts it. Disabled unless set.
+- Template variables `date`, `time`, and `datetime` accept a relative
+  offset (e.g. `{{date+3d}}`, `{{time-2h}}`); see
+  [docs/wiki/Configuration.md](wiki/Configuration.md).
+- `{{cursor}}` template marker — places the cursor at that position after
+  the replacement is typed, instead of at the end. Supported on the libei
+  and wlroots backends; silently has no effect on input-method-v2 (no
+  protocol-level way to move the cursor after committing text).
 
 All new fields default to `null`, `false`, or empty if absent from old configurations.
 
