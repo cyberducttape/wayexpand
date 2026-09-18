@@ -60,6 +60,11 @@ pub struct Settings {
     /// back. `None` (the default) disables this entirely, matching every
     /// config written before it existed.
     pub undo_chord: Option<String>,
+    /// Font size scaling for the GUI (Small, Normal, Large, ExtraLarge, Huge).
+    /// Defaults to Normal (1.0x). Enables accessibility for vision-impaired users
+    /// and high-DPI displays.
+    #[serde(default)]
+    pub font_scale: FontScale,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -70,11 +75,35 @@ pub enum MatchMode {
     WordBoundary,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FontScale {
+    Small,
+    #[default]
+    Normal,
+    Large,
+    ExtraLarge,
+    Huge,
+}
+
+impl FontScale {
+    pub fn multiplier(&self) -> f32 {
+        match self {
+            FontScale::Small => 0.8,
+            FontScale::Normal => 1.0,
+            FontScale::Large => 1.2,
+            FontScale::ExtraLarge => 1.5,
+            FontScale::Huge => 2.0,
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             max_buffer_chars: 128,
             undo_chord: None,
+            font_scale: FontScale::Normal,
         }
     }
 }

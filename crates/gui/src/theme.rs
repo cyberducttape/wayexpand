@@ -6,6 +6,7 @@ use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle, Vec2,
 };
 use crate::colorpack::{ColorPack, ColorScheme};
+use wayexpand_core::FontScale;
 
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -52,12 +53,12 @@ impl Palette {
 /// defaults. Called once at startup for both themes so switching between
 /// them (via the toolbar toggle, which just flips `Context::set_theme`) is
 /// instant.
-pub fn install_pack(ctx: &egui::Context, pack: ColorPack) {
-    apply_for_pack(ctx, egui::Theme::Dark, pack);
-    apply_for_pack(ctx, egui::Theme::Light, pack);
+pub fn install_pack(ctx: &egui::Context, pack: ColorPack, font_scale: FontScale) {
+    apply_for_pack(ctx, egui::Theme::Dark, pack, font_scale);
+    apply_for_pack(ctx, egui::Theme::Light, pack, font_scale);
 }
 
-fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack) {
+fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font_scale: FontScale) {
     let dark = theme == egui::Theme::Dark;
     let palette = Palette::for_pack(pack, dark);
     let mut style = (*ctx.style_of(theme)).clone();
@@ -66,6 +67,8 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack) {
     } else {
         egui::Visuals::light()
     };
+
+    let scale = font_scale.multiplier();
 
     visuals.override_text_color = None;
     visuals.hyperlink_color = palette.accent;
@@ -114,20 +117,20 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack) {
     style.text_styles = [
         (
             TextStyle::Heading,
-            FontId::new(21.0, FontFamily::Proportional),
+            FontId::new(21.0 * scale, FontFamily::Proportional),
         ),
-        (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(14.5 * scale, FontFamily::Proportional)),
         (
             TextStyle::Button,
-            FontId::new(14.5, FontFamily::Proportional),
+            FontId::new(14.5 * scale, FontFamily::Proportional),
         ),
         (
             TextStyle::Small,
-            FontId::new(12.0, FontFamily::Proportional),
+            FontId::new(12.0 * scale, FontFamily::Proportional),
         ),
         (
             TextStyle::Monospace,
-            FontId::new(14.0, FontFamily::Monospace),
+            FontId::new(14.0 * scale, FontFamily::Monospace),
         ),
     ]
     .into();
