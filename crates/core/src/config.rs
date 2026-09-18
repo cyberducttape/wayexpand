@@ -139,6 +139,50 @@ pub struct ExpansionConfig {
     pub propagate_case: bool,
 }
 
+impl ExpansionConfig {
+    /// The trigger strings this expansion actually inserts into the
+    /// matcher's trie: just `trigger`, or (when `propagate_case` is
+    /// enabled) `trigger` plus its uppercase and capitalized forms -- see
+    /// `ExpansionEngine::new`, which builds the matcher from exactly this
+    /// per expansion. `validate()` checks collisions across these effective
+    /// triggers rather than the literal `trigger` field: two expansions
+    /// whose configured triggers never collide as written can still
+    /// collide once case variants are generated (`:sig` with
+    /// `propagate_case` generates `:SIG`, which would otherwise silently
+    /// shadow an unrelated, literally-configured `:SIG` expansion in the
+    /// matcher with no validation error at all).
+    pub(crate) fn effective_triggers(&self) -> Vec<String> {
+        let mut variants = vec![self.trigger.clone()];
+        if self.propagate_case {
+            for variant in [self.trigger.to_uppercase(), capitalize_first_letter(&self.trigger)] {
+                if !variants.contains(&variant) {
+                    variants.push(variant);
+                }
+            }
+        }
+        variants
+    }
+}
+
+/// Capitalizes the first alphabetic character of `text`, leaving everything
+/// else (including any non-alphabetic prefix, e.g. a `:` trigger sigil)
+/// unchanged. Shared by `ExpansionConfig::effective_triggers` (to generate
+/// the capitalized trigger variant) and the engine's replacement recasing
+/// for `propagate_case` (to capitalize the *output* text the same way).
+pub(crate) fn capitalize_first_letter(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut capitalized = false;
+    for character in text.chars() {
+        if !capitalized && character.is_alphabetic() {
+            result.extend(character.to_uppercase());
+            capitalized = true;
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CommandConfig {
@@ -701,23 +745,37 @@ impl Config {
         // Sorting makes duplicate validation O(n log n) instead of comparing
         // every enabled expansion with every other expansion. Prefixes are
         // intentionally allowed; the matcher selects the longest suffix.
-        let mut enabled: Vec<_> = self
+        //
+        // This checks *effective* triggers (literal trigger, plus any
+        // propagate_case-generated variants), not just the literal
+        // `trigger` field: the matcher is built from effective triggers
+        // (see `ExpansionEngine::new`), so two expansions with distinct
+        // configured triggers can still collide once case variants are
+        // generated -- and without this, that collision would silently
+        // make one expansion unreachable instead of failing validation.
+        let mut enabled: Vec<(usize, String)> = self
             .expansion
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry.enabled)
-            .map(|(index, entry)| (index, entry.trigger.as_str()))
+            .flat_map(|(index, entry)| {
+                entry
+                    .effective_triggers()
+                    .into_iter()
+                    .map(move |trigger| (index, trigger))
+            })
             .collect();
-        enabled
-            .sort_unstable_by(|left, right| left.1.cmp(right.1).then_with(|| left.0.cmp(&right.0)));
+        enabled.sort_unstable_by(|left, right| {
+            left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0))
+        });
         for pair in enabled.windows(2) {
-            let (first_index, first) = pair[0];
-            let (second_index, second) = pair[1];
+            let (first_index, first) = &pair[0];
+            let (second_index, second) = &pair[1];
             if first == second {
                 return Err(ConfigError::DuplicateTrigger {
-                    trigger: first.to_owned(),
-                    first: first_index,
-                    second: second_index,
+                    trigger: first.clone(),
+                    first: *first_index,
+                    second: *second_index,
                 });
             }
         }
@@ -809,6 +867,65 @@ mod tests {
         let summary = error.safe_summary();
         assert!(summary.contains("1234"));
         assert!(!summary.contains("secret-configs"));
+    }
+
+    #[test]
+    fn propagate_case_uppercase_variant_colliding_with_another_trigger_is_rejected() {
+        // `:sig` with propagate_case generates the matcher variant `:SIG`,
+        // which collides with the second expansion's literal `:SIG`
+        // trigger even though neither configured `trigger` string is a
+        // literal duplicate of the other.
+        let error = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            propagate_case = true
+
+            [[expansion]]
+            trigger = ":SIG"
+            replacement = "something else"
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ConfigError::DuplicateTrigger { .. }));
+    }
+
+    #[test]
+    fn propagate_case_capitalized_variant_colliding_with_another_trigger_is_rejected() {
+        // `:sig` with propagate_case also generates `:Sig` (capitalized).
+        let error = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            propagate_case = true
+
+            [[expansion]]
+            trigger = ":Sig"
+            replacement = "something else"
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ConfigError::DuplicateTrigger { .. }));
+    }
+
+    #[test]
+    fn propagate_case_without_collision_is_accepted() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            propagate_case = true
+
+            [[expansion]]
+            trigger = ":unrelated"
+            replacement = "something else"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.expansion.len(), 2);
     }
 
     #[test]
