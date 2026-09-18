@@ -23,7 +23,7 @@ makepkg -si
 
 **To maintain:**
 1. Update `pkgver` and `pkgrel` in `PKGBUILD`
-2. Compute SHA256: `sha256sum wayexpand-0.2.0.tar.gz`
+2. Compute SHA256: `sha256sum wayexpand-1.0.0.tar.gz`
 3. Update `sha256sums` array
 4. Test with `makepkg -si`
 5. Push to AUR git repo (requires AUR account)
@@ -38,7 +38,7 @@ dpkg-buildpackage -us -uc
 dpkg-buildpackage -b
 
 # Install locally
-sudo dpkg -i ../wayexpand_0.2.0-1_amd64.deb
+sudo dpkg -i ../wayexpand_1.0.0-1_amd64.deb
 ```
 
 **To maintain:**
@@ -54,7 +54,7 @@ sudo dpkg -i ../wayexpand_0.2.0-1_amd64.deb
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-mock wayexpand-0.2.0-1.fc39.src.rpm
+mock wayexpand-1.0.0-1.fc39.src.rpm
 ```
 
 **To maintain:**
@@ -83,7 +83,7 @@ cd wayexpand-aur
 # Update PKGBUILD with new version
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Update to v0.2.0"
+git commit -m "Update to v1.0.0"
 git push
 ```
 
@@ -101,7 +101,7 @@ git push
 debuild -S -sa
 
 # Upload to PPA
-dput ppa:username/wayexpand ../wayexpand_0.2.0-1_source.changes
+dput ppa:username/wayexpand ../wayexpand_1.0.0-1_source.changes
 ```
 
 ### Fedora/Copr
@@ -153,7 +153,7 @@ wayexpand-gui
 
 When releasing a new version:
 
-1. **Tag in git:** `git tag v0.2.0 && git push origin v0.2.0`
+1. **Tag in git:** `git tag v1.0.0 && git push origin v1.0.0`
 2. **Update all packaging files:**
    - `PKGBUILD`: bump `pkgver`, reset `pkgrel=1`
    - `debian/changelog`: add new entry (use `dch -i`)
