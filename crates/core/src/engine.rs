@@ -1,6 +1,6 @@
 use crate::{
-    render_template_with_cursor, CommandConfig, Config, ConfigError, HotkeyConfig, KeyChord,
-    MatchMode, Matcher, TextInjector,
+    config::capitalize_first_letter, render_template_with_cursor, CommandConfig, Config,
+    ConfigError, HotkeyConfig, KeyChord, MatchMode, Matcher, TextInjector,
 };
 use std::{
     collections::VecDeque,
@@ -122,25 +122,21 @@ impl ExpansionEngine {
         // matching itself case-insensitive (which would affect every
         // expansion, not just ones that opted in). `take_match` later reads
         // back which form was actually typed to decide how to case the
-        // replacement.
+        // replacement. `effective_triggers()` is the single source of
+        // truth for this expansion -- `validate()` (called just above)
+        // checks collisions across the exact same variants, so a config
+        // that reaches this point is already known not to have two
+        // expansions competing for the same matcher entry.
         let enabled: Vec<(usize, String)> = config
             .expansion
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry.enabled)
             .flat_map(|(index, entry)| {
-                let mut variants = vec![entry.trigger.clone()];
-                if entry.propagate_case {
-                    for variant in [
-                        entry.trigger.to_uppercase(),
-                        capitalize_first_letter(&entry.trigger),
-                    ] {
-                        if !variants.contains(&variant) {
-                            variants.push(variant);
-                        }
-                    }
-                }
-                variants.into_iter().map(move |trigger| (index, trigger))
+                entry
+                    .effective_triggers()
+                    .into_iter()
+                    .map(move |trigger| (index, trigger))
             })
             .collect();
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
@@ -573,24 +569,6 @@ fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 
-
-/// Uppercases the first alphabetic character in `text`, leaving everything
-/// else (including a non-alphabetic prefix like `:` in a trigger) as-is.
-/// Used both to derive a trigger's capitalized variant and, symmetrically,
-/// to capitalize a replacement for `propagate_case`.
-fn capitalize_first_letter(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut capitalized = false;
-    for character in text.chars() {
-        if !capitalized && character.is_alphabetic() {
-            result.extend(character.to_uppercase());
-            capitalized = true;
-        } else {
-            result.push(character);
-        }
-    }
-    result
-}
 
 /// Recases `text` (a rendered replacement) to match the casing pattern of
 /// `typed` (the trigger as the user actually typed it), for expansions with
