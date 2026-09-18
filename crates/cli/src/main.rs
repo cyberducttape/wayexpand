@@ -98,6 +98,7 @@ fn run() -> Result<()> {
                             "erase_characters": result.erase_chars,
                             "replacement_bytes": result.insert.len(),
                             "replacement": result.insert,
+                            "cursor_offset": result.cursor_offset,
                         })).collect::<Vec<_>>(),
                     })
                 );
@@ -181,6 +182,7 @@ fn run() -> Result<()> {
                             "matched": true,
                             "trigger": result.trigger,
                             "replacement": result.insert,
+                            "cursor_offset": result.cursor_offset,
                         }));
                     } else {
                         println!("trigger: {}", result.trigger);

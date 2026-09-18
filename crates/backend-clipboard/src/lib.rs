@@ -228,6 +228,24 @@ impl TextInjector for ClipboardInjector {
         self.insert(text)?;
         Ok(())
     }
+
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), wayexpand_core::InjectorError> {
+        if count == 0 {
+            return Ok(());
+        }
+        Command::new("xdotool")
+            .arg("key")
+            .arg("--repeat")
+            .arg(count.to_string())
+            .arg("Left")
+            .output()
+            .map_err(|e| wayexpand_core::InjectorError {
+                backend: BACKEND_NAME,
+                message: format!("xdotool cursor-left failed: {}", e),
+                retryable: false,
+            })?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

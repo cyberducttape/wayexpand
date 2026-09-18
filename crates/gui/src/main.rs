@@ -29,6 +29,8 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{date}}", "UTC date"),
     ("{{time}}", "UTC time"),
     ("{{datetime}}", "UTC date and time"),
+    ("{{date+1d}}", "tomorrow's date (also: -1d, +1w, date/time/datetime, d/w/h/m units)"),
+    ("{{cursor}}", "place the cursor here after expanding (supported on the libei and wlroots backends)"),
     ("{{username}}", "current user"),
     ("{{hostname}}", "local hostname"),
     ("{{unix_timestamp}}", "Unix timestamp"),
@@ -82,6 +84,7 @@ struct GuiApp {
     import_preview: Option<(Config, usize)>,
     settings_open: bool,
     settings_buffer: String,
+    settings_undo_chord: String,
     settings_error: Option<String>,
     dark_mode: bool,
     language: Language,
@@ -135,6 +138,7 @@ impl GuiApp {
             .map(|index| config.expansion[index].trigger.clone())
             .unwrap_or_default();
         let settings_buffer = config.settings.max_buffer_chars.to_string();
+        let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
         let prefs = load_gui_prefs();
         let strings = Strings::new(prefs.language);
         Ok(Self {
@@ -158,6 +162,7 @@ impl GuiApp {
             import_preview: None,
             settings_open: false,
             settings_buffer,
+            settings_undo_chord,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),
             language: prefs.language,
@@ -218,6 +223,9 @@ impl GuiApp {
         };
         let mut candidate = self.config.clone();
         candidate.settings.max_buffer_chars = max_buffer_chars;
+        let undo_chord_input = self.settings_undo_chord.trim();
+        candidate.settings.undo_chord = (!undo_chord_input.is_empty())
+            .then(|| undo_chord_input.to_owned());
         if let Err(error) = candidate.validate() {
             let error = error.safe_summary();
             self.message = format!("Settings rejected: {error}");
@@ -229,6 +237,8 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                self.settings_undo_chord =
+                    self.config.settings.undo_chord.clone().unwrap_or_default();
                 self.settings_open = false;
                 self.settings_error = None;
                 self.message = "Settings saved atomically".into();
@@ -967,6 +977,20 @@ impl eframe::App for GuiApp {
                             .small()
                             .color(palette.muted),
                     );
+
+                    ui.add_space(8.0);
+                    ui.label(self.strings.undo_chord());
+                    ui.add(
+                        TextEdit::singleline(&mut self.settings_undo_chord)
+                            .hint_text("Ctrl+Z")
+                            .desired_width(120.0),
+                    );
+                    ui.label(
+                        RichText::new(self.strings.undo_chord_help())
+                            .small()
+                            .color(palette.muted),
+                    );
+
                     if let Some(error) = &self.settings_error {
                         ui.add_space(4.0);
                         ui.colored_label(palette.danger, format!("⚠ {error}"));

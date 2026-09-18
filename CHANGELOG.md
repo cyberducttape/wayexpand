@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
 - **GUI color packs**: six selectable themes including retro monochrome terminal styles (Classic Green, Classic Amber, Classic White), a Retro 80s Neon theme, and a High Contrast accessibility theme, alongside the existing Default theme. Preference persists across restarts. See [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md).
 - **German README** (`README.de.md`).
 - `ExpansionConfig::propagate_case`: opt-in case propagation — typing a trigger in `UPPERCASE` or `Capitalized` form applies the same casing to the replacement. Exposed as a checkbox in the GUI editor. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+- **Date math in templates**: `{{date}}`, `{{time}}`, and `{{datetime}}` accept a relative offset, e.g. `{{date+3d}}`, `{{date-1w}}`, `{{time+5h}}`, `{{datetime+90m}}`.
+- **`{{cursor}}` placement marker**: positions the cursor after typing the replacement instead of leaving it at the end (e.g. `replacement = "(){{cursor}}"`). Implemented on the libei and wlroots backends (both synthesize a Left key); has no effect on input-method-v2, which has no protocol-level way to move the cursor after committing text. Exposed in the GUI's template-variable picker; `wayexpand test/preview --json` report it as `cursor_offset`.
+- **Undo last expansion**: `settings.undo_chord` (e.g. `"Ctrl+Z"`) reverts the most recent expansion — erasing the replacement and typing the original trigger back — if pressed with no other keystroke in between. Disabled unless configured; exposed in the GUI Settings dialog.
 
 ### Fixed
 
@@ -26,6 +29,7 @@ All notable changes to WayExpand are documented here.
 
 - README.md: updated version badge and release banner from the stale v0.2.1 to v1.0.0, and linked the new customization and German documentation.
 - `TextInjector` now requires `Send`, needed for the shutdown-hang fix above; all existing backends already satisfied this.
+- `TextInjector` gained a `move_cursor_left` method (default no-op; non-breaking for any external implementation) for `{{cursor}}` support.
 
 ## [1.0.0] - 2026-09-17
 

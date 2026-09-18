@@ -828,6 +828,15 @@ fn roundtrip_with_timeout(
 }
 
 impl TextInjector for InputMethodSource {
+    // `move_cursor_left` is not overridden (falls back to the trait's
+    // no-op default): `zwp_input_method_v2` offers only `commit_string`
+    // and `delete_surrounding_text`, and every `commit_string` leaves the
+    // cursor immediately after the text it just inserted with no protocol
+    // request to move it back within already-committed text. Re-deleting
+    // and re-committing the trailing text would just land the cursor at
+    // the end again, so there is no sequence of requests in this protocol
+    // that achieves `{{cursor}}` placement -- unlike the keyboard-level
+    // backends (libei, wlroots), which can synthesize an actual Left key.
     fn name(&self) -> &'static str {
         SOURCE_NAME
     }

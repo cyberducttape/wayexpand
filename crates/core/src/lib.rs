@@ -24,4 +24,4 @@ pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{import_espanso, EspansoImport, MigrationError};
 pub use paths::default_config_path;
-pub use template::{render_template, TemplateContext, TemplateError};
+pub use template::{render_template, render_template_with_cursor, TemplateContext, TemplateError};

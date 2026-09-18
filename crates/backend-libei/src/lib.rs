@@ -32,6 +32,8 @@ use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
 
 const BACKEND_NAME: &str = "libei";
 const KEY_BACKSPACE: u32 = 14;
+// Linux evdev keycode for the Left arrow, used for `{{cursor}}` placement.
+const KEY_LEFT: u32 = 105;
 const EI_TEXT_MAX_UTF8_BYTES: usize = 254;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
@@ -635,6 +637,32 @@ impl LibeiInjector {
             .flush()
             .map_err(|error| LibeiError::Flush(error.to_string()))
     }
+
+    /// Sends `count` Left-arrow key presses, for `{{cursor}}` placement
+    /// after a replacement has already been typed in full.
+    fn send_left_arrows(&mut self, count: usize) -> Result<(), LibeiError> {
+        if count == 0 {
+            return Ok(());
+        }
+        let serial = self.connection.serial();
+        for _ in 0..count {
+            self.device.device().start_emulating(serial, self.sequence);
+            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+            self.keyboard.key(KEY_LEFT, ei::keyboard::KeyState::Press);
+            self.device
+                .device()
+                .frame(serial, self.started_at.elapsed().as_micros() as u64);
+            self.keyboard
+                .key(KEY_LEFT, ei::keyboard::KeyState::Released);
+            self.device
+                .device()
+                .frame(serial, self.started_at.elapsed().as_micros() as u64);
+            self.device.device().stop_emulating(serial);
+        }
+        self.connection
+            .flush()
+            .map_err(|error| LibeiError::Flush(error.to_string()))
+    }
 }
 
 fn split_text_chunks(text: &str) -> Vec<&str> {
@@ -772,6 +800,14 @@ impl TextInjector for LibeiInjector {
             })?;
         }
         Ok(())
+    }
+
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
+        self.send_left_arrows(count).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })
     }
 }
 

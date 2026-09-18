@@ -25,6 +25,9 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 };
 
 const BACKEND_NAME: &str = "wlroots-virtual-keyboard";
+// Reserved alongside the BackSpace keycode (8) in every generated keymap,
+// for `{{cursor}}` placement after a replacement has already been typed.
+const LEFT_KEYCODE: u32 = 9;
 const MAX_OUTPUT_CHARS: usize = 8192;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
 static KEYMAP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -396,18 +399,35 @@ impl TextInjector for WlrootsInjector {
             retryable: error.is_retryable(),
         })
     }
+
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
+        self.upload_keymap(std::iter::empty())
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })?;
+        self.send_keys(std::iter::repeat_n(LEFT_KEYCODE, count))
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
+    }
 }
 
 fn build_keymap(
     chars: impl Iterator<Item = char>,
 ) -> Result<(String, HashMap<char, u32>), WlrootsError> {
     let mut mappings = HashMap::new();
-    let mut next_keycode = 9;
+    let mut next_keycode = 10;
     let mut character_count = 0;
     let mut keycodes = String::from(
-        "xkb_keymap {\n xkb_keycodes \"(unnamed)\" { minimum = 8; maximum = 255;\n <K8> = 8;\n",
+        "xkb_keymap {\n xkb_keycodes \"(unnamed)\" { minimum = 8; maximum = 255;\n <K8> = 8;\n <K9> = 9;\n",
     );
-    let mut symbols = String::from("xkb_symbols \"(unnamed)\" {\n key <K8> { [ BackSpace ] };\n");
+    let mut symbols = String::from(
+        "xkb_symbols \"(unnamed)\" {\n key <K8> { [ BackSpace ] };\n key <K9> { [ Left ] };\n",
+    );
     for character in chars {
         character_count += 1;
         if character_count > MAX_OUTPUT_CHARS {
@@ -458,6 +478,7 @@ mod tests {
         assert!(keymap.contains("[ U1F642 ]"));
         assert!(keymap.contains("[ Return ]"));
         assert!(keymap.contains("[ BackSpace ]"));
+        assert!(keymap.contains("[ Left ]"));
     }
 
     #[test]

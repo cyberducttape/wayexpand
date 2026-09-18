@@ -50,7 +50,9 @@ timeout_ms = 1000
 | `tags` | Optional, maximum 32 tags; each tag is bounded and must be non-empty. |
 | `match_mode` | `immediate` expands as soon as a trigger matches; `word-boundary` waits for a safe boundary. |
 | `enabled` | Defaults to `true`; disabled entries remain editable but never match. |
+| `propagate_case` | Defaults to `false`. When `true`, typing the trigger `UPPERCASE` or `Capitalized` applies the same casing to the replacement. |
 | `max_buffer_chars` | Defaults to 128; accepted range is 1–4096. |
+| `undo_chord` | Optional key chord (e.g. `"Ctrl+Z"`, same syntax as a hotkey chord). Pressed right after an expansion with nothing typed in between, reverts it. Absent by default (disabled). |
 | `command.timeout_ms` | Defaults to 500 ms; accepted range is 1–5000 ms. |
 | `command.cache_ms` | Defaults to 0; maximum is 60 seconds. |
 
@@ -71,6 +73,21 @@ Safe built-ins are expanded only after a match:
 
 `{{date}}`, `{{time}}`, `{{datetime}}`, `{{username}}`, `{{hostname}}`,
 `{{unix_timestamp}}`, `{{newline}}`, and `{{tab}}`.
+
+`date`, `time`, and `datetime` also accept a relative offset:
+`{{date+3d}}` (3 days from now), `{{date-1w}}` (1 week ago),
+`{{time+5h}}`, `{{datetime+90m}}`. Supported units are `d` (day), `w`
+(week), `h` (hour), and `m` (minute); the sign is required.
+
+`{{cursor}}` places the cursor after the replacement is typed, instead of
+leaving it at the end -- useful for a template with text on both sides of
+where you'll type next, e.g. `replacement = "(){{cursor}}"` or
+`replacement = "Hi {{cursor}},\n\nBest"`. It is supported on the libei and
+wlroots virtual-keyboard backends (both can synthesize a Left key after
+typing); the input-method-v2 backend has no protocol-level way to move the
+cursor after committing text, so the marker is silently stripped there and
+the cursor is left at the end as usual. Only the first `{{cursor}}` in a
+replacement has effect.
 
 Unknown or unclosed variables fail validation before activation. Templates are
 not shell commands.
