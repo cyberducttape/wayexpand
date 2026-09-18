@@ -83,11 +83,13 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     visuals.error_fg_color = palette.danger;
     visuals.window_corner_radius = CornerRadius::same(12);
     visuals.window_stroke = Stroke::new(1.0, palette.border);
+
+    // Enhanced shadow for depth and polish
     visuals.window_shadow = Shadow {
-        offset: [0, 10],
-        blur: 24,
+        offset: [0, 12],
+        blur: 32,
         spread: 0,
-        color: Color32::from_black_alpha(if dark { 120 } else { 40 }),
+        color: Color32::from_black_alpha(if dark { 140 } else { 50 }),
     };
     visuals.menu_corner_radius = CornerRadius::same(10);
     visuals.popup_shadow = visuals.window_shadow;
@@ -101,13 +103,26 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     ] {
         widgets.corner_radius = CornerRadius::same(8);
     }
+
+    // Keyboard focus indicator: dashed border for accessibility
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.accent);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette.accent);
+    visuals.widgets.inactive.fg_stroke = Stroke::new(2.0, palette.border);
+
+    // Enhanced hover state: stronger accent color + subtle shadow effect
+    visuals.widgets.hovered.bg_stroke = Stroke::new(2.0, palette.accent);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(2.0, palette.accent);
+
+    // Active/focused state: brightest indicator for keyboard users
+    visuals.widgets.active.bg_stroke = Stroke::new(2.0, palette.accent);
+    visuals.widgets.active.fg_stroke = Stroke::new(2.5, palette.accent);
 
     style.visuals = visuals;
     style.spacing.item_spacing = Vec2::new(10.0, 10.0);
     style.spacing.button_padding = Vec2::new(14.0, 7.0);
+
+    // Improved text input field sizing for better readability and editing
+    style.spacing.text_edit_width = f32::INFINITY; // Use full available width
+
     style.spacing.window_margin = Margin::same(18);
     style.spacing.menu_margin = Margin::same(10);
     style.spacing.indent = 20.0;
@@ -139,11 +154,18 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
 }
 
 /// A bold, icon-prefixed label used above a group of related fields.
+/// Typography hierarchy: large, strong title with visual weight.
 pub fn section_header(ui: &mut egui::Ui, icon: &str, title: &str) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(icon).size(15.0));
-        ui.label(egui::RichText::new(title).strong().size(15.0));
+        ui.label(egui::RichText::new(icon).size(16.0).strong());
+        ui.label(
+            egui::RichText::new(title)
+                .size(16.0)
+                .strong()
+                .text_style(egui::TextStyle::Heading),
+        );
     });
+    ui.add_space(4.0); // Extra space after section header
 }
 
 /// A small rounded, colored badge (snippet/hotkey counts, status words).
