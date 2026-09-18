@@ -2,6 +2,14 @@
 
 WayExpand includes an experimental clipboard-based text injection backend for handling expansions with newlines in GUI text editors.
 
+**This is an XWayland/X11 fallback, not a Wayland-native mechanism.** It
+pastes via `xdotool key ctrl+v`, which uses the XTest extension and requires
+an X11 `DISPLAY` -- `ClipboardInjector::new()` refuses to initialize when
+none is available. On a Wayland session this only works because XWayland is
+present and the target application either runs under it or otherwise
+accepts X11-synthesized input; it cannot target a pure Wayland-native window
+that has no XWayland involvement at all.
+
 ## Problem
 
 When using the `ei_keyboard` fallback (for compositors without ei_text support), newlines in expansions don't work in GUI text editors:
@@ -53,15 +61,21 @@ in it uses this path automatically.
 ## Trade-offs
 
 ✅ **Advantages:**
-- Preserves newlines in all GUI text editors
-- Works with any Wayland compositor
-- Doesn't require special compositor support
+- Preserves newlines in GUI text editors that accept XTest-synthesized paste
+- Doesn't require any Wayland protocol support from the compositor, since it
+  goes through XWayland/XTest instead
 
 ❌ **Disadvantages:**
+- Requires an active X11 `DISPLAY` (i.e. XWayland running) -- refuses to
+  initialize on a Wayland session with no XWayland at all, and cannot target
+  a window with no XWayland involvement even when XWayland is present
 - Requires Ctrl+V instead of direct injection (one extra keystroke mentally)
 - Uses system clipboard (flashes clipboard contents, privacy concern)
 - Slightly slower than direct injection
 - Requires xclip/xsel/xdotool to be installed
+- A failed erase (non-zero `xdotool` exit) is now treated as a hard error
+  rather than proceeding to paste after the trigger text, but that still
+  means the expansion fails visibly instead of silently corrupting text
 
 ## Implementation Details
 

@@ -133,4 +133,4 @@ protocol.
 
 **Workaround:** Disable app filters until 1.1, or use global expansions only.
 
-**Tracking:** See the [1.0 checklist](../../RELEASE_1.0_CHECKLIST.md#5-this-sessions-own-follow-through-items).
+**Tracking:** See the [1.0 checklist](../RELEASE_1.0_CHECKLIST.md#5-this-sessions-own-follow-through-items).

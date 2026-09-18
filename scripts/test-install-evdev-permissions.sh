@@ -14,7 +14,7 @@ script="$project_dir/scripts/install-evdev-permissions.sh"
 out=$("$script" --dry-run)
 printf '%s' "$out" | grep -F 'This will:' >/dev/null
 printf '%s' "$out" | grep -F '(dry run; no changes made)' >/dev/null
-printf '%s' "$out" | grep -F 'docs/SECURITY.md' >/dev/null
+printf '%s' "$out" | grep -F 'SECURITY.md' >/dev/null
 
 if [ "$(id -u)" -eq 0 ]; then
     printf '%s\n' "skipping non-root-rejection checks: already running as root" >&2

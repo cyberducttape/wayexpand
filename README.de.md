@@ -4,7 +4,7 @@
 
 **WayExpand** verwandelt kurze Tastenkombinationen in lange Text-Ersetzungen. Tippen Sie `;sig` um eine Signatur einzufügen, `;today` um das aktuelle Datum zu erhalten – oder schreiben Sie eigene Snippets in unter 30 Sekunden.
 
-[![v1.0.0](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/itchyitchy123/wayexpand/releases)
+[![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 *[English](README.md) | Deutsch*

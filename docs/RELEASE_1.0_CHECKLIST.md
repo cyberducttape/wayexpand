@@ -117,9 +117,9 @@ command-execution guarantee, but has not had outside verification.
 
 ## 4. Packaging currency
 
-- [ ] Fedora Copr: `README.md` still says "coming soon." Either ship it or
-      remove the claim before 1.0 -- an advertised package that doesn't
-      exist is a worse first impression than not mentioning Fedora at all.
+- [x] Fedora Copr: `README.md` no longer shows a runnable `dnf copr enable`
+      command for a repository that doesn't exist; it now says plainly that
+      no Copr repo exists yet and points at PACKAGING_CHECKLIST.md.
 - [ ] PPA (`ppa:cyberducttape/ppa`) and AUR rebuilt and verified against the
       current workspace, which gained two crates this session
       (`crates/backend-clipboard`, `crates/backend-kwin-window`) not

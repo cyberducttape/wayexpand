@@ -1,12 +1,19 @@
 # WayExpand
 
 [![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
-[![Release: v1.0.0](https://img.shields.io/badge/release-v1.0.0-brightgreen.svg)](https://github.com/itchyitchy123/wayexpand/releases)
+[![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Text expansion built for Wayland, rather than adapted to it.**
 
-> **v1.0.0 is production-ready!** Professional GUI with themes and language packs, full KDE Plasma support, zero character drops, stability guarantees, and packages for Ubuntu/Fedora/Arch. [Release notes](https://github.com/itchyitchy123/wayexpand/releases/tag/v1.0.0)
+> The core engine, configuration format, and CLI/JSON contracts are stable
+> (see [COMPATIBILITY.md](docs/COMPATIBILITY.md)). Desktop backend support
+> varies by compositor and several capture/output backends are still
+> **experimental** -- run `wayexpand doctor` on your own session before
+> relying on it, and check the [support matrix](docs/SUPPORT_MATRIX.md) for
+> what's actually been verified versus implemented-but-untested. KDE Plasma
+> (KWin 6.6+) has the most complete verified coverage today. [Release
+> notes](https://github.com/itchyitchy123/wayexpand/releases)
 
 WayExpand is a privacy-first text expander for Linux Wayland desktops. Type a
 short trigger like `;;hello` and it replaces it with a saved snippet —
@@ -194,12 +201,14 @@ cd wayexpand
 makepkg -si
 ```
 
-**Fedora (Copr - coming soon):**
+> Verify the AUR package is current before relying on it in a script --
+> check the `pkgver` in its `PKGBUILD` against the [latest
+> release](https://github.com/itchyitchy123/wayexpand/releases).
 
-```sh
-sudo dnf copr enable cyberducttape/wayexpand
-sudo dnf install wayexpand
-```
+**Fedora:** No Copr repository exists yet. Build from source with
+`./scripts/install-user.sh` below, or track
+[docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md) for Fedora
+packaging status.
 
 For a user-local installation with systemd units, built from source:
 
