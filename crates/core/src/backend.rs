@@ -64,7 +64,13 @@ impl fmt::Display for InputSourceError {
 impl std::error::Error for InputSourceError {}
 
 /// The platform-independent operation required by the expansion engine.
-pub trait TextInjector {
+///
+/// Requires `Send` so that a `Box<dyn TextInjector>` can be handed off to a
+/// detached thread on shutdown (see the daemon's main loop): the libei
+/// backend's teardown can hang against some portal implementations, and
+/// moving that drop off the main thread is what lets shutdown proceed
+/// without waiting on it.
+pub trait TextInjector: Send {
     fn name(&self) -> &'static str;
     /// Remove the exact trigger text immediately before the cursor.
     ///

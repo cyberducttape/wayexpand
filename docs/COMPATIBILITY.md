@@ -322,7 +322,14 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `ExpansionConfig::app_filter` — optional app-scoped restrictions
 - `ExpansionConfig::tags` — optional searchable tags
 
-All new fields default to `null` or empty if absent from old configurations.
+**New fields** (1.0.1+):
+- `ExpansionConfig::propagate_case` (bool, default `false`) — when enabled,
+  typing the trigger in `UPPERCASE` or `Capitalized` form applies the same
+  casing to the replacement (e.g. trigger `:sig` typed as `:SIG` yields an
+  uppercased replacement). Off by default, so existing configs are
+  unaffected; matching stays strictly literal unless a snippet opts in.
+
+All new fields default to `null`, `false`, or empty if absent from old configurations.
 
 **Backward compatibility guarantee:**
 ```toml
