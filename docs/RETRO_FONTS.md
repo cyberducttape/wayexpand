@@ -68,13 +68,26 @@ sudo zypper install google-noto-mono-fonts
 
 ## Using Fonts with WayExpand
 
-Currently, WayExpand GUI uses the system's default monospace font for code display and Proportional for UI text. To use specific fonts globally:
+**Current limitation (v1.1.x):** WayExpand uses your system's default monospace and proportional fonts. Per-theme font selection is not yet implemented.
 
-**Via font configuration (future feature):**
-A font selector will be added to Settings in v1.2, allowing per-theme font selection.
+**To use retro fonts with WayExpand:**
 
-**Via system settings:**
-On Wayland, change your system's default monospace or proportional font through your desktop settings (KDE Plasma: Settings → Fonts, GNOME: Settings → Appearance).
+1. **KDE Plasma (Recommended):**
+   - Settings → Appearance → Fonts
+   - Change "Fixed width font" to Courier New or Liberation Mono
+   - This affects WayExpand and all other applications
+
+2. **GNOME (via gsettings):**
+   ```bash
+   gsettings set org.gnome.desktop.interface monospace-font-name "Courier New 10"
+   # or
+   gsettings set org.gnome.desktop.interface monospace-font-name "Liberation Mono 10"
+   ```
+
+3. **Manual (via fontconfig):**
+   Edit `~/.config/fontconfig/fonts.conf` to set preferred monospace font globally
+
+**Note:** Font changes apply system-wide, not just to WayExpand
 
 ## Font Pairing Recommendations
 
@@ -97,13 +110,18 @@ For best visual accuracy, install fonts in this order:
 3. **IBM Courier** or **Courier Prime** (theme-specific, optional)
 4. **OCR-A** (Amber theme only, optional)
 
-## Future: Font Per-Theme
+## Future: Font Per-Theme (v1.2+)
 
-WayExpand v1.2 is planned to include:
+Per-theme font support requires egui custom font loading, which is on the v1.2 roadmap:
+
+**Planned features:**
 - Font selector in Settings panel
-- Per-theme font configuration
+- Per-theme font configuration (e.g., Courier for Terminal Blue, Proportional for Default)
 - Font preview in theme selector
 - Automatic font detection (warn if selected font isn't installed)
+- Custom .ttf/.otf font file support
+
+**Technical note:** egui doesn't support per-theme FontFamily selection natively; v1.2 will implement custom font loading to enable this feature.
 
 ## Linux Font Resources
 
