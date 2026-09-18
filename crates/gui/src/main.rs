@@ -1065,7 +1065,7 @@ impl eframe::App for GuiApp {
                         let selected = self.colorpack == *pack;
                         if ui.selectable_label(selected, format!("{}  —  {}", pack.name(), pack.description())).clicked() {
                             self.colorpack = *pack;
-                            theme::install_pack(ui.ctx(), *pack);
+                            theme::install_pack(ui.ctx(), *pack, self.config.settings.font_scale);
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                         }
                     }
@@ -1765,7 +1765,7 @@ fn main() -> Result<()> {
         "WayExpand",
         options,
         Box::new(move |creation_context| {
-            theme::install_pack(&creation_context.egui_ctx, colorpack);
+            theme::install_pack(&creation_context.egui_ctx, colorpack, app.config.settings.font_scale);
             // Only override with the OS-detected theme when the user has
             // never explicitly chosen one; otherwise a saved preference
             // would flip back to the system default on every launch.
