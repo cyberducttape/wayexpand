@@ -282,27 +282,39 @@ wayexpand doctor --json | jq -e '.healthy' >/dev/null || exit 1
 
 ### `wayexpand status --json`
 
-Current daemon status (requires running daemon).
+Current daemon status (requires running daemon). This wraps the daemon's
+plain-text control-socket status response (`response` is its first line;
+every subsequent `key=value` line becomes a field, with `true`/`false`
+parsed as JSON booleans) rather than a purpose-built schema, so the fields
+below are exactly what that response currently carries -- nothing more.
 
 **Output shape:**
 ```json
 {
-  "uptime_seconds": 3600,
-  "config_reloads": 2,
-  "state": "active",
+  "response": "running",
+  "source": "input-method",
+  "backend": "input-method-v2",
+  "state": "connected",
   "paused": false,
-  "expansions_evaluated": 45000
+  "config": "/home/user/.config/wayexpand/expansions.toml",
+  "config_state": "ok"
 }
 ```
 
 **Field stability:**
-- `uptime_seconds` (int): Seconds since daemon started
-- `config_reloads` (int): Number of successful config reloads
-- `state` (string): "active", "paused", "stopped"
-- `paused` (bool): Whether daemon is currently paused (expansion matching disabled)
-- `expansions_evaluated` (int): Total expansions evaluated (cumulative counter)
+- `response` (string): The control socket's status line, e.g. `"running"`
+- `source` (string): Active input source (`"input-method"`, `"stdin"`, `"evdev"`, ...)
+- `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
+- `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
+- `paused` (bool): Whether expansion matching is currently disabled
+- `config` (string): Path to the active configuration file
+- `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
 
-**Stability:** 🔒 **Stable** — these fields guaranteed; new counters/metrics may be added as new fields
+**Stability:** 🔒 **Stable** — these fields are guaranteed; new fields may be
+added. There is currently no uptime counter, reload counter, or
+expansions-evaluated counter -- if you need those, track them externally
+(e.g. via `systemctl show` for process uptime, or your own counter around
+`wayexpand test`/daemon log lines) rather than assuming they exist here.
 
 ---
 

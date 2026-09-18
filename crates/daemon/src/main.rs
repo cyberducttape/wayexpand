@@ -646,6 +646,32 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
+/// Builds the control socket's `key=value` status body (everything the
+/// running daemon reports about itself via `status`/`status --json`).
+/// Pulled out of `set_daemon_status` as a pure function so its exact field
+/// set can be unit-tested directly -- this is the other half of the
+/// contract docs/COMPATIBILITY.md documents as "Stable" for
+/// `wayexpand status --json`; `status_json_matches_documented_stable_contract`
+/// in the CLI crate tests the parsing side against the same field names.
+fn daemon_status_body(
+    source: &str,
+    backend: &str,
+    state: &str,
+    paused: bool,
+    config_path: &Path,
+    config_healthy: bool,
+) -> String {
+    format!(
+        "source={source}\nbackend={backend}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}",
+        config_path.display(),
+        if config_healthy {
+            "ok"
+        } else {
+            "reload-rejected"
+        }
+    )
+}
+
 fn set_daemon_status(
     control: &control::ControlServer,
     source: &str,
@@ -654,17 +680,15 @@ fn set_daemon_status(
     config_path: &Path,
     config_healthy: bool,
 ) {
-    control.set_status(format!(
-        "source={source}\nbackend={backend}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}",
+    control.set_status(daemon_status_body(
+        source,
+        backend,
+        state,
         control
             .pause_requested
             .load(std::sync::atomic::Ordering::Acquire),
-        config_path.display(),
-        if config_healthy {
-            "ok"
-        } else {
-            "reload-rejected"
-        }
+        config_path,
+        config_healthy,
     ));
 }
 
@@ -922,6 +946,36 @@ mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
     use wayexpand_core::{Config, InjectorError};
+
+    /// The status body's field set is a documented Stable contract (see
+    /// docs/COMPATIBILITY.md, "wayexpand status --json"). This is the
+    /// producing side; `status_json_matches_documented_stable_contract` in
+    /// the CLI crate's tests is the consuming side, checked against a
+    /// fixture with the same field names -- keeping both in sync with the
+    /// docs by construction, rather than each drifting independently.
+    #[test]
+    fn daemon_status_body_matches_documented_stable_contract() {
+        let body = daemon_status_body(
+            "input-method",
+            "input-method-v2",
+            "connected",
+            false,
+            Path::new("/home/user/.config/wayexpand/expansions.toml"),
+            true,
+        );
+        let mut fields: Vec<&str> = body.lines().filter_map(|line| line.split_once('=').map(|(key, _)| key)).collect();
+        fields.sort_unstable();
+        assert_eq!(
+            fields,
+            vec!["backend", "config", "config_state", "paused", "source", "state"],
+            "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
+        );
+        assert_eq!(
+            body,
+            "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\n\
+             config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok"
+        );
+    }
 
     struct RecordingInjector {
         calls: Vec<String>,
