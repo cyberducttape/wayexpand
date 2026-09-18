@@ -18,7 +18,7 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, InputEvent, MatchMode,
+    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FontScale, InputEvent, MatchMode,
     Settings,
 };
 
@@ -85,6 +85,7 @@ struct GuiApp {
     settings_open: bool,
     settings_buffer: String,
     settings_undo_chord: String,
+    settings_font_scale: FontScale,
     settings_error: Option<String>,
     dark_mode: bool,
     language: Language,
@@ -139,6 +140,7 @@ impl GuiApp {
             .unwrap_or_default();
         let settings_buffer = config.settings.max_buffer_chars.to_string();
         let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
+        let settings_font_scale = config.settings.font_scale;
         let prefs = load_gui_prefs();
         let strings = Strings::new(prefs.language);
         Ok(Self {
@@ -163,6 +165,7 @@ impl GuiApp {
             settings_open: false,
             settings_buffer,
             settings_undo_chord,
+            settings_font_scale,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),
             language: prefs.language,
@@ -223,6 +226,7 @@ impl GuiApp {
         };
         let mut candidate = self.config.clone();
         candidate.settings.max_buffer_chars = max_buffer_chars;
+        candidate.settings.font_scale = self.settings_font_scale;
         let undo_chord_input = self.settings_undo_chord.trim();
         candidate.settings.undo_chord = (!undo_chord_input.is_empty())
             .then(|| undo_chord_input.to_owned());
@@ -239,6 +243,7 @@ impl GuiApp {
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
                 self.settings_undo_chord =
                     self.config.settings.undo_chord.clone().unwrap_or_default();
+                self.settings_font_scale = self.config.settings.font_scale;
                 self.settings_open = false;
                 self.settings_error = None;
                 self.message = "Settings saved atomically".into();
@@ -833,6 +838,9 @@ impl eframe::App for GuiApp {
                         if ui.button(self.strings.settings()).clicked() {
                             self.settings_buffer =
                                 self.config.settings.max_buffer_chars.to_string();
+                            self.settings_undo_chord =
+                                self.config.settings.undo_chord.clone().unwrap_or_default();
+                            self.settings_font_scale = self.config.settings.font_scale;
                             self.settings_error = None;
                             self.settings_open = true;
                         }
@@ -987,6 +995,28 @@ impl eframe::App for GuiApp {
                     );
                     ui.label(
                         RichText::new(self.strings.undo_chord_help())
+                            .small()
+                            .color(palette.muted),
+                    );
+
+                    ui.add_space(8.0);
+                    ui.label("🔤 Font Size");
+                    ui.horizontal(|ui| {
+                        for scale in &[FontScale::Small, FontScale::Normal, FontScale::Large, FontScale::ExtraLarge, FontScale::Huge] {
+                            let label = match scale {
+                                FontScale::Small => "Small (80%)",
+                                FontScale::Normal => "Normal",
+                                FontScale::Large => "Large (120%)",
+                                FontScale::ExtraLarge => "Extra Large (150%)",
+                                FontScale::Huge => "Huge (200%)",
+                            };
+                            if ui.selectable_label(*scale == self.settings_font_scale, label).clicked() {
+                                self.settings_font_scale = *scale;
+                            }
+                        }
+                    });
+                    ui.label(
+                        RichText::new("Adjust text size for readability on your display")
                             .small()
                             .color(palette.muted),
                     );
