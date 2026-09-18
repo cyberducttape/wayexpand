@@ -1,6 +1,6 @@
 # Maintainer: Stephan Loesevitz <stephan.loesevitz at gmail dot com>
 pkgname=wayexpand
-pkgver=0.2.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64')
@@ -20,7 +20,12 @@ optdepends=(
     'systemd: for user service support'
 )
 source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
-sha256sums=('SKIP')  # Update with actual hash after first build
+# SKIP is deliberate for a locally-built (makepkg -si) package: pacman
+# still verifies the download against it once a real value is filled in.
+# Before submitting/updating this PKGBUILD on the AUR, replace SKIP with
+# `updpkgsums` output (or `makepkg -g`) so AUR installs get real
+# tamper-detection, not just for local builds.
+sha256sums=('SKIP')
 conflicts=('wayexpand-git')
 
 build() {
@@ -44,6 +49,13 @@ package() {
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
+
+    # Install application icon at every size the desktop entry's Icon=
+    # lookup can resolve to; without these the app shows a generic icon.
+    for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+        install -Dm644 "assets/icon/hicolor/${size}/apps/wayexpand.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${size}/apps/wayexpand.png"
+    done
 
     # Install systemd user units
     install -Dm644 systemd/wayexpand.service "${pkgdir}/usr/lib/systemd/user/wayexpand.service"

@@ -59,6 +59,11 @@ jobs:
           install -m 0755 target/release/wayexpand-gui "$root/bin/"
           install -m 0644 systemd/*.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
+          for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+            mkdir -p "$root/icons/hicolor/$size/apps"
+            install -m 0644 "assets/icon/hicolor/$size/apps/wayexpand.png" \
+              "$root/icons/hicolor/$size/apps/wayexpand.png"
+          done
           install -m 0644 README.md LICENSE SECURITY.md CHANGELOG.md "$root/"
           install -m 0600 expansions.toml "$root/expansions.toml"
           install -m 0755 scripts/install-release.sh "$root/scripts/"
