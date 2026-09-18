@@ -201,9 +201,9 @@ impl ColorScheme {
     }
 
     fn classic_white() -> Self {
-        // Classic monochrome white on black
-        let white = Color32::from_rgb(0xCC, 0xCC, 0xCC);
-        let light_gray = Color32::from_rgb(0xAA, 0xAA, 0xAA);
+        // Classic monochrome white on black with improved contrast
+        let white = Color32::from_rgb(0xFF, 0xFF, 0xFF);      // Pure white (higher contrast)
+        let light_gray = Color32::from_rgb(0xCC, 0xCC, 0xCC); // Light gray for secondary
         let black = Color32::from_rgb(0x0A, 0x0A, 0x0A);
         let darkest = Color32::from_rgb(0x00, 0x00, 0x00);
 
@@ -214,7 +214,7 @@ impl ColorScheme {
             success: white,
             warning: Color32::from_rgb(0xFF, 0xFF, 0x00), // Yellow for visibility
             danger: Color32::from_rgb(0xFF, 0x44, 0x44),  // Red
-            muted: Color32::from_rgb(0x77, 0x77, 0x77),
+            muted: Color32::from_rgb(0xAA, 0xAA, 0xAA),   // Brighter muted for readability
             border: light_gray,
             surface: black,
             surface_hover: Color32::from_rgb(0x15, 0x15, 0x15),
@@ -296,10 +296,11 @@ impl ColorScheme {
     }
 
     fn terminal_blue() -> Self {
-        // IBM 3270 mainframe terminal: cornflower blue on deep navy
+        // IBM 3270 mainframe terminal: cornflower blue on deep navy, with improved contrast
         let blue = Color32::from_rgb(0x41, 0x69, 0xE1);      // Cornflower blue
         let dark_blue = Color32::from_rgb(0x00, 0x14, 0x28); // Deep navy
         let cyan = Color32::from_rgb(0x00, 0xFF, 0xFF);      // Cyan for accents
+        let white = Color32::from_rgb(0xFF, 0xFF, 0xFF);     // White for secondary text
         let black = Color32::from_rgb(0x00, 0x14, 0x28);
 
         Self {
@@ -309,8 +310,8 @@ impl ColorScheme {
             success: cyan,
             warning: Color32::from_rgb(0xFF, 0xFF, 0x00),
             danger: Color32::from_rgb(0xFF, 0x64, 0x64),
-            muted: Color32::from_rgb(0x41, 0x69, 0xE1),
-            border: Color32::from_rgb(0x00, 0x50, 0x80),
+            muted: white,                                     // White for muted text (better contrast)
+            border: Color32::from_rgb(0x00, 0x80, 0xFF),     // Brighter cyan for borders
             surface: dark_blue,
             surface_hover: Color32::from_rgb(0x00, 0x28, 0x50),
             background: black,
@@ -319,19 +320,20 @@ impl ColorScheme {
     }
 
     fn commodore64() -> Self {
-        // Commodore 64: Authentic 1982 orange/blue aesthetic
-        let orange = Color32::from_rgb(0xFF, 0xAA, 0x00);     // Classic C64 orange
+        // Commodore 64: Authentic 1982 orange/blue aesthetic with improved readability
+        let orange = Color32::from_rgb(0xFF, 0xBB, 0x00);     // Slightly brighter C64 orange for contrast
         let blue = Color32::from_rgb(0x00, 0x00, 0xAA);       // Deep C64 blue
-        let white = Color32::from_rgb(0xFF, 0xFF, 0xFF);      // White accents
+        let white = Color32::from_rgb(0xFF, 0xFF, 0xFF);      // White for secondary text
+        let bright_orange = Color32::from_rgb(0xFF, 0xDD, 0x00); // Bright orange for accents
 
         Self {
-            accent: orange,
+            accent: bright_orange,
             accent_weak: Color32::from_rgb(0x88, 0x55, 0x00),
             accent_text: blue,
             success: orange,
             warning: white,
             danger: Color32::from_rgb(0xFF, 0x64, 0x64),
-            muted: Color32::from_rgb(0xCC, 0x88, 0x00),
+            muted: Color32::from_rgb(0xFF, 0xCC, 0x66),       // Lighter orange for muted text
             border: orange,
             surface: blue,
             surface_hover: Color32::from_rgb(0x00, 0x00, 0xDD),

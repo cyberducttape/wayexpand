@@ -55,6 +55,10 @@ covered in [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md); see also
 [docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md) and
 [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md).
 
+**For system administrators**: See [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md)
+for production-ready snippets covering SSL certificates, logrotate, systemd
+services, firewall rules, Docker, and deployment automation.
+
 Non-English documentation: [Deutsch](README.de.md).
 
 ## Current milestone

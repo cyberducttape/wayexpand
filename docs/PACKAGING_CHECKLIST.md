@@ -42,7 +42,7 @@ release smoke test passed
 
 ## 🟡 In Progress: Tagged Release Testing
 
-**Goal:** Verify that `v0.2.1` tag builds and tests correctly from released source
+**Goal:** Verify that `v1.0.0` tag builds and tests correctly from released source
 
 ### Automatic CI Testing (GitHub Actions)
 
@@ -82,7 +82,7 @@ jobs:
 
 ```bash
 # Checkout tag
-git checkout v0.2.1
+git checkout v1.0.0
 
 # Run tests
 bash scripts/test-release.sh
@@ -122,7 +122,7 @@ grep '^version' crates/cli/src/../../../Cargo.toml
 cd /tmp/wayexpand-test
 git clone https://github.com/itchyitchy123/wayexpand.git
 cd wayexpand
-git checkout v0.2.1  # or main branch
+git checkout v1.0.0  # or main branch
 
 # Clean build
 dpkg-buildpackage -us -uc -b  # unsigned, don't run hooks
@@ -139,10 +139,10 @@ dpkg -c ../wayexpand_*.deb | grep 'icons/hicolor'
 ### PPA Status (Requires Maintainer Access)
 
 **PPA:** `ppa:cyberducttape/ppa` on Launchpad  
-**Current status:** Last updated for 0.2.0  
+**Current status:** Last updated for v1.0.0  
 **Action needed:**
 - [ ] Request upload authorization or have maintainer rebuild
-- [ ] Run `git-buildpackage` (or manual `dpkg-buildpackage`) for 0.2.1
+- [ ] Run `git-buildpackage` (or manual `dpkg-buildpackage`) for v1.1.0+
 - [ ] Upload source to PPA
 - [ ] Wait for Launchpad to build on all target series (focal, jammy, noble, oracular, resolute)
 
@@ -164,7 +164,7 @@ dpkg -c ../wayexpand_*.deb | grep 'icons/hicolor'
 ### Checklist
 
 - [ ] Check if `copr` repo already exists under user account
-- [ ] If exists: update to 0.2.1
+- [ ] If exists: update to v1.0.0
 - [ ] If not: create new Copr project
 - [ ] Write PKGBUILD equivalent (spec file) for Fedora
 - [ ] Test build on Fedora 39, 40, 41
