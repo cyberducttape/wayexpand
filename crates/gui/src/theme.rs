@@ -181,13 +181,21 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
 
 /// A small, clickable rounded chip used for the category filter row --
 /// visually similar to `pill` but interactive, filling solid with the accent
-/// color when `selected`.
-pub fn chip(ui: &mut egui::Ui, palette: &Palette, text: &str, selected: bool) -> egui::Response {
-    let font = FontId::new(12.0, FontFamily::Proportional);
+/// color when `selected`. All metrics (font, padding, height) scale by
+/// `scale` so the user's font-scale accessibility setting reaches this
+/// custom-painted widget, not just standard text.
+pub fn chip_scaled(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    text: &str,
+    selected: bool,
+    scale: f32,
+) -> egui::Response {
+    let font = FontId::new(12.0 * scale, FontFamily::Proportional);
     let galley = ui
         .painter()
         .layout_no_wrap(text.to_owned(), font.clone(), Color32::TRANSPARENT);
-    let size = Vec2::new(galley.size().x + 20.0, 24.0);
+    let size = Vec2::new(galley.size().x + 20.0 * scale, 24.0 * scale);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
@@ -248,18 +256,22 @@ pub struct SnippetRowResponse {
 /// A custom-painted sidebar list entry: a status dot, the trigger in
 /// monospace, a muted detail line, and (for command-backed snippets) a small
 /// badge -- laid out as a rounded card that highlights on hover and tints
-/// with the accent color when selected.
-pub fn snippet_row(
+/// with the accent color when selected. The row height, offsets, and font
+/// sizes all scale by `scale` so the font-scale accessibility setting
+/// (Settings > font size) actually enlarges the most-viewed list in the app,
+/// not just the panels around it.
+pub fn snippet_row_scaled(
     ui: &mut egui::Ui,
     palette: &Palette,
     row: SnippetRow<'_>,
+    scale: f32,
 ) -> SnippetRowResponse {
     let width = ui.available_width();
-    let height = 48.0;
+    let height = 48.0 * scale;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
-    let dot_center = rect.left_center() + Vec2::new(16.0, 0.0);
-    let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(20.0));
+    let dot_center = rect.left_center() + Vec2::new(16.0 * scale, 0.0);
+    let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(20.0 * scale));
     let toggle_response = ui
         .interact(toggle_rect, response.id.with("toggle"), Sense::click())
         .on_hover_text(if row.enabled {
@@ -291,32 +303,32 @@ pub fn snippet_row(
             palette.muted
         };
         if toggle_response.hovered() {
-            painter.circle_stroke(dot_center, 7.0, Stroke::new(1.5, dot_color));
+            painter.circle_stroke(dot_center, 7.0 * scale, Stroke::new(1.5, dot_color));
         }
-        painter.circle_filled(dot_center, 4.0, dot_color);
+        painter.circle_filled(dot_center, 4.0 * scale, dot_color);
 
-        let text_left = rect.left() + 30.0;
-        let trigger_pos = egui::pos2(text_left, rect.top() + 9.0);
+        let text_left = rect.left() + 30.0 * scale;
+        let trigger_pos = egui::pos2(text_left, rect.top() + 9.0 * scale);
         painter.text(
             trigger_pos,
             egui::Align2::LEFT_TOP,
             row.trigger,
-            FontId::new(14.5, FontFamily::Monospace),
+            FontId::new(14.5 * scale, FontFamily::Monospace),
             ui.visuals().text_color(),
         );
         if row.command_backed {
             let galley = painter.layout_no_wrap(
                 row.trigger.to_owned(),
-                FontId::new(14.5, FontFamily::Monospace),
+                FontId::new(14.5 * scale, FontFamily::Monospace),
                 Color32::TRANSPARENT,
             );
-            let badge_font = FontId::new(10.0, FontFamily::Proportional);
+            let badge_font = FontId::new(10.0 * scale, FontFamily::Proportional);
             let text_galley =
                 painter.layout_no_wrap("cmd".to_owned(), badge_font.clone(), Color32::TRANSPARENT);
-            let pad = Vec2::new(6.0, 2.0);
+            let pad = Vec2::new(6.0, 2.0) * scale;
             let badge_size = text_galley.size() + pad * 2.0;
             let badge_rect = egui::Rect::from_min_size(
-                trigger_pos + Vec2::new(galley.size().x + 8.0, -1.0),
+                trigger_pos + Vec2::new(galley.size().x + 8.0 * scale, -1.0),
                 badge_size,
             );
             painter.rect_filled(
@@ -333,16 +345,16 @@ pub fn snippet_row(
             );
         }
         if !row.category.is_empty() {
-            let category_font = FontId::new(10.5, FontFamily::Proportional);
+            let category_font = FontId::new(10.5 * scale, FontFamily::Proportional);
             let galley = painter.layout_no_wrap(
                 row.category.to_owned(),
                 category_font.clone(),
                 Color32::TRANSPARENT,
             );
-            let pad = Vec2::new(8.0, 3.0);
+            let pad = Vec2::new(8.0, 3.0) * scale;
             let chip_size = galley.size() + pad * 2.0;
             let chip_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - chip_size.x - 10.0, rect.top() + 9.0),
+                egui::pos2(rect.right() - chip_size.x - 10.0 * scale, rect.top() + 9.0 * scale),
                 chip_size,
             );
             painter.rect_filled(chip_rect, CornerRadius::same(255), tint(palette.accent, 30));
@@ -360,10 +372,10 @@ pub fn snippet_row(
             row.detail
         };
         painter.text(
-            egui::pos2(text_left, rect.top() + 27.0),
+            egui::pos2(text_left, rect.top() + 27.0 * scale),
             egui::Align2::LEFT_TOP,
             truncate(detail, 46),
-            FontId::new(12.0, FontFamily::Proportional),
+            FontId::new(12.0 * scale, FontFamily::Proportional),
             palette.muted,
         );
     }

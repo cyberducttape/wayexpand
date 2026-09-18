@@ -61,6 +61,7 @@ enum PendingAction {
     Duplicate,
     Delete,
     Reload,
+    Undo,
 }
 
 struct GuiApp {
@@ -402,6 +403,7 @@ impl GuiApp {
             PendingAction::Duplicate => self.duplicate_selected(),
             PendingAction::Delete => self.perform_delete_selected(),
             PendingAction::Reload => self.perform_reload(),
+            PendingAction::Undo => self.undo(),
         }
     }
 
@@ -1142,24 +1144,31 @@ impl eframe::App for GuiApp {
                         self.request_action(PendingAction::Duplicate);
                     }
                     if ui.button(self.strings.undo_button(self.undo.len())).clicked() {
-                        self.undo();
+                        self.request_action(PendingAction::Undo);
                     }
                 });
                 ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(4.0);
+                let font_scale = self.config.settings.font_scale.multiplier();
                 let categories = self.categories();
                 if !categories.is_empty() {
                     ui.horizontal_wrapped(|ui| {
-                        if theme::chip(ui, &palette, self.strings.all(), self.category_filter.is_none())
-                            .clicked()
+                        if theme::chip_scaled(
+                            ui,
+                            &palette,
+                            self.strings.all(),
+                            self.category_filter.is_none(),
+                            font_scale,
+                        )
+                        .clicked()
                         {
                             self.category_filter = None;
                         }
                         for category in &categories {
                             let selected =
                                 self.category_filter.as_deref() == Some(category.as_str());
-                            if theme::chip(ui, &palette, category, selected).clicked() {
+                            if theme::chip_scaled(ui, &palette, category, selected, font_scale).clicked() {
                                 self.category_filter = if selected {
                                     None
                                 } else {
@@ -1179,7 +1188,7 @@ impl eframe::App for GuiApp {
                         } else {
                             expansion.description.clone()
                         };
-                        let response = theme::snippet_row(
+                        let response = theme::snippet_row_scaled(
                             ui,
                             &palette,
                             theme::SnippetRow {
@@ -1190,6 +1199,7 @@ impl eframe::App for GuiApp {
                                 detail: &detail,
                                 category: &expansion.category,
                             },
+                            font_scale,
                         );
                         if response.toggle.clicked() {
                             self.toggle_enabled(index);
@@ -1596,6 +1606,7 @@ impl eframe::App for GuiApp {
                         Some(PendingAction::Duplicate) => self.strings.unsaved_duplicating(),
                         Some(PendingAction::Delete) => self.strings.unsaved_deleting(),
                         Some(PendingAction::Reload) => self.strings.unsaved_reloading(),
+                        Some(PendingAction::Undo) => self.strings.unsaved_undoing(),
                         None => "continuing",
                     };
                     if self.draft_is_dirty() {
