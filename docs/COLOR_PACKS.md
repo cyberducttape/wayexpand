@@ -2,6 +2,8 @@
 
 WayExpand features a sophisticated color pack system with multiple themes including retro PC styles with authentic phosphor colors.
 
+**Tip:** For enhanced authenticity with retro themes, see [RETRO_FONTS.md](RETRO_FONTS.md) for font recommendations and installation instructions. Pairing retro themes with period-appropriate fonts (like Courier for terminal themes) dramatically improves the nostalgia factor!
+
 ## Available Color Packs
 
 ### 🔵 Default
