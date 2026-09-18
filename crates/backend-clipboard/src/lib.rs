@@ -18,6 +18,24 @@ pub struct ClipboardInjector;
 
 impl ClipboardInjector {
     pub fn new() -> Result<Self, ClipboardError> {
+        // `insert`/`erase` synthesize key events via `xdotool`, which speaks
+        // X11/XTest and has no notion of a Wayland-native surface: it always
+        // targets whichever window currently holds *X11* input focus. On a
+        // pure Wayland session with no XWayland running, that target simply
+        // does not exist ($DISPLAY is unset) and every paste/erase silently
+        // fails; with XWayland present but the focused window Wayland-native,
+        // xdotool would instead misdirect keystrokes at some unrelated X11
+        // window. Neither is acceptable for a backend the daemon can select
+        // automatically (see `text_contains_newlines` in the daemon), so
+        // refuse to construct rather than let either happen at runtime.
+        if std::env::var_os("DISPLAY").is_none() {
+            return Err(ClipboardError::Other(
+                "no X11 DISPLAY available (xdotool cannot target a Wayland-native window); \
+                 this backend requires XWayland"
+                    .into(),
+            ));
+        }
+
         let which = |program: &str| {
             Command::new("which")
                 .arg(program)
@@ -104,28 +122,35 @@ impl Default for ClipboardInjector {
 
 impl ClipboardInjector {
     fn get_clipboard(&self) -> Option<String> {
-        let output = Command::new("xclip")
+        // xclip and xsel are independent optional dependencies (`new` only
+        // requires one of them to be present, matching `copy_to_clipboard`'s
+        // fallback below): a spawn failure here (binary missing entirely,
+        // not just a non-zero exit) must still fall through to xsel rather
+        // than short-circuit via `?`, or an xsel-only install silently never
+        // saves the original clipboard for `insert` to restore.
+        let xclip_output = Command::new("xclip")
             .arg("-selection")
             .arg("clipboard")
             .arg("-o")
             .output()
+            .ok();
+
+        if let Some(output) = xclip_output {
+            if output.status.success() {
+                return String::from_utf8(output.stdout).ok();
+            }
+        }
+
+        let xsel_output = Command::new("xsel")
+            .arg("--clipboard")
+            .arg("--output")
+            .output()
             .ok()?;
 
-        if output.status.success() {
-            String::from_utf8(output.stdout).ok()
+        if xsel_output.status.success() {
+            String::from_utf8(xsel_output.stdout).ok()
         } else {
-            // Try xsel fallback
-            let output = Command::new("xsel")
-                .arg("--clipboard")
-                .arg("--output")
-                .output()
-                .ok()?;
-
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok()
-            } else {
-                None
-            }
+            None
         }
     }
 }
@@ -179,9 +204,19 @@ impl TextInjector for ClipboardInjector {
                 retryable: false,
             })?;
 
-        // Restore original clipboard if we saved it
+        // Restore original clipboard if we saved it. `trigger_paste`
+        // returning only means the XTest Ctrl+V event was dispatched, not
+        // that the target application finished consuming the clipboard --
+        // there is no portable way to detect that here. Wait at least as
+        // long as we waited before pasting (previously this was shorter,
+        // which made the restore race ahead of slower apps on exactly the
+        // large snippets this backend exists for) and scale a little with
+        // text size as a best-effort margin, not a real synchronization.
         if let Some(original) = original_clipboard {
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            let restore_delay = std::time::Duration::from_millis(
+                (150 + text.len() as u64 / 100).min(500),
+            );
+            std::thread::sleep(restore_delay);
             let _ = self.copy_to_clipboard(&original);
         }
 

@@ -80,6 +80,13 @@ pub struct ExpansionEngine {
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
     max_buffer_chars: usize,
+    /// Set whenever the buffer evicts a character from the front because it
+    /// exceeded `max_buffer_chars`, and cleared only by `buffer.clear()`
+    /// (a known boundary, e.g. after a match). Lets `match_allowed`
+    /// distinguish "truly at the start of input" from "a preceding
+    /// character existed but was evicted" -- the two cases an empty
+    /// `rev().nth(length)` cannot tell apart on its own.
+    buffer_truncated: bool,
     capture_enabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
@@ -95,12 +102,33 @@ struct CommandCacheEntry {
 impl ExpansionEngine {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         config.validate()?;
+        // Triggers match literally (see `Matcher`, a case-sensitive char
+        // trie), so a `propagate_case` expansion is matched by inserting
+        // its uppercase and capitalized forms as additional trigger
+        // strings mapped to the same config entry, rather than by making
+        // matching itself case-insensitive (which would affect every
+        // expansion, not just ones that opted in). `take_match` later reads
+        // back which form was actually typed to decide how to case the
+        // replacement.
         let enabled: Vec<(usize, String)> = config
             .expansion
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry.enabled)
-            .map(|(index, entry)| (index, entry.trigger.clone()))
+            .flat_map(|(index, entry)| {
+                let mut variants = vec![entry.trigger.clone()];
+                if entry.propagate_case {
+                    for variant in [
+                        entry.trigger.to_uppercase(),
+                        capitalize_first_letter(&entry.trigger),
+                    ] {
+                        if !variants.contains(&variant) {
+                            variants.push(variant);
+                        }
+                    }
+                }
+                variants.into_iter().map(move |trigger| (index, trigger))
+            })
             .collect();
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
@@ -123,6 +151,7 @@ impl ExpansionEngine {
             matcher_indices,
             buffer: VecDeque::new(),
             max_buffer_chars,
+            buffer_truncated: false,
             capture_enabled: true,
             command_cache,
             hotkeys,
@@ -232,7 +261,7 @@ impl ExpansionEngine {
                                             || result_bytes.saturating_add(bytes)
                                                 > MAX_RESULT_BYTES_PER_EVENT
                                         {
-                                            self.buffer.clear();
+                                            self.clear_buffer();
                                             break;
                                         }
                                         result_bytes = result_bytes.saturating_add(bytes);
@@ -243,26 +272,42 @@ impl ExpansionEngine {
                         }
                     }
                     if results.len() >= MAX_RESULTS_PER_EVENT {
-                        self.buffer.clear();
+                        self.clear_buffer();
                         break;
                     }
                     self.buffer.push_back(character);
                     while self.buffer.len() > self.max_buffer_chars {
                         self.buffer.pop_front();
+                        self.buffer_truncated = true;
                     }
                     if let Some((index, length)) =
                         self.matcher.find_suffix(self.buffer.iter().rev().copied())
                     {
                         let config_index = self.matcher_indices.get(index).copied();
                         let Some(config_index) = config_index else {
-                            self.buffer.clear();
+                            self.clear_buffer();
                             continue;
                         };
-                        let (trigger, match_mode) = {
+                        let (trigger, match_mode, propagate_case) = {
                             let expansion = &self.config.expansion[config_index];
-                            (expansion.trigger.clone(), expansion.match_mode)
+                            (
+                                expansion.trigger.clone(),
+                                expansion.match_mode,
+                                expansion.propagate_case,
+                            )
                         };
-                        if self.matcher.has_continuation(&trigger)
+                        // The actually-typed suffix, which may be an
+                        // uppercase or capitalized variant of `trigger` for
+                        // a `propagate_case` expansion (see
+                        // `ExpansionEngine::new`): `has_continuation` must
+                        // be checked against what was typed, since that is
+                        // the string actually present in the forward trie,
+                        // not necessarily `trigger` itself.
+                        let typed: String = {
+                            let start = self.buffer.len().saturating_sub(length);
+                            self.buffer.iter().skip(start).collect()
+                        };
+                        if self.matcher.has_continuation(&typed)
                             || match_mode == MatchMode::WordBoundary
                         {
                             continue;
@@ -270,14 +315,17 @@ impl ExpansionEngine {
                         if !self.match_allowed(config_index, length) {
                             continue;
                         }
-                        let Ok(insert) = self.render_expansion(config_index) else {
-                            self.buffer.clear();
+                        let Ok(mut insert) = self.render_expansion(config_index) else {
+                            self.clear_buffer();
                             continue;
                         };
+                        if propagate_case {
+                            insert = apply_case_style(&typed, &insert);
+                        }
                         let expansion_bytes = trigger.len().saturating_add(insert.len());
                         if result_bytes.saturating_add(expansion_bytes) > MAX_RESULT_BYTES_PER_EVENT
                         {
-                            self.buffer.clear();
+                            self.clear_buffer();
                             break;
                         }
                         result_bytes = result_bytes.saturating_add(expansion_bytes);
@@ -288,7 +336,7 @@ impl ExpansionEngine {
                         });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
-                        self.buffer.clear();
+                        self.clear_buffer();
                     }
                 }
                 results
@@ -307,12 +355,12 @@ impl ExpansionEngine {
                             .copied()
                             .and_then(|config_index| self.take_match(config_index, length))
                     });
-                self.buffer.clear();
+                self.clear_buffer();
                 result.into_iter().collect()
             }
             InputEvent::FocusChanged { sensitive } => {
                 self.capture_enabled = !sensitive;
-                self.buffer.clear();
+                self.clear_buffer();
                 Vec::new()
             }
             InputEvent::WindowChanged(window) => {
@@ -335,7 +383,18 @@ impl ExpansionEngine {
             return None;
         }
         let trigger = self.config.expansion[config_index].trigger.clone();
-        let insert = self.render_expansion(config_index).ok()?;
+        let propagate_case = self.config.expansion[config_index].propagate_case;
+        // Read the actually-typed trigger text (which may be an uppercase
+        // or capitalized variant registered in the matcher for this entry;
+        // see `ExpansionEngine::new`) before it is popped off below.
+        let typed_case_source = propagate_case.then(|| {
+            let start = self.buffer.len().saturating_sub(length);
+            self.buffer.iter().skip(start).collect::<String>()
+        });
+        let mut insert = self.render_expansion(config_index).ok()?;
+        if let Some(typed) = typed_case_source {
+            insert = apply_case_style(&typed, &insert);
+        }
         for _ in 0..length {
             self.buffer.pop_back();
         }
@@ -369,6 +428,15 @@ impl ExpansionEngine {
         Ok(value)
     }
 
+    /// Resets the matcher buffer to a known boundary. Always use this
+    /// instead of `self.buffer.clear()` directly: it also clears
+    /// `buffer_truncated`, since a fresh boundary means whatever preceded it
+    /// is no longer relevant to word-boundary checks.
+    fn clear_buffer(&mut self) {
+        self.buffer.clear();
+        self.buffer_truncated = false;
+    }
+
     fn match_allowed(&self, config_index: usize, length: usize) -> bool {
         let expansion = &self.config.expansion[config_index];
         if !self.app_filter_allows(expansion) {
@@ -377,8 +445,14 @@ impl ExpansionEngine {
         if expansion.match_mode != MatchMode::WordBoundary {
             return true;
         }
-        let preceding = self.buffer.iter().rev().nth(length);
-        preceding.is_none_or(|character| !is_word_character(*character))
+        match self.buffer.iter().rev().nth(length) {
+            Some(character) => !is_word_character(*character),
+            // A `None` here is ambiguous unless we know nothing was ever
+            // evicted: it means either "this is genuinely the start of
+            // input" (allow) or "a preceding character existed but was
+            // truncated out of the buffer" (unknown -- fail closed).
+            None => !self.buffer_truncated,
+        }
     }
 
     /// An expansion with an empty `app_filter` matches everywhere. A
@@ -419,6 +493,41 @@ impl ExpansionEngine {
 
 fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
+}
+
+/// Uppercases the first alphabetic character in `text`, leaving everything
+/// else (including a non-alphabetic prefix like `:` in a trigger) as-is.
+/// Used both to derive a trigger's capitalized variant and, symmetrically,
+/// to capitalize a replacement for `propagate_case`.
+fn capitalize_first_letter(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut capitalized = false;
+    for character in text.chars() {
+        if !capitalized && character.is_alphabetic() {
+            result.extend(character.to_uppercase());
+            capitalized = true;
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
+
+/// Recases `text` (a rendered replacement) to match the casing pattern of
+/// `typed` (the trigger as the user actually typed it), for expansions with
+/// `propagate_case` enabled. A single capitalized letter or a capitalized
+/// word yields a capitalized replacement; two or more uppercase letters
+/// yield a fully uppercased replacement; anything else (typed as
+/// configured, or mixed case) leaves the replacement unchanged.
+fn apply_case_style(typed: &str, text: &str) -> String {
+    let letters: Vec<char> = typed.chars().filter(|character| character.is_alphabetic()).collect();
+    match letters.as_slice() {
+        [] => text.to_owned(),
+        [single] if single.is_uppercase() => capitalize_first_letter(text),
+        letters if letters.iter().all(|character| character.is_uppercase()) => text.to_uppercase(),
+        [first, ..] if first.is_uppercase() => capitalize_first_letter(text),
+        _ => text.to_owned(),
+    }
 }
 
 fn run_command(command: &CommandConfig) -> Result<String, ()> {
@@ -764,6 +873,7 @@ mod tests {
                 match_mode: MatchMode::Immediate,
                 command: None,
                 enabled: true,
+                propagate_case: false,
             }],
             hotkey: Vec::new(),
             settings: crate::Settings::default(),
@@ -859,6 +969,39 @@ replacement = "bad\u0000value""#;
         assert!(engine.process(InputEvent::Text("x:sig".into())).is_empty());
         assert_eq!(
             engine.process(InputEvent::Text(" :sig ".into()))[0].insert,
+            "signature"
+        );
+    }
+
+    /// Regression test: when `max_buffer_chars` is small enough that the
+    /// character preceding a word-boundary trigger gets evicted from the
+    /// buffer before the trigger finishes matching, the engine must fail
+    /// closed (reject the match) rather than treat the evicted, unknown
+    /// character as "no boundary violation".
+    #[test]
+    fn word_boundary_mode_fails_closed_when_buffer_truncates_preceding_context() {
+        let config = || {
+            Config::parse(
+                "[settings]\nmax_buffer_chars = 4\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+            )
+            .unwrap()
+        };
+        // "hello:sig" typed one character at a time: by the time ":sig" (4
+        // chars) fills the 4-char buffer, the "o" that should block a
+        // word-boundary match has already been evicted. Must still reject
+        // rather than treat the unknown evicted character as a non-issue.
+        let mut engine = ExpansionEngine::new(config()).unwrap();
+        assert!(engine
+            .process(InputEvent::Text("hello:sig".into()))
+            .is_empty());
+        // A real word boundary (nothing precedes the trigger at all) must
+        // still match even with the same small buffer: this is the case
+        // truncation must not be confused with. The trailing space is the
+        // terminating character word-boundary mode needs to resolve the
+        // match at all.
+        let mut engine = ExpansionEngine::new(config()).unwrap();
+        assert_eq!(
+            engine.process(InputEvent::Text(":sig ".into()))[0].insert,
             "signature"
         );
     }
@@ -1185,5 +1328,71 @@ replacement = "bad\u0000value""#;
         let config = "[settings]\nmax_buffer_chars = 2\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"";
         let mut engine = ExpansionEngine::new(Config::parse(config).unwrap()).unwrap();
         assert_eq!(engine.process(InputEvent::Text("abc:x".into())).len(), 1);
+    }
+
+    #[test]
+    fn propagate_case_leaves_replacement_unchanged_for_lowercase_trigger() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"\npropagate_case = true",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert_eq!(
+            engine.process(InputEvent::Text(":sig".into()))[0].insert,
+            "regards"
+        );
+    }
+
+    #[test]
+    fn propagate_case_uppercases_replacement_for_uppercase_trigger() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"\npropagate_case = true",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert_eq!(
+            engine.process(InputEvent::Text(":SIG".into()))[0].insert,
+            "REGARDS"
+        );
+    }
+
+    #[test]
+    fn propagate_case_capitalizes_replacement_for_capitalized_trigger() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"\npropagate_case = true",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert_eq!(
+            engine.process(InputEvent::Text(":Sig".into()))[0].insert,
+            "Regards"
+        );
+    }
+
+    #[test]
+    fn propagate_case_works_with_word_boundary_mode() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"\nmatch_mode = \"word-boundary\"\npropagate_case = true",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert_eq!(
+            engine.process(InputEvent::Text(" :SIG ".into()))[0].insert,
+            "REGARDS"
+        );
+    }
+
+    #[test]
+    fn propagate_case_is_opt_in_and_does_not_affect_ordinary_triggers() {
+        // Without `propagate_case`, matching stays strictly literal:
+        // typing the trigger in a different case must not match at all.
+        let config =
+            Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"").unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.process(InputEvent::Text(":SIG".into())).is_empty());
+        assert_eq!(
+            engine.process(InputEvent::Text(":sig".into()))[0].insert,
+            "regards"
+        );
     }
 }

@@ -96,6 +96,9 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,
+            // Espanso's own `propagate_case` match option is not mapped
+            // here; imported snippets keep their replacement text as-is.
+            propagate_case: false,
         });
     }
     let config = Config {

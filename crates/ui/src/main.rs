@@ -270,6 +270,7 @@ impl App {
                     match_mode: wayexpand_core::MatchMode::Immediate,
                     command: None,
                     enabled: true,
+                    propagate_case: false,
                 });
                 if let Err(error) = self.config.save_atomic(&self.path) {
                     self.config = previous;

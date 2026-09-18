@@ -95,6 +95,12 @@ pub struct ExpansionConfig {
     pub command: Option<CommandConfig>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// When the typed trigger is all-uppercase or capitalized, apply the
+    /// same casing to the replacement before inserting it (e.g. typing
+    /// `SIG` instead of `sig` yields an uppercased replacement). Off by
+    /// default so existing configs keep behaving exactly as before.
+    #[serde(default)]
+    pub propagate_case: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

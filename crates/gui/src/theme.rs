@@ -5,6 +5,7 @@
 use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle, Vec2,
 };
+use crate::colorpack::{ColorPack, ColorScheme};
 
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -20,36 +21,26 @@ pub struct Palette {
     pub border: Color32,
     pub surface: Color32,
     pub surface_hover: Color32,
+    pub background: Color32,
+    pub extreme_bg: Color32,
 }
 
 impl Palette {
-    pub fn for_mode(dark: bool) -> Self {
-        if dark {
-            Self {
-                accent: Color32::from_rgb(0x7C, 0x9C, 0xFF),
-                accent_weak: Color32::from_rgb(0x2A, 0x33, 0x52),
-                accent_text: Color32::from_rgb(0x10, 0x14, 0x24),
-                success: Color32::from_rgb(0x4E, 0xD1, 0x8C),
-                warning: Color32::from_rgb(0xF2, 0xB8, 0x4B),
-                danger: Color32::from_rgb(0xF2, 0x7A, 0x7A),
-                muted: Color32::from_rgb(0x9A, 0xA1, 0xAE),
-                border: Color32::from_rgb(0x2A, 0x2F, 0x3A),
-                surface: Color32::from_rgb(0x1B, 0x1E, 0x24),
-                surface_hover: Color32::from_rgb(0x24, 0x28, 0x31),
-            }
-        } else {
-            Self {
-                accent: Color32::from_rgb(0x4F, 0x6B, 0xED),
-                accent_weak: Color32::from_rgb(0xE4, 0xE9, 0xFC),
-                accent_text: Color32::WHITE,
-                success: Color32::from_rgb(0x1F, 0x9D, 0x55),
-                warning: Color32::from_rgb(0xB2, 0x77, 0x0A),
-                danger: Color32::from_rgb(0xD6, 0x45, 0x45),
-                muted: Color32::from_rgb(0x6B, 0x72, 0x80),
-                border: Color32::from_rgb(0xE1, 0xE4, 0xEA),
-                surface: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-                surface_hover: Color32::from_rgb(0xEE, 0xF0, 0xF4),
-            }
+    pub fn for_pack(pack: ColorPack, dark: bool) -> Self {
+        let scheme = ColorScheme::for_pack(pack, dark);
+        Self {
+            accent: scheme.accent,
+            accent_weak: scheme.accent_weak,
+            accent_text: scheme.accent_text,
+            success: scheme.success,
+            warning: scheme.warning,
+            danger: scheme.danger,
+            muted: scheme.muted,
+            border: scheme.border,
+            surface: scheme.surface,
+            surface_hover: scheme.surface_hover,
+            background: scheme.background,
+            extreme_bg: scheme.extreme_bg,
         }
     }
 }
@@ -61,14 +52,14 @@ impl Palette {
 /// defaults. Called once at startup for both themes so switching between
 /// them (via the toolbar toggle, which just flips `Context::set_theme`) is
 /// instant.
-pub fn install(ctx: &egui::Context) {
-    apply_for(ctx, egui::Theme::Dark);
-    apply_for(ctx, egui::Theme::Light);
+pub fn install_pack(ctx: &egui::Context, pack: ColorPack) {
+    apply_for_pack(ctx, egui::Theme::Dark, pack);
+    apply_for_pack(ctx, egui::Theme::Light, pack);
 }
 
-fn apply_for(ctx: &egui::Context, theme: egui::Theme) {
+fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack) {
     let dark = theme == egui::Theme::Dark;
-    let palette = Palette::for_mode(dark);
+    let palette = Palette::for_pack(pack, dark);
     let mut style = (*ctx.style_of(theme)).clone();
     let mut visuals = if dark {
         egui::Visuals::dark()
@@ -81,17 +72,9 @@ fn apply_for(ctx: &egui::Context, theme: egui::Theme) {
     visuals.selection.bg_fill = palette.accent_weak;
     visuals.selection.stroke = Stroke::new(1.0, palette.accent);
     visuals.window_fill = palette.surface;
-    visuals.panel_fill = if dark {
-        Color32::from_rgb(0x14, 0x16, 0x1A)
-    } else {
-        Color32::from_rgb(0xF5, 0xF6, 0xF8)
-    };
+    visuals.panel_fill = palette.background;
     visuals.faint_bg_color = palette.surface_hover;
-    visuals.extreme_bg_color = if dark {
-        Color32::from_rgb(0x0F, 0x11, 0x15)
-    } else {
-        Color32::from_rgb(0xFB, 0xFB, 0xFC)
-    };
+    visuals.extreme_bg_color = palette.extreme_bg;
     visuals.code_bg_color = visuals.extreme_bg_color;
     visuals.warn_fg_color = palette.warning;
     visuals.error_fg_color = palette.danger;

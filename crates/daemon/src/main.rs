@@ -535,6 +535,21 @@ fn main() -> Result<()> {
         }
     }
     warn!("input stream ended; daemon stopping");
+    // The libei backend's Drop can hang indefinitely when connected through
+    // a desktop portal (e.g. KWin's RemoteDesktop portal): its
+    // `tokio::runtime::Runtime` blocks the dropping thread until its
+    // background tasks reach a safe stopping point, which observably does
+    // not always happen promptly against every portal implementation. Left
+    // inline, that stalls this function's return past systemd's
+    // `TimeoutStopSec`, forcing a SIGKILL instead of the clean exit this
+    // service is asking for. Move the injector's drop to a detached thread
+    // so a hang there can never delay `control`'s own drop just below
+    // (which removes the control socket file -- needed for a clean
+    // restart) or the daemon's own exit; the whole process going away
+    // reclaims that thread regardless of whether its drop ever finishes.
+    if let Some(injector) = injector.take() {
+        thread::spawn(move || drop(injector));
+    }
     Ok(())
 }
 

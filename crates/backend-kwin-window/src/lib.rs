@@ -11,9 +11,11 @@
 //! public API exists for it.
 
 use std::{
-    fs, process,
+    fs,
+    io::Write,
+    process,
     sync::{mpsc, Mutex},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
@@ -111,9 +113,28 @@ impl KwinWindowTracker {
             .build()?;
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}");
-        let script_path = std::env::temp_dir().join(format!("{plugin_name}.js"));
+        // The path is otherwise predictable (PID plus a fixed prefix, under
+        // world-writable /tmp), so a local attacker who guesses this
+        // process's upcoming PID could pre-place a symlink here pointing at
+        // a file this user owns elsewhere; `fs::write` follows symlinks and
+        // would overwrite that target. A random suffix makes the exact path
+        // unguessable, and `create_new` (O_CREAT|O_EXCL) refuses to open
+        // through anything already there -- symlink or not -- as defense in
+        // depth even if the suffix were somehow predicted.
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let script_path =
+            std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
-        fs::write(&script_path, &script_contents).map_err(KwinWindowError::ScriptWrite)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&script_path)
+            .map_err(KwinWindowError::ScriptWrite)?;
+        file.write_all(script_contents.as_bytes())
+            .map_err(KwinWindowError::ScriptWrite)?;
 
         if let Err(error) = Self::load_and_run(&connection, &script_path, &plugin_name) {
             let _ = fs::remove_file(&script_path);
