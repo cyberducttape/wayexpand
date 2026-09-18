@@ -1,3 +1,16 @@
+wayexpand (1.1.1-1) focal; urgency=medium
+
+  * Release v1.1.1: Accessibility, themes, and sysadmin documentation
+  * Add comprehensive SYSADMIN_EXAMPLES.md with 30+ production-ready snippets
+  * Improve WCAG AA contrast compliance in retro themes (Classic White, Terminal Blue, Commodore 64)
+  * Fix color contrast issues for accessibility: Terminal Blue muted text now uses white, Commodore 64 orange brightened
+  * Add GUI font scaling (0.8x - 2.0x) with 5-option selector in Settings
+  * Complete GUI v1.1 polish: keyboard focus indicators, typography hierarchy, enhanced shadows, improved input fields
+  * Add 8 color packs including retro Terminal Blue (IBM 3270) and Commodore 64 (1982) themes
+  * All themes now meet 4.5:1 contrast ratio requirement for WCAG 2.1 Level AA compliance
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 18 Sep 2026 12:00:00 +0000
+
 wayexpand (1.0.0-1) focal; urgency=medium
 
   * Release v1.0.0: Production-ready with stability guarantees
