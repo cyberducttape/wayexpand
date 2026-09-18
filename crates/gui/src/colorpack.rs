@@ -127,8 +127,8 @@ impl ColorScheme {
                 success: Color32::from_rgb(0x4E, 0xD1, 0x8C),
                 warning: Color32::from_rgb(0xF2, 0xB8, 0x4B),
                 danger: Color32::from_rgb(0xF2, 0x7A, 0x7A),
-                muted: Color32::from_rgb(0x9A, 0xA1, 0xAE),
-                border: Color32::from_rgb(0x2A, 0x2F, 0x3A),
+                muted: Color32::from_rgb(0xB0, 0xB8, 0xCC),     // Brighter for better contrast on dark bg
+                border: Color32::from_rgb(0x3A, 0x3F, 0x4A),    // Lighter border for better visibility
                 surface: Color32::from_rgb(0x1B, 0x1E, 0x24),
                 surface_hover: Color32::from_rgb(0x24, 0x28, 0x31),
                 background: Color32::from_rgb(0x14, 0x16, 0x1A),
