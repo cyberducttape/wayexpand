@@ -221,6 +221,18 @@ impl GuiApp {
         }
     }
 
+    /// Sets the status message for a config change that was just saved to
+    /// disk, then asks the running daemon to reload it. A failed reload
+    /// request is appended to the message rather than discarded: otherwise
+    /// the GUI reports success while the daemon keeps expanding the old
+    /// config, and the user has no way to know the two have diverged.
+    fn set_message_and_reload(&mut self, message: impl Into<String>) {
+        self.message = message.into();
+        if let Err(error) = control_command("reload") {
+            self.message = format!("{} (daemon did not reload: {error})", self.message);
+        }
+    }
+
     fn save_settings(&mut self) {
         let max_buffer_chars = match self.settings_buffer.trim().parse::<usize>() {
             Ok(value) => value,
@@ -253,8 +265,7 @@ impl GuiApp {
                 self.settings_font_scale = self.config.settings.font_scale;
                 self.settings_open = false;
                 self.settings_error = None;
-                self.message = "Settings saved atomically".into();
-                let _ = control_command("reload");
+                self.set_message_and_reload("Settings saved atomically");
             }
             Err(error) => {
                 let error = error.safe_summary();
@@ -296,12 +307,12 @@ impl GuiApp {
                     .selected
                     .map(|index| Draft::from_expansion(&self.config.expansion[index]));
                 self.import_open = false;
-                self.message = if skipped == 0 {
-                    "Espanso library imported".into()
+                let message = if skipped == 0 {
+                    "Espanso library imported".to_owned()
                 } else {
                     format!("Espanso library imported; skipped {skipped} unsupported match(es)")
                 };
-                let _ = control_command("reload");
+                self.set_message_and_reload(message);
             }
             Err(error) => {
                 self.message = format!("Import save failed: {}", error.safe_summary());
@@ -498,18 +509,27 @@ impl GuiApp {
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
                 self.command_preview_result = None;
-                self.message = "Snippet saved atomically".into();
-                let _ = control_command("reload");
+                self.set_message_and_reload("Snippet saved atomically");
             }
             Err(error) => self.message = format!("Save failed: {}", error.safe_summary()),
         }
     }
 
     fn undo(&mut self) {
-        let Some(previous) = self.undo.pop() else {
+        let Some(previous) = self.undo.last() else {
             self.message = "Nothing to undo".into();
             return;
         };
+        // Save the restored config to disk *before* committing it to GUI
+        // state or popping it off the undo stack. Doing it in the opposite
+        // order (as before) meant a failed save still left the undo entry
+        // consumed and the in-memory config changed, with disk untouched --
+        // GUI, daemon, and disk would all disagree about what the config is.
+        if let Err(error) = previous.save_atomic(&self.path) {
+            self.message = format!("Undo save failed: {}", error.safe_summary());
+            return;
+        }
+        let previous = self.undo.pop().expect("checked non-empty above");
         self.config = previous;
         self.selected = self
             .selected
@@ -521,10 +541,8 @@ impl GuiApp {
             .selected
             .map(|index| self.config.expansion[index].trigger.clone())
             .unwrap_or_default();
-        match self.config.save_atomic(&self.path) {
-            Ok(()) => self.message = "Undid the last saved change".into(),
-            Err(error) => self.message = format!("Undo save failed: {}", error.safe_summary()),
-        }
+        self.command_preview_result = None;
+        self.set_message_and_reload("Undid the last saved change");
     }
 
     fn create_new_snippet(&mut self) {
@@ -557,7 +575,7 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
-                self.message = "Created a new snippet".into();
+                self.set_message_and_reload("Created a new snippet");
             }
             Err(error) => self.message = format!("Create failed: {}", error.safe_summary()),
         }
@@ -592,7 +610,7 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
-                self.message = "Duplicated snippet".into();
+                self.set_message_and_reload("Duplicated snippet");
             }
             Err(error) => self.message = format!("Duplicate failed: {}", error.safe_summary()),
         }
@@ -615,7 +633,8 @@ impl GuiApp {
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
-                self.message = format!("Deleted {trigger}");
+                self.command_preview_result = None;
+                self.set_message_and_reload(format!("Deleted {trigger}"));
             }
             Err(error) => self.message = format!("Delete failed: {}", error.safe_summary()),
         }
@@ -639,11 +658,10 @@ impl GuiApp {
                         draft.enabled = now_enabled;
                     }
                 }
-                self.message = format!(
+                self.set_message_and_reload(format!(
                     "{trigger} {}",
                     if now_enabled { "enabled" } else { "disabled" }
-                );
-                let _ = control_command("reload");
+                ));
             }
             Err(error) => self.message = format!("Toggle failed: {}", error.safe_summary()),
         }

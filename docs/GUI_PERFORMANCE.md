@@ -51,7 +51,7 @@ if detect_app_clicked {
 
 ### Short-term (1.0 Maintenance)
 
-**Document the behavior:** ✅ DONE — Added to [Troubleshooting.md](docs/wiki/Troubleshooting.md)
+**Document the behavior:** ✅ DONE — Added to [Troubleshooting.md](wiki/Troubleshooting.md)
 - Explains expected 1-2 second delay
 - Clarifies it only happens on first enable
 - Points to retry constants for advanced users

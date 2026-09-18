@@ -164,7 +164,7 @@ impl TextInjector for ClipboardInjector {
         // spawn is a real, user-visible delay (fork/exec plus an X11 round
         // trip), so erasing even a modest 20-character trigger one
         // character at a time could take the better part of a second.
-        Command::new("xdotool")
+        let output = Command::new("xdotool")
             .arg("key")
             .arg("--repeat")
             .arg(backspace_count.to_string())
@@ -175,6 +175,22 @@ impl TextInjector for ClipboardInjector {
                 message: format!("xdotool backspace failed: {}", e),
                 retryable: false,
             })?;
+        // A non-zero exit means the trigger was NOT actually erased. This
+        // must be a hard error, not a warning: `replace()` calls `insert()`
+        // right after this, and if that proceeds anyway the replacement
+        // text gets typed after the still-present trigger instead of in
+        // place of it.
+        if !output.status.success() {
+            return Err(wayexpand_core::InjectorError {
+                backend: BACKEND_NAME,
+                message: format!(
+                    "xdotool backspace exited with {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+                retryable: false,
+            });
+        }
         Ok(())
     }
 
@@ -227,7 +243,7 @@ impl TextInjector for ClipboardInjector {
         if count == 0 {
             return Ok(());
         }
-        Command::new("xdotool")
+        let output = Command::new("xdotool")
             .arg("key")
             .arg("--repeat")
             .arg(count.to_string())
@@ -238,6 +254,17 @@ impl TextInjector for ClipboardInjector {
                 message: format!("xdotool cursor-left failed: {}", e),
                 retryable: false,
             })?;
+        if !output.status.success() {
+            return Err(wayexpand_core::InjectorError {
+                backend: BACKEND_NAME,
+                message: format!(
+                    "xdotool cursor-left exited with {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+                retryable: false,
+            });
+        }
         Ok(())
     }
 }

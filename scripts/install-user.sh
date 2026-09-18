@@ -104,7 +104,7 @@ printf '%s\n' "  wayexpand doctor"
 printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service"
 printf '%s\n' "  wayexpand-gui"
 printf '%s\n' "If \`doctor\` reports no input-method-v2/virtual-keyboard support (for"
-printf '%s\n' "example on KWin/KDE Plasma), read docs/SECURITY.md and consider:"
+printf '%s\n' "example on KWin/KDE Plasma), read SECURITY.md and consider:"
 printf '%s\n' "  sudo ./scripts/install-evdev-permissions.sh --dry-run"
 printf '%s\n' "  systemctl --user enable --now wayexpand-evdev.service"
 

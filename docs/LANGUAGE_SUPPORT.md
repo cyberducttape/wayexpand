@@ -134,8 +134,8 @@ A comprehensive German README is available at `README.de.md`.
 To link from other documentation:
 
 ```markdown
-- English: [README.md](README.md)
-- Deutsch: [README.de.md](README.de.md)
+- English: [README.md](../README.md)
+- Deutsch: [README.de.md](../README.de.md)
 ```
 
 ## Testing
