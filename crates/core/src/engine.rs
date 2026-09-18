@@ -490,7 +490,7 @@ impl ExpansionEngine {
                 }
             }
         }
-        let value = run_command(command)?;
+        let value = run_command(command).map_err(|_| ())?;
         if command.cache_ms > 0 {
             self.command_cache[config_index] = Some(CommandCacheEntry {
                 expires_at: Instant::now() + Duration::from_millis(command.cache_ms),
@@ -609,15 +609,63 @@ fn apply_case_style(typed: &str, text: &str) -> String {
     }
 }
 
-fn run_command(command: &CommandConfig) -> Result<String, ()> {
+/// Why a command-backed expansion's configured program did not produce
+/// usable output. Kept narrow (no raw OS error strings) since this can be
+/// surfaced to the GUI/CLI, not just logged internally.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandError {
+    /// The program could not be started at all (not found, not executable,
+    /// permission denied, ...).
+    SpawnFailed,
+    /// The program did not exit within `command.timeout_ms` and was killed.
+    Timeout,
+    /// The program exited but reported failure.
+    NonZeroExit(Option<i32>),
+    /// Output exceeded the bounded size this engine will buffer.
+    OutputTooLarge,
+    /// Output was not valid UTF-8.
+    InvalidUtf8,
+    /// The output-reading thread did not report back in time (should not
+    /// happen once the process itself has exited; treated as a distinct
+    /// case rather than folded into `Timeout` since it points at a bug in
+    /// the reader thread, not a slow command).
+    OutputChannelLost,
+}
+
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandError::SpawnFailed => write!(f, "could not start the program"),
+            CommandError::Timeout => write!(f, "timed out before it produced output"),
+            CommandError::NonZeroExit(Some(code)) => write!(f, "exited with status {code}"),
+            CommandError::NonZeroExit(None) => write!(f, "was terminated by a signal"),
+            CommandError::OutputTooLarge => write!(
+                f,
+                "produced more than {} bytes of output",
+                MAX_COMMAND_OUTPUT_BYTES
+            ),
+            CommandError::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
+            CommandError::OutputChannelLost => write!(f, "output could not be read back"),
+        }
+    }
+}
+
+impl std::error::Error for CommandError {}
+
+/// Runs a command-backed expansion's configured program to completion and
+/// returns its trimmed stdout. Public so the GUI/CLI can invoke it directly
+/// for an explicit, user-initiated "run once" preview -- callers must never
+/// invoke this from a rendering/repaint loop, since it spawns a real process
+/// with real side effects on every call.
+pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     let mut child = Command::new(&command.program)
         .args(&command.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| ())?;
-    let stdout = child.stdout.take().ok_or(())?;
+        .map_err(|_| CommandError::SpawnFailed)?;
+    let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -636,26 +684,26 @@ fn run_command(command: &CommandConfig) -> Result<String, ()> {
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(());
+                return Err(CommandError::Timeout);
             }
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(());
+                return Err(CommandError::Timeout);
             }
         }
     };
     if !status.success() {
-        return Err(());
+        return Err(CommandError::NonZeroExit(status.code()));
     }
     let bytes = receiver
         .recv_timeout(Duration::from_millis(100))
-        .map_err(|_| ())?
-        .map_err(|_| ())?;
+        .map_err(|_| CommandError::OutputChannelLost)?
+        .map_err(|_| CommandError::OutputChannelLost)?;
     if bytes.len() > MAX_COMMAND_OUTPUT_BYTES {
-        return Err(());
+        return Err(CommandError::OutputTooLarge);
     }
-    let output = String::from_utf8(bytes).map_err(|_| ())?;
+    let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     Ok(output.trim_end_matches(['\r', '\n']).to_owned())
 }
 

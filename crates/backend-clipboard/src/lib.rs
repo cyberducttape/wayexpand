@@ -114,12 +114,6 @@ impl ClipboardInjector {
     }
 }
 
-impl Default for ClipboardInjector {
-    fn default() -> Self {
-        Self::new().expect("clipboard backend requires xclip/xsel and xdotool")
-    }
-}
-
 impl ClipboardInjector {
     fn get_clipboard(&self) -> Option<String> {
         // xclip and xsel are independent optional dependencies (`new` only
