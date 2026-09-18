@@ -7,19 +7,32 @@ WayExpand v1.0.0 is production-ready and recommended for deployment on Wayland d
 Production release with:
 - ✅ Stability guarantees for CLI, JSON, and config schema
 - ✅ Security audit and formal threat model documentation
-- ✅ Comprehensive package distribution (Ubuntu PPA, Arch AUR, Fedora Copr)
+- ✅ Package distribution: Ubuntu PPA and Arch AUR (Fedora has no Copr repo
+  yet -- see docs/PACKAGING_CHECKLIST.md)
 - ✅ Professional GUI with themes, language packs, and accessibility support
-- ✅ Full KDE Plasma support (evdev capture + KWin window tracking)
+- ✅ KDE Plasma support (evdev capture + KWin window tracking)
 - ✅ Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
 - ✅ Stability guarantees documented in COMPATIBILITY.md
 
+## ✅ Completed: v1.1.x (2026-09-18)
+
+Shipped as v1.1.0 through v1.1.2. Note this covered accessibility/GUI
+polish rather than the wlroots window tracking originally planned for this
+slot (moved below to the next unscheduled milestone):
+- ✅ GUI font scaling (0.8x-2.0x) for accessibility
+- ✅ 8 color packs, including new Terminal Blue (IBM 3270) and Commodore 64
+  retro themes, all meeting WCAG 2.1 AA contrast
+- ✅ Keyboard focus indicators, typography hierarchy, hover-state polish
+- ✅ Sysadmin-focused example snippet documentation
+
 ---
 
-## 🚀 Planned: v1.1 (Next Release)
+## 🚀 Next (unscheduled)
 
 ### Window Tracking for wlroots Compositors
 
-**Status:** Planned for 1.1  
+**Status:** Not started -- no committed release, moved here from the
+original v1.1 slot since v1.1.x shipped other work instead  
 **Why:** Complete `app_filter` support across all major compositors  
 **Scope:** Implement wlroots `wlr-foreign-toplevel-management-unstable-v1` protocol for Sway/Hyprland/river
 
@@ -31,13 +44,20 @@ Production release with:
 **Related issues:**
 - RELEASE_1.0_CHECKLIST.md §5 mentions protocol is standard and lower risk
 - Currently implemented only for KDE Plasma (D-Bus)
-- GNOME/Mutter has no equivalent (shell-extension required, out of scope)
+- GNOME/Mutter: no window-tracking implementation exists and none is
+  scheduled. (This roadmap previously called it "out of scope" while
+  SUPPORT_MATRIX.md called it "planned for v1.1" -- neither was accurate;
+  this is the corrected, single source of truth for its status.)
 
 ### Polish & Quality Improvements
 
-- [ ] Move long-running KWin window-tracker operations to background thread (reduce UI jank)
-- [ ] Cleanup predictable `/tmp/wayexpand-window-tracker-*.js` files on daemon startup
-- [ ] Document cleanup story in SECURITY.md or release notes
+- [ ] Move long-running KWin window-tracker operations (used by "Use
+      current app" in the snippet editor) to a background thread -- it
+      currently blocks the GUI thread for up to 5 seconds
+- [x] ~~Cleanup predictable `/tmp/wayexpand-window-tracker-*.js` files on
+      daemon startup~~ -- done: the path now includes a random component
+      and is opened with `O_CREAT|O_EXCL`, refusing to write through
+      anything already present (see CHANGELOG.md, Security fixes)
 
 ---
 
@@ -95,8 +115,9 @@ Ongoing:
 ## Release Schedule
 
 **v1.0.0:** Released 2026-09-17 ✅  
-**v1.1:** Planned Q4 2026 (wlroots window tracking, polish)  
-**v1.2+:** Features driven by community feedback and contributions
+**v1.1.x:** Released 2026-09-18 ✅ (GUI accessibility, themes, docs)  
+**v1.2+:** No committed date. wlroots window tracking is the leading
+candidate; otherwise driven by community feedback and contributions.
 
 ---
 

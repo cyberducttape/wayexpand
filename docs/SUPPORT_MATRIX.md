@@ -3,7 +3,7 @@
 This matrix separates implemented code from verified desktop behavior. A
 Wayland session alone does not imply that a backend is usable.
 
-**v1.0.0+ is production-ready** — WayExpand has been tested on KDE Plasma (KWin 6.6+) with comprehensive coverage of input capture, output injection, window tracking, and configuration management. Additional compositor testing (Sway, Hyprland, GNOME) is ongoing and contributions from users on those platforms are welcome.
+**Core engine and config are stable; desktop backend support is compositor-dependent.** WayExpand has its most complete verified coverage on KDE Plasma (KWin 6.6+): input capture, output injection, window tracking, and configuration management have been tested there. Several backends (input-method-v2, libei, evdev, hotkeys) are still Experimental per the table below, and no compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture. Additional compositor testing (Sway, Hyprland, GNOME) is ongoing and contributions from users on those platforms are welcome.
 
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Wayland session alone does not imply that a backend is usable.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev`) | Experimental | Compositor-agnostic fallback for compositors without input-method-v2/virtual-keyboard support (e.g. KWin); has no sensitive-field signal (see [`SECURITY.md`](../SECURITY.md)) and does not yet forward key auto-repeat |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Supported (KDE Plasma v6.6+) | Live-verified on KWin 6.6.6; wlroots (`wlr-foreign-toplevel-management-unstable-v1`) and GNOME implementations planned for v1.1 |
+| Focused-window tracking (`app_filter`) | Supported (KDE Plasma v6.6+) | Live-verified on KWin 6.6.6; wlroots (`wlr-foreign-toplevel-management-unstable-v1`) is the leading candidate for a future release (see PROFESSIONAL_ROADMAP.md) -- no GNOME/Mutter implementation exists or is scheduled |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |
 | Preedit/IME composition | Not supported | Native toolkit and compose/dead-key tests |
 
