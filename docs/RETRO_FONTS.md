@@ -35,9 +35,9 @@ The retro color themes (Classic Green, Classic Amber, Classic White, Terminal Bl
 - Alt option: "c64_pro" or "commodore64" fonts (from independent font sites)
 - Modern: PragmaticaC64 (available on GitHub)
 
-## Installing System Fonts
+## Installing System Fonts (Linux)
 
-### Linux - Ubuntu/Debian
+### Ubuntu/Debian
 ```bash
 # Courier (usually pre-installed, but ensure it's available)
 sudo apt install fonts-liberation    # For Liberation Mono
@@ -48,28 +48,23 @@ sudo apt install fonts-dejavu        # For DejaVu Sans Mono
 sudo apt install fonts-ocraext
 ```
 
-### Linux - Fedora/RHEL
+### Fedora/RHEL/CentOS
 ```bash
 sudo dnf install liberation-fonts
 sudo dnf install google-noto-mono-fonts
 ```
 
-### Linux - Arch
+### Arch/Manjaro
 ```bash
 pacman -S ttf-liberation
 pacman -S noto-fonts-mono
 ```
 
-### macOS
-Courier New is included by default. For additional fonts:
+### openSUSE
 ```bash
-brew install font-courier-prime
-brew install font-liberation-mono
+sudo zypper install liberation-fonts
+sudo zypper install google-noto-mono-fonts
 ```
-
-### Windows
-Courier New is included. For Liberation Mono:
-- Download from https://www.fontspace.com or Google Fonts
 
 ## Using Fonts with WayExpand
 
@@ -110,12 +105,12 @@ WayExpand v1.2 is planned to include:
 - Font preview in theme selector
 - Automatic font detection (warn if selected font isn't installed)
 
-## Resources
+## Linux Font Resources
 
-- **Google Fonts:** https://fonts.google.com/ (Search "Courier", "Courier Prime", "IBM Courier")
-- **Font Spaces:** https://www.fontspace.com/ (Specialized retro fonts)
-- **DaFont:** https://www.dafont.com/ (Community fonts, including C64 themed)
-- **Noto Project:** https://fonts.google.com/noto (High-quality open fonts)
+- **Google Fonts:** https://fonts.google.com/ (Courier Prime, IBM Courier, open-source)
+- **Noto Project:** https://fonts.google.com/noto (High-quality open-source fonts)
+- **Liberation Fonts:** https://github.com/liberationfonts/ (Metric-compatible with MS fonts)
+- **FontAwesome & community fonts via AUR** (Arch users): `yay -S courier-prime-fonts`
 
 ## Technical Notes
 
