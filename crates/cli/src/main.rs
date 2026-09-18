@@ -815,6 +815,53 @@ mod tests {
         assert_eq!(value["config_state"], "ok");
     }
 
+    /// Contract test for docs/COMPATIBILITY.md's `wayexpand status --json`
+    /// section: the exact daemon status line documented there as the
+    /// "Stable" example must still produce exactly the documented field
+    /// set (no more, no less) and types. If this fails, either the
+    /// implementation changed in a way that needs a compatibility note, or
+    /// the documentation needs to be updated to match -- either way it
+    /// should not be silently discovered by a user's integration breaking.
+    #[test]
+    fn status_json_matches_documented_stable_contract() {
+        let daemon_response = "running\n\
+             source=input-method\n\
+             backend=input-method-v2\n\
+             state=connected\n\
+             paused=false\n\
+             config=/home/user/.config/wayexpand/expansions.toml\n\
+             config_state=ok";
+        let value = status_as_json(daemon_response).unwrap();
+        let object = value.as_object().expect("status --json returns an object");
+        let documented_fields = [
+            "response",
+            "source",
+            "backend",
+            "state",
+            "paused",
+            "config",
+            "config_state",
+        ];
+        assert_eq!(
+            object
+                .keys()
+                .map(|key| key.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            documented_fields.into_iter().collect(),
+            "status --json fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
+        );
+        assert_eq!(value["response"], "running");
+        assert_eq!(value["source"], "input-method");
+        assert_eq!(value["backend"], "input-method-v2");
+        assert_eq!(value["state"], "connected");
+        assert_eq!(value["paused"], false);
+        assert_eq!(
+            value["config"],
+            "/home/user/.config/wayexpand/expansions.toml"
+        );
+        assert_eq!(value["config_state"], "ok");
+    }
+
     #[test]
     fn json_flag_is_recognized_in_any_position() {
         let mut args = vec!["expansions.toml".to_string(), "--json".to_string()];
