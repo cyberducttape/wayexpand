@@ -63,6 +63,14 @@ if [ -e "$application_dir/wayexpand.desktop" ]; then
     printf '%s\n' "Removed $application_dir/wayexpand.desktop"
 fi
 
+icon_base="$HOME/.local/share/icons/hicolor"
+for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+    icon_path="$icon_base/$size/apps/wayexpand.png"
+    if [ -e "$icon_path" ]; then
+        rm -f -- "$icon_path"
+    fi
+done
+
 if [ "$purge_config" -eq 1 ]; then
     if [ -e "$config_dir" ]; then
         rm -rf -- "$config_dir"

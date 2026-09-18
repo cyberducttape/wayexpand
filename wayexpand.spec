@@ -1,5 +1,5 @@
 Name:           wayexpand
-Version:        0.2.0
+Version:        1.1.1
 Release:        1%{?dist}
 Summary:        A privacy-first, Wayland-native text expander for Linux
 License:        MIT
@@ -46,6 +46,11 @@ install -Dm755 target/release/wayexpand-ui %{buildroot}%{_bindir}/wayexpand-ui
 
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
 
+for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+    install -Dm644 assets/icon/hicolor/${size}/apps/wayexpand.png \
+        %{buildroot}%{_datadir}/icons/hicolor/${size}/apps/wayexpand.png
+done
+
 install -Dm644 systemd/wayexpand.service %{buildroot}%{_userunitdir}/wayexpand.service
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
@@ -68,8 +73,13 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_userunitdir}/wayexpand-evdev.service
 %{_udevrulesdir}/71-wayexpand-evdev.rules
 %config(noreplace) %{_sysconfdir}/wayexpand/expansions.toml.example
+%{_datadir}/icons/hicolor/*/apps/wayexpand.png
 
 %changelog
+* Thu Sep 18 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.1-1
+- Release v1.1.1: font scaling, retro color themes, WCAG AA contrast fixes,
+  sysadmin snippet examples
+
 * Mon Sep 16 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 0.2.0-1
 - Release v0.2.0: evdev backend, GUI redesign, character-drop fix
 

@@ -68,6 +68,14 @@ install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
 install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 
+icon_base="$HOME/.local/share/icons/hicolor"
+for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+    icon_src="$release_dir/icons/hicolor/$size/apps/wayexpand.png"
+    if [ -f "$icon_src" ]; then
+        install -Dm644 "$icon_src" "$icon_base/$size/apps/wayexpand.png"
+    fi
+done
+
 config_path="$config_dir/expansions.toml"
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
@@ -79,6 +87,9 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
+if [ -d "$release_dir/icons" ]; then
+    printf '%s\n' "Installed application icon in $icon_base"
+fi
 printf '%s\n' "Next steps:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' "  systemctl --user daemon-reload"
