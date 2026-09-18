@@ -739,6 +739,13 @@ impl Strings {
         }
     }
 
+    pub fn unsaved_undoing(&self) -> &'static str {
+        match self.lang {
+            Language::English => "undoing the last change",
+            Language::German => "die letzte Änderung rückgängig machen",
+        }
+    }
+
     pub fn save_before(&self, action: &str) -> String {
         match self.lang {
             Language::English => format!("Save changes before {}?", action),
