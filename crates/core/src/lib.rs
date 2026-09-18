@@ -17,8 +17,8 @@ pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode, Settings,
 };
 pub use engine::{
-    ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent,
-    WindowContext,
+    run_command, CommandError, ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError,
+    HotkeyResult, InputEvent, WindowContext,
 };
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;

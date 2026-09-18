@@ -165,9 +165,14 @@ cargo run -p wayexpand-ui -- expansions.toml
 cargo run -p wayexpand-gui -- expansions.toml
 ```
 
-`test` is the safe dry-run path: it simulates matching and prints the result;
-it never injects text into another application. Add `--json` when consuming
-the result from CI, scripts, or an editor integration.
+`test` simulates matching and prints the result without injecting text into
+another application. For a plain (template) expansion this is a pure,
+side-effect-free dry run. For a **command-backed** expansion, `test` still
+runs the configured program for real to produce its output -- there is no
+way to preview what a command would produce without running it. Review any
+command-backed snippet's `program`/`args` before running `test` against a
+config you did not write yourself. Add `--json` when consuming the result
+from CI, scripts, or an editor integration.
 
 ### Installation via Package Manager
 

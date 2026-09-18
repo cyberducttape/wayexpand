@@ -55,8 +55,15 @@ impl WindowTrackerService {
         };
         // The receiver may already be gone if the tracker was dropped
         // between the script firing and this call landing; that is not an
-        // error, there is simply nothing left to notify.
-        let _ = self.sender.lock().unwrap().send(context);
+        // error, there is simply nothing left to notify. A poisoned mutex
+        // (some other panic while holding the lock) is treated the same way
+        // rather than propagating the panic here: this callback runs on
+        // every D-Bus dispatch, so unwrap()-ing would permanently break
+        // app_filter-scoped snippets on the first poisoning instead of just
+        // this one window-change notification.
+        if let Ok(sender) = self.sender.lock() {
+            let _ = sender.send(context);
+        }
     }
 }
 

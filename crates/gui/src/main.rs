@@ -94,6 +94,11 @@ struct GuiApp {
     language_selector_open: bool,
     colorpack: ColorPack,
     colorpack_selector_open: bool,
+    /// Cached result of an explicit, user-triggered "Run once" command
+    /// preview (`Ok` output or a `Err` message to display). `None` means no
+    /// run has happened yet for the current draft. Cleared on selection
+    /// change so a stale result from a different snippet is never shown.
+    command_preview_result: Option<Result<String, String>>,
 }
 
 impl GuiApp {
@@ -174,6 +179,7 @@ impl GuiApp {
             language_selector_open: false,
             colorpack: prefs.colorpack,
             colorpack_selector_open: false,
+            command_preview_result: None,
         })
     }
 
@@ -349,6 +355,7 @@ impl GuiApp {
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
         self.preview_input = self.config.expansion[index].trigger.clone();
         self.pending_action = None;
+        self.command_preview_result = None;
     }
 
     fn draft_is_dirty(&self) -> bool {
@@ -490,6 +497,7 @@ impl GuiApp {
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
+                self.command_preview_result = None;
                 self.message = "Snippet saved atomically".into();
                 let _ = control_command("reload");
             }
@@ -641,6 +649,13 @@ impl GuiApp {
         }
     }
 
+    /// Renders a live preview for a plain (non-command) draft. Must never be
+    /// called for a command-backed draft: it builds a real `ExpansionEngine`
+    /// and calls it on every repaint, and for a command-backed expansion
+    /// that would mean spawning the configured program continuously while
+    /// the editor is simply open -- including any side-effecting script the
+    /// user has not even saved yet. Command previews are explicit and
+    /// user-triggered instead; see `run_command_preview`.
     fn preview(&self) -> String {
         let Some(index) = self.selected else {
             return self.strings.no_selection().into();
@@ -660,6 +675,23 @@ impl GuiApp {
             .last()
             .map(|result| result.insert.clone())
             .unwrap_or_else(|| "No expansion matched".into())
+    }
+
+    /// Runs the draft's configured command exactly once, on explicit user
+    /// request (a button click), and caches the result for display. This is
+    /// the only place a command-backed draft's program should ever run
+    /// before it is saved.
+    fn run_command_preview(&mut self) {
+        let Some(draft) = self.draft.as_ref() else {
+            return;
+        };
+        let result = match draft.command_config() {
+            Ok(Some(command)) => wayexpand_core::run_command(&command)
+                .map_err(|error| format!("Command failed: {error}")),
+            Ok(None) => Err("Enable the dynamic command first".into()),
+            Err(error) => Err(format!("Command settings invalid: {error}")),
+        };
+        self.command_preview_result = Some(result);
     }
 
     fn toggle_pause(&mut self) {
@@ -1563,27 +1595,67 @@ impl eframe::App for GuiApp {
                 }
             });
             ui.add_space(4.0);
-            let preview_text = self.preview();
-            egui::Frame::new()
-                .fill(palette.extreme_bg)
-                .stroke(egui::Stroke::new(1.0, palette.accent))
-                .corner_radius(egui::CornerRadius::same(8))
-                .inner_margin(egui::Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&preview_text).monospace());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            if ui
-                                .small_button(self.strings.copy())
-                                .on_hover_text(self.strings.copy_tooltip())
-                                .clicked()
-                            {
-                                ui.ctx().copy_text(preview_text.clone());
-                                self.message = "Preview copied to clipboard".into();
+            let command_backed = self.draft.as_ref().is_some_and(|draft| draft.command_enabled);
+            if command_backed {
+                // Never auto-run a configured program from a render/repaint
+                // path: unlike a template, this has real side effects and
+                // this code runs every frame the editor is open. Running is
+                // opt-in via the button below, and only ever once per click.
+                egui::Frame::new()
+                    .fill(theme::tint(palette.warning, 20))
+                    .stroke(egui::Stroke::new(1.0, palette.warning))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        ui.label(
+                            "This snippet runs a program instead of inserting fixed text. \
+                             Its output is not shown automatically -- run it once to see \
+                             what it currently produces.",
+                        );
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("▶ Run once").clicked() {
+                                self.run_command_preview();
+                            }
+                            match &self.command_preview_result {
+                                Some(Ok(output)) => {
+                                    let shown: String = if output.chars().count() > 200 {
+                                        output.chars().take(199).collect::<String>() + "…"
+                                    } else {
+                                        output.clone()
+                                    };
+                                    ui.label(RichText::new(shown).monospace());
+                                }
+                                Some(Err(message)) => {
+                                    ui.colored_label(palette.danger, message);
+                                }
+                                None => {}
                             }
                         });
                     });
-                });
+            } else {
+                let preview_text = self.preview();
+                egui::Frame::new()
+                    .fill(palette.extreme_bg)
+                    .stroke(egui::Stroke::new(1.0, palette.accent))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&preview_text).monospace());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                                if ui
+                                    .small_button(self.strings.copy())
+                                    .on_hover_text(self.strings.copy_tooltip())
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(preview_text.clone());
+                                    self.message = "Preview copied to clipboard".into();
+                                }
+                            });
+                        });
+                    });
+            }
             ui.add_space(12.0);
             let (message_color, message_bg) = status_tone(&self.message, &palette);
             egui::Frame::new()
