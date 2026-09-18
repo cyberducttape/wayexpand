@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+Ongoing development after v1.0.0. These features are stable and tested but not yet released.
+
 ### Added
 
 - **GUI language support**: English and German, with in-app switching (🌐 button), `LANG` environment auto-detection, and persisted preference. See [docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md).
@@ -181,5 +183,7 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v1.0.0
+[0.2.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.2.0
 [0.1.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.1.0

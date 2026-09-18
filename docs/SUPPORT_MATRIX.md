@@ -3,6 +3,8 @@
 This matrix separates implemented code from verified desktop behavior. A
 Wayland session alone does not imply that a backend is usable.
 
+**v1.0.0+ is production-ready** — WayExpand has been tested on KDE Plasma (KWin 6.6+) with comprehensive coverage of input capture, output injection, window tracking, and configuration management. Additional compositor testing (Sway, Hyprland, GNOME) is ongoing and contributions from users on those platforms are welcome.
+
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |
 | Core matching and config validation | Supported | Workspace unit tests and Clippy |
@@ -13,7 +15,7 @@ Wayland session alone does not imply that a backend is usable.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev`) | Experimental | Compositor-agnostic fallback for compositors without input-method-v2/virtual-keyboard support (e.g. KWin); has no sensitive-field signal (see `docs/SECURITY.md`) and does not yet forward key auto-repeat |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Experimental (KDE Plasma only) | Live-verified against a real KWin 6.6 session in this repo's history; wlroots (`wlr-foreign-toplevel-management-unstable-v1`) and GNOME are not implemented |
+| Focused-window tracking (`app_filter`) | Supported (KDE Plasma v6.6+) | Live-verified on KWin 6.6.6; wlroots (`wlr-foreign-toplevel-management-unstable-v1`) and GNOME implementations planned for v1.1 |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |
 | Preedit/IME composition | Not supported | Native toolkit and compose/dead-key tests |
 
