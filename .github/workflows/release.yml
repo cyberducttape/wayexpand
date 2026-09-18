@@ -32,6 +32,18 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match workspace version $actual" >&2
             exit 1
           }
+          # debian/changelog is what Launchpad's PPA builds key off of, not
+          # this tag or Cargo.toml -- a tag can pass the Cargo.toml check
+          # above and still leave Launchpad building a stale version if this
+          # file wasn't bumped in the same commit (this happened for
+          # v1.0.1/v1.1.0/v1.1.1, which all still said 1.0.0 here).
+          changelog_version=$(dpkg-parsechangelog --show-field Version)
+          changelog_upstream="${changelog_version%%-*}"
+          test "$changelog_upstream" = "$expected" || {
+            echo "tag $GITHUB_REF_NAME does not match debian/changelog version $changelog_version" >&2
+            echo "Launchpad builds from debian/changelog, not this tag -- bump it in the same commit you tag." >&2
+            exit 1
+          }
       - name: Build release binaries
         run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
       - name: Package release
