@@ -493,7 +493,9 @@ impl ConfigError {
             Self::InvalidTemplate { index, source } => {
                 format!("expansion {index} has an invalid replacement template ({source})")
             }
-            Self::InvalidPolicyConfig(msg) => format!("organization policy configuration error: {msg}"),
+            Self::InvalidPolicyConfig(msg) => {
+                format!("organization policy configuration error: {msg}")
+            }
         }
     }
 }
@@ -926,7 +928,11 @@ impl Config {
         // Validate that safe_mode doesn't ban all backends
         if self.organization.safe_mode
             && !self.organization.allowed_backends.is_empty()
-            && self.organization.allowed_backends.iter().all(|b| b == "none")
+            && self
+                .organization
+                .allowed_backends
+                .iter()
+                .all(|b| b == "none")
         {
             return Err(ConfigError::InvalidPolicyConfig(
                 "safe_mode with allowed_backends=['none'] would prevent all expansions".to_string(),

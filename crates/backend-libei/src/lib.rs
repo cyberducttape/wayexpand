@@ -708,8 +708,7 @@ fn split_text_chunks(text: &str) -> Vec<&str> {
 
 /// Get the path where portal session tokens are stored.
 /// Returns None if XDG_CONFIG_HOME is not set and home directory cannot be determined.
-#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
-fn portal_token_path() -> Option<PathBuf> {
+pub fn portal_token_path() -> Option<PathBuf> {
     if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
         let mut path = PathBuf::from(config_home);
         path.push("wayexpand");
@@ -723,6 +722,17 @@ fn portal_token_path() -> Option<PathBuf> {
         return Some(path);
     }
     None
+}
+
+pub fn reset_portal_token() -> std::io::Result<bool> {
+    let Some(path) = portal_token_path() else {
+        return Ok(false);
+    };
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Read a stored portal session token, if one exists and is accessible.

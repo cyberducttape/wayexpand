@@ -1,4 +1,7 @@
-use crate::{config::{MAX_CONFIG_BYTES, OrganizationPolicy}, Config, ConfigError, ExpansionConfig, MatchMode, Settings};
+use crate::{
+    config::{OrganizationPolicy, MAX_CONFIG_BYTES},
+    Config, ConfigError, ExpansionConfig, MatchMode, Settings,
+};
 use serde::Deserialize;
 use std::{fs, io::Read, path::Path};
 use thiserror::Error;

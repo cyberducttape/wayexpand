@@ -12,12 +12,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 use tracing::debug;
+use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
 use wayland_client::protocol::wl_registry;
 use wayland_client::{Connection, Dispatch, EventQueue};
 use wayland_protocols_wlr::foreign_toplevel::v1::client::{
     zwlr_foreign_toplevel_handle_v1, zwlr_foreign_toplevel_manager_v1,
 };
-use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
 
 #[derive(Debug, Error)]
 pub enum WlrootsToplevelError {
@@ -106,7 +106,9 @@ impl Dispatch<zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1, ()
     }
 }
 
-impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, usize> for WaylandState {
+impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, usize>
+    for WaylandState
+{
     fn event(
         state: &mut Self,
         _handle: &zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1,
@@ -127,8 +129,8 @@ impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, usiz
                 state.toplevels[index].title = Some(title);
                 if state.toplevels[index].focused {
                     let window = WindowContext {
-                        app_id: state.toplevels[index].app_id.clone().map(Into::into),
-                        title: state.toplevels[index].title.clone().map(Into::into),
+                        app_id: state.toplevels[index].app_id.clone(),
+                        title: state.toplevels[index].title.clone(),
                     };
                     state.current_window = Some(window.clone());
                     let _ = state.tx.send(Some(window));
@@ -139,8 +141,8 @@ impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, usiz
                 state.toplevels[index].app_id = Some(app_id);
                 if state.toplevels[index].focused {
                     let window = WindowContext {
-                        app_id: state.toplevels[index].app_id.clone().map(Into::into),
-                        title: state.toplevels[index].title.clone().map(Into::into),
+                        app_id: state.toplevels[index].app_id.clone(),
+                        title: state.toplevels[index].title.clone(),
                     };
                     state.current_window = Some(window.clone());
                     let _ = state.tx.send(Some(window));
@@ -154,14 +156,18 @@ impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, usiz
                     false
                 };
 
-                debug!(focused = is_focused, index = index, "toplevel state changed");
+                debug!(
+                    focused = is_focused,
+                    index = index,
+                    "toplevel state changed"
+                );
 
                 if is_focused && !state.toplevels[index].focused {
                     // Window gained focus
                     state.toplevels[index].focused = true;
                     let window = WindowContext {
-                        app_id: state.toplevels[index].app_id.clone().map(Into::into),
-                        title: state.toplevels[index].title.clone().map(Into::into),
+                        app_id: state.toplevels[index].app_id.clone(),
+                        title: state.toplevels[index].title.clone(),
                     };
                     debug!("window gained focus: {:?}", window);
                     state.current_window = Some(window.clone());

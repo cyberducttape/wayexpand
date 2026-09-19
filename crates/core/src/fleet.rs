@@ -9,7 +9,6 @@
 ///
 /// Each layer is a directory of .toml files. Within a layer, files are merged
 /// alphabetically. Duplicate triggers are rejected with source provenance.
-
 use crate::{Config, ConfigError};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -153,7 +152,11 @@ impl FleetConfig {
 
     /// Get all unique triggers across all layers
     pub fn all_triggers(&self) -> Vec<&str> {
-        self.config.expansion.iter().map(|e| e.trigger.as_str()).collect()
+        self.config
+            .expansion
+            .iter()
+            .map(|e| e.trigger.as_str())
+            .collect()
     }
 
     /// Get provenance for a trigger (where it came from)
@@ -188,17 +191,14 @@ impl ConfigMerger {
         }
 
         let mut files: Vec<_> = fs::read_dir(dir)
-            .map_err(|e| FleetError::Config(ConfigError::Read {
-                path: dir.display().to_string(),
-                source: e,
-            }))?
+            .map_err(|e| {
+                FleetError::Config(ConfigError::Read {
+                    path: dir.display().to_string(),
+                    source: e,
+                })
+            })?
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(".toml")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".toml"))
             .collect();
 
         files.sort_by_key(|e| e.file_name());
@@ -231,8 +231,10 @@ impl ConfigMerger {
                         existing_file: existing.file.clone(),
                     });
                 }
-                self.expansions
-                    .insert(expansion.trigger.clone(), (config.clone(), provenance.clone()));
+                self.expansions.insert(
+                    expansion.trigger.clone(),
+                    (config.clone(), provenance.clone()),
+                );
                 self.stats.total_expansions += 1;
             }
 
@@ -290,18 +292,19 @@ impl ConfigMerger {
         let expansion: Vec<_> = self
             .expansions
             .into_iter()
-            .map(|(_, (config, _))| config.expansion.into_iter())
-            .flatten()
+            .flat_map(|(_, (config, _))| config.expansion)
             .collect();
 
         let hotkey: Vec<_> = self
             .hotkeys
             .into_iter()
-            .map(|(_, (config, _))| config.hotkey.into_iter())
-            .flatten()
+            .flat_map(|(_, (config, _))| config.hotkey)
             .collect();
 
-        let settings = self.settings.map(|(config, _)| config.settings).unwrap_or_default();
+        let settings = self
+            .settings
+            .map(|(config, _)| config.settings)
+            .unwrap_or_default();
 
         let config = Config {
             expansion,

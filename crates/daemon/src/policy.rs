@@ -2,9 +2,8 @@
 ///
 /// Loads policies from /etc/wayexpand/policy.toml and enforces them
 /// at runtime, blocking unsafe operations and logging violations to journald.
-
 use std::path::Path;
-use tracing::{warn, error};
+use tracing::{error, warn};
 use wayexpand_core::OrganizationPolicy;
 
 const POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
@@ -48,8 +47,8 @@ fn load_policy_internal() -> Result<OrganizationPolicy, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("could not read {}: {}", POLICY_PATH, e))?;
 
-    let policy: OrganizationPolicy = toml::from_str(&content)
-        .map_err(|e| format!("invalid policy TOML: {}", e))?;
+    let policy: OrganizationPolicy =
+        toml::from_str(&content).map_err(|e| format!("invalid policy TOML: {}", e))?;
 
     Ok(policy)
 }
@@ -118,29 +117,37 @@ mod tests {
 
     #[test]
     fn check_expansion_blocks_commands_when_disabled() {
-        let mut policy = OrganizationPolicy::default();
-        policy.disable_commands = true;
+        let policy = OrganizationPolicy {
+            disable_commands: true,
+            ..Default::default()
+        };
         assert!(check_expansion_allowed(&policy, 1024, true, "libei").is_err());
     }
 
     #[test]
     fn check_expansion_blocks_size_when_exceeded() {
-        let mut policy = OrganizationPolicy::default();
-        policy.max_replacement_size = 1000;
+        let policy = OrganizationPolicy {
+            max_replacement_size: 1000,
+            ..Default::default()
+        };
         assert!(check_expansion_allowed(&policy, 2000, false, "libei").is_err());
     }
 
     #[test]
     fn check_expansion_blocks_disallowed_backend() {
-        let mut policy = OrganizationPolicy::default();
-        policy.allowed_backends = vec!["libei".to_string()];
+        let policy = OrganizationPolicy {
+            allowed_backends: vec!["libei".to_string()],
+            ..Default::default()
+        };
         assert!(check_expansion_allowed(&policy, 1024, false, "input-method").is_err());
     }
 
     #[test]
     fn check_hotkey_blocks_when_disabled() {
-        let mut policy = OrganizationPolicy::default();
-        policy.disable_hotkeys = true;
+        let policy = OrganizationPolicy {
+            disable_hotkeys: true,
+            ..Default::default()
+        };
         assert!(check_hotkey_allowed(&policy).is_err());
     }
 }

@@ -3673,6 +3673,7 @@ dependencies = [
  "serde_json",
  "toml",
  "wayexpand-backend-input-method",
+ "wayexpand-backend-libei",
  "wayexpand-backend-wlroots",
  "wayexpand-core",
 ]
@@ -3785,6 +3786,7 @@ dependencies = [
  "anyhow",
  "rustix 1.1.4",
  "signal-hook 0.4.4",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "wayexpand-backend-evdev",

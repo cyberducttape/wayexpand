@@ -11,6 +11,7 @@ use std::{
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendKind, BackendState, Config,
@@ -494,14 +495,7 @@ fn run() -> Result<()> {
                 }
                 return Ok(());
             }
-            println!(
-                "Session: {}",
-                if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-                    "Wayland"
-                } else {
-                    "not detected"
-                }
-            );
+            println!("Session: {}", session_description());
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
             let capture_ready = print_backend_diagnostics();
@@ -512,6 +506,36 @@ fn run() -> Result<()> {
         Some("backend") => {
             print_backend_diagnostics();
         }
+        Some("portal") => match args.next().as_deref() {
+            Some("status") => {
+                if args.next().is_some() {
+                    bail!("usage: wayexpand portal status|reset");
+                }
+                let path = portal_token_path().context("cannot determine config directory")?;
+                println!(
+                    "portal restoration token: {} ({})",
+                    if path.is_file() { "present" } else { "not present" },
+                    path.display()
+                );
+            }
+            Some("reset") => {
+                if args.next().is_some() {
+                    bail!("usage: wayexpand portal status|reset");
+                }
+                let removed = reset_portal_token()
+                    .context("removing the libei portal restoration token")?;
+                println!(
+                    "{}",
+                    if removed {
+                        "removed the stored portal restoration token"
+                    } else {
+                        "no stored portal restoration token was present"
+                    }
+                );
+                println!("the next libei connection may ask for portal access again");
+            }
+            _ => bail!("usage: wayexpand portal status|reset"),
+        },
         Some(requested @ ("status" | "reload" | "pause" | "resume" | "stop")) => {
             let status_argument = args.next();
             let requested_json = status_argument.as_deref() == Some("--json");
@@ -553,6 +577,17 @@ fn run() -> Result<()> {
         Some(command) => bail!("unknown command {command:?}; try `wayexpand help`"),
     }
     Ok(())
+}
+
+fn session_description() -> &'static str {
+    match env::var("XDG_SESSION_TYPE").ok().as_deref() {
+        Some("wayland") if env::var_os("DISPLAY").is_some() => "Wayland (XWayland available)",
+        Some("wayland") => "Wayland",
+        Some("x11") => "X11",
+        _ if env::var_os("WAYLAND_DISPLAY").is_some() => "Wayland",
+        _ if env::var_os("DISPLAY").is_some() => "X11 or XWayland",
+        _ => "not detected",
+    }
 }
 
 fn take_option(args: &mut Vec<String>, name: &str) -> Result<Option<String>> {

@@ -254,10 +254,7 @@ impl EvdevSource {
             Some(KeyAction::Delete) => Some(InputEvent::Backspace),
             // Commit carries "\n"/"\t" for the app, which already received
             // the real key natively; the matcher only needs the boundary.
-            Some(KeyAction::Commit(text)) => text
-                .chars()
-                .next()
-                .map(InputEvent::Delimiter),
+            Some(KeyAction::Commit(text)) => text.chars().next().map(InputEvent::Delimiter),
             Some(KeyAction::Text(text)) => Some(InputEvent::Text(text)),
             Some(KeyAction::Ignore) | None => None,
             Some(KeyAction::Unsupported) => Some(InputEvent::Reset),

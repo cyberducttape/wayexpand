@@ -18,11 +18,11 @@ pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
-pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use engine::{
     run_command, CommandError, ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError,
     HotkeyResult, InputEvent, WindowContext,
 };
+pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{import_espanso, EspansoImport, MigrationError};
