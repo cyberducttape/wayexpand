@@ -133,14 +133,14 @@ impl Settings {
 /// Organization-managed policy for compliance and security.
 ///
 /// Root-owned policies enforce constraints on user expansions, preventing
-/// accidental or malicious use in sensitive contexts. Violations are logged
-/// clearly and prevent expansions from executing.
+/// accidental or malicious use in sensitive contexts.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct OrganizationPolicy {
     /// Enable strict policy enforcement. When true, any policy violation
-    /// is logged and prevents the expansion from executing. When false,
-    /// violations are warnings only.
+    /// is logged as an error and prevents the expansion from executing.
+    /// When false, violations are logged as warnings but expansions proceed.
+    /// This allows organizations to audit policy behavior before full enforcement.
     pub safe_mode: bool,
 
     /// Disable command execution entirely. Overrides individual expansion
