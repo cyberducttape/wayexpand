@@ -2,9 +2,12 @@
 
 This guide covers the manual steps needed to promote releases on GitHub and manage package repositories.
 
-## Promote v1.1.2 as Latest Release (Required - 5 minutes)
+## v1.1.2 promotion (superseded)
 
-**Issue:** GitHub releases page still shows v0.2.1 as latest, despite v1.1.2 being the current stable version.
+The original v1.1.2 promotion task is no longer actionable: GitHub's current
+`/releases/latest` URL resolves to the newer v1.2 release. There is no reason
+to mark v1.1.2 latest retroactively. Use the same five-minute check whenever a
+new release is published.
 
 **Root Cause:** GitHub's `/releases/latest` resolves to whichever release was marked "Set as the latest release" in the UI.
 
@@ -13,8 +16,8 @@ This guide covers the manual steps needed to promote releases on GitHub and mana
 1. **Open GitHub Releases**
    - Go to https://github.com/itchyitchy123/wayexpand/releases
 
-2. **Find v1.1.2**
-   - Scroll to find v1.1.2 (released 2026-09-18)
+2. **Find the current release**
+   - Select the newest intended stable release
    - Click the three-dot menu icon next to the release title
 
 3. **Promote to Latest**
@@ -24,7 +27,7 @@ This guide covers the manual steps needed to promote releases on GitHub and mana
 
 4. **Verify**
    - Visit https://github.com/itchyitchy123/wayexpand/releases/latest
-   - Confirm it redirects to v1.1.2
+   - Confirm it redirects to the intended release tag
 
 ### Why This Matters
 
@@ -147,7 +150,7 @@ rustPlatform.buildRustPackage rec {
 
 | Task | Priority | Effort | When | Owner |
 |------|----------|--------|------|-------|
-| Promote v1.1.2 | 🔴 Critical | 5 min | Today | Manual (GitHub UI) |
+| Verify current release is latest | ✅ Superseded by v1.2 | 5 min | Each release | Manual (GitHub UI) |
 | Fedora Copr | 🟡 High | 2-3 h | This week | Stephan or volunteer |
 | NixOS package | 🟢 Medium | 2-3 h | Q4 | Community maintainer preferred |
 
@@ -155,7 +158,7 @@ rustPlatform.buildRustPackage rec {
 
 ## Checklist Before v1.2.0 Release
 
-- [ ] v1.1.2 promoted as latest on GitHub
+- [x] Current release promotion verified for v1.2; repeat for the next release
 - [ ] SBOM files generated and published (automated in CI)
 - [ ] Binary signatures/attestations verified (automated in CI)
 - [ ] Fedora Copr published (manual, optional for v1.2.0)

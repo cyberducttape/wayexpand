@@ -73,6 +73,8 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 |----------|----------|---------|
 | [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, logs, config reload |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
+| [TROUBLESHOOTING_CHECKLIST.md](TROUBLESHOOTING_CHECKLIST.md) | Users with issues | Doctor output → diagnosis → remediation |
+| [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
 
 ### Configuration & Customization
@@ -152,6 +154,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 #### Installation
 - [GETTING_STARTED.md](GETTING_STARTED.md)
 - [UPGRADING.md](UPGRADING.md)
+- [PACKAGING.md](PACKAGING.md) — distro and aarch64 source builds
 
 #### Configuration
 - [GETTING_STARTED.md](GETTING_STARTED.md) — basic
@@ -160,6 +163,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 
 #### Expansion Matching
 - [GETTING_STARTED.md](GETTING_STARTED.md) — first snippet
+- [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) — matcher limits and large libraries
 - [COMPATIBILITY.md](COMPATIBILITY.md) — matching modes
 
 #### Command Execution

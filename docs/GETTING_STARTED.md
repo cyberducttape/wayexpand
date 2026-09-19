@@ -6,6 +6,91 @@
 
 Welcome! This guide will help you get up and running based on your desktop environment.
 
+## Five-Minute Quickstart
+
+This is the shortest path from an installed binary to a working snippet.
+
+### 1. Check the session
+
+```sh
+wayexpand doctor
+wayexpand backend select --explain
+```
+
+Use the backend combination that `doctor` prints as usable. Backend support is
+compositor-dependent; an `Implemented` line means the code exists, not that
+your current session has advertised the protocol.
+
+### 2. Open the terminal editor
+
+```sh
+wayexpand-ui
+```
+
+Press `n`, enter a trigger such as `;;hello`, enter `Hello, world!`, and press
+`Enter` to save. Use `/` to search, `e` to edit the selected snippet, `Space`
+to enable/disable it, and `q` to quit. The same file can be edited with the
+graphical editor:
+
+```sh
+wayexpand-gui
+```
+
+The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
+`WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
+
+### 3. Start a supported user service
+
+For input-method-v2:
+
+```sh
+systemctl --user enable --now wayexpand-input-method.service
+wayexpand status --json
+```
+
+The status should report `state=connected`. If `doctor` recommends an
+explicit evdev/libei route instead, follow its command and read the security
+tradeoff in [SECURITY.md](../SECURITY.md).
+
+### 4. Test without typing into an application
+
+```sh
+wayexpand test ';;hello'
+```
+
+If this prints `Hello, world!`, type `;;hello` into a plain text field. If it
+prints `no expansion matched`, inspect the trigger with `wayexpand list` and
+`wayexpand validate` before debugging the backend.
+
+### 5. Add an app-filtered snippet (optional)
+
+Add this in the TUI/GUI or to the TOML file:
+
+```toml
+[[expansion]]
+trigger = ";;ticket"
+replacement = "Investigating this now."
+description = "Support response for the ticketing app"
+app_filter = ["com.example.TicketApp"]
+```
+
+App filters only work when the current compositor has a working window tracker.
+They fail closed when tracking is unavailable. Verify the exact application ID
+with the desktop's window-inspection tools and confirm support in
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md); use a global snippet if the tracker is
+experimental or unavailable.
+
+For the output-driven recovery flow, go directly to the
+[Troubleshooting Checklist](TROUBLESHOOTING_CHECKLIST.md).
+
+### Architecture note: aarch64
+
+The release archive currently has a pre-built Linux binary only for `x86_64`.
+There is no official aarch64 binary yet. On aarch64, follow the
+[source-build instructions in the packaging guide](PACKAGING.md#aarch64) and
+run `wayexpand doctor` after building. Fedora Copr is also not published yet;
+Fedora users should build from source or the RPM spec for now.
+
 ## Which Desktop Are You Using?
 
 ### KDE Plasma Wayland (KWin 6.6+) ✅
@@ -165,6 +250,8 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 
 **See Also:**
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - What's verified vs. experimental
+- [TROUBLESHOOTING_CHECKLIST.md](TROUBLESHOOTING_CHECKLIST.md) - doctor output → fix
+- [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) - matcher and large-library tuning
 - [OPERATIONS.md](OPERATIONS.md) - Systemd management and troubleshooting
 - [BACKENDS.md](BACKENDS.md) - Backend protocols and compatibility
 

@@ -1,15 +1,16 @@
 #!/bin/sh
 # Prepare a WayExpand release by syncing version across all sources.
-# This script updates Cargo.toml, debian/changelog, and creates a git tag.
+# This script updates Cargo.toml/Cargo.lock, CHANGELOG.md, debian/changelog,
+# PKGBUILD, the RPM spec, and creates a git tag.
 #
 # Usage:
 #   ./scripts/prepare-release.sh 1.2.0
 #
 # The script will:
 #   1. Verify the new version format (X.Y.Z)
-#   2. Update Cargo.toml with the new version
+#   2. Update Cargo.toml/Cargo.lock, CHANGELOG.md, PKGBUILD, and the RPM spec
 #   3. Update debian/changelog with a new entry
-#   4. Commit the changes
+#   4. Commit the changes as Stephan Loesevitz
 #   5. Create a git tag
 #
 # After running, review the commit/tag, then push:
@@ -49,33 +50,110 @@ fi
 
 printf '%s\n' "Preparing release v$new_version..."
 
+previous_version=$(sed -n 's/^## \[\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\].*/\1/p' CHANGELOG.md | head -n1)
+if [ -z "$previous_version" ]; then
+    printf '%s\n' "error: could not determine the previous version from CHANGELOG.md" >&2
+    exit 1
+fi
+
+release_date=$(LANG=en_US.UTF-8 date '+%Y-%m-%d')
+debian_date=$(LANG=en_US.UTF-8 date '+%a, %d %b %Y %H:%M:%S %z')
+
 # 1. Update Cargo.toml
 printf '%s\n' "Updating Cargo.toml..."
 sed -i.bak "s/^version = \"[^\"]*\"/version = \"$new_version\"/" Cargo.toml
 rm -f Cargo.toml.bak
 
-# 2. Update debian/changelog
+printf '%s\n' "Updating Cargo.lock workspace package versions..."
+lock_tmp=$(mktemp)
+awk -v version="$new_version" '
+    /^\[\[package\]\]$/ { wayexpand_package = 0 }
+    /^name = "wayexpand(-|\")/ { wayexpand_package = 1 }
+    wayexpand_package && /^version = "/ {
+        sub(/^version = "[^"]*"/, "version = \"" version "\"")
+        wayexpand_package = 0
+    }
+    { print }
+' Cargo.lock > "$lock_tmp"
+mv "$lock_tmp" Cargo.lock
+
+# 2. Update the human and distro changelogs.
+printf '%s\n' "Updating CHANGELOG.md..."
+changelog_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /^## \[[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\]/ {
+        print "## [" version "] - " date
+        print ""
+        print "Release v" version ". Move the unreleased entries above into this section before publishing."
+        print ""
+        inserted = 1
+    }
+    { print }
+' CHANGELOG.md > "$changelog_tmp"
+mv "$changelog_tmp" CHANGELOG.md
+
+links_tmp=$(mktemp)
+awk -v version="$new_version" -v previous="$previous_version" '
+    !inserted && /^\[Unreleased\]:/ {
+        print "[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v" version "...HEAD"
+        print "[" version "]: https://github.com/itchyitchy123/wayexpand/compare/v" previous "...v" version
+        inserted = 1
+        next
+    }
+    { print }
+' CHANGELOG.md > "$links_tmp"
+mv "$links_tmp" CHANGELOG.md
+
+# 3. Update package metadata.
+printf '%s\n' "Updating PKGBUILD and wayexpand.spec..."
+sed -i.bak "s/^pkgver=.*/pkgver=$new_version/" PKGBUILD
+rm -f PKGBUILD.bak
+sed -i.bak "s/^Version:        .*/Version:        $new_version/" wayexpand.spec
+rm -f wayexpand.spec.bak
+spec_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /^%changelog$/ {
+        print
+        print "* " date " Stephan Loesevitz <stephan.loesevitz@gmail.com> - " version "-1"
+        print "- Release v" version
+        print ""
+        inserted = 1
+        next
+    }
+    { print }
+' wayexpand.spec > "$spec_tmp"
+mv "$spec_tmp" wayexpand.spec
+
+# 4. Update debian/changelog.
 printf '%s\n' "Updating debian/changelog..."
-release_date=$(LANG=en_US.UTF-8 date '+%a, %d %b %Y %H:%M:%S %z')
 (
     printf '%s\n' "wayexpand ($new_version-1) focal; urgency=medium"
     printf '%s\n' ""
     printf '%s\n' "  * Release v$new_version"
     printf '%s\n' ""
-    printf '%s\n' " -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  $release_date"
+    printf '%s\n' " -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  $debian_date"
     printf '%s\n' ""
     cat debian/changelog
 ) > debian/changelog.tmp
 mv debian/changelog.tmp debian/changelog
 
-# 3. Commit changes
-printf '%s\n' "Committing version updates..."
-git add Cargo.toml debian/changelog
-git commit -m "release: version $new_version"
+# Verify the version-bearing fields before making the commit.
+test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | head -n1)" = "$new_version"
+test "$(sed -n 's/^pkgver=//p' PKGBUILD)" = "$new_version"
+test "$(sed -n 's/^Version: *//p' wayexpand.spec)" = "$new_version"
+test "$(sed -n "s/^wayexpand (\([^ -]*\)-.*/\1/p" debian/changelog | head -n1)" = "$new_version"
+grep -q "^## \[$new_version\]" CHANGELOG.md
 
-# 4. Create tag
+# 5. Commit changes with the project maintainer identity.
+printf '%s\n' "Committing version updates..."
+git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec
+git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
+    commit -m "release: version $new_version"
+
+# 6. Create tag
 printf '%s\n' "Creating git tag v$new_version..."
-git tag -a "v$new_version" -m "Release v$new_version"
+git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
+    tag -a "v$new_version" -m "Release v$new_version"
 
 printf '%s\n' ""
 printf '%s\n' "✓ Release v$new_version prepared successfully"
@@ -84,6 +162,7 @@ printf '%s\n' "Next steps:"
 printf '%s\n' "  1. Review the commit: git log -1"
 printf '%s\n' "  2. Review the tag: git show v$new_version"
 printf '%s\n' "  3. Push to GitHub: git push origin main v$new_version"
+printf '%s\n' "  4. Recompute PKGBUILD sha256sums for the new source archive"
 printf '%s\n' ""
 printf '%s\n' "The release workflow will then:"
 printf '%s\n' "  - Verify all versions match"

@@ -27,14 +27,14 @@ slot (moved below to the next unscheduled milestone):
 
 ---
 
-## Before v1.2
+## v1.2 follow-up
 
 Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 #19, app_filter preferring `app_id` over window title, are done.)
 
-- [ ] **#16 Mark v1.1.2 as the latest GitHub release.** GitHub's
-      `/releases/latest` still resolves to v0.2.1. Manual: Releases → v1.1.2 →
-      Edit → "Set as the latest release".
+- [x] **#16 Promote the current release on GitHub.** The old v1.1.2 action was
+      superseded when v1.2 was published; `/releases/latest` now resolves to
+      the newer release. Repeat the same UI check after future releases.
 - [x] **#17 Separate implementation status from environment status in
       diagnostics.** `BackendState` mixes "not implemented" with "needs
       permission" (uinput reports `RequiresPermission` although no uinput

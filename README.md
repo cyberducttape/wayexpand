@@ -40,6 +40,15 @@ X11-shaped implementation with Wayland support bolted on.
 
 **Get started:** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for your desktop.
 
+### Release status
+
+WayExpand v1.1.2 is a released build with stable core/configuration and CLI
+contracts. “Released” does not mean every compositor path is production-ready:
+input-method-v2, libei/EIS, evdev, and window tracking remain
+compositor-dependent, and several are experimental or awaiting independent
+certification. Check [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) and run
+`wayexpand doctor` before relying on a backend for daily or sensitive work.
+
 ## Why not just use Espanso or AutoKey?
 
 |                          | **WayExpand**                                                        | Espanso                                        | AutoKey                             |
@@ -208,6 +217,9 @@ See [docs/FOR_SYSADMINS.md](docs/FOR_SYSADMINS.md) for
 production-ready snippets (SSL certs, logrotate, systemd units, firewall
 rules, Docker, deployment scripts) and enterprise deployment guidance if you
 want a running start rather than an empty library.
+
+For large snippet libraries, see [PERFORMANCE_TUNING.md](docs/PERFORMANCE_TUNING.md).
+For backend failures, follow the [Troubleshooting Checklist](docs/TROUBLESHOOTING_CHECKLIST.md).
 
 ## Installation
 

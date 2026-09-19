@@ -17,6 +17,7 @@ distribution backports or an isolated toolchain installation.
 | Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 only |
 | Debian/Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
 | Fedora/RHEL | `wayexpand` | Build from source | ⚠️ No official Copr yet |
+| aarch64 | source build | No pre-built release archive yet | Cross-build or build natively |
 
 ## Building Locally
 
@@ -84,6 +85,27 @@ rpmbuild -ba wayexpand.spec
 4. Announce in README
 
 **Contributions welcome:** If you maintain a Copr repo or want to create one, please open an issue or PR.
+
+### aarch64
+
+The GitHub release workflow currently publishes a pre-built Linux archive only
+for `x86_64`; there is no official aarch64 binary to download yet. On an
+aarch64 Fedora, Debian, Ubuntu, or Arch system, build from the source archive
+or checkout after installing Rust 1.87+ and the native Wayland dependencies:
+
+```bash
+sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev
+cargo build --locked --release --workspace
+```
+
+The binaries are in `target/release/`. Run `wayexpand doctor` before enabling
+a user service. Native builds are preferred over cross-builds because the
+Wayland and compositor protocol libraries must match the target system.
+
+For a cross-build, install a Rust target and target-native development
+libraries first, then use Cargo's normal `--target aarch64-unknown-linux-gnu`
+flow. WayExpand does not currently publish a prebuilt sysroot or cross-build
+toolchain.
 
 ---
 

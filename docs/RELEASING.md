@@ -2,10 +2,12 @@
 
 WayExpand releases are created from annotated version tags. The release
 workflow rejects a mismatch before publishing artifacts if the tag does not
-match **both**:
+match all package metadata:
 
 - the workspace version in `Cargo.toml`
 - the version in `debian/changelog`
+- `PKGBUILD`
+- `wayexpand.spec`
 
 The second check exists because Launchpad's PPA builds key off
 `debian/changelog`, not the git tag or `Cargo.toml` — a tag that only
@@ -31,9 +33,12 @@ also exercise newer compilers, but a release must not depend on whichever
    [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
 4. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
    section.
-5. Update the workspace version in `Cargo.toml` **and** the top entry in
-   `debian/changelog`, and regenerate `Cargo.lock` if required.
-6. Commit the version and changelog update.
+5. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
+   changelogs, `PKGBUILD`, and RPM spec, then creates the maintainer-authored
+   commit and tag. Review the generated release section and recompute the
+   `PKGBUILD` source checksum before publishing.
+6. Regenerate `Cargo.lock` if dependency versions changed, then run the
+   release checks again.
 
 ## Publish
 
