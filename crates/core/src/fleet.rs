@@ -27,7 +27,7 @@
 ///
 /// **Base config:** Appended last (lowest priority for expansions/hotkeys).
 /// Base settings only override if no layer provides settings.
-use crate::{Config, ConfigError};
+use crate::{Config, ConfigError, OrganizationPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -167,24 +167,30 @@ impl FleetConfig {
     /// **Policy enforcement:** If organization policy restricts allowed_packs,
     /// pack-sourced expansions not in the allowed list are filtered out.
     pub fn load_standard_with_base(base: Config) -> Result<Self, FleetError> {
+        Self::load_standard_with_base_and_policy(base, &OrganizationPolicy::default())
+    }
+
+    /// Load fleet layers while applying the administrator-owned policy.
+    pub fn load_standard_with_base_and_policy(
+        base: Config,
+        policy: &OrganizationPolicy,
+    ) -> Result<Self, FleetError> {
         let mut fleet = Self::load_standard()?;
         let fleet_settings = fleet.config.settings.clone();
-        let fleet_organization = fleet.config.organization.clone();
         let base_expansions = base.expansion.len();
         let base_hotkeys = base.hotkey.len();
 
         let mut config = base;
 
         // Policy enforcement: filter pack-sourced expansions if allowed_packs is set
-        if !fleet_organization.allowed_packs.is_empty() {
+        if !policy.allowed_packs.is_empty() {
             fleet.config.expansion.retain(|expansion| {
                 if let Some(prov) = fleet.expansions_source.get(&expansion.trigger) {
                     // Keep organization and user layers, filter packs
                     prov.layer == "organization"
                         || prov.layer == "user"
                         || prov.layer.starts_with("pack:")
-                            && fleet_organization
-                                .pack_allowed(prov.layer.strip_prefix("pack:").unwrap_or(""))
+                            && policy.pack_allowed(pack_name(prov))
                 } else {
                     true
                 }
@@ -194,8 +200,7 @@ impl FleetConfig {
                     prov.layer == "organization"
                         || prov.layer == "user"
                         || prov.layer.starts_with("pack:")
-                            && fleet_organization
-                                .pack_allowed(prov.layer.strip_prefix("pack:").unwrap_or(""))
+                            && policy.pack_allowed(pack_name(prov))
                 } else {
                     true
                 }
@@ -206,9 +211,6 @@ impl FleetConfig {
         config.hotkey.extend(fleet.config.hotkey);
         if !fleet_settings.is_default() {
             config.settings = fleet_settings;
-        }
-        if fleet_organization.is_active() {
-            config.organization = fleet_organization;
         }
         config.validate().map_err(FleetError::Config)?;
         fleet.config = config;
@@ -249,7 +251,7 @@ impl FleetConfig {
 /// Merges configuration from multiple layers with duplicate detection.
 ///
 /// Implements fleet precedence: duplicates are rejected (fail-closed) for triggers
-/// and hotkeys, settings follow "last wins", policy is replaced (not merged).
+/// and hotkeys, settings follow "last wins", organization policy is preserved.
 ///
 /// Duplicate detection across all loaded layers ensures configuration safety:
 /// accidental trigger collisions are caught early rather than silently masked
@@ -260,6 +262,8 @@ struct ConfigMerger {
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
     settings: Option<(crate::Settings, Provenance)>,
+    // Organization policy from fleet layers (last one wins)
+    organization: Option<(crate::OrganizationPolicy, Provenance)>,
     stats: MergeStats,
 }
 
@@ -269,6 +273,7 @@ impl ConfigMerger {
             expansions: BTreeMap::new(),
             hotkeys: BTreeMap::new(),
             settings: None,
+            organization: None,
             stats: MergeStats::default(),
         }
     }
@@ -355,7 +360,18 @@ impl ConfigMerger {
                         provenance.file
                     );
                 }
-                self.settings = Some((config.settings.clone(), provenance));
+                self.settings = Some((config.settings.clone(), provenance.clone()));
+            }
+
+            // Organization policy (last one wins)
+            if config.organization.is_active() {
+                if self.organization.is_some() {
+                    eprintln!(
+                        "warning: organization policy from {} overrides previous layer",
+                        provenance.file
+                    );
+                }
+                self.organization = Some((config.organization.clone(), provenance));
             }
         }
 
@@ -396,11 +412,16 @@ impl ConfigMerger {
             .map(|(settings, _)| settings)
             .unwrap_or_default();
 
+        let organization = self
+            .organization
+            .map(|(org, _)| org)
+            .unwrap_or_default();
+
         let config = Config {
             expansion,
             hotkey,
             settings,
-            organization: crate::OrganizationPolicy::default(),
+            organization,
         };
 
         config.validate().map_err(FleetError::Config)?;
@@ -412,6 +433,15 @@ impl ConfigMerger {
             stats: self.stats,
         })
     }
+}
+
+fn pack_name(provenance: &Provenance) -> &str {
+    provenance
+        .layer
+        .strip_prefix("pack:")
+        .or_else(|| provenance.file.split('/').next())
+        .unwrap_or(provenance.file.as_str())
+        .trim_end_matches(".toml")
 }
 
 #[cfg(test)]
