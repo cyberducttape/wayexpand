@@ -35,7 +35,7 @@ disable_commands = false
 # Disable hotkey execution (hotkeys parse but don't run)
 disable_hotkeys = false
 
-# Disable title-based app filtering (all apps match)
+# Disable title-based fallback in app filtering (require app_id match only)
 disable_title_matching = false
 
 # Maximum replacement text size in bytes (0 = unlimited)
