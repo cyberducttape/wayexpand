@@ -919,7 +919,10 @@ mod tests {
         engine.process(InputEvent::PauseChanged(true));
         // Capture disabled, buffer cleared
         let results = engine.process(InputEvent::Text("lo".into()));
-        assert!(results.is_empty(), "paused engine must not produce expansions");
+        assert!(
+            results.is_empty(),
+            "paused engine must not produce expansions"
+        );
     }
 
     #[test]
