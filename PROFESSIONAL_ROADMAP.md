@@ -96,28 +96,42 @@ desktop Linux users but does not prevent use in controlled environments
 
 ---
 
-## Next (unscheduled)
+## In Progress (v1.2 target)
 
 ### Window Tracking for wlroots Compositors
 
-**Status:** Scaffold only -- the foreign-toplevel connection, registry, and
-event-flow work is not yet a functioning active-window tracker and is not
-integrated into the daemon.
-**Why:** Complete `app_filter` support across all major compositors  
-**Scope:** Implement wlroots `wlr-foreign-toplevel-management-unstable-v1` protocol for Sway/Hyprland/river
+**Status:** Phases 1-2 complete (2026-09-19). Phase 3 (daemon integration) in progress.
+**Why:** Complete `app_filter` support across Sway, Hyprland, river  
+**Scope:** Implement wlroots `wlr-foreign-toplevel-management-v1` protocol
 
-- [ ] Implement wlroots toplevel tracker backend
-- [ ] Add integration tests for Sway and Hyprland
-- [ ] Update SUPPORT_MATRIX.md to mark wlroots as Supported
-- [ ] Add troubleshooting guide for app-filter usage
+**Phase 1 + 2 Complete:**
+- ✅ Protocol connection and registry discovery
+- ✅ Toplevel event handling (creation, destruction, metadata)
+- ✅ Focus tracking with async notifications
+- ✅ Channel-based communication for non-blocking window changes
+- ✅ WindowTracker trait implementation with timeout support
+- ✅ 3 new tests covering protocol detection, naming, timeout behavior
 
-**Related issues:**
-- RELEASE_1.0_CHECKLIST.md §5 mentions protocol is standard and lower risk
-- Currently implemented only for KDE Plasma (D-Bus)
-- GNOME/Mutter: no window-tracking implementation exists and none is
-  scheduled. (This roadmap previously called it "out of scope" while
-  SUPPORT_MATRIX.md called it "planned for v1.1" -- neither was accurate;
-  this is the corrected, single source of truth for its status.)
+**Phase 3 (TODO - ~1 hour):**
+- [ ] Integrate tracker into daemon event loop
+- [ ] Add backend discovery function for availability detection
+- [ ] Route window focus changes to engine.process(InputEvent::WindowChanged)
+- [ ] Wire up app_filter matching with focused window context
+
+**Commits:**
+- 1f58bc43: Phase 1 foundation
+- 0f48b022: Phase 2 event-driven focus tracking
+
+**Status by compositor:**
+- Sway: foundation ready, needs Phase 3 + real-world testing
+- Hyprland: foundation ready, needs Phase 3 + real-world testing
+- river: foundation ready, needs Phase 3 + real-world testing
+
+**Related:**
+- `crates/backend-wlroots-toplevel/src/lib.rs`: full Phase 1-2 implementation
+- `docs/WLROOTS_WINDOW_TRACKING_GUIDE.md`: implementation details
+- `docs/DESKTOP_STATUS.md`: current status by compositor
+- GNOME/Mutter: no window-tracking protocol exists (see GNOME_WINDOW_TRACKING.md)
 
 ### Polish & Quality Improvements
 
