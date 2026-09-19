@@ -78,7 +78,8 @@ impl App {
             }
         }
         let query = self.query.to_lowercase();
-        let indices: Vec<usize> = self.config
+        let indices: Vec<usize> = self
+            .config
             .expansion
             .iter()
             .enumerate()
