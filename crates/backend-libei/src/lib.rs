@@ -65,6 +65,7 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
+#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 const PORTAL_TOKEN_FILENAME: &str = "libei-portal-token";
 
 #[derive(Debug, Error)]
@@ -708,6 +709,7 @@ fn split_text_chunks(text: &str) -> Vec<&str> {
 
 /// Get the path where portal session tokens are stored.
 /// Returns None if XDG_CONFIG_HOME is not set and home directory cannot be determined.
+#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 fn portal_token_path() -> Option<PathBuf> {
     if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
         let mut path = PathBuf::from(config_home);
@@ -725,12 +727,14 @@ fn portal_token_path() -> Option<PathBuf> {
 }
 
 /// Read a stored portal session token, if one exists and is accessible.
+#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 fn read_portal_token() -> Option<String> {
     let path = portal_token_path()?;
     std::fs::read_to_string(&path).ok()
 }
 
 /// Store a portal session token with restricted permissions (0600).
+#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 fn store_portal_token(token: &str) -> std::io::Result<()> {
     let path = portal_token_path().ok_or_else(|| {
         std::io::Error::new(
