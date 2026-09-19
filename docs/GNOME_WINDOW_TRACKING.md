@@ -2,7 +2,11 @@
 
 ## Current Status
 
-WayExpand does not currently support window tracking (app-filtering) on GNOME. This means `app_filter` entries in your configuration are ignored on GNOME, and expansions will match globally rather than per-application.
+WayExpand does not currently support window tracking (app-filtering) on GNOME. This means:
+
+**Security behavior (correct):** Application-filtered snippets will NOT expand on GNOME, because the engine cannot determine which application has focus. The matcher fails closed (never expands) rather than failing open (expanding everywhere).
+
+**User experience:** App-filtered snippets simply won't match on GNOME. This is the safe behavior — you won't get surprised by an expansion in the wrong application.
 
 ## Why GNOME is Not Supported
 

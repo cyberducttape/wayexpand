@@ -109,10 +109,21 @@ The daemon uses `ProtectHome=read-only`, `ProtectSystem=strict`, and other
 restrictions that prevent commands from writing to `$HOME`, accessing the
 network, or making unauthorized filesystem changes. A command that works when
 typed manually may fail when triggered by WayExpand if it requires capabilities
-the sandbox forbids. Test suspicious commands with `wayexpand-gui`'s Preview
-button, which runs them under the same sandbox restrictions, to catch these
-issues before typing triggers them. For details, see `SECURITY.md`'s section on
-command expansions.
+the sandbox forbids.
+
+⚠️ **Important:** The GUI's Preview button does NOT run commands under the daemon's
+systemd sandbox — it invokes them in the GUI process without those restrictions.
+This means:
+
+- `wayexpand-gui` preview can succeed while the live daemon expansion fails
+- The preview validates expansion *output* but not the systemd sandbox constraints
+
+To test a command under actual daemon sandbox restrictions, either:
+1. Manually type the trigger and observe the result, or
+2. Check `journalctl --user -u wayexpand-input-method.service` for daemon errors
+
+For full details on sandbox behavior and command execution constraints, see
+`SECURITY.md`'s section on command expansions.
 
 Configuration files are capped at 16 MiB and 10,000 expansion entries to keep
 reload memory and parsing cost bounded. Triggers and replacements containing

@@ -60,7 +60,9 @@ wayexpand doctor
 ```
 
 The installer builds release binaries, installs them under
-`~/.local/bin`, installs both user units, registers the desktop entry, and
+`~/.local/bin`, installs three user units (wayexpand.service for testing,
+wayexpand-input-method.service for GNOME/input-method-v2 compositors,
+wayexpand-evdev.service for KDE/Sway), registers the desktop entry, and
 creates `~/.config/wayexpand/expansions.toml` only when it does not exist.
 Existing configuration is never overwritten.
 
@@ -106,12 +108,15 @@ systemctl --user enable --now wayexpand-evdev.service
 wayexpand status
 ```
 
-For **GNOME and other compositors** with libei support:
+For **GNOME and other compositors** with input-method-v2 support:
 
 ```sh
-systemctl --user enable --now wayexpand.service
+systemctl --user enable --now wayexpand-input-method.service
 wayexpand status
 ```
+
+⚠️ **Do NOT use wayexpand.service** — it's a test harness (stdin mode) and will
+not provide global text expansion.
 
 Enable exactly one service. Expected status includes `source=(stdin|input-method|evdev)`,
 `backend=(none|input-method-v2|wlroots-virtual-keyboard|libei)`, `state=connected`,

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.itchyitchy123.WayExpand</id>
+  <launchable type="desktop-id">wayexpand.desktop</launchable>
+
+  <name>WayExpand</name>
+  <summary>Wayland-native text expander for Linux</summary>
+
+  <description>
+    <p>WayExpand turns short triggers into reusable text snippets. Type a quick abbreviation and get back your saved signatures, templates, code blocks, or anything else you retype every day.</p>
+    <p>Built for Wayland from the ground up, WayExpand uses native Wayland protocols for keyboard input and text injection rather than adapting X11 tools. It supports multiple backends depending on your compositor:</p>
+    <ul>
+      <li>KDE Plasma (KWin 6.6+) with evdev capture</li>
+      <li>GNOME and other compositors with input-method-v2</li>
+      <li>Sway and Hyprland via wlroots virtual-keyboard</li>
+      <li>libei/EIS for portal-mediated text injection</li>
+    </ul>
+    <p>Features:</p>
+    <ul>
+      <li>Graphical snippet editor with live preview</li>
+      <li>Template variables (date, time, username, custom programs)</li>
+      <li>Application-scoped snippets (KDE Plasma)</li>
+      <li>Undo last expansion with hotkey</li>
+      <li>Automatic sensitive-field detection (password fields)</li>
+      <li>Import from Espanso</li>
+      <li>No cloud, no telemetry, config stored locally</li>
+      <li>8 color packs including retro terminal themes</li>
+      <li>Language support: English, German</li>
+    </ul>
+    <p>Privacy-first and security-focused: WayExpand never logs your triggers or replacements, validates configurations before applying them, and detects password fields to prevent accidental expansion in sensitive inputs.</p>
+  </description>
+
+  <project_license>MIT</project_license>
+  <metadata_license>CC0-1.0</metadata_license>
+
+  <developer_name>Stephan Loesevitz</developer_name>
+  <url type="homepage">https://github.com/itchyitchy123/wayexpand</url>
+  <url type="bugtracker">https://github.com/itchyitchy123/wayexpand/issues</url>
+  <url type="help">https://github.com/itchyitchy123/wayexpand/discussions</url>
+  <url type="donation">https://github.com/sponsors/itchyitchy123</url>
+
+  <provides>
+    <binary>wayexpand</binary>
+    <binary>wayexpand-daemon</binary>
+    <binary>wayexpand-gui</binary>
+    <binary>wayexpand-ui</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+    <category>Accessibility</category>
+  </categories>
+
+  <keywords>
+    <keyword>text</keyword>
+    <keyword>expansion</keyword>
+    <keyword>snippets</keyword>
+    <keyword>wayland</keyword>
+    <keyword>productivity</keyword>
+    <keyword>automation</keyword>
+  </keywords>
+
+  <icon type="stock">wayexpand</icon>
+
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://github.com/itchyitchy123/wayexpand/blob/main/docs/wiki/assets/snippets-dashboard.png</image>
+      <caption>Snippet library dashboard with search and live preview</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://github.com/itchyitchy123/wayexpand/blob/main/docs/wiki/assets/diagnostics.png</image>
+      <caption>System diagnostics showing backend availability</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="1.1.2" date="2026-09-18">
+      <description>
+        <p>Security hardening and correctness fixes</p>
+        <ul>
+          <li>Fix P0: Cross-window buffer isolation — prevent text deletion in wrong application</li>
+          <li>Fix P0: Separate pause and sensitive-field state — resume cannot bypass password protection</li>
+          <li>Fix P0: Complete ancestor path validation — writable parent cannot replace config</li>
+          <li>Fix P0: Remove silent clipboard fallback — multiline routing is now explicit</li>
+          <li>Fix P0: input-method-v2 key loss warning — clear documentation of limitations</li>
+          <li>170+ regression tests for security fixes</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.1.1" date="2026-09-18">
+      <description>
+        <p>GUI polish: accessibility, themes, and sysadmin documentation</p>
+        <ul>
+          <li>8 color packs including retro terminal themes</li>
+          <li>Font scaling 0.8x–2.0x for accessibility</li>
+          <li>WCAG 2.1 AA contrast compliance</li>
+          <li>30+ production-ready sysadmin snippet examples</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.0" date="2026-09-17">
+      <description>
+        <p>First stable release with stability guarantees</p>
+        <ul>
+          <li>Stable CLI exit codes and JSON output schema</li>
+          <li>Stable TOML configuration format</li>
+          <li>Security audit and formal threat model</li>
+          <li>Production-ready for Wayland desktops</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+
+  <requires>
+    <display_length compare="ge">800</display_length>
+  </requires>
+
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+
+  <supports>
+    <relation type="requires_os">linux</relation>
+    <relation type="requires_protocol">wayland</relation>
+  </supports>
+
+  <custom>
+    <wayland_protocols>
+      <protocol name="zwp_input_method_v2" required="false" />
+      <protocol name="zwp_virtual_keyboard_v1" required="false" />
+      <protocol name="xdg_foreign_stable_v1" required="false" />
+    </wayland_protocols>
+  </custom>
+
+  <update_contact>stephan.loesevitz@gmail.com</update_contact>
+</component>

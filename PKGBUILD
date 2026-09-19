@@ -1,6 +1,6 @@
 # Maintainer: Stephan Loesevitz <stephan.loesevitz at gmail dot com>
 pkgname=wayexpand
-pkgver=1.1.1
+pkgver=1.1.2
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64')
@@ -20,12 +20,11 @@ optdepends=(
     'systemd: for user service support'
 )
 source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
-# SKIP is deliberate for a locally-built (makepkg -si) package: pacman
-# still verifies the download against it once a real value is filled in.
-# Before submitting/updating this PKGBUILD on the AUR, replace SKIP with
-# `updpkgsums` output (or `makepkg -g`) so AUR installs get real
-# tamper-detection, not just for local builds.
-sha256sums=('SKIP')
+# For local development: `makepkg -g` to generate checksums
+# For AUR submission: must have real sha256sum (not SKIP)
+# Run: updpkgsums
+# Then copy the generated sha256sums line below
+sha256sums=('SKIP')  # TODO: Run 'makepkg -g' or 'updpkgsums' before AUR submission
 conflicts=('wayexpand-git')
 
 build() {
