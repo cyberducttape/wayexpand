@@ -230,9 +230,11 @@ impl FleetConfig {
 
 /// Merges configuration from multiple layers with duplicate detection.
 struct ConfigMerger {
-    expansions: BTreeMap<String, (Config, Provenance)>,
-    hotkeys: BTreeMap<String, (Config, Provenance)>,
-    settings: Option<(Config, Provenance)>,
+    // BUG FIX: Store individual items, not entire Config objects.
+    // Previous bug: storing entire Config per trigger caused N expansions → N² items after flattening.
+    expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
+    hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
+    settings: Option<(crate::Settings, Provenance)>,
     stats: MergeStats,
 }
 
@@ -296,7 +298,7 @@ impl ConfigMerger {
                 }
                 self.expansions.insert(
                     expansion.trigger.clone(),
-                    (config.clone(), provenance.clone()),
+                    (expansion.clone(), provenance.clone()),
                 );
                 self.stats.total_expansions += 1;
             }
@@ -315,7 +317,7 @@ impl ConfigMerger {
                     });
                 }
                 self.hotkeys
-                    .insert(hotkey.chord.clone(), (config.clone(), provenance.clone()));
+                    .insert(hotkey.chord.clone(), (hotkey.clone(), provenance.clone()));
                 self.stats.total_hotkeys += 1;
             }
 
@@ -328,7 +330,7 @@ impl ConfigMerger {
                         provenance.file
                     );
                 }
-                self.settings = Some((config.clone(), provenance));
+                self.settings = Some((config.settings.clone(), provenance));
             }
         }
 
@@ -355,18 +357,18 @@ impl ConfigMerger {
         let expansion: Vec<_> = self
             .expansions
             .into_iter()
-            .flat_map(|(_, (config, _))| config.expansion)
+            .map(|(_, (expansion_config, _))| expansion_config)
             .collect();
 
         let hotkey: Vec<_> = self
             .hotkeys
             .into_iter()
-            .flat_map(|(_, (config, _))| config.hotkey)
+            .map(|(_, (hotkey_config, _))| hotkey_config)
             .collect();
 
         let settings = self
             .settings
-            .map(|(config, _)| config.settings)
+            .map(|(settings, _)| settings)
             .unwrap_or_default();
 
         let config = Config {
