@@ -14,6 +14,23 @@
 //! mistyped. It accepts a direct `LIBEI_SOCKET` or the XDG RemoteDesktop
 //! portal, but portal access is only attempted when this backend is
 //! explicitly selected.
+//!
+//! ## Performance note: ei_keyboard fallback latency
+//!
+//! When using the ei_keyboard fallback (no ei_text available), a 12ms delay
+//! is inserted between synthetic key events. This is necessary for compositor
+//! and toolkit compatibility: many desktop environments silently drop key
+//! events delivered in rapid bursts, similar to how other synthetic-input
+//! tools (`xdotool`, `wtype`, `ydotool`) behave. This results in O(N×12ms)
+//! daemon thread blocking per expansion, where N is the number of characters.
+//!
+//! This tradeoff prioritizes correctness over speed: a slow expansion that
+//! completes successfully is preferable to a fast one with dropped characters.
+//! If latency is a concern:
+//! - Prefer ei_text when available (no per-character delay)
+//! - Consider enabling ei_text support in your EIS server if you control it
+//! - Use the input-method-v2 backend as an alternative (if supported by your compositor)
+//! - File an issue if your EIS server supports ei_text but doesn't resume devices with it
 
 use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
