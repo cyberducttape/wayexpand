@@ -2,6 +2,7 @@
 name = "wayexpand-daemon"
 description = "Daemon runtime for the WayExpand text-expansion service"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

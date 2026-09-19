@@ -20,6 +20,8 @@ const MAX_COMMAND_ARGS: usize = 32;
 const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
 const MAX_COMMAND_ARG_CHARS: usize = 1024;
 const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
+const MAX_COMMAND_ENV_VARS: usize = 32;
+const MAX_COMMAND_ENV_NAME_CHARS: usize = 256;
 const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
 const MAX_COMMAND_CACHE_MS: u64 = 60_000;
 const MAX_EXPANSIONS: usize = 10_000;
@@ -314,6 +316,28 @@ pub struct CommandConfig {
     pub timeout_ms: u64,
     #[serde(default)]
     pub cache_ms: u64,
+    /// Environment policy for the child process. Minimal is the secure
+    /// default; inherit must be explicitly requested for desktop commands.
+    #[serde(default, skip_serializing_if = "CommandEnvironment::is_minimal")]
+    pub environment: CommandEnvironment,
+    /// Additional variables copied from the daemon environment in minimal
+    /// mode. Values are never stored in the configuration file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pass_env: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommandEnvironment {
+    #[default]
+    Minimal,
+    Inherit,
+}
+
+impl CommandEnvironment {
+    fn is_minimal(&self) -> bool {
+        matches!(self, Self::Minimal)
+    }
 }
 
 fn default_command_timeout_ms() -> u64 {
@@ -709,6 +733,13 @@ impl Config {
                 || binding.command.args.len() > MAX_COMMAND_ARGS
                 || !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&binding.command.timeout_ms)
                 || binding.command.cache_ms > MAX_COMMAND_CACHE_MS
+                || binding.command.pass_env.len() > MAX_COMMAND_ENV_VARS
+                || binding.command.pass_env.iter().any(|name| {
+                    name.is_empty()
+                        || name.chars().count() > MAX_COMMAND_ENV_NAME_CHARS
+                        || name.contains('=')
+                        || name.contains('\0')
+                })
             {
                 return Err(ConfigError::InvalidHotkey {
                     index,
@@ -860,6 +891,19 @@ impl Config {
                     return Err(ConfigError::InvalidCommand {
                         index,
                         reason: "cache must be between 0 and 60000 milliseconds",
+                    });
+                }
+                if command.pass_env.len() > MAX_COMMAND_ENV_VARS
+                    || command.pass_env.iter().any(|name| {
+                        name.is_empty()
+                            || name.chars().count() > MAX_COMMAND_ENV_NAME_CHARS
+                            || name.contains('=')
+                            || name.contains('\0')
+                    })
+                {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "pass_env contains an invalid or excessive environment name",
                     });
                 }
             } else if let Err(source) =

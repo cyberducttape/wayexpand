@@ -1,5 +1,5 @@
 use crate::{
-    config::capitalize_first_letter, render_template_with_cursor, CommandConfig, Config,
+    config::capitalize_first_letter, render_template_with_cursor, CommandConfig, CommandEnvironment, Config,
     ConfigError, HotkeyConfig, InjectorError, KeyChord, MatchMode, Matcher, TextInjector,
 };
 #[cfg(unix)]
@@ -270,6 +270,17 @@ impl ExpansionEngine {
         self.async_commands.is_some()
     }
 
+    /// Applies the administrator's command-execution decision before command
+    /// jobs are queued. This is separate from the config-owned organization
+    /// policy because the daemon also loads `/etc/wayexpand/policy.toml`.
+    pub fn set_commands_disabled(&mut self, disabled: bool) {
+        self.config.organization.disable_commands = disabled;
+    }
+
+    pub fn commands_disabled(&self) -> bool {
+        self.config.organization.disable_commands
+    }
+
     /// Return completed command expansions that are still safe to apply.
     /// Any intervening input, focus, pause, or window event advances the
     /// generation and causes late output to be discarded rather than erasing
@@ -404,6 +415,7 @@ impl ExpansionEngine {
     /// is discarded and the process is bounded by the configured timeout.
     pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
         let mut command = Command::new(&result.command.program);
+        configure_command_environment(&mut command, &result.command);
         command
             .args(&result.command.args)
             .stdin(Stdio::null())
@@ -891,6 +903,7 @@ impl std::error::Error for CommandError {}
 /// with real side effects on every call.
 pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     let mut process = Command::new(&command.program);
+    configure_command_environment(&mut process, command);
     process
         .args(&command.args)
         .stdin(Stdio::null())
@@ -938,6 +951,24 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+fn configure_command_environment(process: &mut Command, command: &CommandConfig) {
+    if command.environment == CommandEnvironment::Inherit {
+        return;
+    }
+
+    process.env_clear();
+    for name in ["HOME", "USER", "PATH", "LANG"] {
+        if let Some(value) = std::env::var_os(name) {
+            process.env(name, value);
+        }
+    }
+    for name in &command.pass_env {
+        if let Some(value) = std::env::var_os(name) {
+            process.env(name, value);
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -1,0 +1,11 @@
+{
+  "fields": {
+    "response": "string",
+    "source": "string",
+    "backend": "string",
+    "state": "string",
+    "paused": "boolean",
+    "config": "string",
+    "config_state": "string"
+  }
+}
