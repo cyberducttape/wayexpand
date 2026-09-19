@@ -213,6 +213,12 @@ ls /tmp/wayexpand-window-tracker-*.js 2>/dev/null || echo "None found"
 
 **Symptom:** Snippets don't expand when using `--source=evdev`
 
+Evdev is a best-effort compatibility backend. Because it observes keyboard
+events non-exclusively, very fast typing can race with trigger replacement and
+produce an unexpanded trigger or overlapping text. The quiet period reduces
+this risk but cannot make replacement atomic; use an interception-capable
+protocol when that guarantee is required.
+
 **Check group membership:**
 ```sh
 groups $USER           # Should include 'input'

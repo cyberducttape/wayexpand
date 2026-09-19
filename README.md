@@ -34,7 +34,7 @@ X11-shaped implementation with Wayland support bolted on.
 - 🎯 **Conservative backend auto-selection:** Use `wayexpand backend select --explain` to inspect the decision and its tradeoffs.
 - 🔐 **Portal permission persistence:** One-time libei consent prompt with seamless reconnection. Token stored securely at `~/.config/wayexpand/libei-portal-token`.
 - 🧰 **Portal recovery controls:** Inspect or forget the stored restoration token with `wayexpand portal status` and `wayexpand portal reset`.
-- 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion working correctly.
+- 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion and quiet-period mitigations are bounded and best-effort.
 - 📚 **Clarity on compositor support:** [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) documents what's verified vs. in-progress. [GETTING_STARTED.md](docs/GETTING_STARTED.md) provides per-compositor quick starts.
 - 🧪 **Workspace test suite:** Run `cargo test --locked --workspace` for the current test set across the core engine, CLI, daemon, wlroots integration, and all backends.
 
@@ -263,6 +263,7 @@ Cons:
 - **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
 - **No password-field protection** — matching is never suspended in password fields
 - **Legacy/simple permission model** — active-seat ACLs or a device broker are future security work; see [EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
+- **Best-effort timing** — non-exclusive capture cannot make rapid trigger replacement atomic; see [P0_3_DECISION_REQUIRED.md](docs/P0_3_DECISION_REQUIRED.md)
 - Experimental — read [SECURITY.md](SECURITY.md) before enabling
 
 This unit does not auto-restart on failure by design. A portal session may

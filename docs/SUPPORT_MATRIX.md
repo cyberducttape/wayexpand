@@ -17,7 +17,7 @@ Wayland session alone does not imply that a backend is usable.
 | wlroots virtual-keyboard output | Experimental | Target-compositor insertion test |
 | libei/EIS output | Experimental | Portal consent, revocation, and reconnect tests; on-device tests for the `ei_keyboard`-only keysym-synthesis fallback (no `ei_text`), including non-US layouts |
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
-| evdev capture (`--source=evdev`) | Experimental | Compositor-agnostic fallback for compositors without input-method-v2/virtual-keyboard support (e.g. KWin); has no sensitive-field signal and cannot make rapid replacement atomic under non-exclusive capture (see [`BACKENDS.md`](BACKENDS.md) and [`SECURITY.md`](../SECURITY.md)); repeat behavior still requires real-device certification |
+| evdev capture (`--source=evdev`) | Experimental, best-effort | Compositor-agnostic compatibility fallback (e.g. KWin); requires explicit raw-input consent, has no sensitive-field signal, and cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [`P0_3_DECISION_REQUIRED.md`](P0_3_DECISION_REQUIRED.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
 | Focused-window tracking (`app_filter`) | Implemented on KDE; awaiting independent certification | KWin tracker exists; wlroots tracker is a scaffold; GNOME/Mutter has no supported tracker |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |

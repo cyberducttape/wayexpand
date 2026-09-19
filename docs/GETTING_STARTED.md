@@ -108,8 +108,8 @@ You have the best support. Start here:
 sudo apt install wayexpand  # Ubuntu/Debian
 # or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
 
-# Start the daemon directly (or enable the installed user service)
-wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
+# Start the explicit evdev route (after reviewing its raw-input tradeoff)
+wayexpand-daemon --source=evdev --backend=libei ~/.config/wayexpand/expansions.toml
 
 # Launch the GUI
 wayexpand-gui
@@ -143,7 +143,7 @@ wayexpand doctor  # Shows what your session can use
 **Known limitations:**
 - Automatic mode leaves evdev disabled even when `/dev/input` is readable
 - Input-method-v2 is explicit/experimental: Escape, arrow keys, and F-keys may not pass through
-- Evdev requires `input` group membership and has no password-field signal
+- Evdev requires `input` group membership, has no password-field signal, and is best-effort under rapid typing
 
 **Want to help test?**
 - Run `wayexpand doctor` and share the output on our [GitHub issues](https://github.com/itchyitchy123/wayexpand/issues)

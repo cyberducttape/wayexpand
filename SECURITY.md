@@ -113,6 +113,14 @@ hotplug, and distribution behavior must be tested before either can replace
 the current path. See [docs/EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
 for the investigation plan and acceptance criteria.
 
+Evdev also has a correctness limitation independent of permissions: capture is
+non-exclusive, so the application can receive a terminating key before
+WayExpand can erase and replace the trigger. The current quiet-period and
+held-key mitigations are best-effort only; they do not make replacement atomic.
+Do not use evdev where a lossless replacement guarantee is required. The
+architectural boundary and the risks of an `EVIOCGRAB` proxy are documented in
+[docs/P0_3_DECISION_REQUIRED.md](docs/P0_3_DECISION_REQUIRED.md).
+
 Backends must document their permission requirements explicitly:
 
 - direct libei/EIS requires an explicitly configured `LIBEI_SOCKET`; portal
