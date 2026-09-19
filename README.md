@@ -22,8 +22,11 @@ X11-shaped implementation with Wayland support bolted on.
 > **experimental** — the [support matrix](docs/SUPPORT_MATRIX.md) states
 > exactly what's been verified versus implemented-but-untested, and
 > `wayexpand doctor` tells you what your own session can actually use
-> before you rely on it. KDE Plasma (KWin 6.6+) has the deepest verified
-> coverage today.
+> before you rely on it. See [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md)
+> for per-compositor details. **KDE Plasma (KWin 6.6+)** has the deepest
+> verified coverage. **Sway/Hyprland/river** (wlroots) support is actively
+> in progress — window tracking foundation is complete, daemon integration
+> is next.
 
 ![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
 
@@ -153,7 +156,8 @@ documented alongside them.
   interpretation — a program and argument list, executed directly)
 - `app_filter`: restrict a snippet to specific applications, backed by a
   focused-window tracker (KDE Plasma via KWin's scripting bridge today)
-- Undo-last-expansion via a configurable key chord
+- Undo-last-expansion via a configurable key chord on exclusive input sources;
+  disabled with evdev because its physical hotkey also reaches the application
 
 **Safety and reliability**
 - Parse-then-swap config reloads: a malformed config is rejected before it
