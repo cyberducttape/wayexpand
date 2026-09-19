@@ -5,6 +5,11 @@ export CARGO_NET_OFFLINE=true
 %:
 	dh $@ --buildsystem=cargo
 
+# Vendored crates ship Cargo.toml.orig files that their .cargo-checksum.json
+# lists; dh_clean deletes *.orig by default, which breaks the offline build.
+override_dh_clean:
+	dh_clean -X.orig
+
 override_dh_auto_build:
 	dh_auto_build -- --release --locked
 
