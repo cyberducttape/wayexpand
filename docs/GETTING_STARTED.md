@@ -67,7 +67,7 @@ Limited support due to GNOME's design (no window tracking protocol).
 
 **Recommendation:**
 - Use **global hotkeys** instead of trigger-based expansion
-- See [GNOME_WINDOW_TRACKING.md](GNOME_WINDOW_TRACKING.md) for why
+- See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for compatibility status
 
 ---
 
