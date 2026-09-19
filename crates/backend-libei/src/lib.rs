@@ -981,3 +981,4 @@ mod tests {
         assert!(!typer.chars.contains_key(&'中'));
     }
 }
+

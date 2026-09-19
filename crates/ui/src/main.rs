@@ -169,6 +169,10 @@ impl App {
             Ok(config) => {
                 self.config = config;
                 self.undo = None;
+                // Config changed: both caches are now stale regardless of
+                // whether the query string changed.
+                self.visible_cache = None;
+                self.preview_cache = None;
                 self.selected = self
                     .selected
                     .min(self.visible_indices().len().saturating_sub(1));
