@@ -334,19 +334,11 @@ impl ExpansionEngine {
                             let trigger = &self.config.expansion[config_index].trigger;
                             let match_mode = self.config.expansion[config_index].match_mode;
                             if !self.matcher.can_continue(trigger, character) {
-                                let trailing_word_character =
-                                    match_mode == MatchMode::WordBoundary && is_word_character(character);
+                                let trailing_word_character = match_mode == MatchMode::WordBoundary
+                                    && is_word_character(character);
                                 if !trailing_word_character {
-                                    // Only pass the terminating character for word-boundary triggers,
-                                    // where it will be re-inserted after the replacement.
-                                    let terminating_char =
-                                        if match_mode == MatchMode::WordBoundary {
-                                            Some(character)
-                                        } else {
-                                            None
-                                        };
                                     if let Some(result) =
-                                        self.take_match(config_index, length, terminating_char)
+                                        self.take_match(config_index, length, Some(character))
                                     {
                                         let bytes = result
                                             .trigger
@@ -434,7 +426,7 @@ impl ExpansionEngine {
                             erase_chars: length,
                             insert,
                             cursor_offset,
-                            reinsert_after: Some(character),
+                            reinsert_after: None,
                         });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
@@ -1398,6 +1390,11 @@ replacement = "bad\u0000value""#;
             self.calls.push(format!("insert:{text}"));
             Ok(())
         }
+
+        fn move_cursor_left(&mut self, count: usize) -> Result<(), crate::InjectorError> {
+            self.calls.push(format!("left:{count}"));
+            Ok(())
+        }
     }
 
     #[test]
@@ -1451,6 +1448,24 @@ replacement = "bad\u0000value""#;
         let mut injector = AtomicInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
         assert_eq!(injector.calls, ["replace::x:value"]);
+    }
+
+    #[test]
+    fn apply_replaces_typed_trigger_and_terminator_together() {
+        let result = ExpansionResult {
+            trigger: ":sig".into(),
+            typed_trigger: ":SIG".into(),
+            erase_chars: 4,
+            insert: "Best regards,".into(),
+            cursor_offset: Some(2),
+            reinsert_after: Some(' '),
+        };
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        ExpansionEngine::apply(&mut injector, &result).unwrap();
+        assert_eq!(
+            injector.calls,
+            ["erase::SIG ", "insert:Best regards, ", "left:3"]
+        );
     }
 
     #[test]
@@ -1985,19 +2000,20 @@ replacement = "bad\u0000value""#;
         )
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
-        let result = engine.process(InputEvent::Text(":sig ".into())).pop().unwrap();
+        let result = engine
+            .process(InputEvent::Text(":sig ".into()))
+            .pop()
+            .unwrap();
         assert_eq!(result.trigger, ":sig");
         assert_eq!(result.insert, "signature");
         assert_eq!(result.reinsert_after, Some(' '));
     }
 
     #[test]
-    fn non_word_boundary_triggers_do_not_reinsert() {
-        // Regular (non-word-boundary) triggers that lose their continuation
-        // should not set reinsert_after. The character that breaks continuation
-        // (e.g., `:` between `:a` and `:ab`) is handled normally and may start
-        // a new match. Only word-boundary mode needs re-insertion because it's
-        // waiting for a non-word character specifically to complete.
+    fn delayed_triggers_preserve_the_character_that_completed_them() {
+        // The character that breaks a longer continuation has already reached
+        // the application. Preserve it in the replacement while also allowing
+        // it to participate in matching a following trigger.
         let config = Config::parse(
             "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"\n[[expansion]]\ntrigger = \":b\"\nreplacement = \"beta\"",
         )
@@ -2007,7 +2023,7 @@ replacement = "bad\u0000value""#;
         let results = engine.process(InputEvent::Text(":a:b".into()));
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].trigger, ":a");
-        assert_eq!(results[0].reinsert_after, None);
+        assert_eq!(results[0].reinsert_after, Some(':'));
         assert_eq!(results[1].trigger, ":b");
         assert_eq!(results[1].reinsert_after, None);
     }

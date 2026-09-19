@@ -48,14 +48,13 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       Add an app selector (GUI, TUI) and `--preview-app=<id>` (CLI) that feeds
       a simulated `WindowChanged`. Expected: `app_filter = ["thunderbird"]`
       matches with `thunderbird` selected, not with `konsole` or no context.
-- [ ] **evdev: text typed to end a trigger is erased instead of the
+- [x] **evdev: text typed to end a trigger is erased instead of the
       trigger's first character.** evdev capture is non-exclusive, so the
-      space/Enter/other key that completes a word-boundary trigger (or a
-      trigger that is a prefix of a longer one) has already reached the app
-      when the engine erases only the trigger. Typing `:sig` + space leaves
-      `:regards` with the space gone; Enter may submit a form first. Needs a
-      decision: erase and re-type the terminator, or defer the match until
-      the key is released. input-method-v2 is unaffected.
+      space/Enter/other key that completes a word-boundary trigger has already
+      reached the app. Fixed: the engine now reports `reinsert_after`, and
+      backends erase both trigger and terminator, insert replacement, then
+      re-insert the terminator. Corrects `:sig ` → `signature ` instead of
+      `:regards ` (missing space).
 
 ### v1.2.1
 
@@ -66,6 +65,23 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 - [ ] **Opt-in portal persistence.** Offer an explicit, revocable persistence
       flow for libei/EIS restoration tokens, stored with strict permissions;
       keep the current non-persistent consent behavior as the default.
+
+### Capture Path Improvements (v1.2.1+)
+
+**Known tradeoff:** No capture mode is currently both secure and universal.
+
+- **input-method-v2:** Protects password fields and respects sensitive signals,
+  but exclusive keyboard grab cannot safely pass through Escape, arrow keys,
+  and function keys. Users on GNOME report losing navigation capability.
+- **evdev:** Preserves all keyboard events and native repeat, but reads all
+  global keystrokes (requires `input` group), ignores password field signals,
+  and cannot detect auto-repeat (line 205 tracks this).
+
+Future work: research platform-specific approaches (systemd secure input,
+input ACLs, or compositor-provided focused-window filtering) to recover both
+security and fidelity in one path. This blocks universal recommendation to
+desktop Linux users but does not prevent use in controlled environments
+(sysadmins, trusted machines, single-user sessions).
 
 ---
 
