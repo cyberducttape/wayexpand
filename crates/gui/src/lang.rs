@@ -85,22 +85,22 @@ impl Strings {
 
     pub fn settings(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚙ Settings",
-            Language::German => "⚙ Einstellungen",
+            Language::English => "Settings",
+            Language::German => "Einstellungen",
         }
     }
 
     pub fn import_espanso(&self) -> &'static str {
         match self.lang {
-            Language::English => "📥 Import Espanso",
-            Language::German => "📥 Espanso importieren",
+            Language::English => "Import Espanso",
+            Language::German => "Espanso importieren",
         }
     }
 
     pub fn diagnostics(&self) -> &'static str {
         match self.lang {
-            Language::English => "🖥 Diagnostics",
-            Language::German => "🖥 Diagnose",
+            Language::English => "Diagnostics",
+            Language::German => "Diagnose",
         }
     }
 
@@ -113,8 +113,8 @@ impl Strings {
 
     pub fn resume(&self) -> &'static str {
         match self.lang {
-            Language::English => "▶ Resume",
-            Language::German => "▶ Fortsetzen",
+            Language::English => "Resume",
+            Language::German => "Fortsetzen",
         }
     }
 
@@ -135,8 +135,8 @@ impl Strings {
     // Dialogs
     pub fn diagnostics_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "🖥  WayExpand diagnostics",
-            Language::German => "🖥  WayExpand Diagnose",
+            Language::English => "WayExpand diagnostics",
+            Language::German => "WayExpand Diagnose",
         }
     }
 
@@ -177,8 +177,8 @@ impl Strings {
 
     pub fn import_dialog_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "📥  Import Espanso library",
-            Language::German => "📥  Espanso-Bibliothek importieren",
+            Language::English => "Import Espanso library",
+            Language::German => "Espanso-Bibliothek importieren",
         }
     }
 
@@ -219,8 +219,8 @@ impl Strings {
 
     pub fn settings_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚙  WayExpand settings",
-            Language::German => "⚙  WayExpand-Einstellungen",
+            Language::English => "WayExpand settings",
+            Language::German => "WayExpand-Einstellungen",
         }
     }
 
@@ -418,8 +418,8 @@ impl Strings {
 
     pub fn duplicate_trigger(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚠ Another snippet already uses this trigger; saving will be rejected.",
-            Language::German => "⚠ Ein anderes Snippet verwendet bereits diesen Auslöser; das Speichern wird abgelehnt.",
+            Language::English => "Warning: another snippet already uses this trigger; saving will be rejected.",
+            Language::German => "Warnung: Ein anderes Snippet verwendet bereits diesen Auslöser; das Speichern wird abgelehnt.",
         }
     }
 
@@ -488,8 +488,8 @@ impl Strings {
 
     pub fn detect_app(&self) -> &'static str {
         match self.lang {
-            Language::English => "🎯 Use current app",
-            Language::German => "🎯 Aktuelle App verwenden",
+            Language::English => "Use current app",
+            Language::German => "Aktuelle App verwenden",
         }
     }
 
@@ -502,8 +502,8 @@ impl Strings {
 
     pub fn window_tracking_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚠ If window tracking isn't available on your compositor, this snippet will never match rather than matching everywhere.",
-            Language::German => "⚠ Wenn die Fenster-Verfolgung in Ihrem Kompositor nicht verfügbar ist, passt dieses Snippet nie, anstatt überall zu passen.",
+            Language::English => "Warning: if window tracking isn't available on your compositor, this snippet will never match rather than matching everywhere.",
+            Language::German => "Warnung: Wenn die Fenster-Verfolgung in Ihrem Kompositor nicht verfügbar ist, passt dieses Snippet nie, anstatt überall zu passen.",
         }
     }
 
@@ -604,8 +604,8 @@ impl Strings {
 
     pub fn copy(&self) -> &'static str {
         match self.lang {
-            Language::English => "⧉ Copy",
-            Language::German => "⧉ Kopieren",
+            Language::English => "Copy",
+            Language::German => "Kopieren",
         }
     }
 
@@ -653,11 +653,9 @@ impl Strings {
 
     pub fn command_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => {
-                "⚠ Advanced: this runs a local executable when the trigger matches."
-            }
+            Language::English => "Warning: this runs a local executable when the trigger matches.",
             Language::German => {
-                "⚠ Erweitert: Dieses Programm wird ausgeführt, wenn der Auslöser passt."
+                "Warnung: Dieses Programm wird ausgeführt, wenn der Auslöser passt."
             }
         }
     }
@@ -711,8 +709,8 @@ impl Strings {
     // Dialogs
     pub fn unsaved_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚠  Unsaved changes",
-            Language::German => "⚠  Ungespeicherte Änderungen",
+            Language::English => "Unsaved changes",
+            Language::German => "Ungespeicherte Änderungen",
         }
     }
 

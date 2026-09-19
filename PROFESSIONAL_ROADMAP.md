@@ -35,15 +35,15 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 - [ ] **#16 Mark v1.1.2 as the latest GitHub release.** GitHub's
       `/releases/latest` still resolves to v0.2.1. Manual: Releases → v1.1.2 →
       Edit → "Set as the latest release".
-- [ ] **#17 Separate implementation status from environment status in
+- [x] **#17 Separate implementation status from environment status in
       diagnostics.** `BackendState` mixes "not implemented" with "needs
       permission" (uinput reports `RequiresPermission` although no uinput
       backend exists). Report implementation, device/protocol presence,
       permission and connection separately, in `doctor` and `doctor --json`.
-- [ ] **#18 Contract test for documented backend states.** COMPATIBILITY.md
+- [x] **#18 Contract test for documented backend states.** COMPATIBILITY.md
       now lists the real `BackendState` values; add a test that fails when the
       enum and the documented list diverge. Depends on #17.
-- [ ] **#20 App context for previewing `app_filter` snippets.** Preview has
+- [x] **#20 App context for previewing `app_filter` snippets.** Preview has
       no focused window, so app-restricted snippets always show "no match".
       Add an app selector (GUI, TUI) and `--preview-app=<id>` (CLI) that feeds
       a simulated `WindowChanged`. Expected: `app_filter = ["thunderbird"]`
@@ -61,8 +61,11 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 
 - [ ] **#25 Command expansions block the input thread** (up to the command
       timeout). Run them asynchronously with a bounded queue.
-- [ ] **#27 Command timeouts kill only the direct child.** Spawn commands in
+- [x] **#27 Command timeouts kill only the direct child.** Spawn commands in
       their own process group and kill the group on timeout.
+- [ ] **Opt-in portal persistence.** Offer an explicit, revocable persistence
+      flow for libei/EIS restoration tokens, stored with strict permissions;
+      keep the current non-persistent consent behavior as the default.
 
 ---
 
@@ -70,8 +73,9 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 
 ### Window Tracking for wlroots Compositors
 
-**Status:** Not started -- no committed release, moved here from the
-original v1.1 slot since v1.1.x shipped other work instead  
+**Status:** Scaffold only -- the foreign-toplevel connection, registry, and
+event-flow work is not yet a functioning active-window tracker and is not
+integrated into the daemon.
 **Why:** Complete `app_filter` support across all major compositors  
 **Scope:** Implement wlroots `wlr-foreign-toplevel-management-unstable-v1` protocol for Sway/Hyprland/river
 

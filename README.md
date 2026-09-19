@@ -194,7 +194,7 @@ WayExpand's deployment depends on your compositor and its Wayland protocol suppo
 
 **Option 1: input-method-v2 (single unified backend)**
 
-For compositors advertising `zwp_input_method_manager_v2` (e.g. wlroots-based ones such as Sway and Hyprland):
+For compositors advertising `zwp_input_method_manager_v2` (verify support for your compositor):
 ```sh
 systemctl --user enable --now wayexpand-input-method.service
 ```
@@ -218,7 +218,7 @@ systemctl --user enable --now wayexpand-evdev.service
 
 Pros:
 - Better keyboard fidelity (all keys pass through)
-- Capture works on any compositor (output still needs libei or wlroots support)
+- evdev provides compositor-independent capture; output still requires a compatible libei/EIS portal or virtual-keyboard protocol
 
 Cons:
 - **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
@@ -241,7 +241,7 @@ wayexpand doctor
 
 If you're on KDE Plasma, use **Option 2** (evdev) — it's the only tested path with good keyboard fidelity.
 
-If you're on Sway, Hyprland, or another input-method-v2 compositor, try **Option 1** first; if you lose keyboard input (Escape/arrows), switch to Option 2 if your compositor supports it, or accept the limitation.
+On a compositor where `wayexpand doctor` confirms input-method-v2 support, try **Option 1** first; if you lose keyboard input (Escape/arrows), switch to Option 2 if your compositor supports it, or accept the limitation.
 
 **Granting evdev permission**
 

@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit
-      - run: cargo audit
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   rust:
     name: Rust Tests & Linting
@@ -51,8 +51,6 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy (locked, release)
         run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
-      - name: Build (locked, debug)
-        run: cargo build --locked --workspace
       - name: CLI smoke test
         run: bash scripts/test-release.sh
       - name: UI help output

@@ -3,8 +3,9 @@
 //! The other sources (`wayexpand-backend-input-method`) rely on Wayland
 //! protocols (`zwp_input_method_manager_v2`) that not every compositor
 //! advertises -- notably KWin/KDE Plasma as of KWin 6.6. This source reads
-//! keyboard input directly from the kernel (`/dev/input/eventN`), so it
-//! works on any compositor, at a real cost the Wayland sources do not have:
+//! keyboard input directly from the kernel (`/dev/input/eventN`), so capture
+//! is compositor-independent. Output still requires a compatible libei/EIS
+//! portal or virtual-keyboard protocol, at a real cost the Wayland sources do not have:
 //!
 //! - **No sensitive-field signal.** Wayland's input-method protocol tells a
 //!   backend when the focused field is a password/sensitive field; raw
