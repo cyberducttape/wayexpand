@@ -53,7 +53,8 @@ fn exit_code_for(error: &anyhow::Error) -> i32 {
     if message.starts_with("usage:")
         || message.starts_with("unknown command")
         || message.contains("requires a value")
-        || message.contains("unexpected argument") {
+        || message.contains("unexpected argument")
+    {
         return EXIT_USAGE;
     }
 
@@ -62,7 +63,8 @@ fn exit_code_for(error: &anyhow::Error) -> i32 {
     if message.starts_with("configuration invalid:")
         || message.contains("invalid TOML")
         || message.contains("configuration syntax")
-        || message.contains("malformed config") {
+        || message.contains("malformed config")
+    {
         return EXIT_CONFIG;
     }
 

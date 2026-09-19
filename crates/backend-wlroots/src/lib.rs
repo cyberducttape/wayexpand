@@ -248,11 +248,19 @@ impl WlrootsInjector {
 
     fn send_minimal_keymap(&mut self) -> Result<(), WlrootsError> {
         self.mappings.clear();
-        self.minimal_keymap.seek(SeekFrom::Start(0))
+        self.minimal_keymap
+            .seek(SeekFrom::Start(0))
             .map_err(WlrootsError::Keymap)?;
-        let size = self.minimal_keymap.metadata().map_err(WlrootsError::Keymap)?.len() as u32;
-        self.keyboard
-            .keymap(wl_keyboard::KeymapFormat::XkbV1.into(), self.minimal_keymap.as_fd(), size);
+        let size = self
+            .minimal_keymap
+            .metadata()
+            .map_err(WlrootsError::Keymap)?
+            .len() as u32;
+        self.keyboard.keymap(
+            wl_keyboard::KeymapFormat::XkbV1.into(),
+            self.minimal_keymap.as_fd(),
+            size,
+        );
         self.keymap = None;
         self.connection
             .flush()
@@ -380,12 +388,11 @@ impl TextInjector for WlrootsInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.send_minimal_keymap()
-            .map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: error.to_string(),
-                retryable: error.is_retryable(),
-            })?;
+        self.send_minimal_keymap().map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })?;
         self.send_keys(std::iter::repeat_n(8, trigger.graphemes(true).count()))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
@@ -429,12 +436,11 @@ impl TextInjector for WlrootsInjector {
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        self.send_minimal_keymap()
-            .map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: error.to_string(),
-                retryable: error.is_retryable(),
-            })?;
+        self.send_minimal_keymap().map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })?;
         self.send_keys(std::iter::repeat_n(LEFT_KEYCODE, count))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,

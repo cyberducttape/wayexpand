@@ -906,7 +906,10 @@ fn inject_results_offthread(
     stop_requested: &Arc<AtomicBool>,
     results: Vec<ExpansionResult>,
     injector: Box<dyn TextInjector>,
-) -> (std::result::Result<(), Box<EventError>>, Box<dyn TextInjector>) {
+) -> (
+    std::result::Result<(), Box<EventError>>,
+    Box<dyn TextInjector>,
+) {
     use wayexpand_core::InjectorError;
 
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -1090,7 +1093,10 @@ fn process_event_offthread(
     engine: &mut ExpansionEngine,
     event: InputEvent,
     injector: Box<dyn TextInjector>,
-) -> (std::result::Result<(), Box<EventError>>, Box<dyn TextInjector>) {
+) -> (
+    std::result::Result<(), Box<EventError>>,
+    Box<dyn TextInjector>,
+) {
     // Key events (hotkeys, undo) do not involve sleeping injection paths;
     // handle them inline and return the injector unchanged.
     if let InputEvent::Key(chord) = event {
