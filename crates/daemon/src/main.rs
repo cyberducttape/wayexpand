@@ -11,7 +11,7 @@ use std::{
     env,
     io::{self, BufRead},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{atomic::AtomicBool, mpsc, Arc},
     thread,
     time::{Duration, Instant},
 };
@@ -391,7 +391,7 @@ fn main() -> Result<()> {
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(&window_tracker, &mut config.engine)?;
-                    let result = if let Some(mut backend) = injector.take() {
+                    let result = if let Some(backend) = injector.take() {
                         // Capture is non-exclusive and a match fires on
                         // key-down, so the trigger's last key is still held
                         // right now. Injecting before it comes up makes the
@@ -403,9 +403,16 @@ fn main() -> Result<()> {
                                 warn!(%error, "waiting for key release failed; injecting anyway");
                             }
                         }
-                        let result =
-                            process_event(&mut config.engine, event, Some(backend.as_mut()));
-                        injector = Some(backend);
+                        // Use the offthread path so a slow injector (e.g. libei
+                        // keysym fallback, 12ms per character) does not block
+                        // the main loop for the full duration of the expansion.
+                        let (result, returned_backend) = process_event_offthread(
+                            &control.stop_requested,
+                            &mut config.engine,
+                            event,
+                            backend,
+                        );
+                        injector = Some(returned_backend);
                         result
                     } else {
                         process_event(&mut config.engine, event, None)
@@ -481,10 +488,14 @@ fn main() -> Result<()> {
                 if injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
-                        let (result, backend) = if let Some(mut backend) = injector.take() {
-                            let result =
-                                process_event(&mut config.engine, event, Some(backend.as_mut()));
-                            (result, Some(backend))
+                        let (result, backend) = if let Some(backend) = injector.take() {
+                            let (result, returned_backend) = process_event_offthread(
+                                &control.stop_requested,
+                                &mut config.engine,
+                                event,
+                                backend,
+                            );
+                            (result, Some(returned_backend))
                         } else {
                             (process_event(&mut config.engine, event, None), None)
                         };
@@ -874,6 +885,138 @@ fn connect_output_with_retry(
     }
 }
 
+/// Applies a pre-computed list of expansion results through an injector on a
+/// worker thread, keeping the calling thread responsive to control events.
+///
+/// This is the fix for the `ei_keyboard` fallback path in the libei backend:
+/// that path sleeps 12ms between each synthesized key event. For a 200-char
+/// expansion that previously blocked the daemon's main loop for ~2.4s — the
+/// control socket could not respond, reload requests were queued, and
+/// pause/resume signals were deferred.
+///
+/// **Design:** expansion matching (`engine.process`) stays on the main thread
+/// so the engine state is never shared. Only the injection step — which is
+/// purely I/O and can sleep — moves to a worker thread. The injector is
+/// moved into the worker and returned via a channel so the caller regains
+/// ownership after injection completes.
+///
+/// The caller polls at 5ms intervals during the wait, allowing it to check
+/// `stop_requested` and process other control-socket events promptly.
+fn inject_results_offthread(
+    stop_requested: &Arc<AtomicBool>,
+    results: Vec<ExpansionResult>,
+    injector: Box<dyn TextInjector>,
+) -> (std::result::Result<(), Box<EventError>>, Box<dyn TextInjector>) {
+    use wayexpand_core::InjectorError;
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut backend = injector;
+        let mut outcome: std::result::Result<(), Box<EventError>> = Ok(());
+        for result in results {
+            if text_contains_newlines(&result.insert) {
+                warn!(
+                    backend = backend.name(),
+                    "expansion contains newlines; selected backend may not support multiline insertion"
+                );
+            }
+            if let Err(source) = ExpansionEngine::apply(backend.as_mut(), &result) {
+                outcome = Err(Box::new(EventError { result, source }));
+                break;
+            }
+            info!(
+                trigger_chars = result.trigger.chars().count(),
+                insert_chars = result.insert.len(),
+                "expansion injected (offthread)"
+            );
+        }
+        // Return both the outcome and the injector back to the main thread.
+        // Ignore send errors: if stop was requested and the receiver is gone,
+        // the worker will simply finish and drop the injector normally.
+        let _ = sender.send((outcome, backend));
+    });
+
+    // Poll in short steps so the control socket stays responsive and
+    // stop_requested is honoured promptly even during a slow injection.
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(5)) {
+            Ok((result, returned_injector)) => {
+                return (result, returned_injector);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if stop_requested.load(std::sync::atomic::Ordering::Acquire) {
+                    // Daemon is stopping. The worker thread will complete
+                    // normally and drop the injector — same pattern as the
+                    // shutdown detach in the main loop. Return a non-retryable
+                    // error so the caller breaks out of its loop cleanly.
+                    let dummy = ExpansionResult {
+                        trigger: String::new(),
+                        typed_trigger: String::new(),
+                        erase_chars: 0,
+                        insert: String::new(),
+                        cursor_offset: None,
+                    };
+                    let err = Box::new(EventError {
+                        result: dummy,
+                        source: ExpansionError::Injection(InjectorError {
+                            backend: "libei",
+                            message: "injection cancelled: daemon is stopping".into(),
+                            retryable: false,
+                        }),
+                    });
+                    return (Err(err), Box::new(NullInjector));
+                }
+                // Still running — loop and wait another 5ms.
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // Worker panicked. Treat as a retryable failure so the daemon
+                // reconnects the injector rather than exiting.
+                let dummy = ExpansionResult {
+                    trigger: String::new(),
+                    typed_trigger: String::new(),
+                    erase_chars: 0,
+                    insert: String::new(),
+                    cursor_offset: None,
+                };
+                let err = Box::new(EventError {
+                    result: dummy,
+                    source: ExpansionError::Injection(InjectorError {
+                        backend: "libei",
+                        message: "injection worker thread terminated unexpectedly".into(),
+                        retryable: true,
+                    }),
+                });
+                return (Err(err), Box::new(NullInjector));
+            }
+        }
+    }
+}
+
+/// A no-op `TextInjector` returned when the real injector cannot be recovered
+/// (e.g. stop was requested or the worker panicked). Its methods always return
+/// a retryable error, which causes the daemon to reconnect the output backend
+/// on the next event.
+struct NullInjector;
+impl TextInjector for NullInjector {
+    fn name(&self) -> &'static str {
+        "null"
+    }
+    fn erase(&mut self, _trigger: &str) -> std::result::Result<(), wayexpand_core::InjectorError> {
+        Err(wayexpand_core::InjectorError {
+            backend: "null",
+            message: "injector is unavailable; reconnect required".into(),
+            retryable: true,
+        })
+    }
+    fn insert(&mut self, _text: &str) -> std::result::Result<(), wayexpand_core::InjectorError> {
+        Err(wayexpand_core::InjectorError {
+            backend: "null",
+            message: "injector is unavailable; reconnect required".into(),
+            retryable: true,
+        })
+    }
+}
+
 fn text_contains_newlines(text: &str) -> bool {
     text.contains('\n') || text.contains('\r')
 }
@@ -933,6 +1076,55 @@ fn process_event(
         }
     }
     Ok(())
+}
+
+/// Like `process_event` but moves the injection step off the main thread so
+/// the daemon loop remains responsive during slow output backends (e.g. the
+/// libei `ei_keyboard` fallback that sleeps 12ms per character). The injector
+/// is returned through the result tuple so the caller regains ownership.
+///
+/// Only the injection step (the `ExpansionEngine::apply` calls) is offloaded.
+/// Expansion matching (`engine.process`) always runs on the main thread.
+fn process_event_offthread(
+    stop_requested: &Arc<AtomicBool>,
+    engine: &mut ExpansionEngine,
+    event: InputEvent,
+    injector: Box<dyn TextInjector>,
+) -> (std::result::Result<(), Box<EventError>>, Box<dyn TextInjector>) {
+    // Key events (hotkeys, undo) do not involve sleeping injection paths;
+    // handle them inline and return the injector unchanged.
+    if let InputEvent::Key(chord) = event {
+        for action in engine.process_key(&chord) {
+            match ExpansionEngine::execute_hotkey(&action) {
+                Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
+                Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
+            }
+        }
+        let mut backend = injector;
+        if let Some(result) = engine.try_undo(&chord) {
+            if let Err(source) = ExpansionEngine::apply(backend.as_mut(), &result) {
+                return (Err(Box::new(EventError { result, source })), backend);
+            }
+            info!("expansion undone");
+        }
+        return (Ok(()), backend);
+    }
+    // Compute expansion results on the main thread (engine is not Send).
+    let results = engine.process(event);
+    if results.is_empty() {
+        return (Ok(()), injector);
+    }
+    // Log no-injector matches (same as process_event does) — but here we always
+    // have an injector, so this branch is unreachable; still kept for symmetry.
+    for result in &results {
+        info!(
+            trigger_chars = result.trigger.chars().count(),
+            insert_bytes = result.insert.len(),
+            "expansion matched; injecting offthread"
+        );
+    }
+    // Move the injector and the results to a worker thread.
+    inject_results_offthread(stop_requested, results, injector)
 }
 
 fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
