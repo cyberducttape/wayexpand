@@ -177,12 +177,17 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
         // non-sticky parent directory can still allow another user to
         // rename/replace that directory entry.
         //
-        // Therefore, validate all ancestors up to "/" (except in a systemd
-        // private namespace, where the overflow uid 65534 is remapped and
-        // would cause false rejections). Until fd-based openat2() validation
-        // is implemented, we accept root-owned "/" as a terminal trust
-        // anchor rather than checking its mode.
-        if metadata.uid() == 0 {
+        // Similarly, a root-owned world-writable parent can be exploited even
+        // if the child is root-owned or user-owned. We validate all ancestors
+        // up to "/" (filesystem root), accepting it as a terminal trust anchor
+        // since the filesystem itself is the trust boundary.
+        //
+        // In systemd private namespaces, uid 65534 (overflow) may appear;
+        // this is acceptable as validation is constrained to namespace boundary.
+        //
+        // Future: Consider fd-based openat2(O_PATH, RESOLVE_IN_ROOT) for
+        // stronger protection against TOCTOU races.
+        if current == Path::new("/") {
             break;
         }
         current = current.parent().unwrap_or_else(|| Path::new("/"));
