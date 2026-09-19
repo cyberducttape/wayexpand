@@ -1,5 +1,9 @@
 # Development Guide
 
+**Navigation:** [Home](../README.md) > [For Developers](DEVELOPMENT.md)
+
+---
+
 WayExpand is designed for small, reviewable changes with explicit safety properties. The core engine is platform-independent; compositor-specific behavior lives behind backend traits.
 
 ## Setting Up Your Environment
@@ -64,7 +68,7 @@ bash scripts/test-install-user.sh  # Test installer
   - `backend-wlroots` — wlroots virtual-keyboard (output only)
   - `backend-kwin-window` — KWin window tracking (D-Bus)
 
-**Key principle:** Backends are selected explicitly at startup (`--source=`, `--backend=`), never auto-detected silently.
+**Key principle:** Backend auto-selection is conservative and explainable; use `wayexpand backend select --explain` or explicit `--source`/`--backend` flags.
 
 ## Testing Requirements
 

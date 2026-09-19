@@ -1,5 +1,9 @@
 # WayExpand for System Administrators
 
+**Navigation:** [Home](../README.md) > **System Administration**
+
+---
+
 This guide covers deploying, managing, and supporting WayExpand in team and enterprise environments.
 
 ## Deployment Models

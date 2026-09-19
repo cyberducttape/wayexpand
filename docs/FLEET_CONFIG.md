@@ -1,9 +1,13 @@
 # Fleet Configuration Management
 
+**Navigation:** [Home](../README.md) > [System Administration](FOR_SYSADMINS.md) > **Fleet Configuration**
+
+---
+
 Fleet configuration enables organizations to deploy company-wide snippets across multiple user machines without owning personal configurations.
 
 See:
-- **Architecture:** [wayexpand-core fleet module](/crates/core/src/fleet.rs)
+- **Architecture:** [`wayexpand-core` fleet module](../crates/core/src/fleet.rs)
 - **Enterprise deployment:** [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md), [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md)
 - **Policy enforcement:** [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md)
 - **Configuration layers:**

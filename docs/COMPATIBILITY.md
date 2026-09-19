@@ -357,8 +357,8 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   (e.g. `"Ctrl+Z"`) that, pressed immediately after a successful expansion
   with no other keystroke in between, reverts it. Disabled unless set.
 - Template variables `date`, `time`, and `datetime` accept a relative
-  offset (e.g. `{{date+3d}}`, `{{time-2h}}`); see
-  [docs/wiki/Configuration.md](wiki/Configuration.md).
+  offset (e.g. `{{date+3d}}`, `{{time-2h}}`); see archived
+  [Configuration.md](archive/wiki/Configuration.md) for examples.
 - `{{cursor}}` template marker — places the cursor at that position after
   the replacement is typed, instead of at the end. Supported on the libei
   and wlroots backends; silently has no effect on input-method-v2 (no

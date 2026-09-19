@@ -1,9 +1,13 @@
-# Support matrix
+# Support Matrix
+
+**Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Support Matrix**
+
+---
 
 This matrix separates implemented code from verified desktop behavior. A
 Wayland session alone does not imply that a backend is usable.
 
-**Core engine and config are stable; desktop backend support is compositor-dependent.** WayExpand has its most complete verified coverage on KDE Plasma (KWin 6.6+): input capture, output injection, window tracking, and configuration management have been tested there. Several backends (input-method-v2, libei, evdev, hotkeys) are still Experimental per the table below, and no compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture. Additional compositor testing (Sway, Hyprland, GNOME) is ongoing and contributions from users on those platforms are welcome.
+**Core engine and config are stable; desktop backend support is compositor-dependent.** See [COMPOSITOR_MATRIX.md](COMPOSITOR_MATRIX.md) for the authoritative automatic-selection and certification status. No compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture.
 
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |
@@ -15,7 +19,7 @@ Wayland session alone does not imply that a backend is usable.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev`) | Experimental | Compositor-agnostic fallback for compositors without input-method-v2/virtual-keyboard support (e.g. KWin); has no sensitive-field signal (see [`SECURITY.md`](../SECURITY.md)); repeat behavior still requires real-device certification |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Supported (KDE Plasma v6.6+) | Live-verified on KWin 6.6.6; wlroots (`wlr-foreign-toplevel-management-unstable-v1`) is in development for Sway/Hyprland; GNOME/Mutter has no window-tracking protocol, so use global hotkeys instead of app-filtered triggers |
+| Focused-window tracking (`app_filter`) | Implemented on KDE; awaiting independent certification | KWin tracker exists; wlroots tracker is a scaffold; GNOME/Mutter has no supported tracker |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |
 | Preedit/IME composition | **Not supported** | ⚠️ Affects CJK, dead-keys, composition (see below) |
 

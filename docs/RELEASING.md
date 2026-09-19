@@ -15,7 +15,7 @@ this check was added. Bump both in the same commit you tag.
 ## Preparation
 
 1. Run the complete verification suite from
-   [`docs/wiki/Contributing.md`](wiki/Contributing.md).
+   [DEVELOPMENT.md](DEVELOPMENT.md) (see Release Process section).
 2. Run the isolated release smoke test:
 
    ```sh
