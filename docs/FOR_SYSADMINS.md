@@ -10,19 +10,25 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 
 ### Individual User (Self-Service)
 
-Users install locally from PPA, the repository PKGBUILD preview, or source:
+Users install locally via available package managers or source:
 
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian (via PPA)
 sudo apt install wayexpand
 
-# Arch (packaging preview; not an official AUR package yet)
+# Arch (packaging prepared; build locally)
 git clone https://github.com/itchyitchy123/wayexpand.git
 cd wayexpand && makepkg -si
 
 # From source
 ./scripts/install-user.sh --enable --service=wayexpand-input-method.service
 ```
+
+**Packaging Status:**
+- ✅ Ubuntu/Debian: Available via PPA
+- 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
+- 📦 Fedora: Copr packaging prepared (not yet published)
+- 🔧 Others: Build from source using `./scripts/install-user.sh`
 
 **Admin overhead:** Minimal. Users manage their own configs.
 
@@ -33,7 +39,9 @@ cd wayexpand && makepkg -si
 For teams with shared machines or controlled environments:
 
 **Approach 1: Package distribution** (recommended)
-- Deploy via standard package managers (APT, AUR, Copr)
+- **Ubuntu/Debian:** Deploy via PPA (apt)
+- **Arch:** Packaging prepared (not yet official AUR)
+- **Fedora:** Packaging prepared (Copr packaging ready)
 - Users self-install from organizational repo
 - Admin manages package version, not individual instances
 
