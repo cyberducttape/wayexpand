@@ -338,21 +338,51 @@ fn run() -> Result<()> {
             }
         }
         Some("validate") => {
-            let path = args
+            let mut rest: Vec<String> = args.collect();
+            let merged = if let Some(index) = rest.iter().position(|arg| arg == "--fleet") {
+                rest.remove(index);
+                true
+            } else {
+                false
+            };
+            let requested_json = take_json_flag(&mut rest);
+            if rest.len() > 1 {
+                bail!("usage: wayexpand validate [--fleet] [--json] [config]");
+            }
+            let path = rest
+                .into_iter()
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            if args.next().is_some() {
-                bail!("usage: wayexpand validate [config]");
-            }
             let config = Config::load(&path).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
-            println!(
-                "configuration valid: {} expansion(s), buffer limit {}",
-                config.expansion.len(),
-                config.settings.max_buffer_chars
-            );
+            let config = if merged {
+                FleetConfig::load_standard_with_base(config)
+                    .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?
+                    .config
+            } else {
+                config
+            };
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "valid": true,
+                        "fleet": merged,
+                        "expansion_count": config.expansion.len(),
+                        "hotkey_count": config.hotkey.len(),
+                        "max_buffer_chars": config.settings.max_buffer_chars,
+                    })
+                );
+            } else {
+                println!(
+                    "configuration valid{}: {} expansion(s), buffer limit {}",
+                    if merged { " (fleet merged)" } else { "" },
+                    config.expansion.len(),
+                    config.settings.max_buffer_chars
+                );
+            }
         }
         Some("import") => {
             let format = args
@@ -528,25 +558,57 @@ fn run() -> Result<()> {
                 bail!("doctor found configuration, runtime, or backend problems");
             }
         }
-        Some("backend") => {
-            print_backend_diagnostics();
-        }
+        Some("backend") => match args.next().as_deref() {
+            None => {
+                print_backend_diagnostics();
+            }
+            Some("select") => {
+                if args.next().as_deref() != Some("--explain") || args.next().is_some() {
+                    bail!("usage: wayexpand backend select --explain");
+                }
+                print_backend_selection_explain();
+            }
+            _ => bail!("usage: wayexpand backend [select --explain]"),
+        },
         Some("fleet") => match args.next().as_deref() {
             Some("status") => {
-                if args.next().is_some() {
-                    bail!("usage: wayexpand fleet status");
+                let mut rest: Vec<String> = args.collect();
+                let requested_json = take_json_flag(&mut rest);
+                if !rest.is_empty() {
+                    bail!("usage: wayexpand fleet status [--json]");
                 }
                 let base = Config::load(default_config_path()).map_err(|error| {
                     anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
                 })?;
                 let fleet = FleetConfig::load_standard_with_base(base)
                     .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
-                println!("Fleet configuration: active");
-                println!("Files loaded: {}", fleet.stats.total_files_loaded);
-                println!("Expansions: {}", fleet.stats.total_expansions);
-                println!("Hotkeys: {}", fleet.stats.total_hotkeys);
-                for layer in fleet.stats.layers_applied {
-                    println!("Layer: {layer}");
+                if requested_json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "active": true,
+                            "files_loaded": fleet.stats.total_files_loaded,
+                            "expansion_count": fleet.stats.total_expansions,
+                            "hotkey_count": fleet.stats.total_hotkeys,
+                            "layers": fleet.stats.layers_applied,
+                            "expansions": fleet.config.expansion.iter().map(|expansion| serde_json::json!({
+                                "trigger": expansion.trigger,
+                                "source": fleet.trigger_source(&expansion.trigger),
+                            })).collect::<Vec<_>>(),
+                            "hotkeys": fleet.config.hotkey.iter().map(|hotkey| serde_json::json!({
+                                "chord": hotkey.chord,
+                                "source": fleet.hotkeys_source.get(&hotkey.chord),
+                            })).collect::<Vec<_>>(),
+                        })
+                    );
+                } else {
+                    println!("Fleet configuration: active");
+                    println!("Files loaded: {}", fleet.stats.total_files_loaded);
+                    println!("Expansions: {}", fleet.stats.total_expansions);
+                    println!("Hotkeys: {}", fleet.stats.total_hotkeys);
+                    for layer in fleet.stats.layers_applied {
+                        println!("Layer: {layer}");
+                    }
                 }
             }
             _ => bail!("usage: wayexpand fleet status"),
@@ -773,6 +835,80 @@ fn print_backend_diagnostics() -> bool {
         }
     }
     true
+}
+
+fn print_backend_selection_explain() {
+    let backends = discover_backends();
+    let evdev_ready = backends.iter().any(|status| {
+        status.kind == BackendKind::Evdev && status.state == BackendState::Implemented
+    });
+    let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let desktop_lower = desktop.to_lowercase();
+    let conservative_compositor = desktop_lower.contains("kde")
+        || desktop_lower.contains("sway")
+        || desktop_lower.contains("hypr")
+        || desktop_lower.contains("river");
+    let libei_plausible = env::var_os("LIBEI_SOCKET").is_some()
+        || desktop_lower.contains("kde")
+        || desktop_lower.contains("gnome");
+    let input_method_ready = env::var_os("WAYLAND_DISPLAY").is_some()
+        && InputMethodSource::probe().is_ok();
+
+    let (capture, injection, reason) = if conservative_compositor && evdev_ready {
+        (
+            "evdev",
+            if libei_plausible { "libei" } else { "unverified" },
+            "input-method-v2 is not certified for this compositor; readable evdev is available",
+        )
+    } else if input_method_ready {
+        (
+            "input-method-v2",
+            "input-method-v2",
+            "input-method-v2 manager and seat probe succeeded",
+        )
+    } else if evdev_ready {
+        (
+            "evdev",
+            if libei_plausible { "libei" } else { "unverified" },
+            "input-method-v2 probe failed; readable evdev is available",
+        )
+    } else {
+        ("none", "none", "no supported capture source was detected")
+    };
+    let tracking = if desktop_lower.contains("kde") {
+        "kwin (best-effort)"
+    } else if conservative_compositor {
+        "wlroots scaffold (not active tracking)"
+    } else {
+        "none"
+    };
+
+    println!("Selected:");
+    println!("  capture: {capture}");
+    println!("  injection: {injection}");
+    println!("  window tracking: {tracking}");
+    println!();
+    println!("Reason:");
+    println!("  {reason}");
+    println!("  desktop: {}", if desktop.is_empty() { "unknown" } else { &desktop });
+    println!(
+        "  /dev/input readable: {}",
+        if evdev_ready { "yes" } else { "no" }
+    );
+    println!(
+        "  RemoteDesktop portal plausible: {}",
+        if libei_plausible { "yes" } else { "no" }
+    );
+    println!();
+    println!("Security tradeoffs:");
+    if capture == "evdev" {
+        println!("  password-field detection unavailable with evdev");
+        println!("  global keyboard visibility requires explicit input permissions");
+    } else if capture == "input-method-v2" {
+        println!("  exclusive capture may drop unsupported navigation/function keys");
+    } else {
+        println!("  no automatic input path selected; use explicit backend flags after doctor");
+    }
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
@@ -1206,15 +1342,15 @@ mod tests {
              config_state=ok";
         let value = status_as_json(daemon_response).unwrap();
         let object = value.as_object().expect("status --json returns an object");
-        let documented_fields = [
-            "response",
-            "source",
-            "backend",
-            "state",
-            "paused",
-            "config",
-            "config_state",
-        ];
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
+                .expect("status contract fixture must be valid JSON");
+        let documented_fields = contract["fields"]
+            .as_object()
+            .expect("status contract fields must be an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
         assert_eq!(
             object
                 .keys()
@@ -1233,6 +1369,33 @@ mod tests {
             "/home/user/.config/wayexpand/expansions.toml"
         );
         assert_eq!(value["config_state"], "ok");
+    }
+
+    #[test]
+    fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/contracts/cli-json-shapes.json"))
+                .expect("CLI contract fixture must be valid JSON");
+        let status_fields = contract["status"]
+            .as_array()
+            .expect("status contract must be an array")
+            .iter()
+            .map(|field| field.as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            status_fields,
+            [
+                "response",
+                "source",
+                "backend",
+                "state",
+                "paused",
+                "config",
+                "config_state",
+            ]
+            .into_iter()
+            .collect()
+        );
     }
 
     #[test]

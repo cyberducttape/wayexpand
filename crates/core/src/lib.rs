@@ -17,7 +17,7 @@ pub use backend::{
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
+    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
 pub use engine::{

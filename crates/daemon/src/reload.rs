@@ -195,6 +195,7 @@ impl ReloadableConfig {
                         if self.engine.async_commands_enabled() {
                             engine.enable_async_commands();
                         }
+                        engine.set_commands_disabled(self.engine.commands_disabled());
                         // A fresh engine has no window context yet. Without
                         // this, any reload (e.g. every GUI save) would
                         // wrongly fail-close `app_filter`-scoped expansions

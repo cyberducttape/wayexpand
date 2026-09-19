@@ -20,7 +20,7 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale,
+    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale,
     InputEvent, MatchMode, OrganizationPolicy, Settings,
 };
 
@@ -893,6 +893,8 @@ impl Draft {
                 .collect(),
             timeout_ms,
             cache_ms,
+            environment: CommandEnvironment::default(),
+            pass_env: Vec::new(),
         }))
     }
 }

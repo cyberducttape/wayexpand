@@ -2,6 +2,7 @@
 name = "wayexpand-backend-clipboard"
 description = "Clipboard-based text injection backend for WayExpand (fallback for newlines)"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

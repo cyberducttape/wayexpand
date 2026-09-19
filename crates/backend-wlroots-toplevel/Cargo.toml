@@ -2,6 +2,7 @@
 name = "wayexpand-backend-wlroots-toplevel"
 description = "wlr-foreign-toplevel-management-v1 window tracker for wlroots compositors (Sway, Hyprland, river)"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

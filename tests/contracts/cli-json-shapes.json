@@ -1,0 +1,7 @@
+{
+  "test": ["matched", "results"],
+  "preview": ["matched"],
+  "list": ["config", "count", "hotkey_count", "expansions", "hotkeys"],
+  "doctor": ["healthy", "wayland", "config", "control_socket", "policy", "backends", "capabilities"],
+  "status": ["response", "source", "backend", "state", "paused", "config", "config_state"]
+}

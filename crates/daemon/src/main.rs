@@ -108,6 +108,7 @@ fn main() -> Result<()> {
     // is fatal so a management update cannot silently disable restrictions.
     let policy = policy::load_policy()
         .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
+    config.engine.set_commands_disabled(policy.disable_commands);
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();

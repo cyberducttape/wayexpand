@@ -203,10 +203,10 @@ documented alongside them.
   TOML, skips unsupported non-string matches with a warning, and never
   touches the source file
 
-See [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md) for
+See [docs/FOR_SYSADMINS.md](docs/FOR_SYSADMINS.md) for
 production-ready snippets (SSL certs, logrotate, systemd units, firewall
-rules, Docker, deployment scripts) if you want a running start rather than
-an empty library.
+rules, Docker, deployment scripts) and enterprise deployment guidance if you
+want a running start rather than an empty library.
 
 ## Installation
 
@@ -300,6 +300,7 @@ wayexpand test ';;hello' --json expansions.toml
 wayexpand preview ':today' expansions.toml         # render templates without matching
 wayexpand list expansions.toml
 wayexpand validate expansions.toml
+wayexpand validate --fleet --json                    # CI-friendly merged validation
 wayexpand set-enabled ':sig' off expansions.toml   # atomic, single-snippet edit
 wayexpand set-mode ':sig' word-boundary expansions.toml
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
@@ -307,6 +308,7 @@ wayexpand doctor                                   # human-readable backend/sess
 wayexpand doctor --json                            # stable schema for health checks
 wayexpand backend select --explain                 # explain automatic backend selection
 wayexpand fleet status                              # inspect merged fleet layers
+wayexpand fleet status --json                        # inspect provenance as JSON
 ```
 
 When the daemon starts without an explicit config path, it loads the normal
@@ -349,7 +351,7 @@ Configuration resource limits are documented in
 - [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — tested combinations per desktop/protocol
 
 **Examples & reference:**
-- [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md) — ready-made snippets
+- [docs/FOR_SYSADMINS.md](docs/FOR_SYSADMINS.md) — ready-made snippets and enterprise deployment
 - [docs/ANSIBLE_INTEGRATION.md](docs/ANSIBLE_INTEGRATION.md) — fleet deployment playbooks
 
 Non-English documentation: [Deutsch](README.de.md).
