@@ -11,12 +11,83 @@ use tracing::{debug, warn};
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectorBackend {
+    None,
+    Libei,
+    Wlroots,
+}
+
+impl InjectorBackend {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Libei => "libei",
+            Self::Wlroots => "wlroots",
+        }
+    }
+}
+
+/// A source/output combination that the daemon can actually start.
+///
+/// Input-method-v2 is deliberately its own variant because it captures and
+/// injects text through the same protocol object. It cannot be combined with
+/// a separate output injector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedBackendPair {
+    InputMethod,
+    Evdev(InjectorBackend),
+    Stdin(InjectorBackend),
+}
+
+impl ResolvedBackendPair {
+    pub fn source(self) -> &'static str {
+        match self {
+            Self::InputMethod => "input-method",
+            Self::Evdev(_) => "evdev",
+            Self::Stdin(_) => "stdin",
+        }
+    }
+
+    pub fn backend(self) -> &'static str {
+        match self {
+            Self::InputMethod => "none",
+            Self::Evdev(backend) | Self::Stdin(backend) => backend.name(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendSelectionError {
+    UnknownSource(String),
+    UnknownBackend(String),
+    Incompatible { source: String, backend: String },
+}
+
+impl std::fmt::Display for BackendSelectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownSource(source) => write!(
+                formatter,
+                "unknown source {source:?}; expected stdin, input-method, or evdev"
+            ),
+            Self::UnknownBackend(backend) => write!(
+                formatter,
+                "unknown backend {backend:?}; expected none, wlroots, or libei"
+            ),
+            Self::Incompatible { source, backend } => write!(
+                formatter,
+                "source {source:?} cannot be combined with output backend {backend:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BackendSelectionError {}
+
 #[derive(Debug, Clone)]
 pub struct BackendSelection {
-    /// Input source: "stdin", "input-method", or "evdev"
-    pub source: String,
-    /// Output backend: "none", "libei", or "wlroots"
-    pub backend: String,
+    pub pair: ResolvedBackendPair,
     /// Why this selection was made (for logging/documentation)
     pub reason: String,
 }
@@ -31,7 +102,6 @@ struct Capabilities {
     has_dev_input: bool,
     #[allow(dead_code)]
     has_window_tracker: bool,
-    is_wayland: bool,
 }
 
 /// Probe for actual capabilities available in the session
@@ -54,7 +124,6 @@ fn probe_capabilities() -> Capabilities {
         has_direct_libei_socket,
         has_dev_input,
         has_window_tracker,
-        is_wayland,
     };
 
     debug!("probed capabilities: {:?}", caps);
@@ -128,77 +197,83 @@ fn select_backend(
     _compositor: Compositor,
     explicit_source: Option<&str>,
     explicit_backend: Option<&str>,
-) -> BackendSelection {
-    // User override: always respect explicit selection
+) -> Result<BackendSelection, BackendSelectionError> {
+    // Resolve an explicit source/backend pair first. Once this returns, the
+    // daemon receives a typed pair and never has to combine the two options.
     if let (Some(source), Some(backend)) = (explicit_source, explicit_backend) {
-        return BackendSelection {
-            source: source.to_string(),
-            backend: backend.to_string(),
-            reason: "user-specified".to_string(),
+        let pair = match source {
+            "input-method" if backend == "none" => ResolvedBackendPair::InputMethod,
+            "input-method" => {
+                return Err(BackendSelectionError::Incompatible {
+                    source: source.to_string(),
+                    backend: backend.to_string(),
+                })
+            }
+            "evdev" => ResolvedBackendPair::Evdev(parse_backend(backend)?),
+            "stdin" => ResolvedBackendPair::Stdin(parse_backend(backend)?),
+            other => return Err(BackendSelectionError::UnknownSource(other.to_string())),
         };
+        return Ok(BackendSelection {
+            pair,
+            reason: "user-specified".to_string(),
+        });
     }
 
-    // If user specified just a source, pick best backend for it
+    // If the user specified just a source, pick its default output backend.
     if let Some(source) = explicit_source {
-        let backend = match source {
-            "input-method" => "none", // input-method is also the injector
+        let pair = match source {
+            "input-method" => ResolvedBackendPair::InputMethod,
             "evdev" => {
                 if !capabilities.has_dev_input {
                     warn!("evdev requested but /dev/input not readable - using stdin instead");
-                    return BackendSelection {
-                        source: "stdin".to_string(),
-                        backend: "libei".to_string(),
+                    return Ok(BackendSelection {
+                        pair: ResolvedBackendPair::Stdin(InjectorBackend::Libei),
                         reason: "evdev requested but /dev/input not readable".to_string(),
-                    };
+                    });
                 }
-                "libei" // libei for output with evdev
+                ResolvedBackendPair::Evdev(InjectorBackend::Libei)
             }
-            "stdin" => "libei", // libei is default output
-            other => {
-                return BackendSelection {
-                    source: other.to_string(),
-                    backend: "none".to_string(),
-                    reason: format!("user-specified source: {}", other),
-                }
-            }
+            "stdin" => ResolvedBackendPair::Stdin(InjectorBackend::Libei),
+            other => return Err(BackendSelectionError::UnknownSource(other.to_string())),
         };
-        return BackendSelection {
-            source: source.to_string(),
-            backend: backend.to_string(),
+        return Ok(BackendSelection {
+            pair,
             reason: format!("user-specified source: {}", source),
-        };
+        });
     }
 
-    // If user specified just a backend, pick best source for it
+    // If the user specified just a backend, pick a compatible source. An
+    // explicit injector request must never select input-method-v2 because
+    // input-method-v2 is already its own source and injector.
     if let Some(backend) = explicit_backend {
-        let source = match backend {
-            "libei" if capabilities.has_input_method_v2 => "input-method", // Safer than evdev
-            "libei" if capabilities.has_dev_input => "evdev",
-            "libei" => "stdin", // Conservative fallback
-            "wlroots" if !capabilities.is_wayland => "stdin", // No wlroots on X11
-            "wlroots" if capabilities.has_input_method_v2 => "input-method", // Safer
-            "wlroots" if capabilities.has_dev_input => "evdev",
-            "wlroots" => "stdin",
-            "none" => "stdin",
-            _ => "stdin",
+        let backend = parse_backend(backend)?;
+        let pair = match backend {
+            InjectorBackend::None => ResolvedBackendPair::Stdin(InjectorBackend::None),
+            InjectorBackend::Libei if capabilities.has_dev_input => {
+                ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+            }
+            InjectorBackend::Wlroots if capabilities.has_dev_input => {
+                ResolvedBackendPair::Evdev(InjectorBackend::Wlroots)
+            }
+            InjectorBackend::Libei | InjectorBackend::Wlroots => {
+                ResolvedBackendPair::Stdin(backend)
+            }
         };
-        return BackendSelection {
-            source: source.to_string(),
-            backend: backend.to_string(),
-            reason: format!("user-specified backend: {}", backend),
-        };
+        return Ok(BackendSelection {
+            pair,
+            reason: format!("user-specified backend: {}", backend.name()),
+        });
     }
 
     // Auto-select based on capabilities (SAFETY-FIRST STRATEGY)
 
     // Prefer input-method-v2 when available (password field safety)
     if capabilities.has_input_method_v2 {
-        return BackendSelection {
-            source: "input-method".to_string(),
-            backend: "none".to_string(),
+        return Ok(BackendSelection {
+            pair: ResolvedBackendPair::InputMethod,
             reason: "auto-selected input-method-v2: safest option (password field protection)"
                 .to_string(),
-        };
+        });
     }
 
     // Fall back to evdev + libei only if /dev/input is readable
@@ -208,25 +283,32 @@ fn select_backend(
         } else {
             "; portal consent will be requested when libei starts"
         };
-        return BackendSelection {
-            source: "evdev".to_string(),
-            backend: "libei".to_string(),
+        return Ok(BackendSelection {
+            pair: ResolvedBackendPair::Evdev(InjectorBackend::Libei),
             reason: format!(
                 "auto-selected evdev + libei: input-method-v2 unavailable{}",
                 libei_reason
             ),
-        };
+        });
     }
 
     // Most conservative: stdin + libei (no special permissions needed)
     warn!(
         "no safe input sources available (input-method-v2, evdev, portal) - falling back to stdin"
     );
-    BackendSelection {
-        source: "stdin".to_string(),
-        backend: "libei".to_string(),
+    Ok(BackendSelection {
+        pair: ResolvedBackendPair::Stdin(InjectorBackend::Libei),
         reason: "conservative fallback: stdin + libei (no other input sources available)"
             .to_string(),
+    })
+}
+
+fn parse_backend(backend: &str) -> Result<InjectorBackend, BackendSelectionError> {
+    match backend {
+        "none" => Ok(InjectorBackend::None),
+        "libei" => Ok(InjectorBackend::Libei),
+        "wlroots" => Ok(InjectorBackend::Wlroots),
+        other => Err(BackendSelectionError::UnknownBackend(other.to_string())),
     }
 }
 
@@ -240,7 +322,7 @@ fn select_backend(
 pub fn auto_select(
     explicit_source: Option<&str>,
     explicit_backend: Option<&str>,
-) -> BackendSelection {
+) -> Result<BackendSelection, BackendSelectionError> {
     let capabilities = probe_capabilities();
     let compositor = Compositor::detect();
     debug!(
@@ -256,135 +338,196 @@ mod tests {
 
     // Deterministic tests of decision logic (no environment dependencies)
 
+    fn capabilities(
+        has_input_method_v2: bool,
+        has_dev_input: bool,
+        has_direct_libei_socket: bool,
+    ) -> Capabilities {
+        Capabilities {
+            has_input_method_v2,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket,
+            has_dev_input,
+            has_window_tracker: false,
+        }
+    }
+
     #[test]
     fn decision_prefers_input_method_v2_when_available() {
-        let caps = Capabilities {
-            has_input_method_v2: true,
-            has_virtual_keyboard: true,
-            has_direct_libei_socket: false,
-            has_dev_input: true,
-            has_window_tracker: false,
-            is_wayland: true,
-        };
-        let result = select_backend(&caps, Compositor::Gnome, None, None);
-        assert_eq!(result.source, "input-method");
-        assert_eq!(result.backend, "none");
+        let result = select_backend(
+            &capabilities(true, true, false),
+            Compositor::Gnome,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.pair, ResolvedBackendPair::InputMethod);
         assert!(result.reason.contains("input-method-v2"));
     }
 
     #[test]
     fn decision_falls_back_to_evdev_when_input_method_unavailable() {
-        let caps = Capabilities {
-            has_input_method_v2: false,
-            has_virtual_keyboard: false,
-            has_direct_libei_socket: true,
-            has_dev_input: true,
-            has_window_tracker: false,
-            is_wayland: true,
-        };
-        let result = select_backend(&caps, Compositor::Sway, None, None);
-        assert_eq!(result.source, "evdev");
-        assert_eq!(result.backend, "libei");
+        let result = select_backend(
+            &capabilities(false, true, true),
+            Compositor::Sway,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+        );
     }
 
     #[test]
     fn decision_falls_back_to_stdin_when_nothing_available() {
-        let caps = Capabilities {
-            has_input_method_v2: false,
-            has_virtual_keyboard: false,
-            has_direct_libei_socket: false,
-            has_dev_input: false,
-            has_window_tracker: false,
-            is_wayland: false,
-        };
-        let result = select_backend(&caps, Compositor::X11, None, None);
-        assert_eq!(result.source, "stdin");
-        assert_eq!(result.backend, "libei");
+        let result = select_backend(
+            &capabilities(false, false, false),
+            Compositor::X11,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
+        );
     }
 
     #[test]
     fn policy_uses_evdev_on_x11_if_available() {
-        // X11 can use evdev if /dev/input is readable (no input-method-v2 available)
-        let caps = Capabilities {
-            has_input_method_v2: false,
-            has_virtual_keyboard: false,
-            has_direct_libei_socket: false,
-            has_dev_input: true,
-            has_window_tracker: false,
-            is_wayland: false,
-        };
-        let result = select_backend(&caps, Compositor::X11, None, None);
-        assert_eq!(result.source, "evdev");
-        assert_eq!(result.backend, "libei");
+        let result = select_backend(
+            &capabilities(false, true, false),
+            Compositor::X11,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+        );
     }
 
     #[test]
     fn decision_user_explicit_selection_overrides_all() {
-        let caps = Capabilities {
-            has_input_method_v2: true,
-            has_virtual_keyboard: true,
-            has_direct_libei_socket: false,
-            has_dev_input: true,
-            has_window_tracker: false,
-            is_wayland: true,
-        };
-        let result = select_backend(&caps, Compositor::Gnome, Some("stdin"), Some("libei"));
-        assert_eq!(result.source, "stdin");
-        assert_eq!(result.backend, "libei");
+        let result = select_backend(
+            &capabilities(true, true, false),
+            Compositor::Gnome,
+            Some("stdin"),
+            Some("libei"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
+        );
         assert!(result.reason.contains("user-specified"));
     }
 
     #[test]
-    fn decision_backend_libei_picks_safest_source() {
-        let caps = Capabilities {
-            has_input_method_v2: true,
-            has_virtual_keyboard: true,
-            has_direct_libei_socket: false,
-            has_dev_input: true,
-            has_window_tracker: false,
-            is_wayland: true,
-        };
-        // When libei is explicitly requested, should prefer input-method over evdev
-        let result = select_backend(&caps, Compositor::Gnome, None, Some("libei"));
-        assert_eq!(result.source, "input-method");
-        assert_eq!(result.backend, "libei");
+    fn explicit_libei_never_selects_input_method() {
+        let result = select_backend(
+            &capabilities(true, true, false),
+            Compositor::Gnome,
+            None,
+            Some("libei"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+        );
     }
 
     #[test]
-    fn decision_rejects_unsupported_input_method_on_x11() {
-        let caps = Capabilities {
-            has_input_method_v2: false, // Not supported on X11
-            has_virtual_keyboard: false,
-            has_direct_libei_socket: false,
-            has_dev_input: false,
-            has_window_tracker: false,
-            is_wayland: false,
-        };
-        let result = select_backend(&caps, Compositor::X11, None, Some("libei"));
-        assert_eq!(result.source, "stdin");
-        assert_eq!(result.backend, "libei");
+    fn explicit_wlroots_resolves_a_compatible_source() {
+        let result = select_backend(
+            &capabilities(true, true, false),
+            Compositor::Gnome,
+            None,
+            Some("wlroots"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Wlroots)
+        );
+    }
+
+    #[test]
+    fn explicit_source_resolves_its_default_output() {
+        let result = select_backend(
+            &capabilities(false, true, false),
+            Compositor::Sway,
+            Some("evdev"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+        );
+    }
+
+    #[test]
+    fn input_method_cannot_be_combined_with_an_output_backend() {
+        let result = select_backend(
+            &Capabilities::default(),
+            Compositor::Unknown,
+            Some("input-method"),
+            Some("libei"),
+        );
+        assert!(matches!(
+            result,
+            Err(BackendSelectionError::Incompatible { .. })
+        ));
+    }
+
+    #[test]
+    fn unknown_source_and_backend_are_rejected() {
+        assert!(matches!(
+            select_backend(
+                &Capabilities::default(),
+                Compositor::Unknown,
+                Some("bogus"),
+                None,
+            ),
+            Err(BackendSelectionError::UnknownSource(_))
+        ));
+        assert!(matches!(
+            select_backend(
+                &Capabilities::default(),
+                Compositor::Unknown,
+                None,
+                Some("bogus"),
+            ),
+            Err(BackendSelectionError::UnknownBackend(_))
+        ));
     }
 
     // Integration tests of the full auto_select flow
 
     #[test]
     fn explicit_selection_takes_priority() {
-        let result = auto_select(Some("stdin"), Some("libei"));
-        assert_eq!(result.source, "stdin");
-        assert_eq!(result.backend, "libei");
+        let result = auto_select(Some("stdin"), Some("libei")).unwrap();
+        assert_eq!(
+            result.pair,
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
+        );
         assert!(result.reason.contains("user-specified"));
     }
 
     #[test]
     fn input_method_source_has_no_backend() {
-        let result = auto_select(Some("input-method"), None);
-        assert_eq!(result.source, "input-method");
-        assert_eq!(result.backend, "none");
+        let result = auto_select(Some("input-method"), None).unwrap();
+        assert_eq!(result.pair, ResolvedBackendPair::InputMethod);
     }
 
     #[test]
     fn reason_field_is_always_populated() {
-        let result = auto_select(None, None);
+        let result = auto_select(None, None).unwrap();
         assert!(
             !result.reason.is_empty(),
             "reason should explain the selection"
@@ -393,9 +536,8 @@ mod tests {
 
     #[test]
     fn selection_is_deterministic() {
-        let result1 = auto_select(None, None);
-        let result2 = auto_select(None, None);
-        assert_eq!(result1.source, result2.source);
-        assert_eq!(result1.backend, result2.backend);
+        let result1 = auto_select(None, None).unwrap();
+        let result2 = auto_select(None, None).unwrap();
+        assert_eq!(result1.pair, result2.pair);
     }
 }

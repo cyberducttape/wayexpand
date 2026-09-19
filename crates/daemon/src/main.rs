@@ -83,18 +83,17 @@ impl EventError {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    let (path, source_name, backend_name, use_fleet) = parse_args()?;
+    let (path, explicit_source, explicit_backend, use_fleet) = parse_args()?;
 
-    // Phase 4 UX: Auto-select best backend if not explicitly specified
-    let selection = auto_select::auto_select(source_name.as_deref(), backend_name.as_deref());
-    let (source_name, backend_name) = if source_name.is_none() && backend_name.is_none() {
-        // No explicit selection: use auto-selection
-        info!("{}", selection.reason);
-        (Some(selection.source), Some(selection.backend))
-    } else {
-        // User provided at least one: use their choice
-        (source_name, backend_name)
-    };
+    // Resolve automatic and partial explicit selections once. From this point
+    // onward the daemon only consumes the canonical, compatible pair.
+    let selection =
+        auto_select::auto_select(explicit_source.as_deref(), explicit_backend.as_deref())
+            .map_err(|error| anyhow::anyhow!("backend selection failed: {error}"))?;
+    info!("{}", selection.reason);
+    let resolved_pair = selection.pair;
+    let source_name = resolved_pair.source();
+    let backend_name = resolved_pair.backend();
 
     // An absent policy is permissive; an existing invalid or insecure policy
     // is fatal so a management update cannot silently disable restrictions.
@@ -138,33 +137,26 @@ fn main() -> Result<()> {
     } else {
         warn!("XDG_RUNTIME_DIR unavailable; control socket disabled");
     }
-    let mut input_method = match source_name.as_deref() {
-        Some("input-method") => {
-            if backend_name.is_some() && backend_name.as_deref() != Some("none") {
-                anyhow::bail!(
-                    "input-method source is also its injector; do not combine it with an output backend"
-                );
-            }
-            Some(connect_input_method_with_retry(&control, &path)?)
-        }
+    let mut input_method = match source_name {
+        "input-method" => Some(connect_input_method_with_retry(&control, &path)?),
         _ => None,
     };
-    let mut evdev = match source_name.as_deref() {
-        Some("evdev") => Some(connect_evdev_with_retry(
+    let mut evdev = match source_name {
+        "evdev" => Some(connect_evdev_with_retry(
             &control,
             &path,
-            backend_name.as_deref(),
+            backend_name,
             config.healthy(),
         )?),
         _ => None,
     };
-    match source_name.as_deref() {
-        None | Some("stdin") | Some("input-method") | Some("evdev") => {}
-        Some(other) => {
+    match source_name {
+        "stdin" | "input-method" | "evdev" => {}
+        other => {
             anyhow::bail!("unknown source {other:?}; expected stdin, input-method, or evdev")
         }
     }
-    let input_method_mode = source_name.as_deref() == Some("input-method");
+    let input_method_mode = source_name == "input-method";
     if input_method_mode {
         warn!(
             "input-method-v2 backend selected: exclusive keyboard capture is active; \
@@ -172,15 +164,15 @@ fn main() -> Result<()> {
             Use libei or wlroots backend for full key support."
         );
     }
-    let evdev_mode = source_name.as_deref() == Some("evdev");
-    let active_source = source_name.as_deref().unwrap_or("stdin");
+    let evdev_mode = source_name == "evdev";
+    let active_source = source_name;
     let mut reconnect_delay = Duration::from_millis(250);
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
-        match backend_name.as_deref() {
-            None | Some("none") => None,
-            Some(backend @ ("wlroots" | "libei")) => {
+        match backend_name {
+            "none" => None,
+            backend @ ("wlroots" | "libei") => {
                 let Some(injector) = connect_output_with_retry(
                     &control,
                     active_source,
@@ -193,7 +185,7 @@ fn main() -> Result<()> {
                 };
                 Some(injector)
             }
-            Some(other) => {
+            other => {
                 anyhow::bail!("unknown backend {other:?}; expected none, wlroots, or libei")
             }
         }
@@ -542,11 +534,10 @@ fn main() -> Result<()> {
                                 &path,
                                 config.healthy(),
                             );
-                            let backend = backend_name.as_deref().unwrap_or("none");
                             let Some(reconnected) = connect_output_with_retry(
                                 &control,
                                 active_source,
-                                backend,
+                                backend_name,
                                 &path,
                                 config.healthy(),
                             )?
@@ -648,12 +639,11 @@ fn main() -> Result<()> {
                             set_daemon_status(
                                 &control,
                                 active_source,
-                                backend_name.as_deref().unwrap_or("none"),
+                                backend_name,
                                 connection_state,
                                 &path,
                                 config.healthy(),
                             );
-                            let backend_name = backend_name.as_deref().unwrap_or("none");
                             let Some(reconnected) = connect_output_with_retry(
                                 &control,
                                 active_source,
@@ -935,10 +925,10 @@ fn connect_input_method_with_retry(
 fn connect_evdev_with_retry(
     control: &control::ControlServer,
     config_path: &Path,
-    backend_name: Option<&str>,
+    backend_name: &str,
     config_healthy: bool,
 ) -> Result<EvdevSource> {
-    let backend = backend_name.unwrap_or("none");
+    let backend = backend_name;
     let mut retry_delay = Duration::from_millis(250);
     loop {
         match EvdevSource::connect() {
