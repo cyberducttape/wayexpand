@@ -159,14 +159,13 @@ impl KwinWindowTracker {
         // world-writable /tmp), so a local attacker who guesses this
         // process's upcoming PID could pre-place a symlink here pointing at
         // a file this user owns elsewhere; `fs::write` follows symlinks and
-        // would overwrite that target. A random suffix makes the exact path
-        // unguessable, and `create_new` (O_CREAT|O_EXCL) refuses to open
-        // through anything already there -- symlink or not -- as defense in
-        // depth even if the suffix were somehow predicted.
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
+        // would overwrite that target. A cryptographically random suffix makes
+        // the exact path unguessable, and `create_new` (O_CREAT|O_EXCL) refuses
+        // to open through anything already there -- symlink or not -- as defense
+        // in depth against symlink attacks.
+        let mut nonce_bytes = [0_u8; 8];
+        getrandom::getrandom(&mut nonce_bytes).expect("getrandom failed");
+        let nonce = u64::from_le_bytes(nonce_bytes);
         let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
