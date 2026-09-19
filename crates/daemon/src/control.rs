@@ -155,7 +155,13 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
                 current.display()
             );
         }
-        if metadata.uid() != current_uid && metadata.uid() != 0 {
+        // Skip ownership check for system directories (/, /run, /run/user) where
+        // containerization may cause unexpected UID ownership. User-owned
+        // directories still validate strictly.
+        let is_system_dir = current == Path::new("/")
+            || current == Path::new("/run")
+            || current == Path::new("/run/user");
+        if !is_system_dir && metadata.uid() != current_uid && metadata.uid() != 0 {
             bail!(
                 "control socket directory {} is not owned by the current user or root",
                 current.display()
