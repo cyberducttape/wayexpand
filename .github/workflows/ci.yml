@@ -60,6 +60,21 @@ jobs:
       - name: GUI help output
         run: cargo run --locked -q -p wayexpand-gui -- --help
 
+  msrv:
+    name: MSRV (Rust 1.87)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Check workspace at MSRV
+        run: cargo check --locked --workspace
+      - name: Run workspace tests at MSRV
+        run: cargo test --locked --workspace
+
   scripts:
     name: Script Validation
     runs-on: ubuntu-latest
@@ -68,6 +83,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: ShellCheck scripts
         run: shellcheck scripts/*.sh
+
+  docs:
+    name: Documentation Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check markdown links
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --offline --exclude-link-local --exclude 'file:///' docs/ README.md SECURITY.md
+          fail: true
 
   integration:
     name: Integration & System Tests
