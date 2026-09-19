@@ -973,7 +973,7 @@ impl eframe::App for GuiApp {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .button(if self.dark_mode { "☀" } else { "🌙" })
+                            .button(if self.dark_mode { "Light" } else { "Dark" })
                             .on_hover_text(self.strings.toggle_theme())
                             .clicked()
                         {
@@ -986,14 +986,14 @@ impl eframe::App for GuiApp {
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                         }
                         if ui
-                            .button("🌐 EN/DE")
+                            .button("Language")
                             .on_hover_text("Switch language")
                             .clicked()
                         {
                             self.language_selector_open = !self.language_selector_open;
                         }
                         if ui
-                            .button("🎨 Theme")
+                            .button("Color pack")
                             .on_hover_text("Switch color pack")
                             .clicked()
                         {
@@ -1177,7 +1177,7 @@ impl eframe::App for GuiApp {
                     );
 
                     ui.add_space(8.0);
-                    ui.label("🔤 Font Size");
+                    ui.label("Font size");
                     ui.horizontal(|ui| {
                         for scale in &[
                             FontScale::Small,
@@ -1251,7 +1251,7 @@ impl eframe::App for GuiApp {
         }
         if self.language_selector_open {
             let mut open = self.language_selector_open;
-            egui::Window::new("🌐 Language / Sprache")
+            egui::Window::new("Language / Sprache")
                 .open(&mut open)
                 .resizable(false)
                 .min_width(200.0)
@@ -1283,7 +1283,7 @@ impl eframe::App for GuiApp {
         }
         if self.colorpack_selector_open {
             let mut open = self.colorpack_selector_open;
-            egui::Window::new("🎨 Color Pack / Farbschema")
+            egui::Window::new("Color Pack / Farbschema")
                 .open(&mut open)
                 .resizable(true)
                 .min_width(340.0)
@@ -1728,7 +1728,7 @@ impl eframe::App for GuiApp {
                             );
                         }
                         ui.add_space(10.0);
-                        ui.collapsing(format!("🔣 {}", self.strings.template_variables()), |ui| {
+                        ui.collapsing(self.strings.template_variables(), |ui| {
                             ui.label(
                                 RichText::new(self.strings.template_help())
                                     .small()

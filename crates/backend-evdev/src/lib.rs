@@ -29,9 +29,9 @@
 //! failure surface limited to "a match was missed," not "the user's typing
 //! breaks."
 //!
-//! Keyboard auto-repeat (holding a key down) is not yet forwarded: a held
-//! key registers once. This is a known, documented limitation of this first
-//! pass, not an oversight discovered later.
+//! Kernel auto-repeat events are translated for matcher state while leaving
+//! XKB's physical key state unchanged. The focused application still receives
+//! the native repeat directly because capture remains non-exclusive.
 
 mod device;
 
@@ -42,7 +42,7 @@ use std::{
 };
 
 use thiserror::Error;
-use wayexpand_backend_input_method::{key_action_and_update, key_chord, KeyAction};
+use wayexpand_backend_input_method::{key_action, key_action_and_update, key_chord, KeyAction};
 use wayexpand_core::{InputEvent, InputSource, InputSourceError};
 use wayland_client::protocol::wl_keyboard::KeyState;
 use xkbcommon_rs::{Context, Keymap, State};
@@ -206,10 +206,14 @@ impl EvdevSource {
             return;
         };
         let keycode = u32::from(key_code.code());
+        if value == 2 {
+            let action = key_action(&self.state, keycode);
+            self.queue_action(action);
+            return;
+        }
         let key_state = match value {
             0 => KeyState::Released,
             1 => KeyState::Pressed,
-            // Kernel auto-repeat (2) is not yet forwarded; see module docs.
             _ => return,
         };
         match key_state {
@@ -226,6 +230,10 @@ impl EvdevSource {
             }
         }
         let action = key_action_and_update(&mut self.state, keycode, key_state);
+        self.queue_action(action);
+    }
+
+    fn queue_action(&mut self, action: Option<KeyAction>) {
         let translated = match action {
             Some(KeyAction::Delete) => Some(InputEvent::Backspace),
             // Commit carries "\n"/"\t" for the app, which already received
@@ -372,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_repeat_is_ignored_for_now() {
+    fn auto_repeat_forwards_text_without_a_hotkey_event() {
         let mut state = test_state();
         let event = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 2);
         let mut source = EvdevSource {
@@ -382,6 +390,10 @@ mod tests {
             pressed: HashSet::new(),
         };
         source.translate(event);
+        assert_eq!(
+            source.pending.pop_front(),
+            Some(InputEvent::Text("a".into()))
+        );
         assert_eq!(source.pending.pop_front(), None);
     }
 
@@ -432,8 +444,7 @@ mod tests {
             pressed: HashSet::new(),
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
-        // Value 2 is kernel auto-repeat, which this source does not forward.
-        // It must not be mistaken for a release.
+        // Value 2 is kernel auto-repeat. It must not be mistaken for a release.
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 2));
         assert!(source.keys_held());
     }

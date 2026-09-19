@@ -508,39 +508,7 @@ pub fn key_action_and_update(
     // transition must be applied to keep modifiers, dead keys, and compose
     // state valid.
     let action = if key_state == wl_keyboard::KeyState::Pressed {
-        match keyboard_state
-            .key_get_one_sym(keycode)
-            .map(|keysym| keysym.raw())
-        {
-            None => Some(KeyAction::Unsupported),
-            Some(raw_keysym)
-                if matches!(classify_keysym(raw_keysym), Some(InputEvent::Backspace)) =>
-            {
-                Some(KeyAction::Delete)
-            }
-            Some(raw_keysym)
-                if matches!(classify_keysym(raw_keysym), Some(InputEvent::Boundary)) =>
-            {
-                Some(KeyAction::Commit(if raw_keysym == xkeysym::key::Tab {
-                    "\t"
-                } else {
-                    "\n"
-                }))
-            }
-            Some(raw_keysym) if raw_keysym == xkeysym::key::Escape => Some(KeyAction::Unsupported),
-            Some(raw_keysym) if is_modifier_keysym(raw_keysym) => Some(KeyAction::Ignore),
-            Some(_) => {
-                if let Some(text) = keyboard_state
-                    .key_get_utf8(keycode)
-                    .filter(|text| !text.is_empty())
-                    .and_then(|text| String::from_utf8(text).ok())
-                {
-                    Some(KeyAction::Text(text))
-                } else {
-                    Some(KeyAction::Unsupported)
-                }
-            }
-        }
+        key_action(keyboard_state, key)
     } else {
         None
     };
@@ -551,6 +519,38 @@ pub fn key_action_and_update(
     };
     keyboard_state.update_key(keycode, direction);
     action
+}
+
+/// Resolve a pressed key using the current XKB state without changing that
+/// state. Evdev uses this for kernel repeat events, which repeat the text or
+/// editing action of an already-held key without representing another key
+/// transition.
+pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
+    let keycode = key.checked_add(8)?;
+    match keyboard_state
+        .key_get_one_sym(keycode)
+        .map(|keysym| keysym.raw())
+    {
+        None => Some(KeyAction::Unsupported),
+        Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Backspace)) => {
+            Some(KeyAction::Delete)
+        }
+        Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Boundary)) => {
+            Some(KeyAction::Commit(if raw_keysym == xkeysym::key::Tab {
+                "\t"
+            } else {
+                "\n"
+            }))
+        }
+        Some(raw_keysym) if raw_keysym == xkeysym::key::Escape => Some(KeyAction::Unsupported),
+        Some(raw_keysym) if is_modifier_keysym(raw_keysym) => Some(KeyAction::Ignore),
+        Some(_) => keyboard_state
+            .key_get_utf8(keycode)
+            .filter(|text| !text.is_empty())
+            .and_then(|text| String::from_utf8(text).ok())
+            .map(KeyAction::Text)
+            .or(Some(KeyAction::Unsupported)),
+    }
 }
 
 fn forward_commit(state: &mut StateData, connection: &Connection, text: &str) {

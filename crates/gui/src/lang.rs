@@ -106,8 +106,8 @@ impl Strings {
 
     pub fn pause(&self) -> &'static str {
         match self.lang {
-            Language::English => "⏸ Pause",
-            Language::German => "⏸ Pause",
+            Language::English => "Pause",
+            Language::German => "Pause",
         }
     }
 
@@ -120,8 +120,8 @@ impl Strings {
 
     pub fn reload(&self) -> &'static str {
         match self.lang {
-            Language::English => "↻ Reload",
-            Language::German => "↻ Neu laden",
+            Language::English => "Reload",
+            Language::German => "Neu laden",
         }
     }
 
@@ -163,8 +163,8 @@ impl Strings {
 
     pub fn refresh(&self) -> &'static str {
         match self.lang {
-            Language::English => "↻ Refresh",
-            Language::German => "↻ Aktualisieren",
+            Language::English => "Refresh",
+            Language::German => "Aktualisieren",
         }
     }
 
@@ -310,15 +310,15 @@ impl Strings {
 
     pub fn duplicate(&self) -> &'static str {
         match self.lang {
-            Language::English => "⎘ Duplicate",
-            Language::German => "⎘ Duplizieren",
+            Language::English => "Duplicate",
+            Language::German => "Duplizieren",
         }
     }
 
     pub fn undo_button(&self, count: usize) -> String {
         match self.lang {
-            Language::English => format!("↺ Undo ({})", count),
-            Language::German => format!("↺ Rückgängig ({})", count),
+            Language::English => format!("Undo ({})", count),
+            Language::German => format!("Rückgängig ({})", count),
         }
     }
 
@@ -555,8 +555,8 @@ impl Strings {
 
     pub fn save_changes(&self) -> &'static str {
         match self.lang {
-            Language::English => "💾 Save changes",
-            Language::German => "💾 Änderungen speichern",
+            Language::English => "Save changes",
+            Language::German => "Änderungen speichern",
         }
     }
 
@@ -569,8 +569,8 @@ impl Strings {
 
     pub fn delete(&self) -> &'static str {
         match self.lang {
-            Language::English => "🗑 Delete…",
-            Language::German => "🗑 Löschen…",
+            Language::English => "Delete…",
+            Language::German => "Löschen…",
         }
     }
 

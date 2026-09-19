@@ -200,16 +200,12 @@ the full security model and explicit opt-in procedure.
 ### Known Limitations
 
 **Auto-repeat (key hold) handling:**
-Kernel repeat events (code value == 2) are intentionally ignored by the evdev source.
-This means held keys behave differently from rapid typing:
-
-- **Normal typing:** Key down, key up → matcher sees one keystroke
-- **Key hold:** Key down, repeat events (ignored), key up → matcher sees one keystroke
-- **Result:** Held keys won't trigger auto-repeat in expansions
-
-This is a deliberate choice: repeat events can create confusion in the matcher
-without providing meaningful new information. If your workflow depends on
-detecting held keys differently, use input-method-v2 instead.
+Kernel repeat events (code value == 2) are forwarded to the matcher as repeated
+text, backspace, or boundary actions without changing XKB's physical key state.
+They do not emit repeated global-hotkey actions. This matches non-exclusive
+capture: the focused application receives native repeats while WayExpand sees
+the same repeated input for trigger matching. Real-device behavior remains part
+of compositor certification.
 
 **Password-field protection:**
 Because the kernel provides no field-type information, the matcher **never**
