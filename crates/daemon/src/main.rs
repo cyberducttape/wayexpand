@@ -219,9 +219,7 @@ fn main() -> Result<()> {
         if requested_pause != paused {
             process_event(
                 &mut config.engine,
-                InputEvent::FocusChanged {
-                    sensitive: requested_pause,
-                },
+                InputEvent::PauseChanged(requested_pause),
                 None,
             )?;
             paused = requested_pause;
