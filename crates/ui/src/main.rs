@@ -34,6 +34,8 @@ struct App {
     undo: Option<Config>,
     external_edit: bool,
     last_status_poll: Instant,
+    /// Cached visible_indices result and the query that produced it
+    visible_cache: Option<(String, Vec<usize>)>,
 }
 
 enum Prompt {
@@ -62,12 +64,18 @@ impl App {
             undo: None,
             external_edit: false,
             last_status_poll: Instant::now(),
+            visible_cache: None,
         })
     }
 
-    fn visible_indices(&self) -> Vec<usize> {
+    fn visible_indices(&mut self) -> Vec<usize> {
+        if let Some((cached_query, cached_indices)) = &self.visible_cache {
+            if cached_query == &self.query {
+                return cached_indices.clone();
+            }
+        }
         let query = self.query.to_lowercase();
-        self.config
+        let indices: Vec<usize> = self.config
             .expansion
             .iter()
             .enumerate()
@@ -83,10 +91,12 @@ impl App {
                     .contains(&query)
             })
             .map(|(index, _)| index)
-            .collect()
+            .collect();
+        self.visible_cache = Some((self.query.clone(), indices.clone()));
+        indices
     }
 
-    fn selected_index(&self) -> Option<usize> {
+    fn selected_index(&mut self) -> Option<usize> {
         self.visible_indices().get(self.selected).copied()
     }
 
@@ -323,7 +333,7 @@ impl App {
         }
     }
 
-    fn preview(&self) -> String {
+    fn preview(&mut self) -> String {
         let Some(index) = self.selected_index() else {
             return "No snippet selected".into();
         };
@@ -622,7 +632,7 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
     Ok(())
 }
 
-fn draw(stdout: &mut io::Stdout, app: &App) -> Result<()> {
+fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     let visible = app.visible_indices();
     let selected_config_index = app.selected_index();
     let preview = app.preview();
