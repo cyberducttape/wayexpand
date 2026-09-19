@@ -9,7 +9,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info};
-use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, Layer, OrganizationPolicy};
+use wayexpand_core::{
+    Config, ConfigError, ExpansionEngine, FleetConfig, Layer, OrganizationPolicy,
+};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -273,25 +275,25 @@ impl ReloadableConfig {
     fn poll_stamp(&mut self) -> Option<FileStamp> {
         let current_metadata = metadata_stamp(&self.path)?;
 
-        // If metadata hasn't changed since last check, return cached stamp
-        if let Some(last) = self.last_metadata {
-            if current_metadata == last {
-                return self.observed;
-            }
-        }
+        // Check if metadata changed since last check
+        let metadata_changed = self
+            .last_metadata
+            .is_none_or(|last| current_metadata != last);
 
-        // Metadata changed, or this is the first check. Now do full content hash.
-        // But still rate-limit full reads if metadata keeps changing without
-        // content actually changing (noisy filesystem operations).
-        let too_soon = self
+        // If metadata changed, we must compute new fingerprint to detect
+        // content changes. If metadata unchanged, still check fingerprint
+        // periodically to catch same-size edits on coarse-timestamp filesystems.
+        let time_to_recheck = self
             .last_fingerprint_check
-            .is_some_and(|checked| checked.elapsed() < FINGERPRINT_REFRESH_INTERVAL);
-        if too_soon {
-            // Metadata changed but we're still in rate-limit window. This
-            // can happen with editors that touch mtime repeatedly. Return
-            // the observed stamp and retry next interval.
+            .is_none_or(|checked| checked.elapsed() >= FINGERPRINT_REFRESH_INTERVAL);
+
+        if !metadata_changed && !time_to_recheck {
+            // Metadata unchanged and enough time hasn't passed. Return cached stamp.
             return self.observed;
         }
+
+        // Either metadata changed or it's time to recheck fingerprint.
+        // Compute full file stamp with content hash.
 
         let current = file_stamp(&self.path);
         self.last_fingerprint_check = Some(Instant::now());
