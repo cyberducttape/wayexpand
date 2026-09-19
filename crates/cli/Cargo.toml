@@ -21,3 +21,4 @@ wayexpand-core = { path = "../core" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-libei = { path = "../backend-libei" }
+wayexpand-backend-selection = { path = "../backend-selection" }
