@@ -75,11 +75,9 @@ Detailed development policy and workflows are in [`docs/wiki/Contributing.md`](d
 - **`crates/cli`** — Command-line interface
 - **`crates/gui`** — Native egui-based GUI editor  
 - **`crates/backend-*`** — Wayland protocol implementations
-- **`vendor/`** — Intentionally tracked, full dependency source for
-  reproducible offline Debian/Launchpad builds (`CARGO_NET_OFFLINE=true`,
-  see `debian/rules`). This is why a clone of this repo is large; it is not
-  an accident. Day-to-day development doesn't touch it — Cargo resolves
-  normally from crates.io unless you're specifically working on packaging.
+- **`vendor/`** — Generated, ignored dependency source for reproducible
+  offline Debian/Launchpad builds. Normal development resolves from crates.io;
+  see the offline-build instructions in `docs/DEVELOPMENT.md`.
 
 ### Common Tasks
 

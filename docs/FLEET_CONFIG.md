@@ -50,12 +50,10 @@ mkdir -p ~/.local/share/wayexpand/packs/my-pack
 
 ## Policy Control
 
-Organizations can restrict which packs are allowed:
-
-```toml
-[organization]
-allowed_packs = ["approved-pack-1", "approved-pack-2"]
-```
+Fleet layer files contain snippets, hotkeys, and settings only. Security policy
+is loaded from the root-owned `/etc/wayexpand/policy.toml`; an `[organization]`
+table in a fleet layer is rejected. In daemon fleet mode, that root policy's
+`allowed_packs` list filters curated packs.
 
 ## Layer Precedence and Conflict Resolution
 
@@ -68,16 +66,15 @@ allowed_packs = ["approved-pack-1", "approved-pack-2"]
 | Expansion trigger | Hard error, rejected | Fail-closed: prevents accidental overwrites. Use distinct trigger names. |
 | Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
 | Settings (max_replacement_size, etc.) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins. |
-| Organization policy | Organization layer wins | If fleet organization policy exists, it replaces base config policy entirely. |
-| Curated packs | Filtered by policy | Organization policy `allowed_packs` restricts which packs are active. |
+| Organization policy | Root policy only | `/etc/wayexpand/policy.toml` is the administrator security-policy source. |
+| Curated packs | Filtered by root policy | `allowed_packs` restricts which packs are active in daemon fleet mode. |
 | Base config | Appended last (lowest priority) | Fleet layers are merged first, then base config expansions/hotkeys are appended. Base settings only override if fleet has no settings. |
 
 **Example precedence:**
-- If organization defines `max_replacement_size = 1024` and pack defines `max_replacement_size = 2048`, pack value wins (2048).
 - If organization defines `;sig` trigger and user also defines `;sig`, deployment fails with duplicate-trigger error.
 - Base config's existing snippets are appended to fleet snippets (no override, no error).
 
-**For Infrastructure:** Ensure distinct trigger/hotkey names across organizational, user, and pack layers. Use policy enforcement (`safe_mode = true`) to catch duplicate-trigger errors during validation before deployment.
+**For Infrastructure:** Ensure distinct trigger/hotkey names across organizational, user, and pack layers. Validate `/etc/wayexpand/policy.toml` separately before deployment.
 
 ## See Also
 

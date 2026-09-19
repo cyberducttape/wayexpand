@@ -267,7 +267,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/wayexpand daemon
+ExecStart=/usr/bin/wayexpand-daemon
 Restart=on-failure
 RestartSec=10
 

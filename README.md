@@ -246,11 +246,10 @@ Cons:
 - **No password-field protection** — matching is never suspended in password fields
 - Experimental — read [SECURITY.md](SECURITY.md) before enabling
 
-This unit does not auto-restart on failure by design: the `libei` backend
-connects through the desktop RemoteDesktop portal without persisting
-consent, so every connection attempt shows a fresh permission dialog, and
-auto-restarting would re-show it faster than you could respond. Restart it
-yourself after a compositor restart or portal hiccup:
+This unit does not auto-restart on failure by design. A portal session may
+need fresh user consent after revocation or an expired restoration token, and
+automatic restarts could create permission-dialog storms. Restart it yourself
+after a compositor restart or portal hiccup:
 `systemctl --user restart wayexpand-evdev.service`.
 
 **Which should I choose?**
@@ -279,11 +278,10 @@ Once `wayexpand doctor` reports capture readiness:
 systemctl --user enable --now wayexpand-evdev.service
 ```
 
-This unit does not auto-restart on failure by design: the `libei` backend
-connects through the desktop RemoteDesktop portal without persisting
-consent, so every connection attempt shows a fresh permission dialog, and
-auto-restarting would re-show it faster than you could respond. Restart it
-yourself after a compositor restart or portal hiccup:
+This unit does not auto-restart on failure by design. A portal session may
+need fresh user consent after revocation or an expired restoration token, and
+automatic restarts could create permission-dialog storms. Restart it yourself
+after a compositor restart or portal hiccup:
 `systemctl --user restart wayexpand-evdev.service`.
 
 Neither installer runs as root, enables a service automatically, or

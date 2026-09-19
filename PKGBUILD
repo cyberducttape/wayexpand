@@ -26,7 +26,8 @@ conflicts=('wayexpand-git')
 build() {
     cd "${pkgname}-${pkgver}"
     # Generate vendored dependencies for offline builds
-    cargo vendor vendor/
+    mkdir -p .cargo
+    cargo vendor vendor/ > .cargo/config.toml
     cargo build --release --locked --all
 }
 

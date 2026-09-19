@@ -3,7 +3,7 @@
 /// Enables organizations to deploy company-wide snippets without owning users'
 /// personal configurations. Layers are merged in deterministic order:
 ///
-/// 1. `/etc/wayexpand/snippets.d/` (organization policy, root-owned)
+/// 1. `/etc/wayexpand/snippets.d/` (organization snippets, root-owned)
 /// 2. `~/.config/wayexpand/snippets.d/` (user personal snippets)
 /// 3. `~/.local/share/wayexpand/packs/` (optional curated packs)
 ///
@@ -19,11 +19,8 @@
 /// **Settings:** Last layer wins. Pack settings override user settings, which
 /// override organization settings. Within a layer, later files override earlier.
 ///
-/// **Organization policy:** If fleet organization policy exists, it replaces
-/// the base config policy entirely (not merged).
-///
-/// **Curated packs:** Filtered by organization policy `allowed_packs`. Only
-/// packs in the allowed list are loaded and merged.
+/// **Organization policy:** Security policy is not part of fleet layers. The
+/// daemon loads it exclusively from `/etc/wayexpand/policy.toml`.
 ///
 /// **Base config:** Appended last (lowest priority for expansions/hotkeys).
 /// Base settings only override if no layer provides settings.
@@ -53,6 +50,17 @@ pub enum FleetError {
         message: String,
         existing_file: String,
     },
+    #[error("organization policy is not allowed in fleet layer file {file}; use /etc/wayexpand/policy.toml")]
+    OrganizationPolicyInLayer { file: String },
+}
+
+fn reject_embedded_policy(config: &Config, path: &Path) -> Result<(), FleetError> {
+    if config.organization.is_active() {
+        return Err(FleetError::OrganizationPolicyInLayer {
+            file: path.display().to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Metadata about where a snippet originated.
@@ -152,7 +160,7 @@ impl FleetConfig {
         // Load pack layer (optional)
         if let Some(dir) = Layer::Pack.default_dir() {
             if dir.exists() {
-                merger.load_layer(dir, Layer::Pack)?;
+                merger.load_pack_layer(dir)?;
             }
         }
 
@@ -181,6 +189,7 @@ impl FleetConfig {
         let base_hotkeys = base.hotkey.len();
 
         let mut config = base;
+        config.organization = crate::OrganizationPolicy::default();
 
         // Policy enforcement: filter pack-sourced expansions if allowed_packs is set
         if !policy.allowed_packs.is_empty() {
@@ -189,8 +198,7 @@ impl FleetConfig {
                     // Keep organization and user layers, filter packs
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || prov.layer.starts_with("pack:")
-                            && policy.pack_allowed(pack_name(prov))
+                        || (prov.layer == "pack" && policy.pack_allowed(pack_name(prov)))
                 } else {
                     true
                 }
@@ -199,8 +207,7 @@ impl FleetConfig {
                 if let Some(prov) = fleet.hotkeys_source.get(&hotkey.chord) {
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || prov.layer.starts_with("pack:")
-                            && policy.pack_allowed(pack_name(prov))
+                        || (prov.layer == "pack" && policy.pack_allowed(pack_name(prov)))
                 } else {
                     true
                 }
@@ -251,7 +258,7 @@ impl FleetConfig {
 /// Merges configuration from multiple layers with duplicate detection.
 ///
 /// Implements fleet precedence: duplicates are rejected (fail-closed) for triggers
-/// and hotkeys, settings follow "last wins", organization policy is preserved.
+/// and hotkeys, while settings follow "last wins".
 ///
 /// Duplicate detection across all loaded layers ensures configuration safety:
 /// accidental trigger collisions are caught early rather than silently masked
@@ -262,8 +269,6 @@ struct ConfigMerger {
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
     settings: Option<(crate::Settings, Provenance)>,
-    // Organization policy from fleet layers (last one wins)
-    organization: Option<(crate::OrganizationPolicy, Provenance)>,
     stats: MergeStats,
 }
 
@@ -273,12 +278,29 @@ impl ConfigMerger {
             expansions: BTreeMap::new(),
             hotkeys: BTreeMap::new(),
             settings: None,
-            organization: None,
             stats: MergeStats::default(),
         }
     }
 
     fn load_layer(&mut self, dir: impl AsRef<Path>, layer: Layer) -> Result<(), FleetError> {
+        self.load_layer_named(dir, layer.name().to_string())
+    }
+
+    fn load_pack_layer(&mut self, dir: impl AsRef<Path>) -> Result<(), FleetError> {
+        let dir = dir.as_ref();
+        self.load_layer_named(dir, "pack:root".to_string())?;
+
+        for (pack_dir, name) in discover_pack_dirs(dir)? {
+            self.load_layer_named(pack_dir, format!("pack:{name}"))?;
+        }
+        Ok(())
+    }
+
+    fn load_layer_named(
+        &mut self,
+        dir: impl AsRef<Path>,
+        layer_name: String,
+    ) -> Result<(), FleetError> {
         let dir = dir.as_ref();
 
         if !dir.is_dir() {
@@ -307,10 +329,11 @@ impl ConfigMerger {
                 .to_string();
             let provenance = Provenance {
                 file: relative.clone(),
-                layer: layer.name().to_string(),
+                layer: layer_name.clone(),
             };
 
             let config = Config::load(&path).map_err(FleetError::Config)?;
+            reject_embedded_policy(&config, &path)?;
             self.stats.total_files_loaded += 1;
 
             // Merge expansions (check for duplicates)
@@ -363,21 +386,11 @@ impl ConfigMerger {
                 self.settings = Some((config.settings.clone(), provenance.clone()));
             }
 
-            // Organization policy (last one wins)
-            if config.organization.is_active() {
-                if self.organization.is_some() {
-                    eprintln!(
-                        "warning: organization policy from {} overrides previous layer",
-                        provenance.file
-                    );
-                }
-                self.organization = Some((config.organization.clone(), provenance));
-            }
         }
 
         self.stats
             .layers_applied
-            .push(format!("{} ({})", layer.name(), dir.display()));
+            .push(format!("{} ({})", layer_name, dir.display()));
 
         Ok(())
     }
@@ -412,16 +425,11 @@ impl ConfigMerger {
             .map(|(settings, _)| settings)
             .unwrap_or_default();
 
-        let organization = self
-            .organization
-            .map(|(org, _)| org)
-            .unwrap_or_default();
-
         let config = Config {
             expansion,
             hotkey,
             settings,
-            organization,
+            organization: crate::OrganizationPolicy::default(),
         };
 
         config.validate().map_err(FleetError::Config)?;
@@ -433,6 +441,23 @@ impl ConfigMerger {
             stats: self.stats,
         })
     }
+}
+
+fn discover_pack_dirs(dir: &Path) -> Result<Vec<(PathBuf, String)>, FleetError> {
+    let mut pack_dirs: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| FleetError::Config(ConfigError::Read {
+            path: dir.display().to_string(),
+            source: e,
+        }))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (entry.path(), name)
+        })
+        .collect();
+    pack_dirs.sort_by(|left, right| left.1.cmp(&right.1));
+    Ok(pack_dirs)
 }
 
 fn pack_name(provenance: &Provenance) -> &str {
@@ -463,6 +488,45 @@ mod tests {
         };
         assert_eq!(prov.file, "kubectl-snippets.toml");
         assert_eq!(prov.layer, "pack");
+    }
+
+    #[test]
+    fn pack_provenance_uses_pack_name_for_allowlists() {
+        let prov = Provenance {
+            file: "snippets.toml".to_string(),
+            layer: "pack:sre-core".to_string(),
+        };
+        assert_eq!(pack_name(&prov), "sre-core");
+    }
+
+    #[test]
+    fn embedded_fleet_policy_is_rejected_instead_of_discarded() {
+        let mut config = Config {
+            expansion: Vec::new(),
+            hotkey: Vec::new(),
+            settings: Default::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        config.organization.allowed_packs = vec!["approved".to_string()];
+
+        let result = reject_embedded_policy(&config, Path::new("org.toml"));
+        assert!(matches!(
+            result,
+            Err(FleetError::OrganizationPolicyInLayer { .. })
+        ));
+    }
+
+    #[test]
+    fn pack_directory_discovery_returns_named_packs() {
+        let root = std::env::temp_dir().join(format!("wayexpand-pack-discovery-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("linux-admin")).unwrap();
+        std::fs::create_dir_all(root.join("kubernetes")).unwrap();
+
+        let packs = discover_pack_dirs(&root).unwrap();
+        let names: Vec<_> = packs.iter().map(|(_, name)| name.as_str()).collect();
+        assert_eq!(names, ["kubernetes", "linux-admin"]);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

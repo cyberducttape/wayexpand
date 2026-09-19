@@ -7,7 +7,7 @@ Deploy and manage WayExpand organization snippets using Puppet, maintaining stri
 WayExpand fleet configuration uses three independent layers:
 
 ```
-/etc/wayexpand/snippets.d/          ← Puppet-managed (organization policy)
+/etc/wayexpand/snippets.d/          ← Puppet-managed (organization snippets)
   ├── 01-sre-core.toml
   ├── 02-kubernetes.toml
   └── 03-incident-response.toml

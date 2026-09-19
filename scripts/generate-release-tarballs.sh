@@ -53,9 +53,10 @@ cd "${tmpdir}/wayexpand-${version}-vendored"
 tar -xzf "${tmpdir}/wayexpand-${version}.tar.gz"
 cd "wayexpand-${version}"
 
-# Generate vendor/ directory
+# Generate vendor/ and the source replacement config
 printf '%s\n' "  Generating vendor/ directory..."
-cargo vendor vendor/ >/dev/null 2>&1
+mkdir -p .cargo
+cargo vendor vendor/ > .cargo/config.toml
 
 # Create vendored tarball
 cd ..

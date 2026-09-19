@@ -178,7 +178,7 @@ After=graphical-session-pre.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/wayexpand daemon
+ExecStart=/usr/bin/wayexpand-daemon
 Restart=on-failure
 RestartSec=10
 
@@ -208,8 +208,9 @@ cargo clippy --locked --workspace --all-targets --release -- -D warnings
 ### Offline builds (vendored dependencies)
 
 ```sh
-# Generate vendor/ directory
-cargo vendor vendor/
+# Generate vendor/ and a local Cargo source replacement
+mkdir -p .cargo
+cargo vendor vendor/ > .cargo/config.toml
 
 # Now builds work without network
 cargo build --locked --offline --workspace
@@ -334,7 +335,7 @@ impl InputSource for MyBackend {
 1. Update `Cargo.toml`
 2. Run `cargo build --locked` to update `Cargo.lock`
 3. Commit `Cargo.lock` with your changes
-4. For offline builds, run `cargo vendor vendor/` and commit `vendor/`
+4. For offline builds, run `mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml` and keep the generated `vendor/` directory with the build artifact
 
 **Dependency policy:**
 - Prefer stable, well-maintained crates

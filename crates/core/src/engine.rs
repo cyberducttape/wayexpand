@@ -2374,6 +2374,22 @@ replacement = "bad\u0000value""#;
     }
 
     #[test]
+    fn runtime_title_matching_policy_is_applied() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_title_matching_disabled(true);
+        engine.set_current_window(Some(WindowContext {
+            app_id: None,
+            title: Some("Thunderbird Mail Client".into()),
+        }));
+
+        assert!(engine.process(InputEvent::Text(":email".into())).is_empty());
+    }
+
+    #[test]
     fn word_boundary_triggers_reinsert_terminating_character() {
         // Evdev capture is non-exclusive: the space that ends a word-boundary
         // trigger has already reached the app. The engine must report that

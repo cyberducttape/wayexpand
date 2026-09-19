@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info};
-use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, Layer};
+use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, Layer, OrganizationPolicy};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -23,6 +23,7 @@ pub struct ReloadableConfig {
     fleet: bool,
     fleet_signature: u64,
     last_fleet_check: Instant,
+    policy: OrganizationPolicy,
     pub engine: ExpansionEngine,
     healthy: bool,
 }
@@ -125,12 +126,23 @@ impl ReloadableConfig {
         Self::load_mode(path.into(), false)
     }
 
-    pub fn load_with_fleet(path: impl Into<PathBuf>) -> Result<Self> {
-        Self::load_mode(path.into(), true)
+    pub fn load_with_fleet_and_policy(
+        path: impl Into<PathBuf>,
+        policy: OrganizationPolicy,
+    ) -> Result<Self> {
+        Self::load_mode_with_policy(path.into(), true, policy)
     }
 
     fn load_mode(path: PathBuf, fleet: bool) -> Result<Self> {
-        let (config, stamp) = load_for_mode(&path, fleet)?;
+        Self::load_mode_with_policy(path, fleet, OrganizationPolicy::default())
+    }
+
+    fn load_mode_with_policy(
+        path: PathBuf,
+        fleet: bool,
+        policy: OrganizationPolicy,
+    ) -> Result<Self> {
+        let (config, stamp) = load_for_mode(&path, fleet, &policy)?;
         let engine = ExpansionEngine::new(config)
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
         let last_metadata = stamp.map(|s| MetadataStamp {
@@ -151,6 +163,7 @@ impl ReloadableConfig {
             fleet,
             fleet_signature: standard_fleet_signature(),
             last_fleet_check: Instant::now(),
+            policy,
             engine,
             healthy: true,
         })
@@ -187,7 +200,7 @@ impl ReloadableConfig {
     }
 
     fn reload_current(&mut self, current: Option<FileStamp>) {
-        match load_for_mode(&self.path, self.fleet) {
+        match load_for_mode(&self.path, self.fleet, &self.policy) {
             Ok((config, stable_stamp)) => {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
@@ -196,6 +209,7 @@ impl ReloadableConfig {
                             engine.enable_async_commands();
                         }
                         engine.set_commands_disabled(self.engine.commands_disabled());
+                        engine.set_title_matching_disabled(self.engine.title_matching_disabled());
                         // A fresh engine has no window context yet. Without
                         // this, any reload (e.g. every GUI save) would
                         // wrongly fail-close `app_filter`-scoped expansions
@@ -313,10 +327,14 @@ fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>)> {
     )
 }
 
-fn load_for_mode(path: &Path, fleet: bool) -> Result<(Config, Option<FileStamp>)> {
+fn load_for_mode(
+    path: &Path,
+    fleet: bool,
+    policy: &OrganizationPolicy,
+) -> Result<(Config, Option<FileStamp>)> {
     let (base, stamp) = load_consistent(path)?;
     if fleet {
-        let merged = FleetConfig::load_standard_with_base(base)
+        let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
             .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
         Ok((merged.config, stamp))
     } else {
