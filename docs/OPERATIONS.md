@@ -323,17 +323,40 @@ Relative socket paths are resolved below `XDG_RUNTIME_DIR`. If
 `LIBEI_SOCKET` is unset, explicitly selecting `--backend=libei` starts an XDG
 RemoteDesktop portal session and may display an authorization dialog.
 
+### Portal Permission Persistence
+
+When using the RemoteDesktop portal (libei without direct `LIBEI_SOCKET`), a
+restoration token is stored after the first successful connection at:
+
+```text
+$XDG_CONFIG_HOME/wayexpand/libei-portal-token
+```
+
+or:
+
+```text
+$HOME/.config/wayexpand/libei-portal-token
+```
+
+The token is stored with restricted permissions (mode 0600, user-only readable).
+On subsequent daemon starts, the stored token is passed to the portal to restore
+the previous session, skipping the user consent dialog if the token is still valid.
+
+If the token expires or the user revokes permissions, the portal will display the
+authorization dialog on the next connection attempt. To manually reset permissions,
+delete the token file.
+
 ## Native backend prerequisites
 
 The direct libei backend is built from the pure-Rust protocol implementation
 and requires a compositor/EIS server plus an explicitly configured
 `LIBEI_SOCKET`. The portal-backed path uses the desktop's XDG RemoteDesktop
-portal and requires user consent. Portal revocation or compositor restart is
-reported as an injector failure; the stdin daemon reconnects the output
-session with bounded backoff. Because a transport failure may be ambiguous
-after queued events were sent, the current replacement is not replayed.
-Direct EIS handshakes and device discovery have a five-second I/O deadline so a
-stale endpoint cannot hang daemon startup indefinitely.
+portal and requires user consent (one-time, with token persistence). Portal 
+revocation or compositor restart is reported as an injector failure; the stdin 
+daemon reconnects the output session with bounded backoff. Because a transport 
+failure may be ambiguous after queued events were sent, the current replacement 
+is not replayed. Direct EIS handshakes and device discovery have a five-second 
+I/O deadline so a stale endpoint cannot hang daemon startup indefinitely.
 ## Monitoring and health checks
 
 Use the machine-readable doctor command from a service check or fleet probe:
