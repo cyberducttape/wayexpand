@@ -64,6 +64,24 @@ closed without emitting a replacement. A command can still have side effects
 as the desktop user, so command-enabled configuration must remain protected by
 the ownership and permission checks above.
 
+**Important:** Command-backed expansions run under the systemd user service's
+security hardening constraints (see `systemd/wayexpand.service`). The daemon
+runs with `ProtectHome=read-only`, `ProtectSystem=strict`, memory write-execute
+protection, and other sandboxing. This means a command that works when typed
+manually may fail when invoked as a WayExpand expansion if it tries to:
+- Write to `$HOME` or system directories
+- Connect to the network or D-Bus
+- Access files outside `/tmp` or `/run`
+- Perform other operations restricted by the systemd unit
+
+The systemd unit is deliberately restrictive to limit the blast radius of a
+compromised or misconfigured command. If a command needs capabilities the
+daemon's sandbox forbids, either relax the restrictions in
+`systemd/wayexpand.service` (requires manual editing) or run a less restricted
+wrapper script. The `wayexpand-gui` preview feature can help identify these
+issues: a command that fails in Preview due to sandbox restrictions will also
+fail when triggered during typing.
+
 The input-method source fails closed when it cannot safely pass through a
 non-text key or determine a UTF-8-safe Backspace range from surrounding text.
 Unsupported ordinary non-text keys are discarded individually and clear the

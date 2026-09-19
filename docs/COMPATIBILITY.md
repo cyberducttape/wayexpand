@@ -414,7 +414,7 @@ Breaking changes **must**:
 **Runtime dependencies:**
 - Wayland protocol implementations (input-method-v2, wlroots, libei, EIS)
 - systemd user services (for daemon auto-start)
-- Optional: xclip/xsel/xdotool (for clipboard fallback)
+- D-Bus session service (for KDE Plasma window tracking, when available)
 
 **Build dependencies:**
 - Rust 1.93+ (as per Cargo.lock)
