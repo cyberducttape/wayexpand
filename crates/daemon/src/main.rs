@@ -78,7 +78,7 @@ impl EventError {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    let (path, source_name, backend_name) = parse_args()?;
+    let (path, source_name, backend_name, use_fleet) = parse_args()?;
 
     // Phase 4 UX: Auto-select best backend if not explicitly specified
     let selection = auto_select::auto_select(source_name.as_deref(), backend_name.as_deref());
@@ -91,7 +91,12 @@ fn main() -> Result<()> {
         (source_name, backend_name)
     };
 
-    let mut config = ReloadableConfig::load(&path).map_err(|_| {
+    let mut config = if use_fleet {
+        ReloadableConfig::load_with_fleet(&path)
+    } else {
+        ReloadableConfig::load(&path)
+    }
+    .map_err(|_| {
         anyhow::anyhow!(
             "could not load configuration {}; run `wayexpand doctor` for details",
             path.display()
@@ -99,8 +104,10 @@ fn main() -> Result<()> {
     })?;
     config.engine.enable_async_commands();
 
-    // Load organization policy from /etc/wayexpand/policy.toml
-    let policy = policy::load_policy();
+    // An absent policy is permissive; an existing invalid or insecure policy
+    // is fatal so a management update cannot silently disable restrictions.
+    let policy = policy::load_policy()
+        .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -111,7 +118,7 @@ fn main() -> Result<()> {
             signal_stop.store(true, std::sync::atomic::Ordering::Release);
         }
     });
-    info!(path = %config.path().display(), "configuration loaded");
+    info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
     if let Some(socket) = control.path() {
         info!(path = %socket.display(), "control socket ready");
     } else {
@@ -1146,8 +1153,10 @@ fn apply_results(
     Ok(())
 }
 
-fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
-    let mut path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
+fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>, bool)> {
+    let env_path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
+    let mut path = env_path.clone();
+    let mut explicit_path = env_path.is_some();
     let mut backend = env::var("WAYEXPAND_BACKEND").ok();
     let mut source = env::var("WAYEXPAND_SOURCE").ok();
     for argument in env::args().skip(1) {
@@ -1167,9 +1176,15 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
             anyhow::bail!("multiple configuration paths supplied");
         } else {
             path = Some(PathBuf::from(argument));
+            explicit_path = true;
         }
     }
-    Ok((path.unwrap_or_else(default_config_path), source, backend))
+    Ok((
+        path.unwrap_or_else(default_config_path),
+        source,
+        backend,
+        !explicit_path,
+    ))
 }
 
 #[cfg(test)]

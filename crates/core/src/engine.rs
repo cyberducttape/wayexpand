@@ -630,6 +630,11 @@ impl ExpansionEngine {
         } else if let (Some(runtime), Some(command)) =
             (self.async_commands.as_ref(), expansion.command.as_ref())
         {
+            // Policy enforcement: block command execution if policy disables it
+            if self.config.organization.disable_commands {
+                return None;
+            }
+
             let result = ExpansionResult {
                 trigger,
                 typed_trigger: typed,
@@ -2301,5 +2306,27 @@ replacement = "bad\u0000value""#;
         assert_eq!(results[0].reinsert_after, Some(':'));
         assert_eq!(results[1].trigger, ":b");
         assert_eq!(results[1].reinsert_after, None);
+    }
+
+    #[test]
+    fn disable_commands_policy_blocks_command_execution() {
+        // Regression test: disable_commands policy must prevent command execution
+        // in the engine, BEFORE the subprocess runs. Commands should not execute
+        // when the policy is active.
+        let mut config = Config::parse(
+            "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"dummy\"\ncommand = { program = \"true\" }\n",
+        )
+        .unwrap();
+        config.organization.disable_commands = true;
+
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+
+        // Typing the trigger should not produce any results when commands are disabled
+        let results = engine.process(InputEvent::Text(":cmd".into()));
+        assert!(
+            results.is_empty(),
+            "command-backed expansion should not execute when disable_commands=true"
+        );
     }
 }

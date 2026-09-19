@@ -20,8 +20,8 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FontScale, InputEvent,
-    MatchMode, OrganizationPolicy, Settings,
+    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale,
+    InputEvent, MatchMode, OrganizationPolicy, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -95,6 +95,7 @@ struct GuiApp {
     paused: bool,
     diagnostics_open: bool,
     daemon_status: String,
+    fleet_status: String,
     backend_status: Vec<BackendStatus>,
     protocol_probes: Vec<(String, String)>,
     pending_action: Option<PendingAction>,
@@ -199,6 +200,7 @@ impl GuiApp {
             paused: false,
             diagnostics_open: false,
             daemon_status: "Not checked".into(),
+            fleet_status: "Not checked".into(),
             backend_status: discover_backends(),
             protocol_probes: Vec::new(),
             pending_action: None,
@@ -225,6 +227,15 @@ impl GuiApp {
 
     fn refresh_diagnostics(&mut self) {
         self.backend_status = discover_backends();
+        self.fleet_status = match FleetConfig::load_standard_with_base(self.config.clone()) {
+            Ok(fleet) => format!(
+                "active · {} files · {} expansions · {} hotkeys",
+                fleet.stats.total_files_loaded,
+                fleet.stats.total_expansions,
+                fleet.stats.total_hotkeys
+            ),
+            Err(error) => format!("invalid: {error}"),
+        };
         self.protocol_probes.clear();
         if env::var_os("WAYLAND_DISPLAY").is_some() {
             self.protocol_probes.push((
@@ -1057,6 +1068,11 @@ impl eframe::App for GuiApp {
                         .show(ui, |ui| {
                             ui.label(RichText::new(&self.daemon_status).monospace());
                         });
+                    ui.label(
+                        RichText::new(format!("Fleet layers: {}", self.fleet_status))
+                            .small()
+                            .color(palette.muted),
+                    );
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         theme::section_header(ui, "", self.strings.backends());

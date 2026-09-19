@@ -4,6 +4,11 @@
 
 **Key principle:** Fleet configuration and operational observability before performance optimization.
 
+The standard fleet merge is active in the daemon when no explicit config path
+is supplied. The primary user config remains the base layer; organization,
+user `snippets.d`, and pack directories are then merged in that order. Use
+`wayexpand fleet status` to inspect the discovered layers.
+
 ## Phase 1: Fleet Configuration & Policy (v1.3-1.4)
 
 ### 1.1 Multi-Layer Configuration Merging
@@ -18,7 +23,7 @@
 ```
 
 **Features:**
-- Deterministic merge order (policy → packs → user)
+- Deterministic merge order (primary config → organization → user → packs)
 - `validate --merge-preview` to dry-run combined config
 - `fmt`, `lint`, `diff` subcommands for config management
 - Source provenance tracking (which file defines each snippet)
