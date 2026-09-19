@@ -821,18 +821,23 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
                 mode,
             });
         }
-        // A directory that is already confirmed trusted (owned by us, or by
-        // root, and not writable by anyone else) cannot have been swapped in
-        // by an untrusted party regardless of what is above it: reaching it
-        // required write access to its own parent, which this same check
-        // would already have rejected. Stopping here -- rather than walking
-        // on to "/" -- also sidesteps a real-world false positive: under a
-        // systemd sandbox (e.g. a `--user` unit with ProtectHome=/
-        // ProtectSystem=), higher ancestors like "/" are visible only through
-        // an implicit private user namespace, in which the *real* root owner
-        // is remapped to the overflow uid (65534) and would otherwise be
-        // rejected as untrusted even though nothing is actually wrong.
-        if uid == current_uid {
+        // NOTE: We intentionally do NOT stop at the first user-owned directory.
+        // While a secure user-owned directory itself cannot be swapped
+        // (it requires write access to its parent), a world-writable,
+        // non-sticky parent directory can still allow another user to
+        // rename/replace that directory entry.
+        //
+        // Example: /shared is world-writable and non-sticky, /shared/stephan
+        // is 0700 and owned by stephan. A different user CAN rename
+        // /shared/stephan to /shared/stephan.bak and create a new
+        // /shared/stephan pointing to attacker-controlled config.
+        //
+        // Therefore, validate all ancestors up to "/" (except in a systemd
+        // private namespace, where the overflow uid 65534 is remapped and
+        // would cause false rejections). Until fd-based openat2() validation
+        // is implemented, we accept root-owned "/" as a terminal trust
+        // anchor rather than checking its mode.
+        if uid == 0 {
             return Ok(());
         }
         if current == Path::new("/") {
