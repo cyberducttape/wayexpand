@@ -39,13 +39,38 @@ git push origin v<version>
 
 The release workflow runs the full CI verification suite (`ci.yml`) before
 packaging, and publishing is skipped if it fails. It then builds the Linux
-x86_64 binaries with the locked dependency graph and publishes a tarball
-containing binaries, systemd units, the desktop entry, the application
-icon, an example configuration, documentation, license, security policy,
-`scripts/install-release.sh` / `scripts/uninstall-user.sh`, and (for the
-optional `--source=evdev` capture fallback)
-`scripts/install-evdev-permissions.sh` plus `udev/71-wayexpand-evdev.rules`.
-A SHA256 checksum is published beside the archive.
+x86_64 binaries with the locked dependency graph and publishes:
+
+**Binary archive** (for end users):
+- `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
+  systemd units, the desktop entry, application icon, example configuration,
+  documentation, license, security policy, and installation scripts
+- SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
+
+**Source archives** (for distributions and offline builds):
+- `wayexpand-<version>.tar.gz` (clean source, Cargo.lock only)
+  - Recommended for AUR, Copr, and distributions that build from source
+  - ~70 MB, cargo downloads dependencies from crates.io during build
+  - Build systems add `cargo vendor vendor/` as needed
+  - SHA256: `wayexpand-<version>.tar.gz.sha256`
+
+- `wayexpand-<version>-vendored.tar.gz` (includes vendored dependencies)
+  - For Launchpad PPA and offline/air-gapped builds
+  - ~600 MB, all dependencies pre-downloaded
+  - `CARGO_NET_OFFLINE=true` builds work without internet
+  - SHA256: `wayexpand-<version>-vendored.tar.gz.sha256`
+
+## Tarball distribution
+
+**For package maintainers:**
+
+| Target | Tarball | Build | Notes |
+|--------|---------|-------|-------|
+| AUR | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | Build system adds `cargo vendor vendor/` automatically |
+| Copr (Fedora) | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | RPM spec includes `cargo vendor vendor/` in %build |
+| Launchpad PPA | `wayexpand-<version>-vendored.tar.gz` | `dh build --buildsystem=cargo` | Debian rules handles `cargo vendor vendor/` |
+| Source distribution | `wayexpand-<version>.tar.gz` | Any | Cleaner, more professional appearance (70 MB vs 600 MB) |
+| Offline build | `wayexpand-<version>-vendored.tar.gz` | `CARGO_NET_OFFLINE=true` | All dependencies included, no network required |
 
 Do not call a release stable while [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md)
 still marks key pass-through or a compositor's coverage as unsupported or
