@@ -557,8 +557,11 @@ fn forward_commit(state: &mut StateData, connection: &Connection, text: &str) {
     if let Some(input_method) = state.input_method.as_ref() {
         input_method.commit_string(text.to_owned());
         input_method.commit(state.commit_serial);
-        if let Err(error) = connection.flush() {
-            state.error = Some(InputMethodError::Transport(error.to_string()));
+        match connection.flush() {
+            Ok(()) => optimistic_commit(&mut state.surrounding_text, text),
+            Err(error) => {
+                state.error = Some(InputMethodError::Transport(error.to_string()));
+            }
         }
     }
 }
@@ -852,11 +855,14 @@ impl TextInjector for InputMethodSource {
         };
         input_method.delete_surrounding_text(bytes, 0);
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
-            backend: SOURCE_NAME,
-            message: error.to_string(),
-            retryable: true,
-        })
+        self.connection
+            .flush()
+            .map_err(|error| InjectorError {
+                backend: SOURCE_NAME,
+                message: error.to_string(),
+                retryable: true,
+            })?;
+        optimistic_replace(&mut self.state.surrounding_text, trigger, "")
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
@@ -873,11 +879,15 @@ impl TextInjector for InputMethodSource {
         };
         input_method.commit_string(text.to_owned());
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
-            backend: SOURCE_NAME,
-            message: error.to_string(),
-            retryable: true,
-        })
+        self.connection
+            .flush()
+            .map_err(|error| InjectorError {
+                backend: SOURCE_NAME,
+                message: error.to_string(),
+                retryable: true,
+            })?;
+        optimistic_commit(&mut self.state.surrounding_text, text);
+        Ok(())
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
@@ -895,12 +905,79 @@ impl TextInjector for InputMethodSource {
             input_method.commit_string(text.to_owned());
         }
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
-            backend: SOURCE_NAME,
-            message: error.to_string(),
-            retryable: true,
-        })
+        self.connection
+            .flush()
+            .map_err(|error| InjectorError {
+                backend: SOURCE_NAME,
+                message: error.to_string(),
+                retryable: true,
+            })?;
+        optimistic_replace(&mut self.state.surrounding_text, trigger, text)
     }
+}
+
+fn optimistic_commit(surrounding: &mut Option<SurroundingText>, text: &str) {
+    let Some(surrounding) = surrounding.as_mut() else {
+        return;
+    };
+    let Ok(cursor) = usize::try_from(surrounding.cursor) else {
+        return;
+    };
+    let Ok(anchor) = usize::try_from(surrounding.anchor) else {
+        return;
+    };
+    if cursor > surrounding.text.len()
+        || anchor > surrounding.text.len()
+        || !surrounding.text.is_char_boundary(cursor)
+        || !surrounding.text.is_char_boundary(anchor)
+    {
+        return;
+    }
+    let start = cursor.min(anchor);
+    let end = cursor.max(anchor);
+    surrounding.text.replace_range(start..end, text);
+    let new_cursor = start + text.len();
+    let Ok(new_cursor) = u32::try_from(new_cursor) else {
+        return;
+    };
+    surrounding.cursor = new_cursor;
+    surrounding.anchor = new_cursor;
+}
+
+fn optimistic_replace(
+    surrounding: &mut Option<SurroundingText>,
+    trigger: &str,
+    text: &str,
+) -> Result<(), InjectorError> {
+    let bytes = trigger_delete_length(surrounding.as_ref(), trigger)?;
+    let Some(surrounding) = surrounding.as_mut() else {
+        return Err(InjectorError {
+            backend: SOURCE_NAME,
+            message: "surrounding text is unavailable after replacement".into(),
+            retryable: true,
+        });
+    };
+    let cursor = usize::try_from(surrounding.cursor).map_err(|_| InjectorError {
+        backend: SOURCE_NAME,
+        message: "surrounding text cursor is invalid after replacement".into(),
+        retryable: true,
+    })?;
+    let start = cursor
+        .checked_sub(usize::try_from(bytes).unwrap_or(usize::MAX))
+        .ok_or_else(|| InjectorError {
+            backend: SOURCE_NAME,
+            message: "replacement trigger exceeds surrounding text".into(),
+            retryable: true,
+        })?;
+    surrounding.text.replace_range(start..cursor, text);
+    let new_cursor = start + text.len();
+    surrounding.cursor = u32::try_from(new_cursor).map_err(|_| InjectorError {
+        backend: SOURCE_NAME,
+        message: "replacement cursor exceeds protocol range".into(),
+        retryable: false,
+    })?;
+    surrounding.anchor = surrounding.cursor;
+    Ok(())
 }
 
 fn trigger_delete_length(
