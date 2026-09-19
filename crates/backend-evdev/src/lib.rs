@@ -128,6 +128,7 @@ impl EvdevSource {
     /// ready, so callers on the daemon's main loop can still service
     /// stop/pause/reload requests at a steady cadence even while idle.
     fn poll_once(&mut self, timeout: Duration) -> Result<(), EvdevError> {
+        self.refresh_devices();
         if self.devices.is_empty() {
             return Ok(());
         }
@@ -179,6 +180,21 @@ impl EvdevSource {
             self.devices.remove(index);
         }
         Ok(())
+    }
+
+    fn refresh_devices(&mut self) {
+        let discovery = device::discover_keyboards();
+        for keyboard in discovery.keyboards {
+            if self
+                .devices
+                .iter()
+                .any(|existing| existing.path() == keyboard.path())
+            {
+                continue;
+            }
+            tracing::info!(path = %keyboard.path().display(), "keyboard device connected");
+            self.devices.push(keyboard);
+        }
     }
 
     fn drain_ready(&mut self, ready_indices: &[usize]) -> Result<(), EvdevError> {
@@ -238,10 +254,13 @@ impl EvdevSource {
             Some(KeyAction::Delete) => Some(InputEvent::Backspace),
             // Commit carries "\n"/"\t" for the app, which already received
             // the real key natively; the matcher only needs the boundary.
-            Some(KeyAction::Commit(_)) => Some(InputEvent::Boundary),
+            Some(KeyAction::Commit(text)) => text
+                .chars()
+                .next()
+                .map(InputEvent::Delimiter),
             Some(KeyAction::Text(text)) => Some(InputEvent::Text(text)),
             Some(KeyAction::Ignore) | None => None,
-            Some(KeyAction::Unsupported) => Some(InputEvent::Boundary),
+            Some(KeyAction::Unsupported) => Some(InputEvent::Reset),
         };
         if let Some(event) = translated {
             self.pending.push_back(event);
@@ -251,6 +270,10 @@ impl EvdevSource {
     /// Whether any key is physically held right now.
     pub fn keys_held(&self) -> bool {
         !self.pressed.is_empty()
+    }
+
+    pub fn has_pending_events(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     /// Blocks until every physically held key has been released, or until
@@ -373,10 +396,10 @@ mod tests {
     }
 
     #[test]
-    fn enter_key_becomes_boundary_event() {
+    fn enter_key_preserves_delimiter_event() {
         let mut state = test_state();
         // KEY_ENTER = 28.
-        assert_eq!(press(&mut state, 28), Some(InputEvent::Boundary));
+        assert_eq!(press(&mut state, 28), Some(InputEvent::Delimiter('\n')));
     }
 
     #[test]

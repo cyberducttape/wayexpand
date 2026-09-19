@@ -21,7 +21,7 @@ use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
     CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FontScale, InputEvent,
-    MatchMode, Settings,
+    MatchMode, OrganizationPolicy, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -158,6 +158,7 @@ impl GuiApp {
                     expansion: Vec::new(),
                     hotkey: Vec::new(),
                     settings: Settings::default(),
+                    organization: OrganizationPolicy::default(),
                 };
                 config.save_atomic(&path).map_err(|error| {
                     anyhow::anyhow!(
@@ -2277,6 +2278,7 @@ mod tests {
             ],
             hotkey: Vec::new(),
             settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
         };
         let _ = fs::remove_file(&path);
         config.save_atomic(&path).unwrap();
@@ -2318,6 +2320,7 @@ mod tests {
                 expansion: Vec::new(),
                 hotkey: Vec::new(),
                 settings: Settings::default(),
+                organization: OrganizationPolicy::default(),
             });
         }
         assert_eq!(app.undo.len(), MAX_UNDO_HISTORY);

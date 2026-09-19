@@ -432,8 +432,17 @@ fn main() -> Result<()> {
                                 warn!(%error, "waiting for key release failed; injecting anyway");
                             }
                         }
-                        let result =
-                            process_event(&mut config.engine, event, Some(backend.as_mut()));
+                        let result = if evdev
+                            .as_ref()
+                            .is_some_and(EvdevSource::has_pending_events)
+                        {
+                            warn!(
+                                "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                            );
+                            process_event(&mut config.engine, event, None)
+                        } else {
+                            process_event(&mut config.engine, event, Some(backend.as_mut()))
+                        };
                         injector = Some(backend);
                         result
                     } else {
@@ -680,8 +689,15 @@ fn drain_pending_window_events(
 ) -> Result<()> {
     if let Some(receiver) = window_tracker.as_ref() {
         let mut latest = None;
-        while let Ok(window) = receiver.try_recv() {
-            latest = Some(window);
+        loop {
+            match receiver.try_recv() {
+                Ok(window) => latest = Some(window),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    latest = Some(None);
+                    break;
+                }
+            }
         }
         if let Some(window) = latest {
             process_event(engine, InputEvent::WindowChanged(window), None)?;

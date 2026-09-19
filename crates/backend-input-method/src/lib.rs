@@ -56,7 +56,9 @@ pub fn classify_keysym(raw_keysym: u32) -> Option<InputEvent> {
         || raw_keysym == xkeysym::key::KP_Enter
         || raw_keysym == xkeysym::key::Tab
     {
-        return Some(InputEvent::Boundary);
+        return Some(InputEvent::Delimiter(
+            if raw_keysym == xkeysym::key::Tab { '\t' } else { '\n' },
+        ));
     }
 
     None
@@ -191,7 +193,7 @@ impl StateData {
             // boundary discards the partial trigger while preserving the
             // engine's normal non-sensitive capture policy.
             self.events.clear();
-            self.events.push_back(InputEvent::Boundary);
+            self.events.push_back(InputEvent::Reset);
             return;
         }
         self.events.push_back(event);
@@ -412,7 +414,9 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     }
                     Some(KeyAction::Commit(text)) => {
                         forward_commit(state, connection, text);
-                        state.queue_event(InputEvent::Boundary);
+                        state.queue_event(InputEvent::Delimiter(
+                            text.chars().next().unwrap_or('\n'),
+                        ));
                     }
                     Some(KeyAction::Text(text)) => {
                         forward_commit(state, connection, &text);
@@ -535,7 +539,7 @@ pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
         Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Backspace)) => {
             Some(KeyAction::Delete)
         }
-        Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Boundary)) => {
+        Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Delimiter(_))) => {
             Some(KeyAction::Commit(if raw_keysym == xkeysym::key::Tab {
                 "\t"
             } else {
@@ -616,7 +620,7 @@ fn matcher_event_for_deletion(before: u32, after: u32, selected: bool) -> InputE
 fn matcher_event_for_unsupported_key() -> InputEvent {
     // The keyboard grab is exclusive, so the key cannot be passed through
     // safely. A boundary prevents a partial trigger surviving the lost event.
-    InputEvent::Boundary
+    InputEvent::Reset
 }
 
 fn deactivation_event() -> InputEvent {
@@ -1073,15 +1077,15 @@ mod tests {
         );
         assert_eq!(
             classify_keysym(xkeysym::key::Return),
-            Some(InputEvent::Boundary)
+            Some(InputEvent::Delimiter('\n'))
         );
         assert_eq!(
             classify_keysym(xkeysym::key::KP_Enter),
-            Some(InputEvent::Boundary)
+            Some(InputEvent::Delimiter('\n'))
         );
         assert_eq!(
             classify_keysym(xkeysym::key::Tab),
-            Some(InputEvent::Boundary)
+            Some(InputEvent::Delimiter('\t'))
         );
         assert_eq!(classify_keysym(xkeysym::key::Escape), None);
     }
@@ -1249,7 +1253,7 @@ mod tests {
 
     #[test]
     fn unsupported_key_clears_pending_matching_state() {
-        assert_eq!(matcher_event_for_unsupported_key(), InputEvent::Boundary);
+        assert_eq!(matcher_event_for_unsupported_key(), InputEvent::Reset);
     }
 
     #[test]
@@ -1311,7 +1315,7 @@ mod tests {
         }
         state.queue_event(InputEvent::Text("overflow".into()));
         assert_eq!(state.events.len(), 1);
-        assert_eq!(state.events.front(), Some(&InputEvent::Boundary));
+        assert_eq!(state.events.front(), Some(&InputEvent::Reset));
     }
 
     #[test]
