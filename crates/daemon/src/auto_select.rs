@@ -303,7 +303,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn policy_uses_evdev_on_x11_if_available() {
         // X11 can use evdev if /dev/input is readable (no input-method-v2 available)
         let caps = Capabilities {

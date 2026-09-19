@@ -123,7 +123,7 @@ Enable exactly one service. Expected status includes `source=(stdin|input-method
 and `config_state=ok`. A running service with `state=reconnecting` is intentionally
 not injecting text until the compositor connection is safe again.
 
-See [SUPPORT_MATRIX.md](../SUPPORT_MATRIX.md) for the complete backend compatibility matrix.
+See [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) for the complete backend compatibility matrix.
 
 ## Stop, pause, and inspect
 

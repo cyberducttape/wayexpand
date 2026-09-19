@@ -397,7 +397,7 @@ impl App {
             }));
         }
         let mut results = engine.process(InputEvent::Text(trigger.clone()));
-        results.extend(engine.process(InputEvent::Boundary));
+        results.extend(engine.process(InputEvent::EndOfInput));
         let result = results
             .last()
             .map(|result| result.insert.clone())

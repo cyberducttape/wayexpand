@@ -29,7 +29,7 @@ rolling buffer immediately.
 - wlroots virtual-keyboard requires the compositor protocol and permission to
   create a virtual keyboard.
 - libei/EIS requires explicit backend selection and a configured/authorized
-  session as described in [SECURITY.md](../../SECURITY.md).
+  session as described in [SECURITY.md](../../../SECURITY.md).
 
 Run `wayexpand doctor` after changing desktop permissions. Avoid “fixes” that
 make the configuration directory world-writable or run the daemon as root.

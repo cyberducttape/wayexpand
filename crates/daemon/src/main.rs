@@ -34,6 +34,10 @@ use wayexpand_core::{
 /// an expansion in evdev mode. Generous enough to cover a deliberate
 /// keypress, bounded so a genuinely held key cannot stall expansion.
 const KEY_RELEASE_TIMEOUT: Duration = Duration::from_millis(400);
+/// Extra settling time for non-exclusive evdev capture. If another physical
+/// event arrives during this window, the pending expansion is abandoned to
+/// avoid deleting text from a cursor that has already moved.
+const EVDEV_QUIET_TIMEOUT: Duration = Duration::from_millis(40);
 const MAX_STDIN_LINE_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_INPUT_LINES: usize = 64;
 
@@ -486,7 +490,19 @@ fn main() -> Result<()> {
                                 warn!(%error, "waiting for key release failed; injecting anyway");
                             }
                         }
-                        let result = if evdev.as_ref().is_some_and(EvdevSource::has_pending_events)
+                        let input_quiet = evdev
+                            .as_mut()
+                            .map(|source| source.wait_for_input_quiet(EVDEV_QUIET_TIMEOUT))
+                            .transpose();
+                        let input_quiet = match input_quiet {
+                            Ok(value) => value.unwrap_or(false),
+                            Err(error) => {
+                                warn!(%error, "evdev quiet-period check failed; abandoning expansion");
+                                false
+                            }
+                        };
+                        let result = if !input_quiet
+                            || evdev.as_ref().is_some_and(EvdevSource::has_pending_events)
                         {
                             warn!(
                                 "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
@@ -516,7 +532,7 @@ fn main() -> Result<()> {
                                 "evdev output failed; current expansion is not replayed"
                             );
                             drop(injector.take());
-                            config.engine.process(InputEvent::Boundary);
+                            config.engine.process(InputEvent::EndOfInput);
                             connection_state = "reconnecting";
                             set_daemon_status(
                                 &control,
@@ -550,7 +566,7 @@ fn main() -> Result<()> {
                     connection_state = "reconnecting";
                     let _ = process_event(
                         &mut config.engine,
-                        InputEvent::Boundary,
+                        InputEvent::EndOfInput,
                         None,
                         &policy,
                         active_backend,
@@ -623,7 +639,7 @@ fn main() -> Result<()> {
                             drop(injector.take());
                             let _ = process_event(
                                 &mut config.engine,
-                                InputEvent::Boundary,
+                                InputEvent::EndOfInput,
                                 None,
                                 &policy,
                                 active_backend,
@@ -655,7 +671,7 @@ fn main() -> Result<()> {
                     if let Some(backend) = injector.as_deref_mut() {
                         process_event(
                             &mut config.engine,
-                            InputEvent::Boundary,
+                            InputEvent::EndOfInput,
                             Some(backend),
                             &policy,
                             active_backend,
@@ -671,7 +687,7 @@ fn main() -> Result<()> {
                     )?;
                     process_event(
                         &mut config.engine,
-                        InputEvent::Boundary,
+                        InputEvent::EndOfInput,
                         None,
                         &policy,
                         active_backend,
@@ -1122,7 +1138,7 @@ fn apply_results(
         } else {
             info!(
                 trigger_chars = result.trigger.chars().count(),
-                erase_chars = result.erase_chars,
+                matched_chars = result.matched_text.chars().count(),
                 insert_bytes = result.insert.len(),
                 "expansion matched"
             );

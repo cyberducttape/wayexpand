@@ -267,7 +267,7 @@ For current guidance, see the live documentation above. Archived docs are for re
 ## External Resources
 
 - **GitHub Issues:** https://github.com/itchyitchy123/wayexpand/issues
-- **GitHub Discussions:** https://github.com/itchyitchy123/wayexpand/discussions
+- **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
 - **Security:** See [SECURITY.md](../SECURITY.md) for vulnerability reporting
 - **Changelog:** [CHANGELOG.md](../CHANGELOG.md)
 

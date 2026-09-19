@@ -116,7 +116,7 @@ fn run() -> Result<()> {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
             let mut results = engine.process(InputEvent::Text(trigger));
-            results.extend(engine.process(InputEvent::Boundary));
+            results.extend(engine.process(InputEvent::EndOfInput));
             if requested_json {
                 println!(
                     "{}",
@@ -124,7 +124,7 @@ fn run() -> Result<()> {
                         "matched": !results.is_empty(),
                         "results": results.iter().map(|result| serde_json::json!({
                             "trigger_characters": result.trigger.chars().count(),
-                            "erase_characters": result.erase_chars,
+                            "erase_characters": result.matched_text.chars().count(),
                             "replacement_bytes": result.insert.len(),
                             "replacement": result.insert,
                             "cursor_offset": result.cursor_offset,
@@ -210,7 +210,7 @@ fn run() -> Result<()> {
                 }));
             }
             let mut results = engine.process(InputEvent::Text(trigger));
-            results.extend(engine.process(InputEvent::Boundary));
+            results.extend(engine.process(InputEvent::EndOfInput));
             match results.last() {
                 Some(result) => {
                     if requested_json {

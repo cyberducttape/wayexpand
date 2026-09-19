@@ -183,7 +183,15 @@ impl FleetConfig {
         base: Config,
         policy: &OrganizationPolicy,
     ) -> Result<Self, FleetError> {
-        let mut fleet = Self::load_standard()?;
+        let fleet = Self::load_standard()?;
+        Self::apply_base_and_policy(fleet, base, policy)
+    }
+
+    fn apply_base_and_policy(
+        mut fleet: Self,
+        base: Config,
+        policy: &OrganizationPolicy,
+    ) -> Result<Self, FleetError> {
         let fleet_settings = fleet.config.settings.clone();
         let base_expansions = base.expansion.len();
         let base_hotkeys = base.hotkey.len();
@@ -198,7 +206,7 @@ impl FleetConfig {
                     // Keep organization and user layers, filter packs
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || (prov.layer == "pack" && policy.pack_allowed(pack_name(prov)))
+                        || (prov.layer.starts_with("pack:") && policy.pack_allowed(pack_name(prov)))
                 } else {
                     true
                 }
@@ -207,7 +215,7 @@ impl FleetConfig {
                 if let Some(prov) = fleet.hotkeys_source.get(&hotkey.chord) {
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || (prov.layer == "pack" && policy.pack_allowed(pack_name(prov)))
+                        || (prov.layer.starts_with("pack:") && policy.pack_allowed(pack_name(prov)))
                 } else {
                     true
                 }
@@ -562,15 +570,16 @@ replacement = "third"
 
         // Manually add expansions as if loaded from a file
         for expansion in config.expansion {
-            merger
-                .expansions
-                .insert(expansion.trigger.clone(), (
+            merger.expansions.insert(
+                expansion.trigger.clone(),
+                (
                     expansion.clone(),
                     Provenance {
                         file: "test.toml".to_string(),
                         layer: "test".to_string(),
                     },
-                ));
+                ),
+            );
         }
 
         let result = merger.merge().unwrap();
@@ -584,11 +593,65 @@ replacement = "third"
     }
 
     #[test]
+    fn policy_filters_disallowed_pack_in_complete_fleet_merge() {
+        let mut merger = ConfigMerger::new();
+        let mut add_config = |config: Config, file: &str, layer: &str| {
+            for expansion in config.expansion {
+                merger.expansions.insert(
+                    expansion.trigger.clone(),
+                    (
+                        expansion,
+                        Provenance {
+                            file: file.to_string(),
+                            layer: layer.to_string(),
+                        },
+                    ),
+                );
+            }
+        };
+        add_config(
+            Config::parse("[[expansion]]\ntrigger = ':org'\nreplacement = 'organization'\n")
+                .unwrap(),
+            "organization.toml",
+            "organization",
+        );
+        add_config(
+            Config::parse("[[expansion]]\ntrigger = ':approved'\nreplacement = 'approved'\n")
+                .unwrap(),
+            "snippets.toml",
+            "pack:approved",
+        );
+        add_config(
+            Config::parse("[[expansion]]\ntrigger = ':blocked'\nreplacement = 'blocked'\n")
+                .unwrap(),
+            "snippets.toml",
+            "pack:disallowed",
+        );
+        let fleet = merger.merge().unwrap();
+
+        let policy = OrganizationPolicy {
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+        let base =
+            Config::parse("[[expansion]]\ntrigger = ':personal'\nreplacement = 'personal'\n")
+                .unwrap();
+        let merged = FleetConfig::apply_base_and_policy(fleet, base, &policy).unwrap();
+        let triggers: Vec<_> = merged.all_triggers();
+
+        assert!(triggers.contains(&":personal"));
+        assert!(triggers.contains(&":org"));
+        assert!(triggers.contains(&":approved"));
+        assert!(!triggers.contains(&":blocked"));
+    }
+
+    #[test]
     fn organization_policy_preserved_during_merge() {
         // Regression test for fleet policy loss bug.
         // Verifies that organization policy set during load_layer() is preserved
         // through merge() instead of being replaced with default.
-        let config1 = Config::parse(r#"
+        let config1 = Config::parse(
+            r#"
 [[expansion]]
 trigger = ":test"
 replacement = "test"
@@ -596,17 +659,22 @@ replacement = "test"
 [organization]
 safe_mode = true
 disable_commands = false
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Mark that this config has organization policy
         assert!(config1.organization.safe_mode);
 
         // Load another config without policy
-        let config2 = Config::parse(r#"
+        let config2 = Config::parse(
+            r#"
 [[expansion]]
 trigger = ":other"
 replacement = "other"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         assert!(!config2.organization.safe_mode);
 

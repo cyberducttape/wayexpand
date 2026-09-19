@@ -66,7 +66,7 @@ shellcheck scripts/*.sh
 
 ## Development Guide
 
-Detailed development policy and workflows are in [`docs/wiki/Contributing.md`](docs/wiki/Contributing.md).
+Detailed development policy and workflows are in [`docs/archive/wiki/Contributing.md`](docs/archive/wiki/Contributing.md).
 
 ### Project Structure
 
@@ -104,8 +104,8 @@ PRs are reviewed by maintainers for:
 
 ## Questions?
 
-- Open a [GitHub Discussion](https://github.com/itchyitchy123/wayexpand/discussions) for questions
-- Check [`docs/wiki/`](docs/wiki/) for detailed documentation
+- Open a [GitHub issue](https://github.com/itchyitchy123/wayexpand/issues) for questions
+- Check [`docs/`](docs/) for detailed documentation
 - Review [`SECURITY.md`](SECURITY.md) for security concerns
 
 Thank you for contributing to WayExpand!

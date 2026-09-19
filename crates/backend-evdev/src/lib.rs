@@ -49,6 +49,7 @@ use xkbcommon_rs::{Context, Keymap, State};
 
 const SOURCE_NAME: &str = "evdev";
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
+const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
 
 #[derive(Debug, Error)]
 pub enum EvdevError {
@@ -139,7 +140,7 @@ impl EvdevSource {
         let borrowed: Vec<BorrowedFd<'_>> = self
             .devices
             .iter()
-            .map(|device| unsafe { BorrowedFd::borrow_raw(device.as_raw_fd()) })
+            .map(device::KeyboardDevice::as_fd)
             .collect();
         let mut fds: Vec<rustix::event::PollFd<'_>> = borrowed
             .iter()
@@ -271,6 +272,34 @@ impl EvdevSource {
 
     pub fn has_pending_events(&self) -> bool {
         !self.pending.is_empty()
+    }
+
+    /// Waits for a short interval with no newly received input. Returns
+    /// `false` if another event arrived during that interval. Non-exclusive
+    /// capture cannot prevent the focused application from receiving those
+    /// events, so callers should abandon an expansion when this returns false
+    /// rather than modifying a moving cursor.
+    pub fn wait_for_input_quiet(&mut self, timeout: Duration) -> Result<bool, InputSourceError> {
+        let deadline = Instant::now() + timeout;
+        let quiet_deadline = Instant::now() + DEFAULT_QUIET_PERIOD;
+        while Instant::now() < quiet_deadline {
+            let remaining = quiet_deadline
+                .saturating_duration_since(Instant::now())
+                .min(deadline.saturating_duration_since(Instant::now()));
+            if remaining.is_zero() {
+                break;
+            }
+            self.poll_once(remaining)
+                .map_err(|error| InputSourceError {
+                    source: SOURCE_NAME,
+                    retryable: error.is_retryable(),
+                    message: error.to_string(),
+                })?;
+            if self.has_pending_events() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Blocks until every physically held key has been released, or until
@@ -452,6 +481,20 @@ mod tests {
         assert!(source.keys_held(), "the second key is still down");
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 48, 0));
         assert!(!source.keys_held());
+    }
+
+    #[test]
+    fn quiet_period_rejects_already_queued_input() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::from([InputEvent::Text("a".into())]),
+            pressed: HashSet::new(),
+        };
+
+        assert!(!source
+            .wait_for_input_quiet(Duration::from_millis(40))
+            .unwrap());
     }
 
     #[test]

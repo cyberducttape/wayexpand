@@ -207,8 +207,8 @@ Use this to verify Phase 3 is working correctly:
 
 - [docs/WLROOTS_WINDOW_TRACKING_GUIDE.md](WLROOTS_WINDOW_TRACKING_GUIDE.md) - Protocol details
 - [docs/DESKTOP_STATUS.md](DESKTOP_STATUS.md) - Per-compositor support
-- [crates/backend-wlroots-toplevel/src/lib.rs](../crates/backend-wlroots-toplevel/src/lib.rs) - Implementation
-- [crates/daemon/src/main.rs](../crates/daemon/src/main.rs) - Integration point
+- [crates/backend-wlroots-toplevel/src/lib.rs](../../crates/backend-wlroots-toplevel/src/lib.rs) - Implementation
+- [crates/daemon/src/main.rs](../../crates/daemon/src/main.rs) - Integration point
 
 ## Timeline and Commits
 

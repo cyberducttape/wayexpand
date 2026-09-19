@@ -13,8 +13,32 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace
 bash scripts/smoke-daemon.sh
+bash scripts/test-e2e.sh
 wayexpand doctor
 ```
+
+`scripts/test-e2e.sh` starts a real daemon subprocess with a temporary Unix
+control socket and configuration. It covers startup/status, rejected and
+accepted reloads, pause/resume, app-filter matching across two window
+contexts, and command-backed expansion execution. It uses `stdin` plus the
+`none` injector so it is deterministic and does not require a compositor; the
+smoke test and the real compositor procedures below remain necessary for
+backend behavior.
+
+## Matcher performance baseline
+
+The matcher benchmark exercises 100, 1,000, and 10,000 configured snippets
+while feeding a trigger one character at a time:
+
+```sh
+cargo bench --locked -p wayexpand-core --bench matcher
+```
+
+Criterion stores detailed results under `target/criterion`. The benchmark
+shape is kept in the repository so future runs can compare the same workload;
+record machine-specific numbers with the toolchain and CPU when investigating
+a regression rather than treating one host's latency as a universal limit. The
+captured reference run is in [`docs/BENCHMARKS.md`](BENCHMARKS.md).
 
 Record the compositor, desktop session, keyboard layout, and output of
 `wayexpand doctor` for every integration run.

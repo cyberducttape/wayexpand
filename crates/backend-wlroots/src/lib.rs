@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{Seek, SeekFrom, Write},
-    os::fd::AsFd,
+    os::fd::{AsFd, BorrowedFd},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
@@ -311,45 +311,49 @@ fn roundtrip_with_timeout(
         let Some(guard) = connection.prepare_read() else {
             continue;
         };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(WlrootsError::Timeout(
-                "Wayland registry roundtrip timed out".into(),
-            ));
-        }
-        let timeout = rustix::event::Timespec {
-            tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
-            tv_nsec: remaining.subsec_nanos().into(),
-        };
-        let fd = guard.connection_fd();
-        let mut fds = [rustix::event::PollFd::new(
-            &fd,
-            rustix::event::PollFlags::IN
-                | rustix::event::PollFlags::ERR
-                | rustix::event::PollFlags::HUP
-                | rustix::event::PollFlags::NVAL,
-        )];
-        if rustix::event::poll(&mut fds, Some(&timeout))
-            .map_err(|error| WlrootsError::Transport(error.to_string()))?
-            == 0
-        {
-            return Err(WlrootsError::Timeout(
-                "Wayland registry roundtrip timed out".into(),
-            ));
-        }
-        let revents = fds[0].revents();
-        if revents.intersects(
-            rustix::event::PollFlags::ERR
-                | rustix::event::PollFlags::HUP
-                | rustix::event::PollFlags::NVAL,
-        ) {
-            return Err(WlrootsError::Transport(format!(
-                "Wayland connection became unavailable ({revents:?})"
-            )));
-        }
+        wait_for_readable(guard.connection_fd(), deadline)?;
         guard
             .read()
             .map_err(|error| WlrootsError::Transport(error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn wait_for_readable(fd: BorrowedFd<'_>, deadline: Instant) -> Result<(), WlrootsError> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(WlrootsError::Timeout(
+            "Wayland registry roundtrip timed out".into(),
+        ));
+    }
+    let timeout = rustix::event::Timespec {
+        tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
+        tv_nsec: remaining.subsec_nanos().into(),
+    };
+    let mut fds = [rustix::event::PollFd::new(
+        &fd,
+        rustix::event::PollFlags::IN
+            | rustix::event::PollFlags::ERR
+            | rustix::event::PollFlags::HUP
+            | rustix::event::PollFlags::NVAL,
+    )];
+    if rustix::event::poll(&mut fds, Some(&timeout))
+        .map_err(|error| WlrootsError::Transport(error.to_string()))?
+        == 0
+    {
+        return Err(WlrootsError::Timeout(
+            "Wayland registry roundtrip timed out".into(),
+        ));
+    }
+    let revents = fds[0].revents();
+    if revents.intersects(
+        rustix::event::PollFlags::ERR
+            | rustix::event::PollFlags::HUP
+            | rustix::event::PollFlags::NVAL,
+    ) {
+        return Err(WlrootsError::Transport(format!(
+            "Wayland connection became unavailable ({revents:?})"
+        )));
     }
     Ok(())
 }
@@ -502,7 +506,11 @@ fn build_keymap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::{
+        io::Read,
+        os::unix::net::UnixStream,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn keymap_contains_unicode_and_control_symbols() {
@@ -546,6 +554,50 @@ mod tests {
     #[test]
     fn startup_roundtrip_has_a_bounded_deadline() {
         assert_eq!(INITIAL_ROUNDTRIP_TIMEOUT, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn idle_roundtrip_waits_until_the_requested_deadline() {
+        let (_server, client) = UnixStream::pair().unwrap();
+        let timeout = Duration::from_millis(25);
+        let started = Instant::now();
+        let error = wait_for_readable(client.as_fd(), started + timeout).unwrap_err();
+
+        assert!(matches!(error, WlrootsError::Timeout(_)));
+        assert!(started.elapsed() >= Duration::from_millis(15));
+    }
+
+    #[test]
+    fn disconnected_roundtrip_fails_fast_and_is_retryable() {
+        let (mut server, client) = UnixStream::pair().unwrap();
+        let server_thread = std::thread::spawn(move || {
+            let mut request = [0_u8; 4096];
+            let _ = server.read(&mut request);
+        });
+        let connection = Connection::from_socket(client).unwrap();
+        let mut event_queue = connection.new_event_queue();
+        let mut state = State {
+            seat: None,
+            manager: None,
+            roundtrip_done: false,
+        };
+        let started = Instant::now();
+        let error = roundtrip_with_timeout(
+            &connection,
+            &mut event_queue,
+            &mut state,
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.is_retryable(),
+            "disconnected error must be retryable: {error:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+        drop(event_queue);
+        drop(connection);
+        server_thread.join().unwrap();
     }
 
     #[test]

@@ -12,6 +12,11 @@ The second check exists because Launchpad's PPA builds key off
 bumped `Cargo.toml` shipped a stale Launchpad build more than once before
 this check was added. Bump both in the same commit you tag.
 
+Release builds use the exact Rust toolchain declared in
+[`rust-toolchain.toml`](../rust-toolchain.toml), currently Rust 1.87.0. CI may
+also exercise newer compilers, but a release must not depend on whichever
+`stable` toolchain happens to be installed on the runner.
+
 ## Preparation
 
 1. Run the complete verification suite from
@@ -46,6 +51,7 @@ x86_64 binaries with the locked dependency graph and publishes:
   systemd units, the desktop entry, application icon, example configuration,
   documentation, license, security policy, and installation scripts
 - SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
+- Cargo dependency inventory: `wayexpand-<version>-linux-x86_64.cargo-metadata.json`
 
 **Source archives** (for distributions and offline builds):
 - `wayexpand-<version>.tar.gz` (clean source, Cargo.lock only)
@@ -59,6 +65,9 @@ x86_64 binaries with the locked dependency graph and publishes:
   - ~600 MB, all dependencies pre-downloaded
   - `CARGO_NET_OFFLINE=true` builds work without internet
   - SHA256: `wayexpand-<version>-vendored.tar.gz.sha256`
+
+The workflow pins every GitHub Action to a full commit SHA. Do not replace
+those pins with moving version tags during release-workflow maintenance.
 
 ## Tarball distribution
 
@@ -86,6 +95,12 @@ it:
 sha256sum --check wayexpand-<version>-linux-x86_64.tar.gz.sha256
 tar -tzf wayexpand-<version>-linux-x86_64.tar.gz
 ```
+
+The `.sha256` files provide integrity checks, not publisher identity. Verify
+the GitHub release attestation when one is published, and verify the release
+tag is the signed/expected commit before installing. The Cargo metadata JSON
+is an SBOM-style dependency inventory; compare it with the source archive and
+retain it with your deployment record.
 
 Install only from a verified release artifact. Keep the previous binary and
 configuration backup available until the new service has passed `wayexpand
