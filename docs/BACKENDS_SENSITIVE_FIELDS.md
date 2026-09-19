@@ -17,7 +17,7 @@ Sensitive-field detection allows WayExpand to automatically suspend text matchin
 | **libei** | ❌ No | Output-only (doesn't see input type) | Never — not an input source |
 | **wlroots** | ❌ No | Output-only (doesn't see input type) | Never — not an input source |
 
-## Input-Method-V2 (GNOME, Some Others)
+## Input-Method-V2 (Compositor-dependent)
 
 **Detection Status:** ✅ Supported
 
@@ -98,7 +98,7 @@ If using `--source=input-method --backend=libei`:
 
 ### "I need password protection"
 
-Use `--source=input-method` on GNOME or compatible compositors.
+Use `--source=input-method` only on a compositor where `wayexpand doctor` confirms input-method-v2 support.
 
 ```bash
 systemctl --user enable --now wayexpand-input-method.service

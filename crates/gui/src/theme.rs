@@ -156,11 +156,13 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     ctx.set_style_of(theme, style);
 }
 
-/// A bold, icon-prefixed label used above a group of related fields.
+/// A bold label used above a group of related fields.
 /// Typography hierarchy: large, strong title with visual weight.
 pub fn section_header(ui: &mut egui::Ui, icon: &str, title: &str) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(icon).size(16.0).strong());
+        if !icon.is_empty() {
+            ui.label(egui::RichText::new(icon).size(16.0).strong());
+        }
         ui.label(
             egui::RichText::new(title)
                 .size(16.0)

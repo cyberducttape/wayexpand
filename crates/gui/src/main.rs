@@ -88,6 +88,7 @@ struct GuiApp {
     filter: String,
     category_filter: Option<String>,
     preview_input: String,
+    preview_app: String,
     draft: Option<Draft>,
     undo: Vec<Config>,
     message: String,
@@ -190,6 +191,7 @@ impl GuiApp {
             filter: String::new(),
             category_filter: None,
             preview_input,
+            preview_app: String::new(),
             draft,
             undo: Vec::new(),
             message: strings.ready().into(),
@@ -730,6 +732,7 @@ impl GuiApp {
             draft.tags.hash(&mut hasher);
             draft.category.hash(&mut hasher);
         }
+        self.preview_app.hash(&mut hasher);
         let draft_hash = hasher.finish();
         if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
             if *cached_hash == draft_hash && cached_input == &self.preview_input {
@@ -762,6 +765,12 @@ impl GuiApp {
             self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
             return result;
         };
+        if !self.preview_app.trim().is_empty() {
+            engine.set_current_window(Some(wayexpand_core::WindowContext {
+                app_id: Some(self.preview_app.trim().to_owned()),
+                title: None,
+            }));
+        }
         let mut results = engine.process(InputEvent::Text(self.preview_input.clone()));
         results.extend(engine.process(InputEvent::Boundary));
         let result = results
@@ -1035,7 +1044,7 @@ impl eframe::App for GuiApp {
                 .resizable(true)
                 .min_width(420.0)
                 .show(ui.ctx(), |ui| {
-                    theme::section_header(ui, "🖥", self.strings.runtime_health());
+                    theme::section_header(ui, "", self.strings.runtime_health());
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(self.strings.daemon())
@@ -1049,7 +1058,7 @@ impl eframe::App for GuiApp {
                         });
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        theme::section_header(ui, "🔌", self.strings.backends());
+                        theme::section_header(ui, "", self.strings.backends());
                         if ui.small_button(self.strings.refresh()).clicked() {
                             self.refresh_diagnostics();
                         }
@@ -1066,7 +1075,13 @@ impl eframe::App for GuiApp {
                         ui.horizontal(|ui| {
                             theme::pill(
                                 ui,
-                                format!("{:?}", status.state),
+                                format!(
+                                    "{:?} · {} / {} / {}",
+                                    status.state,
+                                    status.implementation(),
+                                    status.availability(),
+                                    status.permission()
+                                ),
                                 color,
                                 theme::tint(color, 32),
                             );
@@ -1076,7 +1091,7 @@ impl eframe::App for GuiApp {
                         ui.add_space(4.0);
                     }
                     ui.separator();
-                    theme::section_header(ui, "📡", self.strings.protocol_probes());
+                    theme::section_header(ui, "", self.strings.protocol_probes());
                     ui.add_space(4.0);
                     for (name, detail) in &self.protocol_probes {
                         ui.horizontal(|ui| {
@@ -1194,11 +1209,11 @@ impl eframe::App for GuiApp {
 
                     if let Some(error) = &self.settings_error {
                         ui.add_space(4.0);
-                        ui.colored_label(palette.danger, format!("⚠ {error}"));
+                        ui.colored_label(palette.danger, format!("Warning: {error}"));
                     }
 
                     ui.add_space(12.0);
-                    theme::section_header(ui, "🖥", self.strings.backend_status());
+                    theme::section_header(ui, "", self.strings.backend_status());
                     ui.add_space(6.0);
 
                     for status in &self.backend_status {
@@ -1207,9 +1222,15 @@ impl eframe::App for GuiApp {
                             BackendState::Available | BackendState::Implemented => palette.success,
                             _ => palette.muted,
                         };
-                        let state_text = format!("{:?}", status.state);
+                        let state_text = format!(
+                            "{:?}; implementation={}, availability={}, permission={}",
+                            status.state,
+                            status.implementation(),
+                            status.availability(),
+                            status.permission()
+                        );
                         ui.horizontal(|ui| {
-                            ui.colored_label(status_color, "●");
+                            ui.colored_label(status_color, "Status:");
                             ui.label(format!("{:?}: {}", status.kind, state_text));
                         });
                     }
@@ -1479,7 +1500,7 @@ impl eframe::App for GuiApp {
                             .corner_radius(egui::CornerRadius::same(10))
                             .inner_margin(egui::Margin::same(14))
                             .show(ui, |ui| {
-                                theme::section_header(ui, "✏", self.strings.snippet_details());
+                                theme::section_header(ui, "", self.strings.snippet_details());
                                 ui.add_space(6.0);
                                 let categories = self.categories();
                                 let Some(draft) = self.draft.as_mut() else {
@@ -1723,8 +1744,16 @@ impl eframe::App for GuiApp {
                                 }
                             });
                         });
+                        ui.horizontal(|ui| {
+                            ui.label("Preview app");
+                            ui.add(
+                                TextEdit::singleline(&mut self.preview_app)
+                                    .hint_text("leave empty for no focused app")
+                                    .desired_width(300.0),
+                            );
+                        });
                         ui.add_space(4.0);
-                        ui.collapsing(format!("🛠 {}", self.strings.dynamic_command()), |ui| {
+                        ui.collapsing(self.strings.dynamic_command(), |ui| {
                             let Some(draft) = self.draft.as_mut() else {
                                 ui.label("Snippet draft unavailable; choose a snippet again.");
                                 return;
@@ -1792,7 +1821,7 @@ impl eframe::App for GuiApp {
                             }
                         });
                         ui.add_space(14.0);
-                        theme::section_header(ui, "▶", self.strings.preview());
+                        theme::section_header(ui, "", self.strings.preview());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.label(self.strings.input());
@@ -1832,7 +1861,7 @@ impl eframe::App for GuiApp {
                         );
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
-                                        if ui.button("▶ Run once").clicked() {
+                                        if ui.button("Run once").clicked() {
                                             self.run_command_preview();
                                         }
                                         match &self.command_preview_result {

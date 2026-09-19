@@ -38,6 +38,7 @@ struct App {
     visible_cache: Option<(String, Vec<usize>)>,
     /// Cached preview result: (selected_index, trigger, result)
     preview_cache: Option<(usize, String, String)>,
+    preview_app: String,
 }
 
 enum Prompt {
@@ -46,6 +47,7 @@ enum Prompt {
     EditReplacement { index: usize, trigger: String },
     EditDescription { index: usize, trigger: String },
     EditTags { index: usize, trigger: String },
+    PreviewApp,
 }
 
 impl App {
@@ -68,6 +70,7 @@ impl App {
             last_status_poll: Instant::now(),
             visible_cache: None,
             preview_cache: None,
+            preview_app: String::new(),
         })
     }
 
@@ -237,6 +240,12 @@ impl App {
         self.message = "Press d again to confirm deletion, or Esc to cancel".into();
     }
 
+    fn begin_preview_app(&mut self) {
+        self.input = self.preview_app.clone();
+        self.prompt = Some(Prompt::PreviewApp);
+        self.message = "Enter an app id for preview and press Enter (empty clears it)".into();
+    }
+
     fn delete_confirmed(&mut self, index: usize) {
         let previous = self.config.clone();
         let trigger = self.config.expansion[index].trigger.clone();
@@ -353,6 +362,15 @@ impl App {
                     self.preview_cache = None;
                 }
             }
+            Some(Prompt::PreviewApp) => {
+                self.preview_app = input.trim().to_owned();
+                self.preview_cache = None;
+                self.message = if self.preview_app.is_empty() {
+                    "Preview app cleared".into()
+                } else {
+                    format!("Previewing as {}", self.preview_app)
+                };
+            }
             None => {}
         }
     }
@@ -372,6 +390,12 @@ impl App {
             self.preview_cache = Some((index, trigger, result.clone()));
             return result;
         };
+        if !self.preview_app.trim().is_empty() {
+            engine.set_current_window(Some(wayexpand_core::WindowContext {
+                app_id: Some(self.preview_app.trim().to_owned()),
+                title: None,
+            }));
+        }
         let mut results = engine.process(InputEvent::Text(trigger.clone()));
         results.extend(engine.process(InputEvent::Boundary));
         let result = results
@@ -554,6 +578,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             ..
         } => app.begin_edit_tags(),
         KeyEvent {
+            code: KeyCode::Char('a'),
+            ..
+        } => app.begin_preview_app(),
+        KeyEvent {
             code: KeyCode::Char('m'),
             ..
         } => app.toggle_match_mode(),
@@ -680,7 +708,7 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
         Print(if app.paused { "[PAUSED]" } else { "[ACTIVE]" }),
         Print("\n"),
         SetForegroundColor(Color::DarkGrey),
-        Print("/ search   j/k move   n new   e edit   D description   t tags   m mode   d+d delete   u undo   space toggle   p pause   r reload   q quit"),
+        Print("/ search   j/k move   n new   e edit   D description   t tags   a preview app   m mode   d+d delete   u undo   space toggle   p pause   r reload   q quit"),
         ResetColor,
         Print("\n\n"),
         Print("Filter: "),
@@ -722,6 +750,14 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     execute!(
         stdout,
         Print("\nPreview\n"),
+        SetForegroundColor(Color::DarkGrey),
+        Print("Preview app: "),
+        Print(if app.preview_app.is_empty() {
+            "(none)"
+        } else {
+            &app.preview_app
+        }),
+        Print("\n"),
         SetForegroundColor(Color::Green),
         Print(preview),
         ResetColor,
@@ -748,6 +784,7 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
             Prompt::EditReplacement { .. } => "Replacement",
             Prompt::EditDescription { .. } => "Description",
             Prompt::EditTags { .. } => "Tags",
+            Prompt::PreviewApp => "Preview app id",
         };
         execute!(
             stdout,

@@ -2,6 +2,8 @@ use crate::{
     config::capitalize_first_letter, render_template_with_cursor, CommandConfig, Config,
     ConfigError, HotkeyConfig, KeyChord, MatchMode, Matcher, TextInjector,
 };
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{
     collections::VecDeque,
     io::Read,
@@ -64,6 +66,17 @@ pub struct ExpansionResult {
     /// cursor at the end, matching every replacement written before this
     /// existed.
     pub cursor_offset: Option<usize>,
+    /// Character to re-insert after the replacement. Evdev capture is
+    /// non-exclusive, so the key that completes a word-boundary trigger or a
+    /// trigger that is a prefix of another (e.g., `:a` vs `:address`) has
+    /// already reached the app by the time the engine matches. Normally we
+    /// would delete it along with the trigger (evdev sees `:sig` + space, we
+    /// delete `:sig `, then insert replacement). But character-by-character
+    /// deletion in evdev is slow and fragile. Instead: delete only the
+    /// trigger, insert the replacement, then re-type the terminating
+    /// character. This field is `None` for input-method backends (which
+    /// control capture exclusively) and for non-boundary triggers.
+    pub reinsert_after: Option<char>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,19 +271,21 @@ impl ExpansionEngine {
             erase_chars,
             insert: restore_text,
             cursor_offset: None,
+            reinsert_after: None,
         })
     }
 
     /// Execute one validated hotkey action without invoking a shell. Output
     /// is discarded and the process is bounded by the configured timeout.
     pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
-        let mut child = Command::new(&result.command.program)
+        let mut command = Command::new(&result.command.program);
+        command
             .args(&result.command.args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(HotkeyError::Spawn)?;
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().map_err(HotkeyError::Spawn)?;
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
         loop {
             match child.try_wait() {
@@ -280,12 +295,12 @@ impl ExpansionEngine {
                 }
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
                 Ok(None) => {
-                    let _ = child.kill();
+                    kill_process_group(&child);
                     let _ = child.wait();
                     return Err(HotkeyError::Timeout(result.command.timeout_ms));
                 }
                 Err(error) => {
-                    let _ = child.kill();
+                    kill_process_group(&child);
                     let _ = child.wait();
                     return Err(HotkeyError::Spawn(error));
                 }
@@ -323,7 +338,9 @@ impl ExpansionEngine {
                                     == MatchMode::WordBoundary
                                     && is_word_character(character);
                                 if !trailing_word_character {
-                                    if let Some(result) = self.take_match(config_index, length) {
+                                    if let Some(result) =
+                                        self.take_match(config_index, length, Some(character))
+                                    {
                                         let bytes = result
                                             .trigger
                                             .len()
@@ -404,12 +421,23 @@ impl ExpansionEngine {
                         if cursor_offset.is_none() {
                             self.last_expansion = Some((typed.clone(), insert.chars().count()));
                         }
+                        // Only re-insert the terminating character if it is not a
+                        // word character (i.e., it is a boundary like space or
+                        // punctuation). If it is a word character (like the start
+                        // of another trigger), do not re-insert it -- the normal
+                        // matching logic will handle it.
+                        let reinsert_after = if !is_word_character(character) {
+                            Some(character)
+                        } else {
+                            None
+                        };
                         results.push(ExpansionResult {
                             trigger,
                             typed_trigger: typed.clone(),
                             erase_chars: length,
                             insert,
                             cursor_offset,
+                            reinsert_after,
                         });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
@@ -430,7 +458,7 @@ impl ExpansionEngine {
                         self.matcher_indices
                             .get(index)
                             .copied()
-                            .and_then(|config_index| self.take_match(config_index, length))
+                            .and_then(|config_index| self.take_match(config_index, length, None))
                     });
                 self.clear_buffer();
                 result.into_iter().collect()
@@ -461,7 +489,12 @@ impl ExpansionEngine {
         }
     }
 
-    fn take_match(&mut self, config_index: usize, length: usize) -> Option<ExpansionResult> {
+    fn take_match(
+        &mut self,
+        config_index: usize,
+        length: usize,
+        terminating_char: Option<char>,
+    ) -> Option<ExpansionResult> {
         if !self.match_allowed(config_index, length) {
             return None;
         }
@@ -491,6 +524,7 @@ impl ExpansionEngine {
             erase_chars: length,
             insert,
             cursor_offset,
+            reinsert_after: terminating_char,
         })
     }
 
@@ -593,6 +627,13 @@ impl ExpansionEngine {
         result: &ExpansionResult,
     ) -> Result<(), ExpansionError> {
         injector.replace(&result.trigger, &result.insert)?;
+        // If a terminating character is present (e.g., a space that ended a
+        // word-boundary trigger in evdev mode), re-insert it after the
+        // replacement. Evdev capture is non-exclusive, so the terminating
+        // character has already reached the app; we now type it again.
+        if let Some(ch) = result.reinsert_after {
+            let _ = injector.insert(&ch.to_string());
+        }
         // Best-effort: a `{{cursor}}` marker's placement failing (or being
         // unsupported by this backend) does not mean the expansion itself
         // failed, since the replacement text above was already inserted.
@@ -676,13 +717,14 @@ impl std::error::Error for CommandError {}
 /// invoke this from a rendering/repaint loop, since it spawns a real process
 /// with real side effects on every call.
 pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
-    let mut child = Command::new(&command.program)
+    let mut process = Command::new(&command.program);
+    process
         .args(&command.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| CommandError::SpawnFailed)?;
+        .stderr(Stdio::null());
+    configure_process_group(&mut process);
+    let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
     let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
@@ -700,12 +742,12 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
             Ok(None) => {
-                let _ = child.kill();
+                kill_process_group(&child);
                 let _ = child.wait();
                 return Err(CommandError::Timeout);
             }
             Err(_) => {
-                let _ = child.kill();
+                kill_process_group(&child);
                 let _ = child.wait();
                 return Err(CommandError::Timeout);
             }
@@ -723,6 +765,35 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+#[cfg(unix)]
+fn configure_process_group(command: &mut Command) {
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn kill_process_group(child: &std::process::Child) {
+    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(child: &mut std::process::Child) {
+    let _ = child.kill();
 }
 
 #[cfg(test)]
@@ -1331,6 +1402,7 @@ replacement = "bad\u0000value""#;
             erase_chars: 2,
             insert: "value".into(),
             cursor_offset: None,
+            reinsert_after: None,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1368,6 +1440,7 @@ replacement = "bad\u0000value""#;
             erase_chars: 2,
             insert: "value".into(),
             cursor_offset: None,
+            reinsert_after: None,
         };
         let mut injector = AtomicInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1892,5 +1965,61 @@ replacement = "bad\u0000value""#;
             1,
             "expansion with empty app_filter should match anywhere"
         );
+    }
+
+    #[test]
+    fn word_boundary_triggers_reinsert_terminating_character() {
+        // Evdev capture is non-exclusive: the space that ends a word-boundary
+        // trigger has already reached the app. We must erase only the trigger,
+        // insert the replacement, then re-type the terminating character.
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = engine.process(InputEvent::Text(":sig ".into())).pop().unwrap();
+        assert_eq!(result.trigger, ":sig");
+        assert_eq!(result.insert, "signature");
+        assert_eq!(result.reinsert_after, Some(' '));
+    }
+
+    #[test]
+    fn prefix_free_triggers_reinsert_non_word_boundary_characters() {
+        // When a non-word-boundary trigger becomes prefix-free (typing a
+        // non-word character breaks the continuation), we re-insert that
+        // terminating character. Example: `:ab` is in the trie; when we type
+        // `:a`, we have a match (and continue checking for `:ab`). When we
+        // then type `.` (a non-word character), `:a.` is not in the trie, so
+        // the match completes and we need to re-insert the `.`.
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let results = engine.process(InputEvent::Text(":a.".into()));
+        // The `.` breaks the continuation, so we get a match for `:a` with
+        // the `.` re-inserted (not a match for `:ab`).
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].trigger, ":a");
+        assert_eq!(results[0].insert, "alpha");
+        assert_eq!(results[0].reinsert_after, Some('.'));
+    }
+
+    #[test]
+    fn prefix_free_triggers_do_not_reinsert_word_characters() {
+        // When typing a word character breaks a trigger's continuation,
+        // do not re-insert it -- the normal matching logic will handle it
+        // as a potential new trigger start.
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        // Typing `:a` followed by `b` should produce a match for `:ab`
+        // (no re-insertion of `b`), not a match for `:a` with `b` re-inserted.
+        let results = engine.process(InputEvent::Text(":ab".into()));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].trigger, ":ab");
+        assert_eq!(results[0].reinsert_after, None);
     }
 }

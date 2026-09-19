@@ -194,6 +194,7 @@ fn run() -> Result<()> {
                 .context("usage: wayexpand preview <trigger> [--json] [config]")?;
             let mut rest: Vec<String> = args.collect();
             let requested_json = take_json_flag(&mut rest);
+            let preview_app = take_option(&mut rest, "--preview-app")?;
             if rest.len() > 1 {
                 bail!("usage: wayexpand preview <trigger> [--json] [config]");
             }
@@ -208,6 +209,12 @@ fn run() -> Result<()> {
             let mut engine = ExpansionEngine::new(config).map_err(|error| {
                 anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
             })?;
+            if let Some(app_id) = preview_app {
+                engine.set_current_window(Some(wayexpand_core::WindowContext {
+                    app_id: Some(app_id),
+                    title: None,
+                }));
+            }
             let mut results = engine.process(InputEvent::Text(trigger));
             results.extend(engine.process(InputEvent::Boundary));
             match results.last() {
@@ -548,15 +555,41 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn take_option(args: &mut Vec<String>, name: &str) -> Result<Option<String>> {
+    let prefix = format!("{name}=");
+    let Some(index) = args
+        .iter()
+        .position(|arg| arg == name || arg.starts_with(&prefix))
+    else {
+        return Ok(None);
+    };
+    let value = if let Some(value) = args[index].strip_prefix(&prefix) {
+        value.to_owned()
+    } else if index + 1 < args.len() {
+        let value = args[index + 1].clone();
+        args.remove(index + 1);
+        value
+    } else {
+        bail!("{name} requires a value");
+    };
+    args.remove(index);
+    if value.is_empty() {
+        bail!("{name} requires a non-empty value");
+    }
+    Ok(Some(value))
+}
+
 fn print_backend_diagnostics() -> bool {
     let backends = discover_backends();
     for status in &backends {
-        println!(
-            "{:28} {:?} ({})",
-            status.kind.to_string(),
-            status.state,
-            status.detail
+        let detail = format!(
+            "{}; implementation={}, availability={}, permission={}",
+            status.detail,
+            status.implementation(),
+            status.availability(),
+            status.permission()
         );
+        println!("{:28} {:?} ({})", status.kind, status.state, detail);
     }
     // Doctor is also used in CI and for validating a config outside a desktop
     // session. In that context there is no capture claim to validate.
@@ -648,6 +681,9 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             serde_json::json!({
                 "kind": status.kind.to_string(),
                 "state": format!("{:?}", status.state),
+                "implementation": status.implementation(),
+                "availability": status.availability(),
+                "permission": status.permission(),
                 "detail": status.detail,
             })
         })
@@ -957,6 +993,26 @@ mod tests {
         let mut args = vec!["expansions.toml".to_string()];
         assert!(!take_json_flag(&mut args));
         assert_eq!(args, vec!["expansions.toml".to_string()]);
+    }
+
+    #[test]
+    fn preview_app_option_accepts_equals_and_separate_values() {
+        let mut equals = vec![
+            "--preview-app=thunderbird".to_string(),
+            "config".to_string(),
+        ];
+        assert_eq!(
+            take_option(&mut equals, "--preview-app").unwrap(),
+            Some("thunderbird".into())
+        );
+        assert_eq!(equals, vec!["config"]);
+
+        let mut separate = vec!["--preview-app".to_string(), "konsole".to_string()];
+        assert_eq!(
+            take_option(&mut separate, "--preview-app").unwrap(),
+            Some("konsole".into())
+        );
+        assert!(separate.is_empty());
     }
 
     #[test]

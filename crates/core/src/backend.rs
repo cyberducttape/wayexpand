@@ -178,6 +178,34 @@ pub struct BackendStatus {
     pub detail: String,
 }
 
+impl BackendStatus {
+    pub fn implementation(&self) -> &'static str {
+        match self.state {
+            BackendState::NotImplemented => "NotImplemented",
+            _ => "Implemented",
+        }
+    }
+
+    pub fn availability(&self) -> &'static str {
+        match self.state {
+            BackendState::Unavailable | BackendState::RequiresPermission => "Unavailable",
+            BackendState::Implemented => "Unknown",
+            BackendState::Available => "Detected",
+            BackendState::NotImplemented => "Unknown",
+        }
+    }
+
+    pub fn permission(&self) -> &'static str {
+        match self.state {
+            BackendState::RequiresPermission => "Required",
+            BackendState::NotImplemented
+            | BackendState::Unavailable
+            | BackendState::Implemented => "NotApplicable",
+            BackendState::Available => "Granted",
+        }
+    }
+}
+
 /// Report environment-level facts without claiming protocol support that has
 /// not yet been negotiated with a compositor.
 pub fn discover_backends() -> Vec<BackendStatus> {
@@ -376,5 +404,34 @@ mod tests {
         );
         assert_eq!(BackendKind::Uinput.to_string(), "uinput");
         assert_eq!(BackendKind::Clipboard.to_string(), "clipboard");
+    }
+
+    #[test]
+    fn diagnostic_dimensions_use_documented_values() {
+        for state in [
+            BackendState::Implemented,
+            BackendState::Available,
+            BackendState::Unavailable,
+            BackendState::NotImplemented,
+            BackendState::RequiresPermission,
+        ] {
+            let status = BackendStatus {
+                kind: BackendKind::Clipboard,
+                state,
+                detail: String::new(),
+            };
+            assert!(matches!(
+                status.implementation(),
+                "Implemented" | "NotImplemented"
+            ));
+            assert!(matches!(
+                status.availability(),
+                "Detected" | "Unavailable" | "Unknown"
+            ));
+            assert!(matches!(
+                status.permission(),
+                "Granted" | "Required" | "NotApplicable"
+            ));
+        }
     }
 }

@@ -12,11 +12,11 @@ WayExpand does not currently support window tracking (app-filtering) on GNOME. T
 
 Window tracking on Wayland requires compositor cooperation. Most desktop environments provide this through:
 
-1. **D-Bus `org.freedesktop.DBus.Properties.GetAll()` on a window interface** (KDE Plasma, GNOME <= 3.36)
+1. **D-Bus `org.freedesktop.DBus.Properties.GetAll()` on a window interface** (KDE Plasma and older GNOME releases)
 2. **Wayland text-input protocol metadata** (experimental, not widely adopted)
 3. **Direct protocol support** (wlroots compositors)
 
-GNOME removed its D-Bus window interface in GNOME 4.0 (released 2021) and has not provided an alternative path for third-party applications to query the focused window. This makes it impossible for WayExpand to know which application has keyboard focus.
+GNOME removed its D-Bus window interface around the GNOME 40 transition (2021) and has not provided an alternative path for third-party applications to query the focused window. This makes it impossible for WayExpand to know which application has keyboard focus.
 
 ## Workarounds
 
@@ -46,7 +46,7 @@ If per-app expansion is critical, KDE Plasma (6.6+) provides full window trackin
 
 ### Option 4: Use input-method-v2 without app filtering
 
-WayExpand's input-method-v2 backend (the default on GNOME) provides:
+On a compositor where `wayexpand doctor` confirms input-method-v2 support, WayExpand's input-method-v2 backend provides:
 - Automatic sensitive-field detection (password inputs are excluded)
 - Per-content-type behavior (passwords, hidden text, etc. are handled separately)
 
@@ -60,9 +60,10 @@ wayexpand doctor
 
 The output will show:
 - **`app-id tracking`**: The status of window tracking support
-  - `Implemented` (KDE Plasma with D-Bus, or wlroots compositors)
+  - `Implemented` (KDE Plasma with D-Bus)
+  - `Scaffold only` (wlroots foreign-toplevel work; not active tracking)
   - `NotImplemented` (GNOME, Cosmic, other Wayland compositors without D-Bus)
-  - `RequiresPermission` (available but needs portal consent)
+  - `Unavailable` (window tracking is not implemented for this compositor)
 
 ## Contributing Support for GNOME
 

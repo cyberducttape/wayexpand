@@ -36,7 +36,10 @@ via an unshifted or Shift-level keysym are typeable -- and a replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
 is never automatic: selecting this backend may request desktop-control
-consent and the portal session is retained for the injector's lifetime.
+consent and the portal session is retained for the injector's lifetime. The
+current portal flow deliberately uses non-persistent authorization, so a
+reconnect may require consent again; opt-in persistence and explicit token
+revocation remain future work.
 The backend also caps direct text submissions at 1 MiB and validates them before
 queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an
@@ -150,8 +153,10 @@ app id or title actually contains one of the filter strings. Unfiltered
 expansions are entirely unaffected.
 
 wlroots compositor support (via `wlr-foreign-toplevel-management-unstable-v1`)
-is not implemented yet; GNOME (Mutter) exposes no equivalent bridge without
-a shell extension, so no fully evidence-based path exists there today.
+is currently only scaffold work and is not an active window-tracking backend;
+it is not integrated into the daemon. GNOME (Mutter) exposes no equivalent
+bridge without a shell extension, so no fully evidence-based path exists there
+today.
 
 ## wlroots virtual keyboard and uinput
 

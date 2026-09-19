@@ -61,8 +61,8 @@ wayexpand doctor
 
 The installer builds release binaries, installs them under
 `~/.local/bin`, installs three user units (wayexpand.service for testing,
-wayexpand-input-method.service for GNOME/input-method-v2 compositors,
-wayexpand-evdev.service for KDE/Sway), registers the desktop entry, and
+wayexpand-input-method.service for compositors confirmed by `wayexpand doctor`,
+wayexpand-evdev.service for raw-input capture), registers the desktop entry, and
 creates `~/.config/wayexpand/expansions.toml` only when it does not exist.
 Existing configuration is never overwritten.
 
@@ -108,7 +108,7 @@ systemctl --user enable --now wayexpand-evdev.service
 wayexpand status
 ```
 
-For **GNOME and other compositors** with input-method-v2 support:
+For a compositor where `wayexpand doctor` confirms input-method-v2 support:
 
 ```sh
 systemctl --user enable --now wayexpand-input-method.service

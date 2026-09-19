@@ -3759,6 +3759,7 @@ dependencies = [
 name = "wayexpand-core"
 version = "1.1.2"
 dependencies = [
+ "libc",
  "rustix 1.1.4",
  "serde",
  "serde_yaml",
