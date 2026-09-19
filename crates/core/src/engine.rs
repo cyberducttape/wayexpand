@@ -418,15 +418,16 @@ impl ExpansionEngine {
                 Vec::new()
             }
             InputEvent::WindowChanged(window) => {
-                // No buffer clear here, unlike `FocusChanged`: `app_filter`
-                // is re-checked against `current_window` at match time (see
-                // `app_filter_allows`), not against whatever window the
-                // buffer started accumulating in, so an in-progress trigger
-                // is evaluated correctly regardless. Clearing on every
-                // focus change would instead cost completely unfiltered
-                // expansions their in-progress buffer on any incidental
-                // window switch (e.g. a brief alt-tab mid-trigger).
+                // The text in the buffer belongs to the previously-focused
+                // application. Text expansion state must be scoped to the
+                // focused window, not to the desktop session. Even if
+                // app_filter would correctly re-evaluate against the new
+                // window, the physical characters in the buffer are from the
+                // old application and must not be used to compute replacements
+                // for the new one. This prevents cross-window trigger matches
+                // that can cause unrelated text deletion.
                 self.current_window = window;
+                self.clear_buffer();
                 Vec::new()
             }
         }
@@ -823,12 +824,11 @@ mod tests {
     }
 
     #[test]
-    fn window_changed_does_not_discard_an_in_progress_unfiltered_trigger() {
-        // A focus change mid-typing (a brief alt-tab, a notification) must
-        // not cost an unrelated, unfiltered trigger its buffered progress:
-        // `app_filter` is re-checked against the window at match time, not
-        // against whatever window the buffer started accumulating in, so
-        // there is nothing to protect by clearing here.
+    fn window_changed_clears_buffer_to_prevent_cross_window_matches() {
+        // Text expansion state must be scoped to the focused window, not the
+        // desktop session. The buffer contains characters typed in the previous
+        // application, so clearing on window change prevents cross-window
+        // trigger matches that could erase unrelated text.
         let mut engine = engine();
         engine.process(InputEvent::Text(":hel".into()));
         engine.process(InputEvent::WindowChanged(Some(WindowContext {
@@ -836,6 +836,57 @@ mod tests {
             title: None,
         })));
         let mut results = engine.process(InputEvent::Text("lo".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        // The buffer was cleared on window change, so ":hello" was never formed
+        assert!(
+            results.is_empty(),
+            "cross-window partial triggers must not continue matching"
+        );
+    }
+
+    #[test]
+    fn cross_window_trigger_does_not_delete_wrong_text() {
+        // Regression test for P0 bug: Alt-Tab mid-trigger.
+        // Type ":he" in App A, switch to App B, type "llo". Should NOT match.
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":hello"
+            replacement = "expansion result"
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        // Type partial trigger in first window
+        engine.process(InputEvent::Text(":he".into()));
+
+        // Switch windows
+        engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: None,
+        })));
+
+        // Complete what looks like the trigger in the new window
+        let mut results = engine.process(InputEvent::Text("llo".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+
+        assert!(
+            results.is_empty(),
+            "expansion must not fire for cross-window text sequences"
+        );
+    }
+
+    #[test]
+    fn unfiltered_expansion_after_window_change() {
+        // Verify that unfiltered expansions still work after a window change,
+        // just with a fresh buffer (no cross-window text combination).
+        let mut engine = engine();
+        engine.process(InputEvent::WindowChanged(Some(WindowContext {
+            app_id: Some("org.kde.kate".into()),
+            title: None,
+        })));
+        let mut results = engine.process(InputEvent::Text(":hello".into()));
         results.extend(engine.process(InputEvent::Boundary));
         assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
     }
