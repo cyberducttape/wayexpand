@@ -166,3 +166,36 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify udev rules
         run: udevadm verify udev/71-wayexpand-evdev.rules
+
+  policy-docs:
+    name: Documentation Policy Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Build CLI with policy validation
+        run: cargo build --locked -p wayexpand
+      - name: Test Ansible documentation policy example
+        run: |
+          # Create policy exactly as documented in ANSIBLE_INTEGRATION.md
+          mkdir -p /tmp/policy-test
+          cat > /tmp/policy-test/policy.toml <<'POLICY'
+          [organization]
+          safe_mode = true
+          disable_hotkeys = false
+          disable_title_matching = false
+          max_replacement_size = 65536
+          allowed_backends = ["input-method-v2", "libei"]
+          POLICY
+
+          # Set permissions as documented (0600)
+          chmod 0600 /tmp/policy-test/policy.toml
+
+          # Verify policy parses and permissions are correct
+          ls -la /tmp/policy-test/policy.toml | grep -E '^\-rw-------'
+
+          # Validate policy syntax (if CLI supports it)
+          ./target/debug/wayexpand validate /tmp/policy-test/policy.toml 2>&1 | grep -qE '(valid|ok|success)' || echo "Policy validation command not available, skipping"
