@@ -77,6 +77,11 @@ pub struct ExpansionResult {
     /// in one backend operation (`:sig ` becomes `signature `). This field is
     /// `None` for matches that complete immediately without a trailing key.
     pub reinsert_after: Option<char>,
+    /// Explicit provenance: true if this expansion's replacement came from
+    /// executing a command. Used for audit logging to distinguish command output
+    /// from template-based expansions. No heuristics—this is set explicitly
+    /// when the engine processes the command result.
+    pub command_backed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -408,6 +413,7 @@ impl ExpansionEngine {
             insert: restore_text,
             cursor_offset: None,
             reinsert_after: None,
+            command_backed: false,
         })
     }
 
@@ -654,6 +660,7 @@ impl ExpansionEngine {
                 insert: String::new(),
                 cursor_offset: None,
                 reinsert_after: terminating_char,
+                command_backed: true,
             };
             let job = AsyncCommandJob {
                 config_index,
@@ -686,6 +693,7 @@ impl ExpansionEngine {
             insert,
             cursor_offset,
             reinsert_after: terminating_char,
+            command_backed: false,
         })
     }
 
@@ -1690,6 +1698,7 @@ replacement = "bad\u0000value""#;
             insert: "value".into(),
             cursor_offset: None,
             reinsert_after: None,
+            command_backed: false,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1728,6 +1737,7 @@ replacement = "bad\u0000value""#;
             insert: "value".into(),
             cursor_offset: None,
             reinsert_after: None,
+            command_backed: false,
         };
         let mut injector = AtomicInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -1743,6 +1753,7 @@ replacement = "bad\u0000value""#;
             insert: "Best regards,".into(),
             cursor_offset: Some(2),
             reinsert_after: Some(' '),
+            command_backed: false,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
