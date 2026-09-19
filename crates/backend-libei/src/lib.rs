@@ -561,11 +561,12 @@ impl LibeiInjector {
         let return_keycode = typer.return_keycode;
         let tab_keycode = typer.tab_keycode;
 
-        for c in text.chars() {
+        let chars: Vec<char> = text.chars().collect();
+        for (i, c) in chars.iter().enumerate() {
             let (keycode, shift) = match c {
                 '\n' => (return_keycode, false),
                 '\t' => (tab_keycode, false),
-                _ => typer.chars[&c],
+                _ => typer.chars[c],
             };
 
             let serial = self.connection.serial();
@@ -588,7 +589,9 @@ impl LibeiInjector {
             self.connection
                 .flush()
                 .map_err(|error| LibeiError::Flush(error.to_string()))?;
-            std::thread::sleep(KEY_EVENT_INTERVAL);
+            if i < chars.len() - 1 {
+                std::thread::sleep(KEY_EVENT_INTERVAL);
+            }
         }
         Ok(())
     }
