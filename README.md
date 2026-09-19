@@ -44,7 +44,7 @@ X11-shaped implementation with Wayland support bolted on.
 
 |                          | **WayExpand**                                                        | Espanso                                        | AutoKey                             |
 | ------------------------ | --------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ |
-| Wayland input path       | Native per-protocol backends (`input-method-v2`, wlroots virtual-keyboard, libei/EIS), selected explicitly | XTest via XWayland, or a Wayland mode with narrower compositor support | X11/XTest only — no native Wayland path |
+| Wayland input path       | Native per-protocol backends (`input-method-v2`, wlroots virtual-keyboard, libei/EIS), selected conservatively or explicitly | XTest via XWayland, or a Wayland mode with narrower compositor support | X11/XTest only — no native Wayland path |
 | Architecture             | Matching engine and injection backend are separate crates behind a trait; a backend gap never blocks the matcher | Single Rust binary, backend selection is internal | Python, GTK-bound |
 | Config safety            | Parse-then-swap: a malformed config is rejected before it ever replaces the live one | Reload replaces config; validation is more implicit | Reload replaces config |
 | Sensitive-field handling | Matching suspends automatically in password fields on backends that report focus (see [SECURITY.md](SECURITY.md)) | Not modeled explicitly | Not modeled |
@@ -85,8 +85,9 @@ expand.
 ```
 
 Every backend implements a small trait (`InputSource` for capture,
-`TextInjector` for output) and is selected explicitly at daemon startup
-(`--source=`, `--backend=`) — never auto-detected silently. A backend that
+`TextInjector` for output) and is selected conservatively or explicitly at
+daemon startup (`--source=`, `--backend=`). Use
+`wayexpand backend select --explain` to inspect automatic selection. A backend that
 doesn't exist for your compositor is a documented gap, not a runtime
 surprise: `app_filter`-scoped snippets **fail closed** (never match) rather
 than matching everywhere when window tracking isn't available, the same
@@ -333,8 +334,9 @@ Configuration resource limits are documented in
 
 **Get started:**
 - [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) — installation, first snippet, verify it works
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) — systemd daemon, logs, troubleshooting
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues, solutions, and diagnostics
 - [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — what's tested vs. experimental per compositor
+- [docs/MIGRATION_FROM_ESPANSO.md](docs/MIGRATION_FROM_ESPANSO.md) — if switching from Espanso
 
 **Configuration & customization:**
 - [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) — GUI themes, color packs, language support
@@ -353,6 +355,9 @@ Configuration resource limits are documented in
 **Examples & reference:**
 - [docs/FOR_SYSADMINS.md](docs/FOR_SYSADMINS.md) — ready-made snippets and enterprise deployment
 - [docs/ANSIBLE_INTEGRATION.md](docs/ANSIBLE_INTEGRATION.md) — fleet deployment playbooks
+
+**For developers:**
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — building, testing, and contributing
 
 Non-English documentation: [Deutsch](README.de.md).
 
