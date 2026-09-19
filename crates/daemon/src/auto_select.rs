@@ -6,8 +6,10 @@
 /// 3. Fall back to conservative options (stdin) when capabilities unavailable
 /// 4. Desktop environment strings influence preference ordering only
 use std::env;
-use std::path::Path;
+use std::fs::File;
 use tracing::{debug, warn};
+use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_wlroots::WlrootsInjector;
 
 #[derive(Debug, Clone)]
 pub struct BackendSelection {
@@ -25,7 +27,7 @@ struct Capabilities {
     has_input_method_v2: bool,
     #[allow(dead_code)]
     has_virtual_keyboard: bool,
-    has_libei_portal: bool,
+    has_direct_libei_socket: bool,
     has_dev_input: bool,
     #[allow(dead_code)]
     has_window_tracker: bool,
@@ -36,31 +38,20 @@ struct Capabilities {
 fn probe_capabilities() -> Capabilities {
     let is_wayland =
         env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("WAYLAND_SOCKET").is_some();
-    let has_dev_input = Path::new("/dev/input").is_dir();
+    let has_dev_input = has_readable_input_device();
 
-    // TODO: Probe for protocol availability. These would ideally connect to
-    // the Wayland display and query for protocol support, but that's complex
-    // to do without a full Wayland client. For now, we make conservative assumptions:
-    // - input-method-v2 is likely on KDE/GNOME but not guaranteed
-    // - libei portal requires dbus + portal, assume available on modern systems
-    // - window tracker only on wlroots compositors with the protocol
-
-    let (has_input_method_v2, has_virtual_keyboard, has_window_tracker, has_libei_portal) =
-        if !is_wayland {
-            // X11 has no input-method-v2, no virtual-keyboard, no window tracker
-            // X11 might have libei (recent Xwayland), but conservative: no
-            (false, false, false, false)
-        } else {
-            // Wayland: We can't easily probe without connecting, so be optimistic
-            // about safer options (input-method-v2) and conservative about dangerous ones (evdev)
-            // Actual protocol availability will be detected at runtime by backends
-            (true, true, true, true)
-        };
+    let has_input_method_v2 = is_wayland && InputMethodSource::probe().is_ok();
+    let has_virtual_keyboard = is_wayland && WlrootsInjector::probe().is_ok();
+    // Portal probing would show a consent dialog. An existing direct EIS
+    // socket is safe to recognize; desktop portal availability remains an
+    // explicit startup decision and is reported as such by `doctor`.
+    let has_direct_libei_socket = env::var_os("LIBEI_SOCKET").is_some();
+    let has_window_tracker = false;
 
     let caps = Capabilities {
         has_input_method_v2,
         has_virtual_keyboard,
-        has_libei_portal,
+        has_direct_libei_socket,
         has_dev_input,
         has_window_tracker,
         is_wayland,
@@ -68,6 +59,17 @@ fn probe_capabilities() -> Capabilities {
 
     debug!("probed capabilities: {:?}", caps);
     caps
+}
+
+fn has_readable_input_device() -> bool {
+    let Ok(entries) = std::fs::read_dir("/dev/input") else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        entry.file_name().to_string_lossy().starts_with("event")
+            && File::open(entry.path()).is_ok()
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -208,10 +210,10 @@ pub fn auto_select(
 
     // Fall back to evdev + libei only if /dev/input is readable
     if capabilities.has_dev_input {
-        let libei_reason = if capabilities.has_libei_portal {
-            ", libei portal available"
+        let libei_reason = if capabilities.has_direct_libei_socket {
+            ", direct EIS socket available"
         } else {
-            ""
+            "; portal consent will be requested when libei starts"
         };
         return BackendSelection {
             source: "evdev".to_string(),
