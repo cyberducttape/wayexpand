@@ -149,7 +149,7 @@ wayexpand-policy: backend 'evdev' is not in allowed list: ["input-method-v2"]
 
 ## Future: Action Broker
 
-For fine-grained command control (v1.3+), see [P2_action_broker_architecture](../memory/P2_action_broker_architecture.md) for per-action permission control.
+For fine-grained command control (planned for v1.3+), an Action Broker will enable per-action permission control. This feature is tracked in the [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md).
 
 ## See Also
 

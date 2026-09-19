@@ -332,6 +332,8 @@ Configuration resource limits are documented in
 
 ## Documentation
 
+**Start here:** [DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) — find what you need by use case or role
+
 **Get started:**
 - [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) — installation, first snippet, verify it works
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues, solutions, and diagnostics
