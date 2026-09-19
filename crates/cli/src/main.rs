@@ -888,6 +888,20 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
         let value = match value {
             "true" => serde_json::Value::Bool(true),
             "false" => serde_json::Value::Bool(false),
+            value
+                if matches!(
+                    key,
+                    "command_queue_depth"
+                        | "command_queue_rejected_total"
+                        | "command_timeout_total"
+                        | "command_failure_total"
+                ) =>
+            {
+                match value.parse::<u64>() {
+                    Ok(number) => serde_json::Value::Number(number.into()),
+                    Err(_) => value.into(),
+                }
+            }
             _ => value.into(),
         };
         object.insert(key.to_owned(), value);
@@ -1229,11 +1243,14 @@ mod tests {
 
     #[test]
     fn status_json_preserves_types_and_ignores_banner() {
-        let value =
-            status_as_json("running\nsource=stdin\npaused=true\nconfig_state=ok\n").unwrap();
+        let value = status_as_json(
+            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\n",
+        )
+        .unwrap();
         assert_eq!(value["response"], "running");
         assert_eq!(value["source"], "stdin");
         assert_eq!(value["paused"], true);
+        assert_eq!(value["command_queue_depth"], 3);
         assert_eq!(value["config_state"], "ok");
     }
 
@@ -1252,7 +1269,11 @@ mod tests {
              state=connected\n\
              paused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\n\
-             config_state=ok";
+             config_state=ok\n\
+             command_queue_depth=0\n\
+             command_queue_rejected_total=0\n\
+             command_timeout_total=0\n\
+             command_failure_total=0";
         let value = status_as_json(daemon_response).unwrap();
         let object = value.as_object().expect("status --json returns an object");
         let contract: serde_json::Value =
@@ -1282,6 +1303,10 @@ mod tests {
             "/home/user/.config/wayexpand/expansions.toml"
         );
         assert_eq!(value["config_state"], "ok");
+        assert_eq!(value["command_queue_depth"], 0);
+        assert_eq!(value["command_queue_rejected_total"], 0);
+        assert_eq!(value["command_timeout_total"], 0);
+        assert_eq!(value["command_failure_total"], 0);
     }
 
     #[test]
@@ -1306,6 +1331,10 @@ mod tests {
                 "paused",
                 "config",
                 "config_state",
+                "command_queue_depth",
+                "command_queue_rejected_total",
+                "command_timeout_total",
+                "command_failure_total",
             ]
             .into_iter()
             .collect()
