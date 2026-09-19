@@ -1033,15 +1033,19 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
         // /shared/stephan to /shared/stephan.bak and create a new
         // /shared/stephan pointing to attacker-controlled config.
         //
-        // Therefore, validate all ancestors up to "/" (except in a systemd
-        // private namespace, where the overflow uid 65534 is remapped and
-        // would cause false rejections). Until fd-based openat2() validation
-        // is implemented, we accept root-owned "/" as a terminal trust
-        // anchor rather than checking its mode.
-        if uid == 0 {
-            return Ok(());
-        }
+        // Similarly, a root-owned world-writable parent can be exploited even
+        // though the child is root-owned. We validate all ancestors including
+        // the root-owned filesystem root ("/"), accepting it as a terminal
+        // trust anchor since the filesystem itself is the trust boundary.
+        // In containerized/namespaced environments, this prevents false
+        // rejections while maintaining protection against directory swaps.
+        //
+        // Future: Consider fd-based openat2(O_PATH, RESOLVE_IN_ROOT) for
+        // stronger protection against TOCTOU races.
         if current == Path::new("/") {
+            // Reached filesystem root. Root-owned "/" is a trust anchor.
+            // In systemd private namespaces, uid 65534 (overflow) may appear;
+            // accept it as validation is constrained to namespace boundary.
             break;
         }
         current = current.parent().unwrap_or_else(|| Path::new("/"));
