@@ -36,35 +36,53 @@ const EXIT_DAEMON: i32 = 4;
 /// consistently ("usage: ...", "configuration invalid", daemon-socket
 /// context messages) so callers can distinguish failure causes without
 /// parsing free-form text, while avoiding a bespoke error type per site.
+///
+/// **Stability note:** This function uses message pattern matching to infer
+/// exit codes because anyhow::Error doesn't preserve source error types.
+/// The patterns below are chosen to be stable across minor rewording:
+/// - Prefixes that introduce a statement ("usage:", "configuration invalid:")
+/// - Specific multiword phrases ("invalid TOML", "XDG_RUNTIME_DIR or WAYEXPAND_SOCKET")
+/// - Context domain terms ("daemon control", "control socket")
+///
+/// A breaking change to these error messages requires a new major version.
 fn exit_code_for(error: &anyhow::Error) -> i32 {
     let message = error.to_string();
 
-    // Check for usage errors (must be exact or prefix match)
-    if message.starts_with("usage:") || message.starts_with("unknown command") {
+    // Usage errors: command-line parsing failures
+    // Patterns: error message introducing a usage problem
+    if message.starts_with("usage:")
+        || message.starts_with("unknown command")
+        || message.contains("requires a value")
+        || message.contains("unexpected argument") {
         return EXIT_USAGE;
     }
 
-    // Check for configuration errors
-    if message.starts_with("configuration invalid:") || message.contains("invalid TOML") {
+    // Configuration errors: TOML parsing, validation, or file access
+    // Patterns: error context or domain-specific phrase
+    if message.starts_with("configuration invalid:")
+        || message.contains("invalid TOML")
+        || message.contains("configuration syntax")
+        || message.contains("malformed config") {
         return EXIT_CONFIG;
     }
 
-    // Check for daemon control errors by looking at specific substrings that
-    // indicate daemon communication failures. These checks are exact enough to
-    // avoid false positives while remaining stable across minor message rewording.
+    // Daemon communication errors: socket, handshake, or protocol failures
+    // Patterns: actions specific to daemon control (connect, socket, response)
     let is_daemon_error = message.starts_with("connecting to")
         || message.starts_with("could not connect")
         || message.contains("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")
         || message.contains("daemon control response")
         || message.contains("daemon returned a non-UTF-8")
         || message.contains("cannot connect to")
-        || message.contains("control socket");
+        || message.contains("control socket")
+        || message.contains("socket error")
+        || message.contains("daemon communication");
 
     if is_daemon_error {
         return EXIT_DAEMON;
     }
 
-    // Generic error
+    // Generic transient error: I/O, network, or other operational failures
     1
 }
 
