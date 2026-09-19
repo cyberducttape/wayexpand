@@ -1,5 +1,6 @@
 mod auto_select;
 mod control;
+mod policy;
 mod reload;
 
 use anyhow::Result;
@@ -97,6 +98,9 @@ fn main() -> Result<()> {
         )
     })?;
     config.engine.enable_async_commands();
+
+    // Load organization policy from /etc/wayexpand/policy.toml
+    let policy = policy::load_policy();
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -231,7 +235,7 @@ fn main() -> Result<()> {
                 latest = Some(window);
             }
             if let Some(window) = latest {
-                process_event(&mut config.engine, InputEvent::WindowChanged(window), None)?;
+                process_event(&mut config.engine, InputEvent::WindowChanged(window), None, &policy, active_backend)?;
             }
         }
         let requested_pause = control
@@ -242,6 +246,8 @@ fn main() -> Result<()> {
                 &mut config.engine,
                 InputEvent::PauseChanged(requested_pause),
                 None,
+                &policy,
+                active_backend,
             )?;
             paused = requested_pause;
             info!(paused, "expansion processing policy changed");
@@ -263,14 +269,14 @@ fn main() -> Result<()> {
         if !completed_commands.is_empty() {
             if input_method_mode {
                 if let Some(source) = input_method.as_mut() {
-                    apply_results(completed_commands, Some(source))?;
+                    apply_results(completed_commands, Some(source), &policy, active_backend)?;
                 }
             } else if let Some(mut backend) = injector.take() {
-                let result = apply_results(completed_commands, Some(backend.as_mut()));
+                let result = apply_results(completed_commands, Some(backend.as_mut()), &policy, active_backend);
                 injector = Some(backend);
                 result?;
             } else {
-                apply_results(completed_commands, None)?;
+                apply_results(completed_commands, None, &policy, active_backend)?;
             }
         }
         set_daemon_status(
@@ -319,9 +325,9 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
-                    drain_pending_window_events(&window_tracker, &mut config.engine)?;
+                    drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
                     let result = match input_method.as_mut() {
-                        Some(source) => process_event(&mut config.engine, event, Some(source)),
+                        Some(source) => process_event(&mut config.engine, event, Some(source), &policy, active_backend),
                         None => {
                             return Err(anyhow::anyhow!(
                                 "input-method source disappeared while processing an event"
@@ -343,6 +349,8 @@ fn main() -> Result<()> {
                                 &mut config.engine,
                                 InputEvent::FocusChanged { sensitive: true },
                                 None,
+                                &policy,
+                                active_backend,
                             )?;
                             set_daemon_status(
                                 &control,
@@ -365,6 +373,8 @@ fn main() -> Result<()> {
                         &mut config.engine,
                         InputEvent::FocusChanged { sensitive: true },
                         None,
+                        &policy,
+                        active_backend,
                     )?;
                     set_daemon_status(
                         &control,
@@ -419,7 +429,7 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
-                    drain_pending_window_events(&window_tracker, &mut config.engine)?;
+                    drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
                     let result = if let Some(mut backend) = injector.take() {
                         // Capture is non-exclusive and a match fires on
                         // key-down, so the trigger's last key is still held
@@ -439,14 +449,14 @@ fn main() -> Result<()> {
                             warn!(
                                 "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                             );
-                            process_event(&mut config.engine, event, None)
+                            process_event(&mut config.engine, event, None, &policy, active_backend)
                         } else {
-                            process_event(&mut config.engine, event, Some(backend.as_mut()))
+                            process_event(&mut config.engine, event, Some(backend.as_mut()), &policy, active_backend)
                         };
                         injector = Some(backend);
                         result
                     } else {
-                        process_event(&mut config.engine, event, None)
+                        process_event(&mut config.engine, event, None, &policy, active_backend)
                     };
                     match result {
                         Ok(()) => reconnect_delay = Duration::from_millis(250),
@@ -490,7 +500,7 @@ fn main() -> Result<()> {
                     warn!(%error, "evdev connection lost; reconnecting");
                     evdev = None;
                     connection_state = "reconnecting";
-                    config.engine.process(InputEvent::Boundary);
+                    let _ = process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend);
                     set_daemon_status(
                         &control,
                         active_source,
@@ -515,16 +525,16 @@ fn main() -> Result<()> {
         };
         match receiver.recv_timeout(Duration::from_millis(250)) {
             Ok(line) => {
-                drain_pending_window_events(&window_tracker, &mut config.engine)?;
+                drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
                 if injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
                         let (result, backend) = if let Some(mut backend) = injector.take() {
                             let result =
-                                process_event(&mut config.engine, event, Some(backend.as_mut()));
+                                process_event(&mut config.engine, event, Some(backend.as_mut()), &policy, active_backend);
                             (result, Some(backend))
                         } else {
-                            (process_event(&mut config.engine, event, None), None)
+                            (process_event(&mut config.engine, event, None, &policy, active_backend), None)
                         };
                         injector = backend;
                         if let Err(error) = result {
@@ -538,7 +548,7 @@ fn main() -> Result<()> {
                                 "output session failed; current expansion is not replayed"
                             );
                             drop(injector.take());
-                            config.engine.process(InputEvent::Boundary);
+                            let _ = process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend);
                             connection_state = "reconnecting";
                             set_daemon_status(
                                 &control,
@@ -564,11 +574,11 @@ fn main() -> Result<()> {
                         }
                     }
                     if let Some(backend) = injector.as_deref_mut() {
-                        process_event(&mut config.engine, InputEvent::Boundary, Some(backend))?;
+                        process_event(&mut config.engine, InputEvent::Boundary, Some(backend), &policy, active_backend)?;
                     }
                 } else {
-                    process_event(&mut config.engine, InputEvent::Text(line), None)?;
-                    process_event(&mut config.engine, InputEvent::Boundary, None)?;
+                    process_event(&mut config.engine, InputEvent::Text(line), None, &policy, active_backend)?;
+                    process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend)?;
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -686,6 +696,8 @@ fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
 fn drain_pending_window_events(
     window_tracker: &Option<mpsc::Receiver<Option<WindowContext>>>,
     engine: &mut ExpansionEngine,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
 ) -> Result<()> {
     if let Some(receiver) = window_tracker.as_ref() {
         let mut latest = None;
@@ -700,7 +712,7 @@ fn drain_pending_window_events(
             }
         }
         if let Some(window) = latest {
-            process_event(engine, InputEvent::WindowChanged(window), None)?;
+            process_event(engine, InputEvent::WindowChanged(window), None, policy, active_backend)?;
         }
     }
     Ok(())
@@ -966,8 +978,16 @@ fn process_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
     mut injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
+        // Check if hotkeys are allowed by policy
+        if let Err(violation) = policy::check_hotkey_allowed(policy) {
+            policy::log_violation(policy, &violation);
+            return Ok(());
+        }
+
         for action in engine.process_key(&chord) {
             match ExpansionEngine::execute_hotkey(&action) {
                 Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
@@ -984,14 +1004,28 @@ fn process_event(
         }
         return Ok(());
     }
-    apply_results(engine.process(event), injector)
+    apply_results(engine.process(event), injector, policy, active_backend)
 }
 
 fn apply_results(
     results: Vec<ExpansionResult>,
     mut injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     for result in results {
+        // Check if expansion is allowed by policy
+        let has_command = result.insert.contains("$COMMAND(");
+        if let Err(violation) = policy::check_expansion_allowed(
+            policy,
+            result.insert.len(),
+            has_command,
+            active_backend,
+        ) {
+            policy::log_violation(policy, &violation);
+            continue;
+        }
+
         if let Some(backend) = injector.as_deref_mut() {
             // P0 security fix: Never silently switch output transports.
             // If a replacement contains newlines and the selected backend
@@ -1147,10 +1181,13 @@ mod tests {
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
         let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy::default();
         process_event(
             &mut engine,
             InputEvent::Text(":a:b".into()),
             Some(&mut injector),
+            &policy,
+            "libei",
         )
         .unwrap();
         assert_eq!(
@@ -1231,7 +1268,8 @@ mod tests {
         )
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
-        process_event(&mut engine, InputEvent::Text(":x".into()), None).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        process_event(&mut engine, InputEvent::Text(":x".into()), None, &policy, "libei").unwrap();
     }
 
     #[test]
@@ -1243,10 +1281,13 @@ mod tests {
         )
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
         let error = process_event(
             &mut engine,
             InputEvent::Text(":x".into()),
             Some(&mut FailingInjector),
+            &policy,
+            "libei",
         )
         .unwrap_err();
         assert!(error.retryable());

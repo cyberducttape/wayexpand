@@ -16,6 +16,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 signal-hook.workspace = true
 rustix = { workspace = true, features = ["process", "fs"] }
+toml.workspace = true
 wayexpand-core = { path = "../core" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-wlroots-toplevel = { path = "../backend-wlroots-toplevel" }
