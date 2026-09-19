@@ -62,9 +62,18 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       timeout). Run them asynchronously with a bounded queue.
 - [x] **#27 Command timeouts kill only the direct child.** Spawn commands in
       their own process group and kill the group on timeout.
-- [ ] **Opt-in portal persistence.** Offer an explicit, revocable persistence
+- [ ] **Opt-in portal persistence (#28).** Offer an explicit, revocable persistence
       flow for libei/EIS restoration tokens, stored with strict permissions;
       keep the current non-persistent consent behavior as the default.
+      **Implementation guide:**
+      - Current: `select_devices()` uses `PersistMode::DoNot` (line 731)
+      - Proposed: Change to `PersistMode::Persistent` and extract restoration token from session
+      - Storage: `~/.config/wayexpand/libei-portal-token` (mode 0600, user-only)
+      - Config: Add `settings.libei_token_persistence` (bool, default: true) in config.rs
+      - Restoration: On next connection, call `proxy.restore_session(token)` instead of `create_session()`
+      - Error recovery: If restoration fails (expired/invalid), fall back to fresh `create_session()`
+      - Testing: Verify consent dialog appears once on first run, disappears on reconnect if token valid
+      - Note: ashpd version in vendor/ may need API verification; check Session type in ashpd::desktop
 
 ### Capture Path Improvements (v1.2.1+)
 
@@ -73,9 +82,9 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 - **input-method-v2:** Protects password fields and respects sensitive signals,
   but exclusive keyboard grab cannot safely pass through Escape, arrow keys,
   and function keys. Users on GNOME report losing navigation capability.
-- **evdev:** Preserves all keyboard events and native repeat, but reads all
-  global keystrokes (requires `input` group), ignores password field signals,
-  and cannot detect auto-repeat (line 205 tracks this).
+- **evdev:** Preserves all keyboard events and now mirrors kernel repeat into
+  matcher state, but reads all global keystrokes (requires `input` group) and
+  ignores password field signals. Repeat still needs real-device certification.
 
 Future work: research platform-specific approaches (systemd secure input,
 input ACLs, or compositor-provided focused-window filtering) to recover both
@@ -110,6 +119,9 @@ integrated into the daemon.
 
 ### Polish & Quality Improvements
 
+- [x] ~~Remove emoji and uncommon Unicode glyphs from functional GUI controls~~
+      -- controls now use text labels; decorative illustrations remain optional
+      and do not carry functionality
 - [x] ~~Move long-running KWin window-tracker operations (used by "Use
       current app" in the snippet editor) to a background thread~~ -- done:
       detection runs on a worker thread and the GUI polls for the result
@@ -140,6 +152,12 @@ Research ongoing; requires compositor-specific testing.
 
 **Baseline established:** See docs/GUI_PERFORMANCE.md  
 Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippets
+
+### Release Architectures
+
+Native x86_64 and aarch64 release archives are built on GitHub-hosted Linux
+runners. Package-manager publication and installation testing on aarch64 remain
+distribution-maintainer verification tasks.
 
 ### Enhanced Telemetry (Privacy-Respecting)
 
