@@ -36,28 +36,37 @@ pub fn load_policy() -> Result<OrganizationPolicy, String> {
 }
 
 fn load_policy_internal() -> Result<OrganizationPolicy, String> {
-    let path = Path::new(POLICY_PATH);
+    load_policy_from_path(Path::new(POLICY_PATH), Path::new(POLICY_DIR))
+}
 
-    // Policy file is optional; no file = default policy
-    if !path.exists() {
-        return Ok(OrganizationPolicy::default());
-    }
+fn load_policy_from_path(path: &Path, policy_dir: &Path) -> Result<OrganizationPolicy, String> {
+    // Use symlink_metadata to not follow symlinks (critical for security)
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // Policy file is optional; no file = default policy.
+            return Ok(OrganizationPolicy::default());
+        }
+        Err(error) => {
+            return Err(format!(
+                "could not inspect {}: {}",
+                path.display(),
+                error
+            ));
+        }
+    };
 
     // Validate parent directory: must be /etc/wayexpand with strict permissions
-    validate_policy_directory()?;
-
-    // Use symlink_metadata to not follow symlinks (critical for security)
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|e| format!("could not inspect {}: {}", POLICY_PATH, e))?;
+    validate_policy_directory(policy_dir)?;
 
     // Strict validation of policy file
-    validate_policy_file_metadata(&metadata)?;
+    validate_policy_file_metadata(path, &metadata)?;
 
     // Check file size (prevent DoS via huge files)
     if metadata.size() > MAX_POLICY_FILE_SIZE {
         return Err(format!(
             "{} is too large ({} bytes, max {})",
-            POLICY_PATH,
+            path.display(),
             metadata.size(),
             MAX_POLICY_FILE_SIZE
         ));
@@ -65,33 +74,31 @@ fn load_policy_internal() -> Result<OrganizationPolicy, String> {
 
     // Read and parse policy file
     let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("could not read {}: {}", POLICY_PATH, e))?;
+        .map_err(|e| format!("could not read {}: {}", path.display(), e))?;
 
     parse_policy_content(&content)
 }
 
 /// Validate that /etc/wayexpand directory is trusted
-fn validate_policy_directory() -> Result<(), String> {
-    let dir_path = Path::new(POLICY_DIR);
-
+fn validate_policy_directory(dir_path: &Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(dir_path)
-        .map_err(|e| format!("could not inspect {}: {}", POLICY_DIR, e))?;
+        .map_err(|e| format!("could not inspect {}: {}", dir_path.display(), e))?;
 
     // Must be a directory, not a symlink
     if !metadata.is_dir() {
-        return Err(format!("{} is not a directory", POLICY_DIR));
+        return Err(format!("{} is not a directory", dir_path.display()));
     }
 
     // Must be owned by root
     if metadata.uid() != 0 {
-        return Err(format!("{} must be owned by root", POLICY_DIR));
+        return Err(format!("{} must be owned by root", dir_path.display()));
     }
 
     // Must not be group- or world-writable
     if metadata.mode() & 0o022 != 0 {
         return Err(format!(
             "{} must not be group- or world-writable",
-            POLICY_DIR
+            dir_path.display()
         ));
     }
 
@@ -99,21 +106,21 @@ fn validate_policy_directory() -> Result<(), String> {
 }
 
 /// Strict validation of policy file metadata
-fn validate_policy_file_metadata(metadata: &std::fs::Metadata) -> Result<(), String> {
+fn validate_policy_file_metadata(path: &Path, metadata: &std::fs::Metadata) -> Result<(), String> {
     // Must be a regular file (not symlink, directory, etc.)
     if !metadata.is_file() {
-        return Err(format!("{} must be a regular file", POLICY_PATH));
+        return Err(format!("{} must be a regular file", path.display()));
     }
 
     // Explicitly reject symlinks (redundant with is_file, but be explicit)
     // is_file() returns false for symlinks because we use symlink_metadata
     if metadata.file_type().is_symlink() {
-        return Err(format!("{} must not be a symlink", POLICY_PATH));
+        return Err(format!("{} must not be a symlink", path.display()));
     }
 
     // Must be owned by root (critical: prevent user tampering)
     if metadata.uid() != 0 {
-        return Err(format!("{} must be owned by root", POLICY_PATH));
+        return Err(format!("{} must be owned by root", path.display()));
     }
 
     // Owner must be able to read, strict permissions recommended (0600 or 0400)
@@ -126,7 +133,7 @@ fn validate_policy_file_metadata(metadata: &std::fs::Metadata) -> Result<(), Str
             if metadata.mode() & 0o077 != 0 {
                 return Err(format!(
                     "{} must not be group- or world-accessible (mode: {:o})",
-                    POLICY_PATH,
+                    path.display(),
                     mode
                 ));
             }
@@ -226,6 +233,10 @@ pub fn check_hotkey_allowed(policy: &OrganizationPolicy) -> Result<(), String> {
         // In audit mode, violation is logged but hotkey proceeds
     }
     Ok(())
+}
+
+pub fn commands_enforced(policy: &OrganizationPolicy) -> bool {
+    policy.safe_mode && policy.disable_commands
 }
 
 /// Check expansion for policy violations and log them if present.
@@ -349,6 +360,23 @@ mod tests {
     }
 
     #[test]
+    fn command_enforcement_requires_safe_mode() {
+        let audit_policy = OrganizationPolicy {
+            safe_mode: false,
+            disable_commands: true,
+            ..Default::default()
+        };
+        let enforced_policy = OrganizationPolicy {
+            safe_mode: true,
+            disable_commands: true,
+            ..Default::default()
+        };
+
+        assert!(!commands_enforced(&audit_policy));
+        assert!(commands_enforced(&enforced_policy));
+    }
+
+    #[test]
     fn load_policy_with_organization_table() {
         // Test documented enterprise format: [organization] table
         let toml_content = r#"
@@ -390,8 +418,9 @@ allowed_backends = ["input-method", "libei"]
     #[test]
     fn validate_policy_file_metadata_rejects_symlinks() {
         // Create a test metadata that claims to be a symlink
-        let metadata = std::fs::symlink_metadata("/etc/passwd").unwrap();
-        let result = validate_policy_file_metadata(&metadata);
+        let path = Path::new("/etc/passwd");
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        let result = validate_policy_file_metadata(path, &metadata);
         // Should either fail due to wrong ownership or symlink check
         // (passwd is a regular file, so test our ownership check instead)
         assert!(result.is_err());
@@ -400,8 +429,9 @@ allowed_backends = ["input-method", "libei"]
     #[test]
     fn validate_policy_file_metadata_requires_root_ownership() {
         // Any regular file owned by non-root should fail
-        let metadata = std::fs::symlink_metadata("/tmp").unwrap(); // Typically not root
-        let result = validate_policy_file_metadata(&metadata);
+        let path = Path::new("/tmp");
+        let metadata = std::fs::symlink_metadata(path).unwrap(); // Typically not root
+        let result = validate_policy_file_metadata(path, &metadata);
         assert!(result.is_err(), "non-root file should be rejected");
     }
 
@@ -418,7 +448,35 @@ allowed_backends = ["input-method", "libei"]
         // Validate that directory checking is implemented
         // (actual /etc/wayexpand may not exist in test environment)
         // This test just verifies the function exists and is called
-        let _ = validate_policy_directory();
+        let _ = validate_policy_directory(Path::new(POLICY_DIR));
         // Result depends on system, but function should complete
+    }
+
+    #[test]
+    fn missing_policy_file_is_permissive() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/policy-test-missing");
+        let path = root.join("policy.toml");
+        let policy = load_policy_from_path(&path, &root).expect("missing policy is optional");
+        assert_eq!(policy, OrganizationPolicy::default());
+    }
+
+    #[test]
+    fn malformed_policy_is_rejected() {
+        let error = parse_policy_content("[organization\nnot valid").unwrap_err();
+        assert!(error.contains("invalid policy TOML"));
+    }
+
+    #[test]
+    fn existing_policy_file_requires_trusted_metadata() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/policy-test-untrusted");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("policy.toml");
+        std::fs::write(&path, "[organization]\ndisable_commands = true\n").unwrap();
+
+        let error = load_policy_from_path(&path, &root).unwrap_err();
+        assert!(error.contains("owned by root") || error.contains("accessible"));
+
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 }
