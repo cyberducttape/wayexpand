@@ -52,6 +52,11 @@ pub struct WindowContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpansionResult {
     pub trigger: String,
+    /// The exact characters that were typed in the input to match this trigger.
+    /// Used for deletion to ensure we delete exactly what was typed, not a
+    /// computed variant or the trigger template. Useful when case propagation
+    /// or other transformations might cause confusion about what to delete.
+    pub typed_trigger: String,
     pub erase_chars: usize,
     pub insert: String,
     /// Characters to move the cursor left after `insert` is typed, from a
@@ -249,6 +254,7 @@ impl ExpansionEngine {
         let (restore_text, erase_chars) = self.last_expansion.take()?;
         Some(ExpansionResult {
             trigger: String::new(),
+            typed_trigger: String::new(),
             erase_chars,
             insert: restore_text,
             cursor_offset: None,
@@ -400,6 +406,7 @@ impl ExpansionEngine {
                         }
                         results.push(ExpansionResult {
                             trigger,
+                            typed_trigger: typed.clone(),
                             erase_chars: length,
                             insert,
                             cursor_offset,
@@ -476,10 +483,11 @@ impl ExpansionEngine {
             self.buffer.pop_back();
         }
         if cursor_offset.is_none() {
-            self.last_expansion = Some((typed, insert.chars().count()));
+            self.last_expansion = Some((typed.clone(), insert.chars().count()));
         }
         Some(ExpansionResult {
             trigger,
+            typed_trigger: typed,
             erase_chars: length,
             insert,
             cursor_offset,
@@ -1311,6 +1319,7 @@ replacement = "bad\u0000value""#;
     fn apply_erases_before_inserting() {
         let result = ExpansionResult {
             trigger: ":x".into(),
+            typed_trigger: ":x".into(),
             erase_chars: 2,
             insert: "value".into(),
             cursor_offset: None,
@@ -1347,6 +1356,7 @@ replacement = "bad\u0000value""#;
     fn apply_uses_atomic_backend_operation_when_available() {
         let result = ExpansionResult {
             trigger: ":x".into(),
+            typed_trigger: ":x".into(),
             erase_chars: 2,
             insert: "value".into(),
             cursor_offset: None,
