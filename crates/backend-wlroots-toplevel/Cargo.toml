@@ -1,0 +1,18 @@
+[package]
+name = "wayexpand-backend-wlroots-toplevel"
+description = "wlr-foreign-toplevel-management-v1 window tracker for wlroots compositors (Sway, Hyprland, river)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+wayexpand-core = { path = "../core" }
+wayland-client = { workspace = true }
+wayland-protocols-wlr = { workspace = true, features = ["client"] }
+thiserror.workspace = true
+tracing.workspace = true
