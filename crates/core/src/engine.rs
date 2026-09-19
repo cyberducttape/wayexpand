@@ -2353,22 +2353,86 @@ replacement = "bad\u0000value""#;
     #[test]
     fn disable_commands_policy_blocks_command_execution() {
         // Regression test: disable_commands policy must prevent command execution
-        // in the engine, BEFORE the subprocess runs. Commands should not execute
-        // when the policy is active.
-        let mut config = Config::parse(
-            "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"dummy\"\ncommand = { program = \"true\" }\n",
-        )
-        .unwrap();
+        // in the engine, BEFORE the subprocess runs. Verify by checking that a
+        // side effect (file creation) never occurs—not just absence of result.
+        use std::fs;
+        use std::path::PathBuf;
+
+        let test_file = PathBuf::from(format!("/tmp/wayexpand-policy-test-{}.txt", std::process::id()));
+
+        // Clean up if it exists from a prior run
+        let _ = fs::remove_file(&test_file);
+
+        let cmd = format!(
+            "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"dummy\"\ncommand = {{ program = \"touch\", args = [\"{}\"] }}\n",
+            test_file.display()
+        );
+
+        let mut config = Config::parse(&cmd).unwrap();
         config.organization.disable_commands = true;
 
         let mut engine = ExpansionEngine::new(config).unwrap();
         engine.enable_async_commands();
 
-        // Typing the trigger should not produce any results when commands are disabled
+        // Typing the trigger should not produce results when commands are disabled
         let results = engine.process(InputEvent::Text(":cmd".into()));
         assert!(
             results.is_empty(),
-            "command-backed expansion should not execute when disable_commands=true"
+            "command-backed expansion should not return result when disable_commands=true"
         );
+
+        // Prove the actual security property: the subprocess was never spawned
+        // If the subprocess had run, the file would exist
+        assert!(
+            !test_file.exists(),
+            "command was executed despite disable_commands=true; {} exists when it should not",
+            test_file.display()
+        );
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn commands_execute_when_not_disabled() {
+        // Positive control: verify that commands DO run when policy allows them.
+        // This ensures the test infrastructure works and command execution isn't broken.
+        use std::fs;
+        use std::path::PathBuf;
+        use std::thread;
+        use std::time::Duration;
+
+        let test_file = PathBuf::from(format!("/tmp/wayexpand-cmd-enabled-{}.txt", std::process::id()));
+
+        // Clean up if it exists from a prior run
+        let _ = fs::remove_file(&test_file);
+
+        let cmd = format!(
+            "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"dummy\"\ncommand = {{ program = \"touch\", args = [\"{}\"] }}\n",
+            test_file.display()
+        );
+
+        let config = Config::parse(&cmd).unwrap();
+        // disable_commands is false by default, so commands will execute
+
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+
+        // Type the trigger to queue the command job
+        let _ = engine.process(InputEvent::Text(":cmd".into()));
+
+        // Commands are async; drain the completed results with a small timeout
+        thread::sleep(Duration::from_millis(100));
+        let _ = engine.drain_completed_commands();
+
+        // File should exist, proving the command ran
+        assert!(
+            test_file.exists(),
+            "command did not execute when commands are enabled; {} does not exist",
+            test_file.display()
+        );
+
+        // Clean up
+        let _ = fs::remove_file(&test_file);
     }
 }
