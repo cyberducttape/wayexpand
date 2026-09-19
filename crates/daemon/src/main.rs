@@ -1,3 +1,4 @@
+mod auto_select;
 mod control;
 mod reload;
 
@@ -77,6 +78,18 @@ impl EventError {
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let (path, source_name, backend_name) = parse_args()?;
+
+    // Phase 4 UX: Auto-select best backend if not explicitly specified
+    let selection = auto_select::auto_select(source_name.as_deref(), backend_name.as_deref());
+    let (source_name, backend_name) = if source_name.is_none() && backend_name.is_none() {
+        // No explicit selection: use auto-selection
+        info!("{}", selection.reason);
+        (Some(selection.source), Some(selection.backend))
+    } else {
+        // User provided at least one: use their choice
+        (source_name, backend_name)
+    };
+
     let mut config = ReloadableConfig::load(&path).map_err(|_| {
         anyhow::anyhow!(
             "could not load configuration {}; run `wayexpand doctor` for details",
