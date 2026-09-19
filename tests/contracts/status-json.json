@@ -6,6 +6,10 @@
     "state": "string",
     "paused": "boolean",
     "config": "string",
-    "config_state": "string"
+    "config_state": "string",
+    "command_queue_depth": "integer",
+    "command_queue_rejected_total": "integer",
+    "command_timeout_total": "integer",
+    "command_failure_total": "integer"
   }
 }

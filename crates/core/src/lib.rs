@@ -21,8 +21,8 @@ pub use config::{
     HotkeyConfig, MatchMode, OrganizationPolicy, Settings,
 };
 pub use engine::{
-    run_command, CommandError, ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError,
-    HotkeyResult, InputEvent, WindowContext,
+    run_command, CommandError, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
+    HotkeyError, HotkeyResult, InputEvent, WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};

@@ -295,7 +295,8 @@ wayexpand doctor --json | jq -e '.healthy' >/dev/null || exit 1
 Current daemon status (requires running daemon). This wraps the daemon's
 plain-text control-socket status response (`response` is its first line;
 every subsequent `key=value` line becomes a field, with `true`/`false`
-parsed as JSON booleans) rather than a purpose-built schema, so the fields
+parsed as JSON booleans and nonnegative integer values parsed as JSON numbers)
+rather than a purpose-built schema, so the fields
 below are exactly what that response currently carries -- nothing more.
 
 **Output shape:**
@@ -307,7 +308,11 @@ below are exactly what that response currently carries -- nothing more.
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
-  "config_state": "ok"
+  "config_state": "ok",
+  "command_queue_depth": 0,
+  "command_queue_rejected_total": 0,
+  "command_timeout_total": 0,
+  "command_failure_total": 0
 }
 ```
 
@@ -319,12 +324,14 @@ below are exactly what that response currently carries -- nothing more.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
+- `command_queue_depth` (integer): Number of accepted command actions waiting for the command worker
+- `command_queue_rejected_total` (integer): Number of command actions rejected because the bounded queue was full or unavailable
+- `command_timeout_total` (integer): Number of command actions that exceeded their configured timeout
+- `command_failure_total` (integer): Number of command actions that failed for another reason, including spawn failures and non-zero exits
 
 **Stability:** 🔒 **Stable** — these fields are guaranteed; new fields may be
-added. There is currently no uptime counter, reload counter, or
-expansions-evaluated counter -- if you need those, track them externally
-(e.g. via `systemctl show` for process uptime, or your own counter around
-`wayexpand test`/daemon log lines) rather than assuming they exist here.
+added. The queue depth is instantaneous; the three totals cover the current
+daemon engine and reset after a successful configuration reload.
 
 ---
 

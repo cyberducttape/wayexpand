@@ -25,8 +25,8 @@ use wayexpand_backend_libei::LibeiInjector;
 use wayexpand_backend_selection::auto_select;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent,
-    TextInjector, WindowContext, WindowTracker,
+    default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
+    InputEvent, TextInjector, WindowContext, WindowTracker,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -239,6 +239,7 @@ fn main() -> Result<()> {
     let window_tracker = spawn_window_tracker();
 
     let mut stdin_closed = false;
+    let mut logged_queue_rejections = 0;
     loop {
         if let Some(receiver) = window_tracker.as_ref() {
             let mut latest = None;
@@ -288,6 +289,20 @@ fn main() -> Result<()> {
                 Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
             }
         }
+        let metrics = config.engine.command_metrics();
+        if metrics.command_queue_rejected_total < logged_queue_rejections {
+            // A successful configuration reload creates a fresh engine and
+            // therefore starts a fresh counter interval.
+            logged_queue_rejections = 0;
+        }
+        if metrics.command_queue_rejected_total > logged_queue_rejections {
+            warn!(
+                command_queue_depth = metrics.command_queue_depth,
+                command_queue_rejected_total = metrics.command_queue_rejected_total,
+                "command action rejected because the command queue was full or unavailable"
+            );
+            logged_queue_rejections = metrics.command_queue_rejected_total;
+        }
         let completed_commands = config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
             if input_method_mode {
@@ -307,13 +322,14 @@ fn main() -> Result<()> {
                 apply_results(completed_commands, None, &policy, active_backend)?;
             }
         }
-        set_daemon_status(
+        set_daemon_status_with_metrics(
             &control,
             active_source,
             active_backend,
             connection_state,
             &path,
             config.healthy(),
+            metrics,
         );
         if input_method_mode {
             if input_method.is_none() {
@@ -855,7 +871,35 @@ fn set_daemon_status(
     config_path: &Path,
     config_healthy: bool,
 ) {
-    status::set_daemon_status(control, source, backend, state, config_path, config_healthy);
+    set_daemon_status_with_metrics(
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        config_healthy,
+        CommandMetrics::default(),
+    );
+}
+
+fn set_daemon_status_with_metrics(
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+    metrics: CommandMetrics,
+) {
+    status::set_daemon_status(
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        config_healthy,
+        metrics,
+    );
 }
 
 fn connect_input_method_with_retry(
@@ -1165,6 +1209,7 @@ mod tests {
             false,
             Path::new("/home/user/.config/wayexpand/expansions.toml"),
             true,
+            CommandMetrics::default(),
         );
         let mut fields: Vec<&str> = body
             .lines()
@@ -1173,13 +1218,26 @@ mod tests {
         fields.sort_unstable();
         assert_eq!(
             fields,
-            vec!["backend", "config", "config_state", "paused", "source", "state"],
+            vec![
+                "backend",
+                "command_failure_total",
+                "command_queue_depth",
+                "command_queue_rejected_total",
+                "command_timeout_total",
+                "config",
+                "config_state",
+                "paused",
+                "source",
+                "state",
+            ],
             "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
         );
         assert_eq!(
             body,
             "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\n\
-             config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok"
+             config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
+             command_queue_depth=0\ncommand_queue_rejected_total=0\n\
+             command_timeout_total=0\ncommand_failure_total=0"
         );
     }
 

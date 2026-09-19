@@ -9,7 +9,10 @@ use std::{
     collections::VecDeque,
     io::Read,
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -111,6 +114,17 @@ pub enum HotkeyError {
     WorkerUnavailable,
 }
 
+/// Runtime counters for command-backed expansions and hotkey actions.
+/// Counters are monotonically increasing for the lifetime of an engine;
+/// `command_queue_depth` is the current number of jobs waiting for the worker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CommandMetrics {
+    pub command_queue_depth: usize,
+    pub command_queue_rejected_total: u64,
+    pub command_timeout_total: u64,
+    pub command_failure_total: u64,
+}
+
 pub struct ExpansionEngine {
     config: Config,
     matcher: Matcher,
@@ -142,6 +156,7 @@ pub struct ExpansionEngine {
     last_expansion: Option<(String, String)>,
     input_generation: u64,
     async_commands: Option<AsyncCommandRuntime>,
+    command_metrics: Arc<CommandMetricsState>,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +169,70 @@ struct AsyncCommandRuntime {
     sender: mpsc::SyncSender<AsyncCommandJob>,
     receiver: mpsc::Receiver<AsyncCommandCompletion>,
     hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
+    metrics: Arc<CommandMetricsState>,
+}
+
+struct CommandMetricsState {
+    queue_depth: AtomicUsize,
+    queue_rejected_total: AtomicU64,
+    timeout_total: AtomicU64,
+    failure_total: AtomicU64,
+}
+
+impl CommandMetricsState {
+    fn new() -> Self {
+        Self {
+            queue_depth: AtomicUsize::new(0),
+            queue_rejected_total: AtomicU64::new(0),
+            timeout_total: AtomicU64::new(0),
+            failure_total: AtomicU64::new(0),
+        }
+    }
+
+    fn snapshot(&self) -> CommandMetrics {
+        CommandMetrics {
+            command_queue_depth: self.queue_depth.load(Ordering::Relaxed),
+            command_queue_rejected_total: self.queue_rejected_total.load(Ordering::Relaxed),
+            command_timeout_total: self.timeout_total.load(Ordering::Relaxed),
+            command_failure_total: self.failure_total.load(Ordering::Relaxed),
+        }
+    }
+
+    fn record_error(&self, timeout: bool) {
+        if timeout {
+            self.timeout_total.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.failure_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl AsyncCommandRuntime {
+    fn try_send(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
+        self.metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
+        match self.sender.try_send(job) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => {
+                self.metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                self.metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(QueueSendError::Full)
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                self.metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(QueueSendError::Disconnected)
+            }
+        }
+    }
+}
+
+enum QueueSendError {
+    Full,
+    Disconnected,
 }
 
 enum AsyncCommandJob {
@@ -244,6 +323,7 @@ impl ExpansionEngine {
             last_expansion: None,
             input_generation: 0,
             async_commands: None,
+            command_metrics: Arc::new(CommandMetricsState::new()),
         })
     }
 
@@ -261,10 +341,13 @@ impl ExpansionEngine {
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let (hotkey_completion_sender, hotkey_completion_receiver) =
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
+        let metrics = Arc::clone(&self.command_metrics);
+        let worker_metrics = Arc::clone(&metrics);
         thread::Builder::new()
             .name("wayexpand-command-worker".into())
             .spawn(move || {
                 while let Ok(job) = job_receiver.recv() {
+                    worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     match job {
                         AsyncCommandJob::Expansion {
                             config_index,
@@ -274,6 +357,9 @@ impl ExpansionEngine {
                         } => {
                             let cache_ms = command.cache_ms;
                             let output = run_command(&command);
+                            if let Err(error) = &output {
+                                worker_metrics.record_error(matches!(error, CommandError::Timeout));
+                            }
                             if completion_sender
                                 .send(AsyncCommandCompletion {
                                     config_index,
@@ -289,6 +375,10 @@ impl ExpansionEngine {
                         }
                         AsyncCommandJob::Hotkey(action) => {
                             let output = Self::execute_hotkey(&action);
+                            if let Err(error) = &output {
+                                worker_metrics
+                                    .record_error(matches!(error, HotkeyError::Timeout(_)));
+                            }
                             if hotkey_completion_sender
                                 .send(AsyncHotkeyCompletion { action, output })
                                 .is_err()
@@ -304,11 +394,17 @@ impl ExpansionEngine {
             sender: job_sender,
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
+            metrics,
         });
     }
 
     pub fn async_commands_enabled(&self) -> bool {
         self.async_commands.is_some()
+    }
+
+    /// Snapshot command execution counters for diagnostics and status output.
+    pub fn command_metrics(&self) -> CommandMetrics {
+        self.command_metrics.snapshot()
     }
 
     /// Applies the administrator's command-execution decision before command
@@ -374,11 +470,10 @@ impl ExpansionEngine {
             return Err(HotkeyError::WorkerUnavailable);
         };
         runtime
-            .sender
             .try_send(AsyncCommandJob::Hotkey(action.clone()))
             .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => HotkeyError::QueueFull,
-                mpsc::TrySendError::Disconnected(_) => HotkeyError::WorkerUnavailable,
+                QueueSendError::Full => HotkeyError::QueueFull,
+                QueueSendError::Disconnected => HotkeyError::WorkerUnavailable,
             })
     }
 
@@ -749,11 +844,16 @@ impl ExpansionEngine {
                 command: command.clone(),
                 result,
             };
+            if runtime.try_send(job).is_err() {
+                return None;
+            }
+            // Do not consume the trigger until the worker has accepted the
+            // job. A saturated queue therefore cannot make input silently
+            // disappear from the engine's state.
             for _ in 0..length {
                 self.buffer.pop_back();
             }
             self.last_expansion = None;
-            runtime.sender.try_send(job).ok()?;
             return None;
         } else {
             self.render_expansion(config_index).ok()?
@@ -1438,6 +1538,85 @@ mod tests {
         };
         assert_eq!(completed_action.chord, action.chord);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn rejected_command_job_does_not_consume_the_trigger() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/true"
+            timeout_ms = 500
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        // A zero-capacity queue with its receiver held makes try_send return
+        // Full deterministically, without starting a child process.
+        let (sender, _job_receiver) = mpsc::sync_channel(0);
+        let (_, completion_receiver) = mpsc::sync_channel(1);
+        let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
+        engine.async_commands = Some(AsyncCommandRuntime {
+            sender,
+            receiver: completion_receiver,
+            hotkey_receiver: hotkey_completion_receiver,
+            metrics: Arc::clone(&engine.command_metrics),
+        });
+        engine.buffer.extend(":slow".chars());
+        let before = engine.buffer.clone();
+
+        assert!(engine
+            .take_match(0, ":slow".chars().count(), None)
+            .is_none());
+        assert_eq!(engine.buffer, before);
+        assert_eq!(engine.command_metrics().command_queue_depth, 0);
+        assert_eq!(engine.command_metrics().command_queue_rejected_total, 1);
+    }
+
+    #[test]
+    fn command_metrics_count_timeouts_and_failures() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":timeout"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sleep"
+            args = ["1"]
+            timeout_ms = 10
+
+            [[expansion]]
+            trigger = ":failure"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/false"
+            timeout_ms = 500
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        assert!(engine
+            .process(InputEvent::Text(":timeout".into()))
+            .is_empty());
+        assert!(engine
+            .process(InputEvent::Text(":failure".into()))
+            .is_empty());
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            engine.drain_completed_commands();
+            let metrics = engine.command_metrics();
+            if metrics.command_timeout_total == 1 && metrics.command_failure_total == 1 {
+                break;
+            }
+            assert!(Instant::now() < deadline, "command metrics did not update");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
