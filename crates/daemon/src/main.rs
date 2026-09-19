@@ -111,8 +111,9 @@ fn main() -> Result<()> {
 
     // Respect safe_mode semantics: only disable commands in the engine when in enforcement mode.
     // In audit mode (safe_mode=false), commands are allowed but violations are logged by check_and_log_expansion_violations().
-    let should_disable_commands = policy.disable_commands && policy.safe_mode;
-    config.engine.set_commands_disabled(should_disable_commands);
+    config
+        .engine
+        .set_commands_disabled(policy::commands_enforced(&policy));
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -1116,11 +1117,11 @@ fn apply_results(
 ) -> std::result::Result<(), Box<EventError>> {
     for result in results {
         // Check if expansion violates policy and log if needed
-        let has_command = result.insert.contains("$COMMAND(");
+        // Use explicit provenance instead of heuristic: command_backed is set by engine
         if policy::check_and_log_expansion_violations(
             policy,
             result.insert.len(),
-            has_command,
+            result.command_backed,
             active_backend,
         ) {
             // In safe_mode, block the expansion
