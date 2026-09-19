@@ -8,7 +8,7 @@ Production release with:
 - Stability guarantees for CLI, JSON, and config schema
 - Security audit and formal threat model documentation
 - Package distribution: Ubuntu PPA and Arch AUR (Fedora has no Copr repo
-  yet -- see docs/PACKAGING_CHECKLIST.md)
+  yet -- see docs/PACKAGING.md)
 - Professional GUI with themes, language packs, and accessibility support
 - KDE Plasma support (evdev capture + KWin window tracking)
 - Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
@@ -98,7 +98,7 @@ Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippet
 
 Achieved at v1.0.0:
 - Available via Ubuntu PPA and Arch AUR (Fedora Copr not yet published —
-  see [docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md))
+  see [docs/PACKAGING.md](docs/PACKAGING.md))
 - Documented security policy with vulnerability disclosure process
 - Stability guarantees (COMPATIBILITY.md)
 - No known critical bugs

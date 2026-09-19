@@ -22,28 +22,47 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Verify version tag
+      - name: Verify version consistency across all sources
         shell: bash
         run: |
           set -euo pipefail
           expected="${GITHUB_REF_NAME#v}"
-          actual=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
-          test "$actual" = "$expected" || {
-            echo "tag $GITHUB_REF_NAME does not match workspace version $actual" >&2
+
+          # Check Cargo.toml
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+          test "$cargo_version" = "$expected" || {
+            echo "❌ Cargo.toml version ($cargo_version) does not match tag ($expected)" >&2
             exit 1
           }
-          # debian/changelog is what Launchpad's PPA builds key off of, not
-          # this tag or Cargo.toml -- a tag can pass the Cargo.toml check
-          # above and still leave Launchpad building a stale version if this
-          # file wasn't bumped in the same commit (this happened for
-          # v1.0.1/v1.1.0/v1.1.1, which all still said 1.0.0 here).
+
+          # Check debian/changelog (Launchpad PPA uses this)
           changelog_version=$(dpkg-parsechangelog --show-field Version)
           changelog_upstream="${changelog_version%%-*}"
           test "$changelog_upstream" = "$expected" || {
-            echo "tag $GITHUB_REF_NAME does not match debian/changelog version $changelog_version" >&2
-            echo "Launchpad builds from debian/changelog, not this tag -- bump it in the same commit you tag." >&2
+            echo "❌ debian/changelog version ($changelog_version) does not match tag ($expected)" >&2
+            echo "Launchpad builds from debian/changelog, not this tag." >&2
             exit 1
           }
+
+          # Check PKGBUILD (Arch Linux AUR uses this)
+          pkgbuild_version=$(sed -n 's/^pkgver=\([^"]*\)/\1/p' PKGBUILD)
+          test "$pkgbuild_version" = "$expected" || {
+            echo "❌ PKGBUILD pkgver ($pkgbuild_version) does not match tag ($expected)" >&2
+            exit 1
+          }
+
+          # Check RPM spec (Fedora Copr uses this)
+          spec_version=$(sed -n 's/^Version: *\([^ ]*\)/\1/p' wayexpand.spec)
+          test "$spec_version" = "$expected" || {
+            echo "❌ wayexpand.spec Version ($spec_version) does not match tag ($expected)" >&2
+            exit 1
+          }
+
+          echo "✓ Version consistency verified: $expected"
+          echo "  ✓ Cargo.toml: $cargo_version"
+          echo "  ✓ debian/changelog: $changelog_upstream"
+          echo "  ✓ PKGBUILD: $pkgbuild_version"
+          echo "  ✓ wayexpand.spec: $spec_version"
       - name: Build release binaries
         run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
       - name: Package release

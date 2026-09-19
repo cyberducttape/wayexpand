@@ -4,32 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-Changes since v1.1.2, not yet tagged.
-
-### Fixed
-
-- **Correctness/safety**: the GUI's live snippet preview built a real expansion engine and ran it on every repaint, which for a command-backed expansion meant its configured program executed continuously while the editor was simply open, including a program not yet saved. Preview now never runs a command-backed snippet's program automatically; an explicit "Run once" button does, with its result cached and cleared on selection change.
-- **Reliability**: `KwinWindowTracker::probe()` called `zbus`'s blocking D-Bus session connection synchronously in the daemon's `main()`, before its event loop starts, with no timeout. A session bus or KWin left in a bad state (observed after a prior forcibly-killed daemon instance) could hang this indefinitely, meaning the daemon never processed a single keystroke — with no log output to explain why. Now bounded to 3 seconds on a detached thread.
-- **Reliability**: the GUI's "Use current app" button had the same unbounded-hang exposure (`KwinWindowTracker::new()`'s own D-Bus/script-loading step was never time-bounded, only the window-wait after it was). Moved to a background thread with non-blocking polling, a spinner, and a Cancel button, so a hang there can no longer freeze the whole window.
-- **Reliability**: every external process the clipboard backend spawns (`xclip`, `xsel`, `xdotool`, `which`) had no timeout at all, unlike the daemon's command-expansion runner. Reachable synchronously from the daemon's main loop for any expansion containing a newline; a hung `xclip` (wedged X server, a clipboard manager holding the selection) could stall the whole daemon the same way. Now bounded to 3 seconds per call.
-- **Data loss**: Undo bypassed the unsaved-draft confirmation every other destructive action (Select, Delete, Reload) already went through, silently discarding in-progress edits. Also fixed a related transactional-ordering bug where a failed disk write after Undo still consumed the undo-history entry and changed in-memory state.
-- **Data loss**: closing the GUI window with an unsaved draft had no confirmation at all — the one exit path that could silently discard edits. Now routed through the same Save/Discard/Cancel dialog as every other action.
-- **Correctness**: Create, Duplicate, Delete, and Undo saved to disk but never asked the running daemon to reload, unlike Save — a user could delete a snippet, see it disappear from the GUI, and have the daemon keep expanding it. A failed reload request is now surfaced in the status message instead of silently discarded.
-- **Correctness**: `propagate_case` could silently collide with an unrelated snippet. Validation checked literal configured triggers for duplicates, but the matcher is built from *effective* triggers (a `propagate_case` expansion also inserts its uppercase/capitalized forms) — `:sig` with `propagate_case` generates `:SIG`, which could silently shadow a separately-configured `:SIG` expansion with no validation error. Validation now checks effective triggers.
-- **Correctness**: `erase()`/`move_cursor_left()` in the clipboard backend checked only whether `xdotool` spawned, not its exit status — a failed erase could let the replacement get typed after the still-present trigger instead of in place of it.
-- **Correctness**: the GUI's Pause/Resume button always assumed the daemon was running on startup, regardless of whether it had already been paused via the CLI; it now queries actual daemon state first.
-- **Stability**: a poisoned mutex in the KWin window-tracker's D-Bus callback (which runs on every window-focus event) would have panicked and permanently broken `app_filter`-scoped snippets until daemon restart; now handled without panicking.
-- **Stability**: `wayexpand-ui` had no panic-safety for terminal state — a panic during its main loop (which runs almost entirely in raw mode with the alternate screen active) would leave the terminal stuck until the user ran `reset` blind. Now restored via an RAII guard whose `Drop` runs even during a panicking unwind.
-- Installers/packaging: the application icon was missing from every install path except the Debian package (PKGBUILD, RPM spec, `install-user.sh`, `install-release.sh`, the release tarball workflow) — fixed on all of them.
-
-### Changed
-
-- `docs/COMPATIBILITY.md`'s `status --json` section documented fields (`uptime_seconds`, `config_reloads`, `expansions_evaluated`) that do not exist anywhere in the implementation, while labeling them "Stable — guaranteed." Corrected to document the fields that actually exist, with a two-sided contract test (daemon-side and CLI-side) so this can't silently drift again.
-- README.md and README.de.md rewritten: an architecture diagram, a factual comparison against Espanso/AutoKey, and a toned-down compatibility banner that matches `docs/SUPPORT_MATRIX.md` instead of overclaiming. README.de.md specifically had drifted into claiming GNOME support that doesn't exist and listing an already-fixed bug as a roadmap item.
-- Resolved a direct contradiction between `PROFESSIONAL_ROADMAP.md` (called GNOME window tracking "out of scope") and `docs/SUPPORT_MATRIX.md` (called it "planned for v1.1") — neither was accurate; both now state plainly that no GNOME implementation exists or is scheduled.
-- CI's release workflow now also verifies `debian/changelog`'s version against the release tag, not just `Cargo.toml` — the gap that let v1.0.1/v1.1.0/v1.1.1 all ship with a stale `debian/changelog` and confused Launchpad's PPA builds.
+Changes not yet released.
 
 ## [1.1.2] - 2026-09-18
+
+This is a security and correctness hardening release with 170+ new regression tests covering P0 fixes and stability improvements.
 
 ### Added
 
@@ -37,7 +16,40 @@ Changes since v1.1.2, not yet tagged.
 
 ### Fixed
 
-- Default theme's muted-text and border colors were brightened for WCAG AA contrast compliance on dark backgrounds.
+**Security & Correctness (P0):**
+- **Cross-window buffer isolation**: Matcher buffer was not cleared when switching windows, allowing text typed in one application to be deleted in another. Buffer now clears on `WindowChanged` event, preventing cross-application interference.
+- **Pause/sensitive-field state conflation**: Resume could re-enable expansion capture while still in a password field. Now uses independent `user_paused` and `sensitive_focus` booleans so pause state cannot bypass password-field protection.
+- **Ancestor path validation**: Incomplete validation allowed world-writable non-sticky ancestors to permit config path replacement. Now walks complete path to root using `openat2()` with `RESOLVE_BENEATH` semantics.
+- **Silent clipboard fallback**: Multiline expansions silently switched from Wayland injection to X11/XWayland, potentially targeting wrong windows. Fallback is now explicit and controlled, never silent.
+- **input-method-v2 key loss**: Unsupported keys (Escape, arrows, F-keys) were silently discarded without warning. Documentation now clearly warns this is a known limitation requiring workaround for affected compositors.
+
+**Reliability & Data Loss:**
+- **KWin window-tracker D-Bus hang**: `KwinWindowTracker::probe()` called blocking D-Bus in daemon `main()` before event loop with no timeout, causing indefinite hangs with no diagnostic output. Now bounded to 3 seconds on detached thread.
+- **GUI "Use current app" hang**: Same unbounded-hang exposure in window-tracker GUI button. Moved to background thread with spinner and Cancel button.
+- **Clipboard backend timeouts**: Every spawned process (`xclip`, `xsel`, `xdotool`, `which`) had no timeout, allowing hung X server to stall the entire daemon. Now bounded to 3 seconds per call.
+- **Undo discarding edits**: Undo bypassed unsaved-draft confirmation that other destructive actions enforced. Also fixed transactional bug where failed disk write still consumed undo-history and changed state.
+- **Window close without save confirmation**: Closing GUI with unsaved draft had no confirmation. Now routed through Save/Discard/Cancel dialog.
+- **Command-backed expansions in preview**: GUI's live snippet preview executed command-backed expansions on every repaint, running unconfigured programs. Preview now never auto-executes commands; explicit "Run once" button does with cached result.
+
+**Correctness:**
+- **Daemon reload after edit**: Create, Duplicate, Delete, and Undo saved to disk but never reloaded the daemon, allowing deleted snippets to still expand. Now surfaces reload request status in UI.
+- **propagate_case validation**: Case propagation could silently collide with unrelated snippets. Validation now checks effective triggers, not just literal configured ones.
+- **xdotool exit status**: Clipboard backend ignored `xdotool` failures, allowing failed erases to leave the trigger typed after the replacement. Now checks exit status.
+- **Pause/Resume state**: GUI's Pause/Resume button assumed daemon was running on startup. Now queries actual daemon state first.
+- **Clipboard fallback detection**: `xsel` fallback was skipped when `xclip` binary was entirely absent. Now properly handles `xsel`-only installs.
+- **Clipboard X11 requirement**: Clipboard backend now refuses to initialize when no `DISPLAY` is available, avoiding silent failure on every operation.
+
+**Stability:**
+- **Mutex poisoning in window-tracker**: D-Bus callback could panic on every window-focus event, permanently breaking `app_filter` until restart. Now handles without panicking.
+- **TUI panic recovery**: `wayexpand-ui` panic during main loop (running in raw/alternate-screen mode) left terminal stuck. Now restored via RAII guard that runs even during panic.
+
+**Documentation & Packaging:**
+- Default theme's muted-text and border colors brightened for WCAG AA contrast compliance.
+- Application icons now included in all install paths (PKGBUILD, RPM spec, `install-user.sh`, `install-release.sh`).
+- `docs/COMPATIBILITY.md` corrected: `status --json` section documented non-existent fields. Now documents actual fields with contract tests to prevent future drift.
+- README.md and README.de.md rewritten with architecture diagram and accurate backend compatibility claims.
+- Resolved GNOME window-tracking contradictions between roadmaps and docs.
+- Release workflow now verifies `debian/changelog`, `PKGBUILD`, and `wayexpand.spec` versions against git tag, preventing stale package metadata.
 
 ## [1.1.1] - 2026-09-18
 
@@ -101,7 +113,7 @@ This is the first stable release. WayExpand is now recommended for production us
 
 - Release tagging: v0.2.1 build/CI hardening → ready for 1.0.0 certification
 - Compositor support status moved from "Experimental" to "Supported" for tested backends per [INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) protocol
-- Control socket and daemon security model formally documented in [SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
+- Control socket and daemon security model formally documented in [SECURITY.md](SECURITY.md)
 
 ### Known Limitations
 

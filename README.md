@@ -97,10 +97,8 @@ wayexpand-gui             # manage snippets graphically
 yay -S wayexpand
 ```
 
-> Verify the AUR package is current before relying on it in a script —
-> check `pkgver` in its `PKGBUILD` against the [latest
-> release](https://github.com/itchyitchy123/wayexpand/releases). Fedora has
-> no Copr repository yet; see [docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md).
+> **Fedora/RHEL note:** No official Copr repository exists yet. Build from source using the RPM spec file
+> in the repository, or use the release tarball with `install-release.sh`. Community contributions welcome.
 
 **From source** (any distro, no packaging required):
 
@@ -192,22 +190,62 @@ an empty library.
 
 ## Installation
 
-For compositors that advertise `zwp_input_method_manager_v2` or
-`zwp_virtual_keyboard_manager_v1`, an explicit `--source=input-method` mode
-uses input-method-v2 for both capture and insertion, paired with
-`--backend=wlroots` or `--backend=libei` for output. Unsupported grabbed
-key events may be lost until compositor-specific pass-through is
-implemented (tracked in the [support matrix](docs/SUPPORT_MATRIX.md)); this
-does not restart the daemon.
+WayExpand's deployment depends on your compositor and its Wayland protocol support. The valid backend combinations are:
 
-For compositors that advertise neither protocol at all — KWin/KDE Plasma as
-of 6.6 is the primary example — an experimental `--source=evdev` mode reads
-keyboard events directly from the kernel instead. This works on any
-compositor but requires `input` group membership and has **no
-sensitive-field signal**, so matching is never suspended in password
-fields. Read [SECURITY.md](SECURITY.md) before enabling it. Granting the
-permission is a separate, explicit, root-requiring step the installers
-never run for you:
+**Option 1: input-method-v2 (single unified backend)**
+
+For compositors advertising `zwp_input_method_manager_v2` (GNOME, some others):
+```sh
+systemctl --user enable --now wayexpand-input-method.service
+```
+
+Pros:
+- Simpler setup (one backend handles capture+output)
+- Respects sensitive-field signals in password fields
+- Requires no special permissions
+
+Cons:
+- Experimental — unsupported key events (Escape, arrows, F-keys) may not pass through (see [support matrix](docs/SUPPORT_MATRIX.md))
+
+**Option 2: evdev + libei/wlroots (split capture/output)**
+
+For compositors without input-method-v2 (KDE Plasma/KWin 6.6+, Sway, Hyprland):
+```sh
+sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
+sudo ./scripts/install-evdev-permissions.sh             # then apply
+systemctl --user enable --now wayexpand-evdev.service
+```
+
+Pros:
+- Better keyboard fidelity (all keys pass through)
+- Works on any Wayland compositor
+
+Cons:
+- **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
+- **No password-field protection** — matching is never suspended in password fields
+- Experimental — read [SECURITY.md](SECURITY.md) before enabling
+
+This unit does not auto-restart on failure by design: the `libei` backend
+connects through the desktop RemoteDesktop portal without persisting
+consent, so every connection attempt shows a fresh permission dialog, and
+auto-restarting would re-show it faster than you could respond. Restart it
+yourself after a compositor restart or portal hiccup:
+`systemctl --user restart wayexpand-evdev.service`.
+
+**Which should I choose?**
+
+Run `wayexpand doctor` after installation to see which backends your compositor supports:
+```sh
+wayexpand doctor
+```
+
+If you're on KDE Plasma, use **Option 2** (evdev) — it's the only tested path with good keyboard fidelity.
+
+If you're on GNOME or another input-method-v2 compositor, try **Option 1** first; if you lose keyboard input (Escape/arrows), switch to Option 2 if your compositor supports it, or accept the limitation.
+
+**Granting evdev permission**
+
+Granting the permission is a separate, explicit, root-requiring step the installers never run for you. Understand what `input` group membership means before proceeding (see [SECURITY.md](SECURITY.md) for details).
 
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first

@@ -1,15 +1,29 @@
 [Unit]
-Description=WayExpand text expansion daemon
+Description=WayExpand text expansion daemon (stdin test mode)
 After=graphical-session.target
 PartOf=graphical-session.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
+# ⚠️ WARNING: This unit runs with --source=stdin, a test harness that only
+# reads from standard input. It is not a working text expander for normal use.
+#
+# For production deployment, use one of these instead:
+#
+#   wayexpand-input-method.service
+#       (GNOME and compositors with input-method-v2 support)
+#
+#   wayexpand-evdev.service
+#       (KDE Plasma, Sway, Hyprland, and other compositors without
+#        input-method-v2 — read SECURITY.md and docs/OPERATIONS.md first)
+#
+# This unit exists only for testing the daemon configuration in isolation.
+
 [Service]
 Type=simple
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 ExecStartPre=/usr/bin/env wayexpand validate
-ExecStart=/usr/bin/env wayexpand-daemon
+ExecStart=/usr/bin/env wayexpand-daemon --source=stdin
 Restart=on-failure
 RestartSec=2s
 SuccessExitStatus=SIGTERM

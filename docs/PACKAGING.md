@@ -6,9 +6,9 @@ This guide covers building and maintaining WayExpand packages for different Linu
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
-| Arch Linux | `wayexpand` | [AUR](https://aur.archlinux.org) | See below |
-| Debian/Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | See below |
-| Fedora | `wayexpand` | [Copr](https://copr.fedorainfracloud.org) | See below |
+| Arch Linux | `wayexpand` | [AUR](https://aur.archlinux.org) | Community (WayExpand repo provides PKGBUILD) |
+| Debian/Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
+| Fedora/RHEL | `wayexpand` | Build from source | ⚠️ No official Copr yet |
 
 ## Building Locally
 
@@ -49,19 +49,33 @@ sudo dpkg -i ../wayexpand_1.0.0-1_amd64.deb
 
 ### Fedora/RHEL
 
+**Status:** No official Copr repository yet. Build locally or from source.
+
+**Local build from spec file:**
+
 ```bash
 # Prepare for rpmbuild
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-mock wayexpand-1.0.0-1.fc39.src.rpm
+mock wayexpand-1.1.2-1.fc39.src.rpm
 ```
 
-**To maintain:**
-1. Update version in `wayexpand.spec`
-2. Add changelog entry in `%changelog` section
-3. Test build: `rpmbuild -ba wayexpand.spec`
-4. Push to Copr (if using Copr) or submit to Fedora package collection
+**To build from the repository spec file:**
+```bash
+git clone https://github.com/itchyitchy123/wayexpand
+cd wayexpand
+rpmbuild -ba wayexpand.spec
+```
+
+**To set up an official Copr repository:**
+
+1. Create account at https://copr.fedorainfracloud.org
+2. Create new project
+3. Configure to auto-build from GitHub releases
+4. Announce in README
+
+**Contributions welcome:** If you maintain a Copr repo or want to create one, please open an issue or PR.
 
 ---
 

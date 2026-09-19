@@ -42,6 +42,34 @@ queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an
 unresponsive EIS endpoint cannot hold daemon startup indefinitely.
 
+**Character insertion latency (ei_keyboard fallback):**
+When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
+synthesizes individual key presses for each character. To ensure reliability
+and prevent key merging at the compositor, a safe delay is added between each
+synthesized character. This means:
+
+- **Normal case** (ei_text available): Sub-millisecond insertion (fast)
+- **Fallback case** (ei_keyboard only): ~10-50ms per character (slower)
+
+For short snippets (signatures, small templates), this is imperceptible.
+For long replacements (multi-paragraph code blocks, long administrative text),
+the total insertion time becomes noticeable:
+
+- 100-character replacement: ~1-5 seconds
+- 1000-character replacement: ~10-50 seconds
+
+This is intentional: the delay prioritizes correctness and reliability over speed
+when the fast path isn't available.
+
+**When does this happen?** Observed with xdg-desktop-portal-kde on KWin 6.6.
+As KDE Portal support matures, `ei_text` support should become universal and
+this fallback will become rare.
+
+**Workaround:** If latency is intolerable:
+- Use input-method-v2 instead (if your compositor supports it)
+- Use shorter snippets (split long ones into smaller, composable pieces)
+- Accept the tradeoff as a known limitation of your deployment
+
 The implementation is isolated behind an optional backend crate and is not a
 dependency of the platform-independent core. Both direct-socket and portal
 paths use the pure-Rust `reis` protocol implementation; portal revocation and
@@ -150,3 +178,77 @@ character becomes synthetic keyboard traffic; larger replacements are rejected
 before the trigger is erased. Registry discovery is deadline-bounded at startup
 so an unresponsive compositor cannot leave a daemon connection attempt hanging
 forever.
+
+## evdev (direct kernel input capture)
+
+The evdev backend reads keyboard events directly from `/dev/input/event*`
+devices, bypassing Wayland protocols entirely. This is necessary for compositors
+(notably KWin/KDE Plasma as of 6.6) that do not implement `zwp_input_method_manager_v2`
+or `zwp_virtual_keyboard_manager_v1`. The tradeoff is significant: evdev has
+**no way to detect password fields or sensitive inputs**, since field semantics
+are not available at the kernel level.
+
+**Requires:** Membership in the `input` group, which grants raw keyboard access
+to **all keystrokes** system-wide (not just WayExpand's). See SECURITY.md for
+the full security model and explicit opt-in procedure.
+
+### Known Limitations
+
+**Auto-repeat (key hold) handling:**
+Kernel repeat events (code value == 2) are intentionally ignored by the evdev source.
+This means held keys behave differently from rapid typing:
+
+- **Normal typing:** Key down, key up → matcher sees one keystroke
+- **Key hold:** Key down, repeat events (ignored), key up → matcher sees one keystroke
+- **Result:** Held keys won't trigger auto-repeat in expansions
+
+This is a deliberate choice: repeat events can create confusion in the matcher
+without providing meaningful new information. If your workflow depends on
+detecting held keys differently, use input-method-v2 instead.
+
+**Password-field protection:**
+Because the kernel provides no field-type information, the matcher **never**
+suspends matching in password fields. Sensitive-field detection is unavailable.
+
+This is the primary security limitation of the evdev backend. Before enabling
+evdev, ensure your deployment model accepts this tradeoff (see SECURITY.md).
+
+**Keyboard layout handling:**
+The evdev source uses the system XKB keymap (typically loaded at session start).
+If the active layout changes during a session, the mapper continues using the
+original layout until the daemon is restarted. For fixed-layout deployments,
+this is not an issue. For multi-layout switchers, consider:
+
+- Restarting the daemon after switching layouts: `systemctl --user restart wayexpand-evdev.service`
+- Using input-method-v2 instead, which learns layout changes from the compositor
+- Using only ASCII triggers and replacements (no layout-dependent characters)
+
+**Probe detection doesn't verify keyboards:**
+The evdev backend's `doctor` probe counts any readable `/dev/input/event*` device
+as potentially valid. It does NOT verify that a readable device is actually a
+keyboard (has EV_KEY capability bits). This can produce a false-positive
+diagnostic result:
+
+- `doctor` reports "evdev capture ready" ✓
+- Daemon starts and tries to use the device
+- Device is a mouse, touchpad, or other input device
+- Daemon finds no keyboard and fails to capture text
+
+**Workaround:** If `wayexpand doctor` says evdev is ready but typing doesn't
+expand:
+1. List input devices: `ls -la /dev/input/event*`
+2. Check which ones are keyboards: `cat /proc/bus/input/devices`
+3. Verify at least one is readable: `ls -l /dev/input/event* | grep $USER` (for input group membership)
+4. Restart daemon: `systemctl --user restart wayexpand-evdev.service`
+
+**Future improvement:** The probe should inspect EV_KEY/key capability bits and
+report actual candidate keyboards specifically.
+
+**No hotplug or per-device tracking:**
+The evdev source probes `/dev/input/event*` at startup and retains that device list.
+If devices are added/removed during operation (USB keyboard unplugged, etc.),
+the source continues using the original devices. This is typically fine for
+built-in keyboards but may affect workflows with multiple input devices.
+
+For more details on evdev implementation, architecture decisions, and integration
+testing, see the evdev backend crate source code.

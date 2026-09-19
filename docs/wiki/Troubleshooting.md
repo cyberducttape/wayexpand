@@ -112,18 +112,23 @@ responds to "Use current app". This is a known race condition:
 
 If the WayExpand daemon is killed ungracefully (`kill -9`), leftover KWin
 scripts may remain:
-- D-Bus service: `org.wayexpand.WindowTracker.pid<PID>` (unregistered but gone)
-- Script file: `/tmp/wayexpand-window-tracker-<PID>.js` (orphaned)
+- D-Bus service: `org.wayexpand.WindowTracker` (may linger)
+- Script file: `/tmp/wayexpand-window-tracker-*.js` (created with random nonce, safe)
 
-**Impact:** Low — subsequent daemon restarts use a different PID and register a
-new service/script with no collision.
+**Impact:** Low — the random nonce in script filenames prevents collision with
+new daemon instances. Stale services are cleaned up on next session.
 
-**Cleanup (if concerned):**
+**Automatic cleanup:** Normal daemon shutdown cleans these up. You do not need
+to manually remove them.
+
+**Manual cleanup (if concerned):**
 ```sh
-rm /tmp/wayexpand-window-tracker-*.js
+# List orphaned scripts (usually safe to ignore)
+ls /tmp/wayexpand-window-tracker-*.js 2>/dev/null || echo "None found"
 ```
 
-Normal daemon shutdown cleans these up automatically.
+The script creation now uses `O_CREAT|O_EXCL` semantics with random nonces,
+preventing accidental overwrites even after process crashes.
 
 ## Wlroots Compositors (Sway, Hyprland)
 
