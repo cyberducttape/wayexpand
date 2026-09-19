@@ -41,8 +41,9 @@ The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
 
 ### 3. Start the route selected for your session
 
-If the explanation reports `evdev + libei`, install the evdev permission rule
-and start the normal capture service:
+Automatic mode intentionally leaves raw evdev disabled, even when
+`/dev/input` is readable. If you choose to acknowledge global keyboard capture,
+install the evdev permission rule and start the explicit service:
 
 ```sh
 sudo ./scripts/install-evdev-permissions.sh
@@ -50,10 +51,10 @@ systemctl --user enable --now wayexpand-evdev.service
 wayexpand status --json
 ```
 
-The status should report `state=connected`. If no readable evdev device is
-available, the automatic fallback is stdin and is intended for harnesses, not
-normal desktop capture. Input-method-v2 is an explicit experimental opt-in;
-read its key pass-through warning before starting
+The status should report `state=connected`. If you do not acknowledge evdev,
+the automatic fallback is stdin and is intended for harnesses, not normal
+desktop capture. Input-method-v2 is an explicit experimental opt-in; read its
+key pass-through warning before starting
 `wayexpand-input-method.service`. For either route, read the security
 tradeoffs in [SECURITY.md](../SECURITY.md).
 
@@ -140,7 +141,7 @@ wayexpand doctor  # Shows what your session can use
 ```
 
 **Known limitations:**
-- The automatic route is evdev + libei when `/dev/input` is readable
+- Automatic mode leaves evdev disabled even when `/dev/input` is readable
 - Input-method-v2 is explicit/experimental: Escape, arrow keys, and F-keys may not pass through
 - Evdev requires `input` group membership and has no password-field signal
 

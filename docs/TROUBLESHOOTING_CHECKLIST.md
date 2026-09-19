@@ -76,7 +76,7 @@ has advertised the protocol. The probe lines are the decision:
 | --- | --- | --- |
 | `input-method-v2 probe: manager and seat connection succeeded` | Experimental direct Wayland path is available | Use only with explicit opt-in if accepting possible loss of Escape, arrows, or function keys |
 | `wlroots probe: virtual keyboard globals available` | A wlroots output path was detected | Use `--source=evdev --backend=wlroots` only when doctor lists it as usable |
-| `RequiresPermission` / `permission=Required` | The device or portal needs explicit access | Apply the evdev or portal remediation below |
+| `RequiresPermission` / `permission=Required` | The device or portal needs explicit access | Apply the evdev or portal remediation below; raw evdev is never automatic |
 | `Unavailable` / `NotImplemented` | The path cannot be used in this session | Choose another path or compositor |
 | `Capture readiness: NOT READY` | No complete source + output pair was found | Resolve the first unavailable probe; do not keep restarting the daemon |
 
@@ -94,7 +94,8 @@ wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
 wayexpand doctor
 ```
 
-For an explicit evdev fallback:
+For an explicit evdev setup (acknowledges global keyboard visibility and has no
+password-field signal):
 
 ```sh
 sudo usermod -aG input "$USER"
