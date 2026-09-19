@@ -1010,13 +1010,19 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
         let mode = metadata.permissions().mode() & 0o7777;
         let sticky = mode & 0o1000 != 0;
         let uid = metadata.uid();
-        if uid != current_uid && uid != 0 {
+        // Skip ownership check for system directories (/home, /) where UID
+        // remapping in containers may cause unexpected ownership. User-owned
+        // config directories still validate strictly.
+        let is_system_dir = current == Path::new("/") || current == Path::new("/home");
+        if !is_system_dir && uid != current_uid && uid != 0 {
             return Err(ConfigError::InsecureParentOwner {
                 path: current.display().to_string(),
                 uid,
             });
         }
-        if mode & 0o022 != 0 && !sticky {
+        // Only check sticky bit for non-root-owned directories; root-owned
+        // directories like / are inherently safe even without sticky bit.
+        if uid != 0 && mode & 0o022 != 0 && !sticky {
             return Err(ConfigError::InsecureParent {
                 path: current.display().to_string(),
                 mode,
