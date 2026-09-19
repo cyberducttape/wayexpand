@@ -334,7 +334,7 @@ impl BackendSelection {
         let tracking = if capabilities.has_window_tracker {
             match capabilities.compositor {
                 Compositor::KdePlasma => "kwin (best-effort)",
-                _ => "wlroots scaffold (best-effort)",
+                _ => "not shipped",
             }
         } else {
             "none"

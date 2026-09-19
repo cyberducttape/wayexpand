@@ -19,7 +19,7 @@ Wayland session alone does not imply that a backend is usable.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev`) | Experimental, best-effort | Compositor-agnostic compatibility fallback (e.g. KWin); requires explicit raw-input consent, has no sensitive-field signal, and cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [`P0_3_DECISION_REQUIRED.md`](P0_3_DECISION_REQUIRED.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Implemented on KDE; awaiting independent certification | KWin tracker exists; wlroots tracker is a scaffold; GNOME/Mutter has no supported tracker |
+| Focused-window tracking (`app_filter`) | Implemented on KDE; awaiting independent certification | KWin tracker exists; wlroots tracker is not shipped; GNOME/Mutter has no supported tracker |
 | Key pass-through | Not supported | Must prove unrelated keys are never lost |
 | Preedit/IME composition | **Not supported** | ⚠️ Affects CJK, dead-keys, composition (see below) |
 

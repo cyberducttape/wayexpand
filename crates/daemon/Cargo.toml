@@ -21,7 +21,6 @@ rustix = { workspace = true, features = ["process", "fs"] }
 toml.workspace = true
 wayexpand-core = { path = "../core" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
-wayexpand-backend-wlroots-toplevel = { path = "../backend-wlroots-toplevel" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-evdev = { path = "../backend-evdev" }

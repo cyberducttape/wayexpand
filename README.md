@@ -23,8 +23,8 @@ X11-shaped implementation with Wayland support bolted on.
 > exactly what's been verified versus implemented-but-untested, and
 > `wayexpand doctor` tells you what your own session can actually use
 > before you rely on it. **KDE Plasma (KWin 6.6+)** and 
-> Sway, Hyprland, and river have a wlroots tracking scaffold awaiting
-> active-protocol and compositor certification.
+> Sway, Hyprland, and river do not currently ship a wlroots window-tracking
+> backend; that integration remains an experimental future project.
 
 ![WayExpand snippet dashboard](docs/archive/wiki/assets/snippets-dashboard.png)
 

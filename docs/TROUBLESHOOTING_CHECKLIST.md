@@ -154,8 +154,8 @@ Test the unfiltered snippet first. Then check the current support boundary:
 
 - KDE/KWin: run `wayexpand doctor`; window tracking is implemented but still
   best-effort and awaiting broader independent certification.
-- Sway, Hyprland, and river: the window-tracking path is a scaffold; filters
-  fail closed and therefore do not match.
+- Sway, Hyprland, and river: window tracking is not shipped; filters fail
+  closed and therefore do not match.
 - GNOME/Mutter: no supported window tracker is available; use a global
   expansion or hotkey.
 
