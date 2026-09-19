@@ -14,8 +14,8 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, discover_backends, import_espanso, BackendKind, BackendState, Config,
-    ExpansionEngine, InputEvent, MatchMode, OrganizationPolicy,
+    all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind,
+    BackendState, Config, ExpansionEngine, InputEvent, MatchMode, OrganizationPolicy,
 };
 
 /// Pulls the first `--json` flag out of `args`, wherever it appears, so
@@ -485,7 +485,13 @@ fn run() -> Result<()> {
             println!("Session: {}", session_description());
             println!("No permissions, services, or configuration will be changed.");
             println!();
-            let ready = print_backend_diagnostics();
+            let has_wayland = env::var_os("WAYLAND_DISPLAY").is_some();
+            let has_x11 = env::var_os("DISPLAY").is_some();
+            let diagnostics_ok = print_backend_diagnostics();
+            let ready = has_wayland && diagnostics_ok;
+            if has_x11 && !has_wayland {
+                println!("Setup note: native X11 capture is not implemented; use the explicit evdev route if its security tradeoff is acceptable.");
+            }
             println!();
             if ready {
                 println!("Next step: choose one listed backend and enable its user service.");
@@ -517,6 +523,7 @@ fn run() -> Result<()> {
             let control_socket_ok = print_control_socket_diagnostics();
             let _policy_ok = print_policy_diagnostics();
             let capture_ready = print_backend_diagnostics();
+            print_capabilities_diagnostics();
             if !config_ok || !control_socket_ok || !capture_ready {
                 bail!("doctor found configuration, runtime, or backend problems");
             }
@@ -774,6 +781,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
         .collect();
     let policy = print_policy_diagnostics_json();
+    let capabilities = print_capabilities_diagnostics_json();
     let healthy = config_ok && (socket_path.is_none() || socket_exists);
     println!(
         "{}",
@@ -792,6 +800,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             },
             "policy": policy,
             "backends": backends,
+            "capabilities": capabilities,
         })
     );
     Ok(healthy)
@@ -1045,6 +1054,47 @@ fn print_policy_diagnostics_json() -> serde_json::Value {
         "exists": Path::new(POLICY_PATH).exists(),
         "policy": policy_json,
     })
+}
+
+fn print_capabilities_diagnostics() {
+    println!("\nBackend capabilities:");
+    let all_caps = all_capabilities();
+    for caps in all_caps {
+        let env_support = if caps.works_in_environment() {
+            "✓ available"
+        } else {
+            "✗ not available in this environment"
+        };
+        println!("  {}: {}", caps.backend_name, env_support);
+        println!("    Features: {}", caps.feature_summary);
+        println!(
+            "    Max replacement: {}",
+            if caps.max_replacement_size == 0 {
+                "unlimited".to_string()
+            } else {
+                format!("{} bytes", caps.max_replacement_size)
+            }
+        );
+    }
+}
+
+fn print_capabilities_diagnostics_json() -> serde_json::Value {
+    let all_caps = all_capabilities();
+    let caps_json: Vec<_> = all_caps
+        .iter()
+        .map(|caps| {
+            serde_json::json!({
+                "backend": caps.backend_name,
+                "available_in_environment": caps.works_in_environment(),
+                "multiline": caps.multiline,
+                "exclusive_capture": caps.exclusive_capture,
+                "text_method": caps.text_method.to_string(),
+                "max_replacement_size": caps.max_replacement_size,
+                "feature_summary": caps.feature_summary,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(caps_json)
 }
 
 fn print_policy_diagnostics() -> bool {

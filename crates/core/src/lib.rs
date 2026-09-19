@@ -1,6 +1,7 @@
 //! Platform-independent text expansion engine.
 
 mod backend;
+mod capabilities;
 mod config;
 mod engine;
 mod fleet;
@@ -14,6 +15,7 @@ pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorError, InputSource,
     InputSourceError, TextInjector, WindowTracker, WindowTrackerError,
 };
+pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
     OrganizationPolicy, Settings,
