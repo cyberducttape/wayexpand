@@ -16,7 +16,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
-use wayexpand_backend_clipboard::ClipboardInjector;
 use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
@@ -874,24 +873,18 @@ fn process_event(
     }
     for result in engine.process(event) {
         if let Some(backend) = injector.as_deref_mut() {
-            // Auto-detect newlines and try clipboard backend if needed
-            let use_clipboard = text_contains_newlines(&result.insert);
-
-            let inject_result = if use_clipboard {
-                // Try clipboard backend for text with newlines
-                match ClipboardInjector::new() {
-                    Ok(mut clipboard) => {
-                        info!("using clipboard backend for expansion with newlines");
-                        ExpansionEngine::apply(&mut clipboard, &result)
-                    }
-                    Err(error) => {
-                        warn!(%error, "clipboard backend unavailable, falling back to primary backend");
-                        ExpansionEngine::apply(backend, &result)
-                    }
-                }
-            } else {
-                ExpansionEngine::apply(backend, &result)
-            };
+            // P0 security fix: Never silently switch output transports.
+            // If a replacement contains newlines and the selected backend
+            // doesn't support them, the expansion will fail with a clear error.
+            // This is vastly better than guessing and potentially sending text
+            // to an unintended XWayland window.
+            if text_contains_newlines(&result.insert) {
+                warn!(
+                    backend = backend.name(),
+                    "expansion contains newlines; selected backend may not support multiline insertion"
+                );
+            }
+            let inject_result = ExpansionEngine::apply(backend, &result);
 
             if let Err(source) = inject_result {
                 return Err(EventError { result, source });
