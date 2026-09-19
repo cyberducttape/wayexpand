@@ -120,14 +120,13 @@ impl Compositor {
     }
 }
 
-/// Capability-based backend auto-selection: safety first.
+/// Pure policy: select backend given capabilities.
 ///
-/// Strategy:
-/// 1. Respect user overrides (explicit source/backend)
-/// 2. Prefer safer input sources (input-method-v2 over evdev)
-/// 3. Check actual capabilities, not just desktop name
-/// 4. Warn and fall back if unsafe combinations requested
-pub fn auto_select(
+/// Decoupled from probing so logic is deterministically testable.
+/// Takes explicit capabilities to avoid environment dependencies in tests.
+fn select_backend(
+    capabilities: &Capabilities,
+    _compositor: Compositor,
     explicit_source: Option<&str>,
     explicit_backend: Option<&str>,
 ) -> BackendSelection {
@@ -139,11 +138,6 @@ pub fn auto_select(
             reason: "user-specified".to_string(),
         };
     }
-
-    // Probe for actual capabilities
-    let capabilities = probe_capabilities();
-    let compositor = Compositor::detect();
-    debug!("detected compositor: {:?}, capabilities: {:?}", compositor, capabilities);
 
     // If user specified just a source, pick best backend for it
     if let Some(source) = explicit_source {
@@ -231,9 +225,140 @@ pub fn auto_select(
     }
 }
 
+/// Capability-based backend auto-selection: safety first.
+///
+/// Strategy:
+/// 1. Probe for actual capabilities
+/// 2. Delegate decision logic to select_backend() (deterministically testable)
+/// 3. Respect user overrides (explicit source/backend)
+/// 4. Prefer safer input sources (input-method-v2 over evdev)
+pub fn auto_select(
+    explicit_source: Option<&str>,
+    explicit_backend: Option<&str>,
+) -> BackendSelection {
+    let capabilities = probe_capabilities();
+    let compositor = Compositor::detect();
+    debug!("detected compositor: {:?}, capabilities: {:?}", compositor, capabilities);
+    select_backend(&capabilities, compositor, explicit_source, explicit_backend)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Deterministic tests of decision logic (no environment dependencies)
+
+    #[test]
+    fn decision_prefers_input_method_v2_when_available() {
+        let caps = Capabilities {
+            has_input_method_v2: true,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket: false,
+            has_dev_input: true,
+            has_window_tracker: false,
+            is_wayland: true,
+        };
+        let result = select_backend(&caps, Compositor::Gnome, None, None);
+        assert_eq!(result.source, "input-method");
+        assert_eq!(result.backend, "none");
+        assert!(result.reason.contains("input-method-v2"));
+    }
+
+    #[test]
+    fn decision_falls_back_to_evdev_when_input_method_unavailable() {
+        let caps = Capabilities {
+            has_input_method_v2: false,
+            has_virtual_keyboard: false,
+            has_direct_libei_socket: true,
+            has_dev_input: true,
+            has_window_tracker: false,
+            is_wayland: true,
+        };
+        let result = select_backend(&caps, Compositor::Sway, None, None);
+        assert_eq!(result.source, "evdev");
+        assert_eq!(result.backend, "libei");
+    }
+
+    #[test]
+    fn decision_falls_back_to_stdin_when_nothing_available() {
+        let caps = Capabilities {
+            has_input_method_v2: false,
+            has_virtual_keyboard: false,
+            has_direct_libei_socket: false,
+            has_dev_input: false,
+            has_window_tracker: false,
+            is_wayland: false,
+        };
+        let result = select_backend(&caps, Compositor::X11, None, None);
+        assert_eq!(result.source, "stdin");
+        assert_eq!(result.backend, "libei");
+    }
+
+    #[test]
+    #[test]
+    fn policy_uses_evdev_on_x11_if_available() {
+        // X11 can use evdev if /dev/input is readable (no input-method-v2 available)
+        let caps = Capabilities {
+            has_input_method_v2: false,
+            has_virtual_keyboard: false,
+            has_direct_libei_socket: false,
+            has_dev_input: true,
+            has_window_tracker: false,
+            is_wayland: false,
+        };
+        let result = select_backend(&caps, Compositor::X11, None, None);
+        assert_eq!(result.source, "evdev");
+        assert_eq!(result.backend, "libei");
+    }
+
+    #[test]
+    fn decision_user_explicit_selection_overrides_all() {
+        let caps = Capabilities {
+            has_input_method_v2: true,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket: false,
+            has_dev_input: true,
+            has_window_tracker: false,
+            is_wayland: true,
+        };
+        let result = select_backend(&caps, Compositor::Gnome, Some("stdin"), Some("libei"));
+        assert_eq!(result.source, "stdin");
+        assert_eq!(result.backend, "libei");
+        assert!(result.reason.contains("user-specified"));
+    }
+
+    #[test]
+    fn decision_backend_libei_picks_safest_source() {
+        let caps = Capabilities {
+            has_input_method_v2: true,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket: false,
+            has_dev_input: true,
+            has_window_tracker: false,
+            is_wayland: true,
+        };
+        // When libei is explicitly requested, should prefer input-method over evdev
+        let result = select_backend(&caps, Compositor::Gnome, None, Some("libei"));
+        assert_eq!(result.source, "input-method");
+        assert_eq!(result.backend, "libei");
+    }
+
+    #[test]
+    fn decision_rejects_unsupported_input_method_on_x11() {
+        let caps = Capabilities {
+            has_input_method_v2: false, // Not supported on X11
+            has_virtual_keyboard: false,
+            has_direct_libei_socket: false,
+            has_dev_input: false,
+            has_window_tracker: false,
+            is_wayland: false,
+        };
+        let result = select_backend(&caps, Compositor::X11, None, Some("libei"));
+        assert_eq!(result.source, "stdin");
+        assert_eq!(result.backend, "libei");
+    }
+
+    // Integration tests of the full auto_select flow
 
     #[test]
     fn explicit_selection_takes_priority() {
@@ -248,27 +373,6 @@ mod tests {
         let result = auto_select(Some("input-method"), None);
         assert_eq!(result.source, "input-method");
         assert_eq!(result.backend, "none");
-    }
-
-    #[test]
-    fn prefers_input_method_v2_over_evdev() {
-        // When input-method-v2 is available, it should be preferred
-        let result = auto_select(None, None);
-        // The actual result depends on environment, but we verify the logic exists
-        // In most test environments, input-method-v2 will be preferred if on Wayland
-        assert!(!result.source.is_empty());
-        assert!(!result.reason.is_empty());
-    }
-
-    #[test]
-    fn respects_user_backend_selection_with_safe_source() {
-        let result = auto_select(None, Some("libei"));
-        assert_eq!(result.backend, "libei");
-        // Should pick the safest available source (input-method or stdin, not evdev)
-        assert!(
-            result.source == "input-method" || result.source == "evdev" || result.source == "stdin",
-            "backend selection should pick a valid source"
-        );
     }
 
     #[test]
