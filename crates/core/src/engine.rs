@@ -2811,16 +2811,12 @@ replacement = "bad\u0000value""#;
     }
 
     #[test]
-    #[ignore = "Known issue P2: descendants survive on successful exit (issue: process cleanup on success)"]
     fn process_descendants_cleaned_up_on_successful_exit() {
         // Regression test: spawned descendants should not survive after the
         // command-backed expansion completes, even when the direct child exits
-        // successfully. This tests the scenario: (sleep 600 &; exit 0)
-        //
-        // Currently FAILS: descendants survive when the direct child exits with
-        // status 0, because we only kill the process group on timeout. This needs
-        // to be called regardless of child exit status. See run_command() in
-        // engine.rs line ~926 - needs unconditional kill_process_group() call.
+        // successfully. The descendant waits before writing its marker so the
+        // test observes continued execution, rather than shell redirection
+        // creating the file before the descendant is killed.
         use std::fs::File;
         use std::io::Write;
         use std::path::PathBuf;
@@ -2837,10 +2833,11 @@ replacement = "bad\u0000value""#;
             std::process::id()
         ));
 
-        // Script that spawns a long-running background process and exits successfully
+        // Script that spawns a descendant and exits successfully. A surviving
+        // descendant writes the marker after the command has completed.
         let script_content = format!(
             "#!/bin/bash\n\
-            (sleep 600 > {} 2>&1 &)\n\
+            (sleep 1; printf survived > {}) &\n\
             exit 0\n",
             output_file.display()
         );
@@ -2870,21 +2867,20 @@ replacement = "bad\u0000value""#;
         thread::sleep(Duration::from_millis(500));
         let _ = engine.drain_completed_commands();
 
-        // Give any survivors a moment to start writing
-        thread::sleep(Duration::from_millis(100));
+        // Give any surviving descendant enough time to write the marker.
+        thread::sleep(Duration::from_millis(1500));
 
         // The background process should have been killed with the process group.
-        // If it survived, the output file would exist (it tries to write to it).
-        // Note: This is a heuristic test; a truly robust test would use /proc
-        // inspection, but this catches the obvious regression.
         let survived = output_file.exists();
+
+        // Clean up before asserting so a failure cannot leave test processes or
+        // temporary files behind.
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&output_file);
+
         assert!(
             !survived,
             "descendant process survived after command-backed expansion completed"
         );
-
-        // Clean up
-        let _ = std::fs::remove_file(&script_path);
-        let _ = std::fs::remove_file(&output_file);
     }
 }
