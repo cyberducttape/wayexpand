@@ -36,6 +36,8 @@ struct App {
     last_status_poll: Instant,
     /// Cached visible_indices result and the query that produced it
     visible_cache: Option<(String, Vec<usize>)>,
+    /// Cached preview result: (selected_index, trigger, result)
+    preview_cache: Option<(usize, String, String)>,
 }
 
 enum Prompt {
@@ -65,6 +67,7 @@ impl App {
             external_edit: false,
             last_status_poll: Instant::now(),
             visible_cache: None,
+            preview_cache: None,
         })
     }
 
@@ -119,6 +122,8 @@ impl App {
                     self.config.expansion[index].trigger
                 );
                 self.undo = Some(previous);
+                self.visible_cache = None;
+                self.preview_cache = None;
             }
             Err(error) => {
                 self.config.expansion[index].enabled = !self.config.expansion[index].enabled;
@@ -149,6 +154,8 @@ impl App {
                     self.config.expansion[index].trigger
                 );
                 self.undo = Some(previous);
+                self.visible_cache = None;
+                self.preview_cache = None;
             }
             Err(error) => {
                 self.config.expansion[index].match_mode = previous.expansion[index].match_mode;
@@ -238,6 +245,8 @@ impl App {
         } else {
             self.message = format!("Deleted {trigger}");
             self.undo = Some(previous);
+            self.visible_cache = None;
+            self.preview_cache = None;
         }
         self.confirm_delete = None;
     }
@@ -256,6 +265,8 @@ impl App {
                 .selected
                 .min(self.visible_indices().len().saturating_sub(1));
             self.message = "Undid the last saved change".into();
+            self.visible_cache = None;
+            self.preview_cache = None;
         }
     }
 
@@ -289,6 +300,8 @@ impl App {
                     self.selected = self.visible_indices().len().saturating_sub(1);
                     self.message = "Snippet created".into();
                     self.undo = Some(previous);
+                    self.visible_cache = None;
+                    self.preview_cache = None;
                 }
             }
             Some(Prompt::EditReplacement { index, trigger }) => {
@@ -300,6 +313,8 @@ impl App {
                 } else {
                     self.message = format!("Updated {trigger}");
                     self.undo = Some(previous);
+                    self.visible_cache = None;
+                    self.preview_cache = None;
                 }
             }
             Some(Prompt::EditDescription { index, trigger }) => {
@@ -311,6 +326,8 @@ impl App {
                 } else {
                     self.message = format!("Updated description for {trigger}");
                     self.undo = Some(previous);
+                    self.visible_cache = None;
+                    self.preview_cache = None;
                 }
             }
             Some(Prompt::EditTags { index, trigger }) => {
@@ -327,6 +344,8 @@ impl App {
                 } else {
                     self.message = format!("Updated tags for {trigger}");
                     self.undo = Some(previous);
+                    self.visible_cache = None;
+                    self.preview_cache = None;
                 }
             }
             None => {}
@@ -337,16 +356,25 @@ impl App {
         let Some(index) = self.selected_index() else {
             return "No snippet selected".into();
         };
-        let Ok(mut engine) = ExpansionEngine::new(self.config.clone()) else {
-            return "Configuration is invalid".into();
-        };
         let trigger = self.config.expansion[index].trigger.clone();
-        let mut results = engine.process(InputEvent::Text(trigger));
+        if let Some((cached_index, cached_trigger, cached_result)) = &self.preview_cache {
+            if *cached_index == index && cached_trigger == &trigger {
+                return cached_result.clone();
+            }
+        }
+        let Ok(mut engine) = ExpansionEngine::new(self.config.clone()) else {
+            let result: String = "Configuration is invalid".into();
+            self.preview_cache = Some((index, trigger, result.clone()));
+            return result;
+        };
+        let mut results = engine.process(InputEvent::Text(trigger.clone()));
         results.extend(engine.process(InputEvent::Boundary));
-        results
+        let result = results
             .last()
             .map(|result| result.insert.clone())
-            .unwrap_or_else(|| "No expansion matched".into())
+            .unwrap_or_else(|| "No expansion matched".into());
+        self.preview_cache = Some((index, trigger, result.clone()));
+        result
     }
 
     fn refresh_daemon_state(&mut self) {
