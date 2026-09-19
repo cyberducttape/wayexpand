@@ -882,7 +882,7 @@ fn process_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
     mut injector: Option<&mut dyn TextInjector>,
-) -> std::result::Result<(), EventError> {
+) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
         for action in engine.process_key(&chord) {
             match ExpansionEngine::execute_hotkey(&action) {
@@ -893,7 +893,7 @@ fn process_event(
         if let Some(result) = engine.try_undo(&chord) {
             if let Some(backend) = injector.as_deref_mut() {
                 if let Err(source) = ExpansionEngine::apply(backend, &result) {
-                    return Err(EventError { result, source });
+                    return Err(Box::new(EventError { result, source }));
                 }
                 info!("expansion undone");
             }
@@ -916,7 +916,7 @@ fn process_event(
             let inject_result = ExpansionEngine::apply(backend, &result);
 
             if let Err(source) = inject_result {
-                return Err(EventError { result, source });
+                return Err(Box::new(EventError { result, source }));
             }
             info!(
                 trigger_chars = result.trigger.chars().count(),

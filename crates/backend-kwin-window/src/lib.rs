@@ -16,7 +16,7 @@ use std::{
     process,
     sync::{mpsc, Mutex},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use thiserror::Error;
 use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};

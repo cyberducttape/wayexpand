@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::{
     fs,
-    hash::{Hash, Hasher},
     io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
