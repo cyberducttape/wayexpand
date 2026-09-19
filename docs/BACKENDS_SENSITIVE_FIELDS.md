@@ -64,6 +64,8 @@ This is the documented tradeoff for using evdev. Before enabling evdev, you must
 
 - You're on KDE Plasma/KWin where input-method-v2 isn't available
 - You need reliable key pass-through for arrow keys, Escape, F-keys
+- You accept best-effort replacement timing; non-exclusive evdev cannot make
+  rapid trigger replacement atomic
 - You trust your system and understand the security model
 - You manually manage which applications you run (not a shared system)
 
