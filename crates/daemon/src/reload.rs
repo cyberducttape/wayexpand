@@ -181,6 +181,16 @@ impl ReloadableConfig {
                         // until the next real focus change, even though the
                         // user's actual window never changed.
                         engine.set_current_window(self.engine.current_window().cloned());
+                        // CRITICAL: Restore runtime safety state across reloads.
+                        // A fresh engine defaults user_paused=false and sensitive_focus=false,
+                        // losing any protection or pause state. This causes:
+                        // - Password-field protection to be lost until the next compositor
+                        //   focus event, creating a security window where matching resumes
+                        //   in a sensitive field despite the old engine being paused.
+                        // - User pause state to be lost, making the daemon appear to resume
+                        //   matching even though the control status still says paused.
+                        engine.set_user_paused(self.engine.is_user_paused());
+                        engine.set_sensitive_focus(self.engine.is_sensitive_focus());
                         self.engine = engine;
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;
@@ -444,6 +454,45 @@ mod tests {
         config.last_fingerprint_check = Some(Instant::now());
         let reused = config.poll_stamp().unwrap();
         assert_eq!(reused, stamp);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn reload_preserves_runtime_safety_state() {
+        // CRITICAL P0 SECURITY TEST: Verify that config reloads do NOT
+        // lose sensitive_focus and user_paused state.
+        //
+        // A fresh ExpansionEngine defaults both to false, meaning:
+        // - If sensitive_focus was true (password field), a reload would
+        //   resume matching in that field until the next compositor event.
+        // - If user_paused was true, a reload would appear to resume matching
+        //   despite the control API still reporting pause.
+        //
+        // Both are critical for maintaining password-field protection.
+        let path = temporary_config();
+        write_config(&path, &config_text("initial"));
+        let mut config = ReloadableConfig::load(&path).unwrap();
+
+        // Simulate entering a sensitive field and pausing the user.
+        config.engine.set_sensitive_focus(true);
+        config.engine.set_user_paused(true);
+        assert!(config.engine.is_sensitive_focus());
+        assert!(config.engine.is_user_paused());
+
+        // Trigger a reload (e.g., from a GUI save).
+        write_config(&path, &config_text("reloaded"));
+        config.reload_now();
+        assert!(config.healthy());
+
+        // CRITICAL: These states MUST be preserved across the reload.
+        assert!(
+            config.engine.is_sensitive_focus(),
+            "sensitive_focus lost on reload - password field protection bypassed!"
+        );
+        assert!(
+            config.engine.is_user_paused(),
+            "user_paused lost on reload - pause state lost!"
+        );
         let _ = fs::remove_file(path);
     }
 

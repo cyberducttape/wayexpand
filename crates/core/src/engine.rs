@@ -322,6 +322,30 @@ impl ExpansionEngine {
         self.current_window = window;
     }
 
+    /// Returns whether the user has manually paused text expansion.
+    /// This must be preserved across config reloads to maintain pause state.
+    pub fn is_user_paused(&self) -> bool {
+        self.user_paused
+    }
+
+    /// Restores user pause state from a previous engine instance.
+    /// Critical for config reloads to preserve pause state.
+    pub fn set_user_paused(&mut self, paused: bool) {
+        self.user_paused = paused;
+    }
+
+    /// Returns whether the focused field is sensitive (password, OTP, etc).
+    /// This must be preserved across config reloads to maintain input protection.
+    pub fn is_sensitive_focus(&self) -> bool {
+        self.sensitive_focus
+    }
+
+    /// Restores sensitive field focus state from a previous engine instance.
+    /// Critical for config reloads to preserve password-field protection.
+    pub fn set_sensitive_focus(&mut self, sensitive: bool) {
+        self.sensitive_focus = sensitive;
+    }
+
     /// Whether text expansion capture is currently enabled.
     /// Both user pause and sensitive field focus independently disable capture.
     fn is_capture_enabled(&self) -> bool {
@@ -419,7 +443,10 @@ impl ExpansionEngine {
             self.last_expansion = None;
         }
         match event {
-            InputEvent::Key(_) => Vec::new(),
+            InputEvent::Key(_) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                Vec::new()
+            }
             InputEvent::Text(text) => {
                 let mut results = Vec::new();
                 let mut result_bytes = 0usize;
@@ -1307,6 +1334,29 @@ mod tests {
         engine.enable_async_commands();
         assert!(engine.process(InputEvent::Text(":slow".into())).is_empty());
         assert!(engine.process(InputEvent::Text("x".into())).is_empty());
+        thread::sleep(Duration::from_millis(100));
+        assert!(engine.drain_completed_commands().is_empty());
+    }
+
+    #[test]
+    fn asynchronous_command_output_is_discarded_after_key_only_input() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.05; printf stale"]
+            timeout_ms = 500
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        assert!(engine.process(InputEvent::Text(":slow".into())).is_empty());
+        let chord = KeyChord::parse("Left").unwrap();
+        assert!(engine.process(InputEvent::Key(chord)).is_empty());
         thread::sleep(Duration::from_millis(100));
         assert!(engine.drain_completed_commands().is_empty());
     }
