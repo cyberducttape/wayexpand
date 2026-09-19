@@ -13,8 +13,8 @@ const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, discover_backends, import_espanso, Config, ExpansionEngine, InputEvent,
-    MatchMode,
+    default_config_path, discover_backends, import_espanso, BackendKind, BackendState, Config,
+    ExpansionEngine, InputEvent, MatchMode,
 };
 
 /// Pulls the first `--json` flag out of `args`, wherever it appears, so
@@ -551,76 +551,83 @@ fn run() -> Result<()> {
 fn print_backend_diagnostics() -> bool {
     let backends = discover_backends();
     for status in &backends {
-        println!("{:28} {:?} ({})", status.kind, status.state, status.detail);
+        println!(
+            "{:28} {:?} ({})",
+            status.kind.to_string(),
+            status.state,
+            status.detail
+        );
     }
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        // Probe actual runtime availability
-        let wlroots_available = WlrootsInjector::probe().is_ok();
-        let input_method_available = InputMethodSource::probe().is_ok();
-
-        if wlroots_available {
+    // Doctor is also used in CI and for validating a config outside a desktop
+    // session. In that context there is no capture claim to validate.
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return true;
+    }
+    let wlroots_available = match WlrootsInjector::probe() {
+        Ok(_) => {
             println!("wlroots probe: virtual keyboard globals available");
-        } else {
-            println!("wlroots probe: unavailable");
+            true
         }
-
-        if input_method_available {
+        Err(error) => {
+            println!("wlroots probe: unavailable ({error})");
+            false
+        }
+    };
+    let input_method_available = match InputMethodSource::probe() {
+        Ok(_) => {
             println!("input-method-v2 probe: manager and seat connection succeeded");
-        } else {
-            println!("input-method-v2 probe: unavailable");
+            true
         }
-
-        // Evaluate valid source+backend combinations for deployment
-        let mut valid_combinations = Vec::new();
-
-        // Combination 1: input-method-v2 source (exclusive, no output backend needed)
-        if input_method_available {
-            valid_combinations.push("input-method-v2 (exclusive, includes output)");
+        Err(error) => {
+            println!("input-method-v2 probe: unavailable ({error})");
+            false
         }
+    };
+    let evdev_readable = backends.iter().any(|status| {
+        status.kind == BackendKind::Evdev && status.state == BackendState::Implemented
+    });
+    // libei needs a RemoteDesktop portal with EIS support (or an explicit
+    // LIBEI_SOCKET); probing the portal would pop a consent dialog, so this
+    // only recognizes desktops known to ship one.
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_lowercase();
+    let libei_plausible = std::env::var_os("LIBEI_SOCKET").is_some()
+        || desktop.contains("kde")
+        || desktop.contains("gnome");
 
-        // Combination 2: evdev source + wlroots output
-        let evdev_readable = backends.iter().any(|status| {
-            use wayexpand_core::BackendKind;
-            status.kind == BackendKind::Evdev
-                && (status.state == wayexpand_core::BackendState::Implemented)
-        });
-
-        if evdev_readable && wlroots_available {
-            valid_combinations.push("evdev (capture) → wlroots (output)");
-        }
-
-        // Combination 3: evdev source + libei output
-        // libei is always Implemented if we're in a Wayland session (libei backend probes lazily)
-        if evdev_readable {
-            valid_combinations.push("evdev (capture) → libei (output; requires portal consent)");
-        }
-
-        let capture_ready = !valid_combinations.is_empty();
-        if capture_ready {
-            println!("\nCapture readiness: READY");
-            println!("Valid deployment combinations:");
-            for combo in &valid_combinations {
-                println!("  • {}", combo);
-            }
-        } else {
-            println!(
-                "\nCapture readiness: NOT READY (no supported input source+backend combination detected)"
-            );
-            println!("Troubleshooting:");
-            println!(
-                "  • For input-method-v2: Ensure compositor advertises zwp_input_method_manager_v2"
-            );
-            println!("  • For evdev: Add your user to the `input` group and log in again");
-            println!(
-                "  • KDE Plasma users: Use `--source=evdev --backend=libei` (no input-method-v2)"
-            );
-        }
-
-        capture_ready
-    } else {
-        // No Wayland session; doctor is only used for validation in this context
-        true
+    let mut combinations = Vec::new();
+    if input_method_available {
+        combinations.push("--source=input-method (capture and output)");
     }
+    if evdev_readable && wlroots_available {
+        combinations.push("--source=evdev --backend=wlroots");
+    }
+    if evdev_readable && libei_plausible {
+        combinations.push("--source=evdev --backend=libei (asks for portal consent on start)");
+    }
+
+    if combinations.is_empty() {
+        println!("Capture readiness: NOT READY (no working source+backend combination detected)");
+        if evdev_readable && !libei_plausible {
+            println!(
+                "evdev is readable, but no output backend was detected: the wlroots probe \
+                 failed and this desktop is not known to provide a libei portal."
+            );
+        } else {
+            println!(
+                "Next step: use a compositor with input-method-v2 support, or \
+                 `--source=evdev` (requires `input` group membership; see SECURITY.md for the \
+                 sensitive-field tradeoff) paired with `--backend=wlroots` or `--backend=libei`."
+            );
+        }
+        return false;
+    }
+    println!("Capture readiness: READY");
+    for combination in &combinations {
+        println!("  usable: wayexpand-daemon {combination}");
+    }
+    true
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
