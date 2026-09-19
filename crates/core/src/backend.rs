@@ -323,7 +323,7 @@ fn discover_evdev() -> (BackendState, String) {
     } else {
         (
             BackendState::Implemented,
-            format!("{readable}/{total} input device(s) readable; keyboard filtering happens at connect time"),
+            format!("{readable}/{total} input device(s) readable; evdev will verify keyboard capability at connection time"),
         )
     }
 }
