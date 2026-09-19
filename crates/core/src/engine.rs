@@ -744,6 +744,11 @@ impl ExpansionEngine {
         if expansion.app_filter.is_empty() {
             return true;
         }
+        // Policy: disable_title_matching prevents app_filter from working
+        // (all apps match, effectively disabling the filter)
+        if self.config.organization.disable_title_matching {
+            return true;
+        }
         let Some(window) = &self.current_window else {
             return false;
         };
