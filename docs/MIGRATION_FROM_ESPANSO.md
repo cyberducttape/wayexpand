@@ -340,7 +340,7 @@ trigger = ";weather"
 
 [expansion.command]
 program = "/path/to/get-weather.py"
-timeout_ms = 10000
+timeout_ms = 5000
 ```
 
 ### Testing your config
