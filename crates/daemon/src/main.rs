@@ -1077,8 +1077,11 @@ fn process_event(
     if let InputEvent::Key(chord) = event {
         // Check if hotkeys are allowed by policy
         if let Err(violation) = policy::check_hotkey_allowed(policy) {
+            // Log the violation, but in safe_mode only block the hotkey
             policy::log_violation(policy, &violation);
-            return Ok(());
+            if policy.safe_mode {
+                return Ok(());
+            }
         }
 
         for action in engine.process_key(&chord) {
@@ -1107,15 +1110,15 @@ fn apply_results(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     for result in results {
-        // Check if expansion is allowed by policy
+        // Check if expansion violates policy and log if needed
         let has_command = result.insert.contains("$COMMAND(");
-        if let Err(violation) = policy::check_expansion_allowed(
+        if policy::check_and_log_expansion_violations(
             policy,
             result.insert.len(),
             has_command,
             active_backend,
         ) {
-            policy::log_violation(policy, &violation);
+            // In safe_mode, block the expansion
             continue;
         }
 
