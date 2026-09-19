@@ -156,7 +156,7 @@ class wayexpand (
   # Validate merged fleet configuration after deployment
   if $validate_config {
     exec { 'wayexpand-validate-fleet':
-      command     => '/usr/bin/wayexpand validate --merge-preview',
+      command     => '/usr/bin/wayexpand validate --fleet --json',
       refreshonly => true,
       onlyif      => '/usr/bin/test -d /etc/wayexpand/snippets.d',
       subscribe   => [
@@ -309,7 +309,7 @@ puppet resource file /etc/wayexpand/snippets.d/01-sre-core.toml
 
 ```bash
 # Run locally on managed node
-wayexpand validate --merge-preview --json | jq '.stats'
+wayexpand fleet status --json | jq '{files_loaded, expansion_count, hotkey_count, layers}'
 
 # Should show something like:
 # {
@@ -343,7 +343,7 @@ puppet resource changes | grep wayexpand
 grep -rn "^trigger = " /etc/wayexpand/snippets.d/ | cut -d: -f3 | sort | uniq -d
 
 # View validation output
-wayexpand validate --merge-preview 2>&1
+wayexpand validate --fleet --json 2>&1
 ```
 
 ### Daemon doesn't reload

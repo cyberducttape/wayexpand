@@ -1,4 +1,8 @@
-# Operations guide
+# Operations Guide
+
+**Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Operations**
+
+---
 
 ## Configuration
 

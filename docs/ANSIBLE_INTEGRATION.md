@@ -67,7 +67,7 @@ wayexpand-snippets/
   notify: reload wayexpand daemon
 
 - name: Verify fleet configuration
-  command: wayexpand validate --merge-preview
+  command: wayexpand validate --fleet --json
   register: validation_result
   failed_when: validation_result.rc != 0
   changed_when: false
@@ -196,7 +196,7 @@ timeout_ms = 5000
 
 [[expansion]]
 trigger = ":test-snippet"
-replacement = "wayexpand validate --merge-preview"
+replacement = "wayexpand validate --fleet --json"
 description = "Test fleet snippet merge"
 category = "admin"
 ```
@@ -281,7 +281,7 @@ ssh user@target.example.com
 cat /etc/wayexpand/snippets.d/*.toml
 
 # Test merge (if wayexpand installed)
-wayexpand validate --merge-preview --json | jq '.stats'
+wayexpand fleet status --json | jq '{files_loaded, expansion_count, hotkey_count, layers}'
 
 # Show provenance
 journalctl --user -u wayexpand | grep -i "layer\|organize"

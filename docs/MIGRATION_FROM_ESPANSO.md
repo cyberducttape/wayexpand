@@ -1,5 +1,9 @@
 # Migrating from Espanso to WayExpand
 
+**Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Migrating from Espanso**
+
+---
+
 Welcome! If you're switching from Espanso, WayExpand can import your existing snippets and offers several advantages for Wayland users. This guide covers the transition.
 
 ## Quick Import

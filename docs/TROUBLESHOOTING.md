@@ -1,5 +1,9 @@
 # Troubleshooting WayExpand
 
+**Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Troubleshooting**
+
+---
+
 Start with a non-invasive diagnostic snapshot:
 
 ```sh

@@ -1,5 +1,9 @@
 # Secret Management and Sensitive Data
 
+**Navigation:** [Home](../README.md) > [System Administration](FOR_SYSADMINS.md) > **Secret Management**
+
+---
+
 ## Current State (v1.2)
 
 WayExpand does **not** provide built-in secret management. This is intentional:

@@ -1,5 +1,9 @@
 # Getting Started with WayExpand
 
+**Navigation:** [Home](../README.md) > **Getting Started**
+
+---
+
 Welcome! This guide will help you get up and running based on your desktop environment.
 
 ## Which Desktop Are You Using?
@@ -26,13 +30,13 @@ wayexpand-gui
 
 ---
 
-### Sway / Hyprland / river 🔄
+### Sway / Hyprland / river ⚠️
 
 Wlroots-based compositors have active development in progress. Window tracking is nearly ready.
 
 **Current status:**
 - ✅ Text capture and injection work (via input-method-v2 or evdev)
-- ⏳ Window tracking (app_filter) is in Phase 3 integration
+- ⏳ Window tracking (app_filter) remains a scaffold awaiting protocol-flow and compositor certification
 - ⚠️ Password field detection requires input-method-v2
 
 **Getting started:**
@@ -134,7 +138,7 @@ replacement = """def my_function(x):
     return x * 2"""
 ```
 
-See [Configuration.md](wiki/Configuration.md) for the full list of variables and options.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view the [archived configuration reference](archive/wiki/Configuration.md) for variable examples.
 
 ---
 
@@ -165,7 +169,7 @@ See [Configuration.md](wiki/Configuration.md) for the full list of variables and
 
 ## Next Steps
 
-- **Learn the config format:** [Configuration.md](wiki/Configuration.md)
+- **Learn the config format:** [Configuration Limits](CONFIGURATION_LIMITS.md) and [Compatibility](COMPATIBILITY.md)
 - **Understand the architecture:** [README.md](../README.md#architecture)
 - **Report bugs:** See [SECURITY.md](../SECURITY.md#reporting-a-vulnerability) for security issues, or open a GitHub issue for bugs
 

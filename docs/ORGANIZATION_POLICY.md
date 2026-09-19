@@ -1,5 +1,9 @@
 # Organization Policy Reference
 
+**Navigation:** [Home](../README.md) > [System Administration](FOR_SYSADMINS.md) > **Organization Policy**
+
+---
+
 > **Status:** Core feature implemented as of v1.1.2
 
 Organization policies enforce administrator-defined constraints on text expansions, protecting sensitive environments and preventing unsafe operations.
