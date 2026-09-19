@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Forward evdev kernel auto-repeat into matcher state without repeating global
+  hotkeys or changing physical held-key state.
+- Build native Linux release archives for both x86_64 and aarch64.
+
 ## [1.1.2] - 2026-09-18
 
 This is a security and correctness hardening release with 170+ new regression tests covering P0 fixes and stability improvements.

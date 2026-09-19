@@ -13,15 +13,25 @@ jobs:
     name: Verify
     uses: ./.github/workflows/ci.yml
 
-  linux-x86_64:
-    name: Linux x86_64 release
+  linux:
+    name: Linux ${{ matrix.arch }} release
     needs: ci
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Verify version consistency across all sources
         shell: bash
         run: |
@@ -70,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          root="wayexpand-${version}-linux-x86_64"
+          root="wayexpand-${version}-linux-${{ matrix.arch }}"
           mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev"
           install -m 0755 target/release/wayexpand "$root/bin/"
           install -m 0755 target/release/wayexpand-daemon "$root/bin/"
