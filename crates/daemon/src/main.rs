@@ -2,6 +2,7 @@ mod auto_select;
 mod control;
 mod policy;
 mod reload;
+mod status;
 
 use anyhow::Result;
 use reload::ReloadableConfig;
@@ -870,32 +871,6 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-/// Builds the control socket's `key=value` status body (everything the
-/// running daemon reports about itself via `status`/`status --json`).
-/// Pulled out of `set_daemon_status` as a pure function so its exact field
-/// set can be unit-tested directly -- this is the other half of the
-/// contract docs/COMPATIBILITY.md documents as "Stable" for
-/// `wayexpand status --json`; `status_json_matches_documented_stable_contract`
-/// in the CLI crate tests the parsing side against the same field names.
-fn daemon_status_body(
-    source: &str,
-    backend: &str,
-    state: &str,
-    paused: bool,
-    config_path: &Path,
-    config_healthy: bool,
-) -> String {
-    format!(
-        "source={source}\nbackend={backend}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}",
-        config_path.display(),
-        if config_healthy {
-            "ok"
-        } else {
-            "reload-rejected"
-        }
-    )
-}
-
 fn set_daemon_status(
     control: &control::ControlServer,
     source: &str,
@@ -904,16 +879,7 @@ fn set_daemon_status(
     config_path: &Path,
     config_healthy: bool,
 ) {
-    control.set_status(daemon_status_body(
-        source,
-        backend,
-        state,
-        control
-            .pause_requested
-            .load(std::sync::atomic::Ordering::Acquire),
-        config_path,
-        config_healthy,
-    ));
+    status::set_daemon_status(control, source, backend, state, config_path, config_healthy);
 }
 
 fn connect_input_method_with_retry(
@@ -1213,7 +1179,7 @@ mod tests {
     /// docs by construction, rather than each drifting independently.
     #[test]
     fn daemon_status_body_matches_documented_stable_contract() {
-        let body = daemon_status_body(
+        let body = status::daemon_status_body(
             "input-method",
             "input-method-v2",
             "connected",

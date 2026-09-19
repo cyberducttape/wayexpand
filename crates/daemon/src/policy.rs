@@ -48,11 +48,7 @@ fn load_policy_from_path(path: &Path, policy_dir: &Path) -> Result<OrganizationP
             return Ok(OrganizationPolicy::default());
         }
         Err(error) => {
-            return Err(format!(
-                "could not inspect {}: {}",
-                path.display(),
-                error
-            ));
+            return Err(format!("could not inspect {}: {}", path.display(), error));
         }
     };
 
@@ -127,7 +123,7 @@ fn validate_policy_file_metadata(path: &Path, metadata: &std::fs::Metadata) -> R
     // Allow 0600 (rw-------), 0400 (r--------), or 0440 (r--r-----)
     let mode = metadata.mode() & 0o777;
     match mode {
-        0o600 | 0o400 | 0o440 => {}, // Acceptable: owner-only or root-only
+        0o600 | 0o400 | 0o440 => {} // Acceptable: owner-only or root-only
         _ => {
             // Reject any group or world-readable/writable bits
             if metadata.mode() & 0o077 != 0 {
@@ -209,7 +205,8 @@ pub fn check_expansion_allowed(
     has_command: bool,
     backend: &str,
 ) -> Result<(), String> {
-    if let Some(violation) = expansion_policy_violations(policy, replacement_size, has_command, backend)
+    if let Some(violation) =
+        expansion_policy_violations(policy, replacement_size, has_command, backend)
     {
         if policy.safe_mode {
             // In safe_mode, violations are enforced (prevent expansion)
@@ -247,7 +244,8 @@ pub fn check_and_log_expansion_violations(
     has_command: bool,
     backend: &str,
 ) -> bool {
-    if let Some(violation) = expansion_policy_violations(policy, replacement_size, has_command, backend)
+    if let Some(violation) =
+        expansion_policy_violations(policy, replacement_size, has_command, backend)
     {
         log_violation(policy, &violation);
         // Return true (block) only in safe_mode
@@ -354,9 +352,19 @@ mod tests {
         };
 
         // In safe_mode, violations should block
-        assert!(check_and_log_expansion_violations(&policy_safe, 1024, true, "libei"));
+        assert!(check_and_log_expansion_violations(
+            &policy_safe,
+            1024,
+            true,
+            "libei"
+        ));
         // In audit mode, violations should not block
-        assert!(!check_and_log_expansion_violations(&policy_audit, 1024, true, "libei"));
+        assert!(!check_and_log_expansion_violations(
+            &policy_audit,
+            1024,
+            true,
+            "libei"
+        ));
     }
 
     #[test]
@@ -440,7 +448,11 @@ allowed_backends = ["input-method", "libei"]
         // Test that oversized files are rejected
         // This would require creating a temporary policy file, which is complex
         // The implementation is tested by the constant MAX_POLICY_FILE_SIZE
-        assert_eq!(MAX_POLICY_FILE_SIZE, 1024 * 100, "policy file size limit is 100 KB");
+        assert_eq!(
+            MAX_POLICY_FILE_SIZE,
+            1024 * 100,
+            "policy file size limit is 100 KB"
+        );
     }
 
     #[test]

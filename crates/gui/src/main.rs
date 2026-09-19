@@ -20,8 +20,8 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale,
-    InputEvent, MatchMode, OrganizationPolicy, Settings,
+    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, ExpansionEngine,
+    FleetConfig, FontScale, InputEvent, MatchMode, OrganizationPolicy, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);

@@ -67,8 +67,7 @@ fn has_readable_input_device() -> bool {
     };
 
     entries.flatten().any(|entry| {
-        entry.file_name().to_string_lossy().starts_with("event")
-            && File::open(entry.path()).is_ok()
+        entry.file_name().to_string_lossy().starts_with("event") && File::open(entry.path()).is_ok()
     })
 }
 
@@ -212,16 +211,22 @@ fn select_backend(
         return BackendSelection {
             source: "evdev".to_string(),
             backend: "libei".to_string(),
-            reason: format!("auto-selected evdev + libei: input-method-v2 unavailable{}", libei_reason),
+            reason: format!(
+                "auto-selected evdev + libei: input-method-v2 unavailable{}",
+                libei_reason
+            ),
         };
     }
 
     // Most conservative: stdin + libei (no special permissions needed)
-    warn!("no safe input sources available (input-method-v2, evdev, portal) - falling back to stdin");
+    warn!(
+        "no safe input sources available (input-method-v2, evdev, portal) - falling back to stdin"
+    );
     BackendSelection {
         source: "stdin".to_string(),
         backend: "libei".to_string(),
-        reason: "conservative fallback: stdin + libei (no other input sources available)".to_string(),
+        reason: "conservative fallback: stdin + libei (no other input sources available)"
+            .to_string(),
     }
 }
 
@@ -238,7 +243,10 @@ pub fn auto_select(
 ) -> BackendSelection {
     let capabilities = probe_capabilities();
     let compositor = Compositor::detect();
-    debug!("detected compositor: {:?}, capabilities: {:?}", compositor, capabilities);
+    debug!(
+        "detected compositor: {:?}, capabilities: {:?}",
+        compositor, capabilities
+    );
     select_backend(&capabilities, compositor, explicit_source, explicit_backend)
 }
 
@@ -378,7 +386,10 @@ mod tests {
     #[test]
     fn reason_field_is_always_populated() {
         let result = auto_select(None, None);
-        assert!(!result.reason.is_empty(), "reason should explain the selection");
+        assert!(
+            !result.reason.is_empty(),
+            "reason should explain the selection"
+        );
     }
 
     #[test]
