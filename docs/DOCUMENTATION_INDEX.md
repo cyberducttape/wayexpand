@@ -1,0 +1,292 @@
+# WayExpand Documentation Index
+
+Complete guide to all WayExpand documentation, organized by use case and audience.
+
+## Quick Navigation by Use Case
+
+### I want to install WayExpand
+→ Start with [GETTING_STARTED.md](GETTING_STARTED.md)
+- Installation instructions for your desktop
+- First snippet walkthrough
+- Links to advanced guides
+
+### Something isn't working
+→ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- Common issues and solutions
+- Compositor-specific guidance
+- Debugging tips
+
+### I'm switching from Espanso
+→ Read [MIGRATION_FROM_ESPANSO.md](MIGRATION_FROM_ESPANSO.md)
+- Automatic config import
+- Feature comparison
+- Side-by-side examples
+
+### I need to manage WayExpand on servers/multiple machines
+→ Read [FOR_SYSADMINS.md](FOR_SYSADMINS.md)
+- Deployment models
+- 30+ production-ready snippets
+- Fleet management at scale
+- Health checks and monitoring
+
+### I'm deploying to my organization
+→ Start with [FLEET_CONFIG.md](FLEET_CONFIG.md)
+- Multi-layer configuration
+- Policy enforcement
+- Then see [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) for policy details
+- And [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) or [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) for automation
+
+### I want to handle sensitive data safely
+→ See [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
+- Security best practices
+- Pattern recommendations
+- Integration with secret stores
+
+### I want to understand what's supported on my desktop
+→ Check [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)
+- Feature status per desktop
+- Known limitations
+- Promotion policy
+
+### I'm contributing code
+→ Start with [DEVELOPMENT.md](DEVELOPMENT.md)
+- Development setup
+- Testing requirements
+- Code review checklist
+- Architecture overview
+
+---
+
+## Complete Documentation Map
+
+### Installation & Getting Started
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | New users | Install and create first snippet |
+| [MIGRATION_FROM_ESPANSO.md](MIGRATION_FROM_ESPANSO.md) | Espanso users | Switch to WayExpand |
+| [UPGRADING.md](UPGRADING.md) | Existing users | Upgrade to new versions |
+
+### Operations & Troubleshooting
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, logs, config reload |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
+| [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
+
+### Configuration & Customization
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [CUSTOMIZATION.md](CUSTOMIZATION.md) | GUI users | Themes, language support, colors |
+| [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) | All users | Resource and safety boundaries |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | Advanced users | Exact CLI/JSON/config contracts |
+| [COLOR_PACKS.md](COLOR_PACKS.md) | GUI users | GUI theme options |
+| [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md) | Internationalization | Available languages |
+| [RETRO_FONTS.md](RETRO_FONTS.md) | GUI users | Retro font options |
+| [UI.md](UI.md) | GUI users | User interface guide |
+
+### Enterprise & Security
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [FLEET_CONFIG.md](FLEET_CONFIG.md) | Enterprise teams | Multi-layer configuration |
+| [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) | Enterprise teams | Policy enforcement and compliance |
+| [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) | Enterprise teams | Handling sensitive data |
+| [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) | DevOps/SRE | Ansible playbooks |
+| [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) | DevOps/SRE | Puppet modules |
+
+### Backends & Compatibility
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) | All users | What's tested vs experimental |
+| [BACKENDS.md](BACKENDS.md) | Advanced users | Backend architecture |
+| [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md) | Advanced users | Password field protection details |
+| [COMPOSITOR_MATRIX.md](COMPOSITOR_MATRIX.md) | System integrators | Desktop/protocol combinations |
+
+### Development & Contribution
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Contributors | Building, testing, contributing |
+| [PACKAGING.md](PACKAGING.md) | Package maintainers | Building for distros |
+| [RELEASING.md](RELEASING.md) | Maintainers | Release process |
+| [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
+| [GUI_PERFORMANCE.md](GUI_PERFORMANCE.md) | GUI contributors | Performance considerations |
+
+---
+
+## Organization by Topic
+
+### By User Role
+
+#### End Users
+- [GETTING_STARTED.md](GETTING_STARTED.md) — installation
+- [OPERATIONS.md](OPERATIONS.md) — daemon management
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — fixing issues
+- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — what works where
+- [CUSTOMIZATION.md](CUSTOMIZATION.md) — GUI customization
+- [COMPATIBILITY.md](COMPATIBILITY.md) — guarantees
+
+#### System Administrators
+- [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — all sysadmin needs (30+ snippets)
+- [FLEET_CONFIG.md](FLEET_CONFIG.md) — multi-machine setup
+- [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) — policy enforcement
+
+#### Enterprise Teams
+- [FLEET_CONFIG.md](FLEET_CONFIG.md) — configuration layers
+- [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) — policy and compliance
+- [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) — secure data handling
+- [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) or [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) — deployment
+
+#### Contributors
+- [DEVELOPMENT.md](DEVELOPMENT.md) — setup and testing
+- [ARCHITECTURE](../README.md#architecture) — design overview
+- [PACKAGING.md](PACKAGING.md) — distro packaging
+- [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) — test procedures
+
+### By Feature
+
+#### Installation
+- [GETTING_STARTED.md](GETTING_STARTED.md)
+- [UPGRADING.md](UPGRADING.md)
+
+#### Configuration
+- [GETTING_STARTED.md](GETTING_STARTED.md) — basic
+- [COMPATIBILITY.md](COMPATIBILITY.md) — contracts
+- [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) — boundaries
+
+#### Expansion Matching
+- [GETTING_STARTED.md](GETTING_STARTED.md) — first snippet
+- [COMPATIBILITY.md](COMPATIBILITY.md) — matching modes
+
+#### Command Execution
+- [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — examples
+- [DEVELOPMENT.md](DEVELOPMENT.md) — architecture
+
+#### App Filtering
+- [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — examples
+- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — support status
+- [BACKENDS.md](BACKENDS.md) — technical details
+
+#### Policy Enforcement
+- [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) — complete reference
+- [FLEET_CONFIG.md](FLEET_CONFIG.md) — deployment
+
+#### Backend Selection
+- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — what's available
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — if issues
+- [BACKENDS.md](BACKENDS.md) — technical details
+
+#### Sensitive Data
+- [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) — best practices
+- [SECURITY.md](../SECURITY.md) — security model
+
+---
+
+## Common Workflows
+
+### "How do I set up WayExpand?"
+1. [GETTING_STARTED.md](GETTING_STARTED.md) — install for your desktop
+2. [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — verify support
+3. [OPERATIONS.md](OPERATIONS.md) — manage daemon
+
+### "How do I create effective snippets?"
+1. [GETTING_STARTED.md](GETTING_STARTED.md) — basic format
+2. [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — 30+ examples
+3. [COMPATIBILITY.md](COMPATIBILITY.md) — available features
+
+### "How do I deploy to my team?"
+1. [FLEET_CONFIG.md](FLEET_CONFIG.md) — understand layers
+2. [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) — set policy
+3. [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) — automate
+4. [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — monitor and support
+
+### "Something broke, how do I fix it?"
+1. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — find your issue
+2. [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — check if supported
+3. [OPERATIONS.md](OPERATIONS.md) — check logs
+
+### "I'm switching from Espanso"
+1. [MIGRATION_FROM_ESPANSO.md](MIGRATION_FROM_ESPANSO.md) — overview
+2. `wayexpand import espanso ~/.config/espanso/default.yml` — import config
+3. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — if issues
+
+### "I want to contribute code"
+1. [DEVELOPMENT.md](DEVELOPMENT.md) — setup
+2. [DEVELOPMENT.md](DEVELOPMENT.md#code-review-checklist) — standards
+3. [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — understand status
+4. [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) — test procedures
+
+---
+
+## Finding Answers
+
+### By Problem
+
+**Can't install**
+→ [GETTING_STARTED.md](GETTING_STARTED.md)
+
+**Snippets not expanding**
+→ [TROUBLESHOOTING.md](TROUBLESHOOTING.md), [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)
+
+**Daemon not running**
+→ [OPERATIONS.md](OPERATIONS.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+**Want to know what's supported**
+→ [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md), [BACKENDS.md](BACKENDS.md)
+
+**Password fields not protected**
+→ [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md), [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md)
+
+**Need to handle secrets safely**
+→ [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
+
+**Want to deploy to team**
+→ [FLEET_CONFIG.md](FLEET_CONFIG.md), [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md), [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md)
+
+**Want to contribute**
+→ [DEVELOPMENT.md](DEVELOPMENT.md)
+
+---
+
+## Archived Documentation
+
+Historical documentation is available in [archive/](archive/):
+- Implementation roadmaps
+- Planning documents
+- Alternative documentation structures (wiki)
+- Historical window tracking guides
+
+For current guidance, see the live documentation above. Archived docs are for reference only.
+
+---
+
+## External Resources
+
+- **GitHub Issues:** https://github.com/itchyitchy123/wayexpand/issues
+- **GitHub Discussions:** https://github.com/itchyitchy123/wayexpand/discussions
+- **Security:** See [SECURITY.md](../SECURITY.md) for vulnerability reporting
+- **Changelog:** [CHANGELOG.md](../CHANGELOG.md)
+
+---
+
+## Documentation Statistics
+
+- **Total public docs:** 27 files
+- **Archived docs:** 11 files
+- **Total lines:** ~8,500 lines of documentation
+- **Last updated:** 2026-09-19
+
+---
+
+## Navigation Tips
+
+- **Breadcrumbs:** Each major document shows its place in the hierarchy
+- **Cross-references:** Documents link to related topics
+- **Workflow guides:** See "Common Workflows" section above for guided paths
+- **Search:** Use your browser's search (Ctrl+F) to find topics
+
+Welcome! Start with the workflow that matches your needs above. 🎉
