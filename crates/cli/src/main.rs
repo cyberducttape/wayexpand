@@ -549,38 +549,78 @@ fn run() -> Result<()> {
 }
 
 fn print_backend_diagnostics() -> bool {
-    let mut capture_ready = false;
-    for status in discover_backends() {
+    let backends = discover_backends();
+    for status in &backends {
         println!("{:28} {:?} ({})", status.kind, status.state, status.detail);
     }
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        match WlrootsInjector::probe() {
-            Ok(_) => println!("wlroots probe: virtual keyboard globals available"),
-            Err(error) => println!("wlroots probe: unavailable ({error})"),
-        }
-        match InputMethodSource::probe() {
-            Ok(_) => {
-                capture_ready = true;
-                println!("input-method-v2 probe: manager and seat connection succeeded")
-            }
-            Err(error) => println!("input-method-v2 probe: unavailable ({error})"),
-        }
-        if !capture_ready {
-            println!(
-                "Capture readiness: NOT READY (no supported global input source was detected)"
-            );
-            println!(
-                "Next step: use a compositor with input-method-v2 support, or fall back to \
-                 `--source=evdev` (requires `input` group membership; see SECURITY.md for the \
-                 sensitive-field tradeoff) paired with `--backend=wlroots` or `--backend=libei`."
-            );
+        // Probe actual runtime availability
+        let wlroots_available = WlrootsInjector::probe().is_ok();
+        let input_method_available = InputMethodSource::probe().is_ok();
+
+        if wlroots_available {
+            println!("wlroots probe: virtual keyboard globals available");
         } else {
-            println!("Capture readiness: READY");
+            println!("wlroots probe: unavailable");
         }
+
+        if input_method_available {
+            println!("input-method-v2 probe: manager and seat connection succeeded");
+        } else {
+            println!("input-method-v2 probe: unavailable");
+        }
+
+        // Evaluate valid source+backend combinations for deployment
+        let mut valid_combinations = Vec::new();
+
+        // Combination 1: input-method-v2 source (exclusive, no output backend needed)
+        if input_method_available {
+            valid_combinations.push("input-method-v2 (exclusive, includes output)");
+        }
+
+        // Combination 2: evdev source + wlroots output
+        let evdev_readable = backends.iter().any(|status| {
+            use wayexpand_core::BackendKind;
+            status.kind == BackendKind::Evdev
+                && (status.state == wayexpand_core::BackendState::Implemented)
+        });
+
+        if evdev_readable && wlroots_available {
+            valid_combinations.push("evdev (capture) → wlroots (output)");
+        }
+
+        // Combination 3: evdev source + libei output
+        // libei is always Implemented if we're in a Wayland session (libei backend probes lazily)
+        if evdev_readable {
+            valid_combinations.push("evdev (capture) → libei (output; requires portal consent)");
+        }
+
+        let capture_ready = !valid_combinations.is_empty();
+        if capture_ready {
+            println!("\nCapture readiness: READY");
+            println!("Valid deployment combinations:");
+            for combo in &valid_combinations {
+                println!("  • {}", combo);
+            }
+        } else {
+            println!(
+                "\nCapture readiness: NOT READY (no supported input source+backend combination detected)"
+            );
+            println!("Troubleshooting:");
+            println!(
+                "  • For input-method-v2: Ensure compositor advertises zwp_input_method_manager_v2"
+            );
+            println!("  • For evdev: Add your user to the `input` group and log in again");
+            println!(
+                "  • KDE Plasma users: Use `--source=evdev --backend=libei` (no input-method-v2)"
+            );
+        }
+
+        capture_ready
+    } else {
+        // No Wayland session; doctor is only used for validation in this context
+        true
     }
-    // Doctor is also used in CI and for validating a config outside a desktop
-    // session. In that context there is no capture claim to validate.
-    std::env::var_os("WAYLAND_DISPLAY").is_none() || capture_ready
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
