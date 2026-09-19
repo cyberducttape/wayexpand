@@ -114,7 +114,10 @@ doctor --json` and a real expansion test.
 ```sh
 tar -xzf wayexpand-<version>-linux-x86_64.tar.gz
 cd wayexpand-<version>-linux-x86_64
-./scripts/install-release.sh --enable
+./scripts/install-release.sh
+wayexpand backend select --explain
+# Enable the selected service explicitly; do not implicitly enable
+# input-method-v2 because unsupported non-text keys may be lost.
 ```
 
 To remove a release-tarball or source-tree installation later, run

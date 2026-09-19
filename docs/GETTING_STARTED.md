@@ -39,18 +39,23 @@ wayexpand-gui
 The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
 `WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
 
-### 3. Start a supported user service
+### 3. Start the route selected for your session
 
-For input-method-v2:
+If the explanation reports `evdev + libei`, install the evdev permission rule
+and start the normal capture service:
 
 ```sh
-systemctl --user enable --now wayexpand-input-method.service
+sudo ./scripts/install-evdev-permissions.sh
+systemctl --user enable --now wayexpand-evdev.service
 wayexpand status --json
 ```
 
-The status should report `state=connected`. If `doctor` recommends an
-explicit evdev/libei route instead, follow its command and read the security
-tradeoff in [SECURITY.md](../SECURITY.md).
+The status should report `state=connected`. If no readable evdev device is
+available, the automatic fallback is stdin and is intended for harnesses, not
+normal desktop capture. Input-method-v2 is an explicit experimental opt-in;
+read its key pass-through warning before starting
+`wayexpand-input-method.service`. For either route, read the security
+tradeoffs in [SECURITY.md](../SECURITY.md).
 
 ### 4. Test without typing into an application
 
@@ -130,13 +135,14 @@ Wlroots-based compositors have active development in progress. Window tracking i
 **Getting started:**
 
 ```bash
-wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
+wayexpand-daemon --source=evdev --backend=libei ~/.config/wayexpand/expansions.toml
 wayexpand doctor  # Shows what your session can use
 ```
 
 **Known limitations:**
-- Escape, arrow keys, and F-keys may not work with input-method-v2
-- If that's a blocker, use evdev: `--source=evdev` (requires `input` group)
+- The automatic route is evdev + libei when `/dev/input` is readable
+- Input-method-v2 is explicit/experimental: Escape, arrow keys, and F-keys may not pass through
+- Evdev requires `input` group membership and has no password-field signal
 
 **Want to help test?**
 - Run `wayexpand doctor` and share the output on our [GitHub issues](https://github.com/itchyitchy123/wayexpand/issues)
@@ -151,14 +157,14 @@ Limited support due to GNOME's design (no window tracking protocol).
 
 **What works:**
 - ✅ Global hotkeys (text expansion via custom keyboard shortcuts)
-- ⚠️ Text capture via input-method-v2 (but no password field detection)
+- ⚠️ Text capture via input-method-v2 when explicitly enabled (but no window tracking)
 
 **What doesn't work:**
 - ❌ Window-specific snippets (app_filter)
 - ❌ Password field protection
 
 **Recommendation:**
-- Use **global hotkeys** instead of trigger-based expansion
+- Use **global hotkeys** instead of trigger-based expansion, or explicitly opt into input-method-v2 after testing key pass-through
 - See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for compatibility status
 
 ---

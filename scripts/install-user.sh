@@ -3,7 +3,7 @@ set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 enable_service=0
-service_name=wayexpand-input-method.service
+service_name=
 for argument in "$@"; do
     case "$argument" in
         --enable)
@@ -121,9 +121,10 @@ printf '%s\n' ""
 printf '%s\n' "3. Check which backend your compositor supports:"
 printf '%s\n' "   wayexpand doctor"
 printf '%s\n' ""
-printf '%s\n' "4. Choose ONE service to enable:"
+printf '%s\n' "4. Inspect automatic selection, then choose ONE service explicitly:"
+printf '%s\n' "   wayexpand backend select --explain"
 printf '%s\n' ""
-printf '%s\n' "   FOR COMPOSITORS CONFIRMED BY wayexpand doctor (input-method-v2):"
+printf '%s\n' "   EXPERIMENTAL input-method-v2 (may lose unsupported non-text keys):"
 printf '%s\n' "   systemctl --user enable --now wayexpand-input-method.service"
 printf '%s\n' ""
 printf '%s\n' "   FOR KDE PLASMA / SWAY / HYPRLAND (evdev):"
@@ -137,6 +138,11 @@ printf '%s\n' ""
 printf '%s\n' "⚠️  DO NOT use 'wayexpand.service' directly — it is a test harness."
 
 if [ "$enable_service" -eq 1 ]; then
+    if [ -z "$service_name" ]; then
+        printf '%s\n' "error: --enable requires an explicit --service selection" >&2
+        printf '%s\n' "choose wayexpand-input-method.service only after accepting its key pass-through limitation, or wayexpand-evdev.service for the normal route" >&2
+        exit 2
+    fi
     "$bin_dir/wayexpand" validate "$config_path"
     if ! command -v systemctl >/dev/null 2>&1; then
         printf '%s\n' "error: systemctl is required for --enable" >&2

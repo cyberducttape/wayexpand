@@ -6,7 +6,7 @@ set -eu
 
 release_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 enable_service=0
-service_name=wayexpand-input-method.service
+service_name=
 for argument in "$@"; do
     case "$argument" in
         --enable)
@@ -103,7 +103,9 @@ printf '%s\n' "Next steps:"
 printf '%s\n' "  export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' "  systemctl --user daemon-reload"
 printf '%s\n' "  wayexpand doctor"
-printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service"
+printf '%s\n' "  wayexpand backend select --explain"
+printf '%s\n' "  systemctl --user enable --now wayexpand-evdev.service (normal route, after evdev permissions)"
+printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service (explicit experimental opt-in; may lose non-text keys)"
 printf '%s\n' "  wayexpand-gui"
 printf '%s\n' "If \`doctor\` reports no input-method-v2/virtual-keyboard support (for"
 printf '%s\n' "example on KWin/KDE Plasma), read SECURITY.md and consider:"
@@ -112,6 +114,11 @@ printf '%s\n' "  systemctl --user enable --now wayexpand-evdev.service"
 printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
 
 if [ "$enable_service" -eq 1 ]; then
+    if [ -z "$service_name" ]; then
+        printf '%s\n' "error: --enable requires an explicit --service selection" >&2
+        printf '%s\n' "choose wayexpand-input-method.service only after accepting its key pass-through limitation, or wayexpand-evdev.service for the normal route" >&2
+        exit 2
+    fi
     "$bin_dir/wayexpand" validate "$config_path"
     if ! command -v systemctl >/dev/null 2>&1; then
         printf '%s\n' "error: systemctl is required for --enable" >&2
