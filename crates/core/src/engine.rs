@@ -1,6 +1,7 @@
 use crate::{
-    config::capitalize_first_letter, render_template_with_cursor, CommandConfig, CommandEnvironment, Config,
-    ConfigError, HotkeyConfig, InjectorError, KeyChord, MatchMode, Matcher, TextInjector,
+    config::capitalize_first_letter, render_template_with_cursor, CommandConfig,
+    CommandEnvironment, Config, ConfigError, HotkeyConfig, InjectorError, KeyChord, MatchMode,
+    Matcher, TextInjector,
 };
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -2437,7 +2438,10 @@ replacement = "bad\u0000value""#;
         use std::fs;
         use std::path::PathBuf;
 
-        let test_file = PathBuf::from(format!("/tmp/wayexpand-policy-test-{}.txt", std::process::id()));
+        let test_file = PathBuf::from(format!(
+            "/tmp/wayexpand-policy-test-{}.txt",
+            std::process::id()
+        ));
 
         // Clean up if it exists from a prior run
         let _ = fs::remove_file(&test_file);
@@ -2481,7 +2485,10 @@ replacement = "bad\u0000value""#;
         use std::thread;
         use std::time::Duration;
 
-        let test_file = PathBuf::from(format!("/tmp/wayexpand-cmd-enabled-{}.txt", std::process::id()));
+        let test_file = PathBuf::from(format!(
+            "/tmp/wayexpand-cmd-enabled-{}.txt",
+            std::process::id()
+        ));
 
         // Clean up if it exists from a prior run
         let _ = fs::remove_file(&test_file);
@@ -2513,5 +2520,83 @@ replacement = "bad\u0000value""#;
 
         // Clean up
         let _ = fs::remove_file(&test_file);
+    }
+
+    #[test]
+    #[ignore = "Known issue P2: descendants survive on successful exit (issue: process cleanup on success)"]
+    fn process_descendants_cleaned_up_on_successful_exit() {
+        // Regression test: spawned descendants should not survive after the
+        // command-backed expansion completes, even when the direct child exits
+        // successfully. This tests the scenario: (sleep 600 &; exit 0)
+        //
+        // Currently FAILS: descendants survive when the direct child exits with
+        // status 0, because we only kill the process group on timeout. This needs
+        // to be called regardless of child exit status. See run_command() in
+        // engine.rs line ~926 - needs unconditional kill_process_group() call.
+        use std::fs::File;
+        use std::io::Write;
+        use std::path::PathBuf;
+        use std::thread;
+        use std::time::Duration;
+
+        // Create a temporary helper script that spawns a descendant and exits
+        let script_path = PathBuf::from(format!(
+            "/tmp/wayexpand-descendant-test-{}.sh",
+            std::process::id()
+        ));
+        let output_file = PathBuf::from(format!(
+            "/tmp/wayexpand-descendant-marker-{}.txt",
+            std::process::id()
+        ));
+
+        // Script that spawns a long-running background process and exits successfully
+        let script_content = format!(
+            "#!/bin/bash\n\
+            (sleep 600 > {} 2>&1 &)\n\
+            exit 0\n",
+            output_file.display()
+        );
+
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&output_file);
+
+        let mut script_file = File::create(&script_path).unwrap();
+        script_file.write_all(script_content.as_bytes()).unwrap();
+        drop(script_file);
+
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cmd = format!(
+            "[[expansion]]\ntrigger = \":spawn\"\nreplacement = \"x\"\ncommand = {{ program = \"{}\", timeout_ms = 5000 }}\n",
+            script_path.display()
+        );
+
+        let config = Config::parse(&cmd).unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+
+        // Execute the command that spawns a descendant
+        let _ = engine.process(InputEvent::Text(":spawn".into()));
+
+        // Wait for async command to complete
+        thread::sleep(Duration::from_millis(500));
+        let _ = engine.drain_completed_commands();
+
+        // Give any survivors a moment to start writing
+        thread::sleep(Duration::from_millis(100));
+
+        // The background process should have been killed with the process group.
+        // If it survived, the output file would exist (it tries to write to it).
+        // Note: This is a heuristic test; a truly robust test would use /proc
+        // inspection, but this catches the obvious regression.
+        let survived = output_file.exists();
+        assert!(
+            !survived,
+            "descendant process survived after command-backed expansion completed"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&output_file);
     }
 }
