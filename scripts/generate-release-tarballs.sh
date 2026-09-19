@@ -37,6 +37,13 @@ git archive --format=tar.gz \
     --output="${tmpdir}/wayexpand-${version}.tar.gz" \
     HEAD
 
+# Verify .git is not in archive
+if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" | grep -q '\.git/'; then
+    printf '%s\n' "ERROR: .git directory found in clean tarball" >&2
+    exit 1
+fi
+printf '%s\n' "  ✓ Verified .git not in clean tarball"
+
 # 2. Generate vendored tarball (with vendor/)
 printf '%s\n' "Creating vendored tarball (with vendor/)..."
 mkdir -p "${tmpdir}/wayexpand-${version}-vendored"
@@ -53,6 +60,13 @@ cargo vendor vendor/ >/dev/null 2>&1
 # Create vendored tarball
 cd ..
 tar -czf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" "wayexpand-${version}"
+
+# Verify .git is not in vendored archive
+if tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" | grep -q '\.git/'; then
+    printf '%s\n' "ERROR: .git directory found in vendored tarball" >&2
+    exit 1
+fi
+printf '%s\n' "  ✓ Verified .git not in vendored tarball"
 
 # Move tarballs to current directory
 printf '%s\n' ""
