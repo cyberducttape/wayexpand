@@ -16,7 +16,7 @@ Every change should preserve the project's operational guarantees:
 
 ### Prerequisites
 
-- Rust 1.93+ (install via [rustup](https://rustup.rs/))
+- Rust 1.87+ (install via [rustup](https://rustup.rs/))
 - Standard tools: `git`, `make`, `pkg-config`
 - Wayland dev libraries (usually pre-installed on Wayland systems)
 
