@@ -13,10 +13,11 @@ categories.workspace = true
 
 [dependencies]
 ashpd = "0.12"
+libc.workspace = true
 reis = "0.7.1"
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "time"] }
-rustix = { version = "1", features = ["event"] }
+rustix = { version = "1", features = ["event", "process"] }
 unicode-segmentation.workspace = true
 xkbcommon-rs = { workspace = true, features = ["server"] }
 xkeysym = "0.2.1"
