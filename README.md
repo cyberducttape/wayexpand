@@ -30,6 +30,15 @@ X11-shaped implementation with Wayland support bolted on.
 
 ![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
 
+## What's New (v1.2 in progress)
+
+- 🚀 **Wlroots window tracking (Phases 1-2 complete):** Foundation for Sway, Hyprland, river support. Phase 3 (daemon integration) coming soon.
+- 🔒 **P0 security fix:** Config reload no longer loses password-field protection state.
+- 📚 **Clarity on compositor support:** New [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md) clearly documents what works where and what's in progress.
+- 🧪 **191 tests passing:** Stability across core engine, CLI, daemon, and backends.
+
+**Get started:** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for your desktop.
+
 ## Why not just use Espanso or AutoKey?
 
 |                          | **WayExpand**                                                        | Espanso                                        | AutoKey                             |
