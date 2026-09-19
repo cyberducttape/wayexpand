@@ -244,10 +244,11 @@ Cons:
 
 **Option 2: evdev + libei/wlroots (split capture/output)**
 
-This is the normal automatic route when readable evdev input is available,
-including on compositors with input-method-v2. Output goes through libei on
-desktops with a RemoteDesktop portal (KDE Plasma, GNOME) or wlroots on wlroots
-compositors; the shipped unit uses libei:
+This is the normal explicit route when you have acknowledged raw keyboard
+capture. Automatic mode does not enable evdev merely because the process can
+read `/dev/input`. Output goes through libei on desktops with a RemoteDesktop
+portal (KDE Plasma, GNOME) or wlroots on wlroots compositors; the shipped unit
+uses libei:
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
 sudo ./scripts/install-evdev-permissions.sh             # then apply
@@ -276,13 +277,15 @@ Run `wayexpand doctor` after installation to see which backends your compositor 
 wayexpand doctor
 ```
 
-If you're on KDE Plasma, use **Option 2** (evdev) — it is the normal default
-route and has better keyboard fidelity.
+If you're on KDE Plasma, use **Option 2** (evdev) after reviewing the raw
+keyboard visibility tradeoff. It has better keyboard fidelity, but it is not
+enabled automatically.
 
-If `wayexpand backend select --explain` reports evdev + libei, keep that
-selection for normal use. Choose input-method-v2 explicitly only if password-
-field signals matter more to you than general key pass-through; Escape, arrows,
-and function keys may be lost while it is active.
+If `wayexpand backend select --explain` reports readable evdev as disabled,
+choose `--source=evdev --backend=libei` only after acknowledging that WayExpand
+will see global keyboard input. Choose input-method-v2 explicitly only if
+password-field signals matter more to you than general key pass-through;
+Escape, arrows, and function keys may be lost while it is active.
 
 **Granting evdev permission**
 

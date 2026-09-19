@@ -779,17 +779,27 @@ fn print_backend_diagnostics() -> bool {
         return false;
     }
     println!("Capture readiness: READY");
+    println!(
+        "Automatic selection: stdin + libei (raw evdev capture is disabled unless `--source=evdev` is explicitly selected)"
+    );
+    if evdev_readable {
+        println!(
+            "evdev probe: readable, but not enabled automatically; explicit `--source=evdev` acknowledges global keyboard visibility"
+        );
+    }
     for combination in &combinations {
-        println!("  usable: wayexpand-daemon {combination}");
+        println!("  explicit usable: wayexpand-daemon {combination}");
     }
     println!("Setup guidance:");
     if input_method_available {
-        println!("  recommended: systemctl --user enable --now wayexpand-input-method.service");
-        println!("  verify: input-method-v2 support is compositor-dependent");
+        println!(
+            "  experimental opt-in: systemctl --user enable --now wayexpand-input-method.service"
+        );
+        println!("  warning: unsupported non-text keys may be lost");
     }
     if evdev_readable {
         println!(
-            "  evdev alternative: requires the input group/udev grant and has no password-field signal"
+            "  explicit evdev: requires the input group/udev grant and has no password-field signal"
         );
     }
     if libei_plausible && evdev_readable {

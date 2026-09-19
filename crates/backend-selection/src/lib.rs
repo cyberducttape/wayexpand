@@ -245,20 +245,21 @@ pub fn select_backend(
         let backend = parse_backend(backend)?;
         match backend {
             InjectorBackend::None => ResolvedBackendPair::Stdin(InjectorBackend::None),
-            InjectorBackend::Libei if capabilities.has_dev_input => {
-                ResolvedBackendPair::Evdev(InjectorBackend::Libei)
-            }
-            InjectorBackend::Wlroots if capabilities.has_dev_input => {
-                ResolvedBackendPair::Evdev(InjectorBackend::Wlroots)
-            }
+            // Choosing an output backend does not acknowledge global raw
+            // keyboard capture. Keep the complementary source on stdin
+            // unless the user explicitly requested --source=evdev.
             InjectorBackend::Libei | InjectorBackend::Wlroots => {
                 ResolvedBackendPair::Stdin(backend)
             }
         }
-    } else if capabilities.has_dev_input {
-        ResolvedBackendPair::Evdev(InjectorBackend::Libei)
     } else {
-        warn!("no safe input sources available - falling back to stdin");
+        if capabilities.has_dev_input {
+            warn!(
+                "readable evdev devices detected, but automatic mode leaves raw keyboard capture disabled"
+            );
+        } else {
+            warn!("no safe input sources available - falling back to stdin");
+        }
         ResolvedBackendPair::Stdin(InjectorBackend::Libei)
     };
 
@@ -286,29 +287,18 @@ fn selection_reason(
         return format!("user-specified source: {source}");
     }
     if let Some(backend) = explicit_backend {
-        return format!("user-specified backend: {backend}");
+        return format!(
+            "user-specified backend: {backend}; stdin remains the source unless --source=evdev is also specified"
+        );
     }
     match pair {
-        ResolvedBackendPair::Evdev(InjectorBackend::Libei) => {
-            let availability = if capabilities.has_input_method_v2 {
-                "input-method-v2 is available but remains opt-in because unsupported non-text keys may be lost"
-            } else {
-                "input-method-v2 is unavailable"
-            };
-            let socket = if capabilities.has_direct_libei_socket {
-                ", direct EIS socket available"
-            } else {
-                "; portal consent will be requested when libei starts"
-            };
-            format!("auto-selected evdev + libei: {availability}{socket}")
-        }
         ResolvedBackendPair::Stdin(InjectorBackend::Libei) => {
-            let availability = if capabilities.has_input_method_v2 {
-                "input-method-v2 remains opt-in because unsupported non-text keys may be lost"
+            let availability = if capabilities.has_dev_input {
+                "readable evdev is available but disabled by default; use --source=evdev to acknowledge global keyboard capture"
             } else {
-                "no evdev device is readable and input-method-v2 is unavailable"
+                "no readable evdev device is available"
             };
-            format!("conservative fallback: stdin + libei ({availability})")
+            format!("conservative default: stdin + libei ({availability})")
         }
         _ => format!("selected {} + {}", pair.source(), pair.backend()),
     }
@@ -369,6 +359,13 @@ impl BackendSelection {
             }
         )
         .unwrap();
+        if capabilities.has_dev_input && self.pair.source() != "evdev" {
+            writeln!(
+                output,
+                "  evdev automatic use: disabled; pass --source=evdev to acknowledge global keyboard capture"
+            )
+            .unwrap();
+        }
         writeln!(
             output,
             "  direct LIBEI_SOCKET: {}",
@@ -429,15 +426,18 @@ mod tests {
     }
 
     #[test]
-    fn automatic_resolution_avoids_input_method_even_when_available() {
+    fn automatic_resolution_does_not_enable_raw_evdev() {
         let selection = select_backend(&capabilities(true, true, false), None, None).unwrap();
         assert_eq!(
             selection.pair,
-            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
         );
-        assert!(selection.reason.contains("remains opt-in"));
-        assert!(selection.explanation().contains("capture: evdev"));
+        assert!(selection.reason.contains("disabled by default"));
+        assert!(selection.explanation().contains("capture: stdin"));
         assert!(selection.explanation().contains("injection: libei"));
+        assert!(selection
+            .explanation()
+            .contains("evdev automatic use: disabled"));
     }
 
     #[test]
@@ -455,16 +455,17 @@ mod tests {
             selection.pair,
             ResolvedBackendPair::Stdin(InjectorBackend::Libei)
         );
-        assert!(selection.reason.contains("remains opt-in"));
+        assert!(selection.reason.contains("no readable evdev device"));
     }
 
     #[test]
-    fn explicit_injector_never_selects_input_method() {
+    fn explicit_injector_does_not_imply_raw_capture() {
         let result = select_backend(&capabilities(true, true, false), None, Some("libei")).unwrap();
         assert_eq!(
             result.pair,
-            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
         );
+        assert!(result.reason.contains("--source=evdev"));
     }
 
     #[test]
@@ -492,7 +493,7 @@ mod tests {
             select_backend(&capabilities(false, true, false), None, Some("wlroots"))
                 .unwrap()
                 .pair,
-            ResolvedBackendPair::Evdev(InjectorBackend::Wlroots)
+            ResolvedBackendPair::Stdin(InjectorBackend::Wlroots)
         );
     }
 
@@ -503,6 +504,6 @@ mod tests {
             selection.pair,
             ResolvedBackendPair::Stdin(InjectorBackend::Libei)
         );
-        assert!(selection.explanation().contains("conservative fallback"));
+        assert!(selection.explanation().contains("conservative default"));
     }
 }
