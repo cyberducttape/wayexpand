@@ -105,6 +105,10 @@ pub enum HotkeyError {
     Timeout(u64),
     #[error("hotkey action failed with status {0}")]
     Failed(String),
+    #[error("hotkey action queue is full")]
+    QueueFull,
+    #[error("hotkey action worker is unavailable")]
+    WorkerUnavailable,
 }
 
 pub struct ExpansionEngine {
@@ -149,13 +153,17 @@ struct CommandCacheEntry {
 struct AsyncCommandRuntime {
     sender: mpsc::SyncSender<AsyncCommandJob>,
     receiver: mpsc::Receiver<AsyncCommandCompletion>,
+    hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
 }
 
-struct AsyncCommandJob {
-    config_index: usize,
-    generation: u64,
-    command: CommandConfig,
-    result: ExpansionResult,
+enum AsyncCommandJob {
+    Expansion {
+        config_index: usize,
+        generation: u64,
+        command: CommandConfig,
+        result: ExpansionResult,
+    },
+    Hotkey(HotkeyResult),
 }
 
 struct AsyncCommandCompletion {
@@ -164,6 +172,11 @@ struct AsyncCommandCompletion {
     cache_ms: u64,
     result: ExpansionResult,
     output: Result<String, CommandError>,
+}
+
+struct AsyncHotkeyCompletion {
+    action: HotkeyResult,
+    output: Result<(), HotkeyError>,
 }
 
 impl ExpansionEngine {
@@ -234,33 +247,55 @@ impl ExpansionEngine {
         })
     }
 
-    /// Run command-backed expansions on a bounded worker queue. This is
-    /// enabled by the daemon; CLI and GUI previews remain synchronous so an
-    /// explicit preview call can return its result directly.
+    /// Run command-backed expansions and hotkey actions on a bounded worker
+    /// queue. This is enabled by the daemon; CLI and GUI previews remain
+    /// synchronous so an explicit preview call can return its result
+    /// directly.
     pub fn enable_async_commands(&mut self) {
         if self.async_commands.is_some() {
             return;
         }
         let (job_sender, job_receiver) =
             mpsc::sync_channel::<AsyncCommandJob>(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let (completion_sender, completion_receiver) = mpsc::channel();
+        let (completion_sender, completion_receiver) =
+            mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (hotkey_completion_sender, hotkey_completion_receiver) =
+            mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         thread::Builder::new()
             .name("wayexpand-command-worker".into())
             .spawn(move || {
                 while let Ok(job) = job_receiver.recv() {
-                    let cache_ms = job.command.cache_ms;
-                    let output = run_command(&job.command);
-                    if completion_sender
-                        .send(AsyncCommandCompletion {
-                            config_index: job.config_index,
-                            generation: job.generation,
-                            cache_ms,
-                            result: job.result,
-                            output,
-                        })
-                        .is_err()
-                    {
-                        break;
+                    match job {
+                        AsyncCommandJob::Expansion {
+                            config_index,
+                            generation,
+                            command,
+                            result,
+                        } => {
+                            let cache_ms = command.cache_ms;
+                            let output = run_command(&command);
+                            if completion_sender
+                                .send(AsyncCommandCompletion {
+                                    config_index,
+                                    generation,
+                                    cache_ms,
+                                    result,
+                                    output,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        AsyncCommandJob::Hotkey(action) => {
+                            let output = Self::execute_hotkey(&action);
+                            if hotkey_completion_sender
+                                .send(AsyncHotkeyCompletion { action, output })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                     }
                 }
             })
@@ -268,6 +303,7 @@ impl ExpansionEngine {
         self.async_commands = Some(AsyncCommandRuntime {
             sender: job_sender,
             receiver: completion_receiver,
+            hotkey_receiver: hotkey_completion_receiver,
         });
     }
 
@@ -328,6 +364,36 @@ impl ExpansionEngine {
             results.push(completion.result);
         }
         results
+    }
+
+    /// Queue a hotkey action for bounded asynchronous execution. The caller
+    /// must drain completions periodically; neither enqueueing nor draining
+    /// waits for the child process.
+    pub fn queue_hotkey(&self, action: &HotkeyResult) -> Result<(), HotkeyError> {
+        let Some(runtime) = self.async_commands.as_ref() else {
+            return Err(HotkeyError::WorkerUnavailable);
+        };
+        runtime
+            .sender
+            .try_send(AsyncCommandJob::Hotkey(action.clone()))
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => HotkeyError::QueueFull,
+                mpsc::TrySendError::Disconnected(_) => HotkeyError::WorkerUnavailable,
+            })
+    }
+
+    /// Return hotkey action completions without waiting for any child
+    /// process. Results are intended for logging and operational status; the
+    /// action itself has already completed on the worker thread.
+    pub fn drain_completed_hotkeys(&mut self) -> Vec<(HotkeyResult, Result<(), HotkeyError>)> {
+        let Some(runtime) = self.async_commands.as_ref() else {
+            return Vec::new();
+        };
+        runtime
+            .hotkey_receiver
+            .try_iter()
+            .map(|completion| (completion.action, completion.output))
+            .collect()
     }
 
     /// The currently known focused window, if any. Used to carry window
@@ -426,6 +492,9 @@ impl ExpansionEngine {
 
     /// Execute one validated hotkey action without invoking a shell. Output
     /// is discarded and the process is bounded by the configured timeout.
+    /// This is intentionally synchronous for explicit, user-initiated
+    /// callers; the daemon must use [`Self::queue_hotkey`] so its capture loop
+    /// never waits for a child process.
     pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
         let mut command = Command::new(&result.command.program);
         configure_command_environment(&mut command, &result.command);
@@ -674,7 +743,7 @@ impl ExpansionEngine {
                 reinsert_after: terminating_char,
                 command_backed: true,
             };
-            let job = AsyncCommandJob {
+            let job = AsyncCommandJob::Expansion {
                 config_index,
                 generation: self.input_generation,
                 command: command.clone(),
@@ -1333,6 +1402,42 @@ mod tests {
             .pop()
             .unwrap();
         ExpansionEngine::execute_hotkey(&action).unwrap();
+    }
+
+    #[test]
+    fn asynchronous_hotkey_execution_does_not_block_input_processing() {
+        let config = Config::parse(
+            r#"
+            [[hotkey]]
+            chord = "Ctrl+M"
+            [hotkey.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.1"]
+            timeout_ms = 500
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        let action = engine
+            .process_key(&KeyChord::parse("Ctrl+M").unwrap())
+            .pop()
+            .unwrap();
+
+        let started = Instant::now();
+        engine.queue_hotkey(&action).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(50));
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let (completed_action, result) = loop {
+            if let Some(completion) = engine.drain_completed_hotkeys().pop() {
+                break completion;
+            }
+            assert!(Instant::now() < deadline, "hotkey did not complete");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(completed_action.chord, action.chord);
+        assert!(result.is_ok());
     }
 
     #[test]

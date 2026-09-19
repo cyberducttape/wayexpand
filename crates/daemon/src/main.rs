@@ -282,6 +282,12 @@ fn main() -> Result<()> {
             break;
         }
         config.reload_if_changed();
+        for (action, result) in config.engine.drain_completed_hotkeys() {
+            match result {
+                Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
+                Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
+            }
+        }
         let completed_commands = config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
             if input_method_mode {
@@ -1030,9 +1036,12 @@ fn process_event(
         }
 
         for action in engine.process_key(&chord) {
-            match ExpansionEngine::execute_hotkey(&action) {
-                Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
-                Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
+            if let Err(error) = engine.queue_hotkey(&action) {
+                warn!(
+                    chord = %action.chord,
+                    %error,
+                    "hotkey action was not queued"
+                );
             }
         }
         if let Some(result) = engine.try_undo(&chord) {
@@ -1326,6 +1335,44 @@ mod tests {
             "libei",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn process_event_queues_hotkeys_without_waiting_for_the_child() {
+        let config = Config::parse(
+            r#"
+                [[hotkey]]
+                chord = "Ctrl+M"
+                [hotkey.command]
+                program = "/bin/sh"
+                args = ["-c", "sleep 0.1"]
+                timeout_ms = 500
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let started = Instant::now();
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+M").unwrap()),
+            None,
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(50));
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if let Some((_, result)) = engine.drain_completed_hotkeys().pop() {
+                assert!(result.is_ok());
+                break;
+            }
+            assert!(Instant::now() < deadline, "hotkey did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
