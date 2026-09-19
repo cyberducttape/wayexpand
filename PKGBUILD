@@ -3,7 +3,7 @@ pkgname=wayexpand
 pkgver=1.1.2
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
-arch=('x86_64' 'aarch64')
+arch=('x86_64')
 url="https://github.com/itchyitchy123/wayexpand"
 license=('MIT')
 depends=(
@@ -20,15 +20,13 @@ optdepends=(
     'systemd: for user service support'
 )
 source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
-# For local development: `makepkg -g` to generate checksums
-# For AUR submission: must have real sha256sum (not SKIP)
-# Run: updpkgsums
-# Then copy the generated sha256sums line below
-sha256sums=('SKIP')  # TODO: Run 'makepkg -g' or 'updpkgsums' before AUR submission
+sha256sums=('db56609c2ba49d0fc9669e52a4f79dda6b59cb9fdd6b724987cf475487214f60')
 conflicts=('wayexpand-git')
 
 build() {
     cd "${pkgname}-${pkgver}"
+    # Generate vendored dependencies for offline builds
+    cargo vendor vendor/
     cargo build --release --locked --all
 }
 

@@ -41,6 +41,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Generate vendored dependencies (offline builds)
+        run: cargo vendor vendor/ && echo "vendor/" >> .gitignore
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
@@ -77,6 +79,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Generate vendored dependencies (offline builds)
+        run: cargo vendor vendor/ && echo "vendor/" >> .gitignore
       - name: Daemon smoke test
         run: bash scripts/smoke-daemon.sh
       - name: Doctor smoke test
