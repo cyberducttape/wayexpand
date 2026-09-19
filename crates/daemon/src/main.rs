@@ -21,6 +21,7 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_libei::LibeiInjector;
 use wayexpand_backend_wlroots::WlrootsInjector;
+use wayexpand_backend_wlroots_toplevel::WlrootsToplevelTracker;
 use wayexpand_core::{
     default_config_path, ExpansionEngine, ExpansionError, ExpansionResult, InputEvent,
     TextInjector, WindowContext, WindowTracker,
@@ -579,43 +580,82 @@ fn main() -> Result<()> {
 /// available, feeding `WindowChanged` events into the main loop through a
 /// channel so `app_filter`-scoped expansions can gate on it. Returns `None`
 /// (not an error) when no tracker applies to this session -- window
-/// tracking is inherently compositor-specific and today only KDE Plasma
-/// (KWin) is implemented; `app_filter`-scoped expansions simply fail closed
-/// everywhere else, exactly as they would if this thread were never
-/// started.
+/// tracking is inherently compositor-specific. Today, KDE Plasma (KWin) and
+/// wlroots-based compositors (Sway, Hyprland, river) are implemented.
+/// `app_filter`-scoped expansions simply fail closed everywhere else, exactly
+/// as they would if this thread were never started.
 fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
-    if let Err(error) = KwinWindowTracker::probe() {
-        info!(%error, "window tracking unavailable; app_filter-scoped expansions will not match");
-        return None;
-    }
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut tracker = match KwinWindowTracker::new() {
-            Ok(tracker) => tracker,
-            Err(error) => {
-                warn!(%error, "window tracker failed to start after a successful probe");
-                return;
-            }
-        };
-        info!("window tracker active (KWin scripting bridge)");
-        loop {
-            match tracker.next_window_timeout(Duration::from_secs(2)) {
-                Ok(Some(window)) => {
-                    if sender.send(window).is_err() {
+    // Phase 3: Try backends in order of preference
+    // 1. KDE Plasma (KWin D-Bus) - most reliable
+    // 2. wlroots (foreign-toplevel-management-v1) - Sway/Hyprland/river
+
+    // Try KWin first
+    if KwinWindowTracker::probe().is_ok() {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut tracker = match KwinWindowTracker::new() {
+                Ok(tracker) => tracker,
+                Err(error) => {
+                    warn!(%error, "KWin window tracker failed to start after a successful probe");
+                    return;
+                }
+            };
+            info!("window tracker active (KWin scripting bridge)");
+            loop {
+                match tracker.next_window_timeout(Duration::from_secs(2)) {
+                    Ok(Some(window)) => {
+                        if sender.send(window).is_err() {
+                            break;
+                        }
+                    }
+                    // Nothing changed within the timeout: expected and frequent.
+                    Ok(None) => {}
+                    Err(error) => {
+                        warn!(%error, "KWin window tracker stopped");
                         break;
                     }
                 }
-                // Nothing changed within the timeout: expected and frequent
-                // (focus is usually stable), just poll again.
-                Ok(None) => {}
-                Err(error) => {
-                    warn!(%error, "window tracker stopped");
-                    break;
-                }
             }
+        });
+        return Some(receiver);
+    }
+
+    // Try wlroots (Sway, Hyprland, river, etc.)
+    match WlrootsToplevelTracker::new(Duration::from_secs(3)) {
+        Ok(_) => {
+            let (sender, receiver) = mpsc::channel();
+            thread::spawn(move || {
+                let mut tracker = match WlrootsToplevelTracker::new(Duration::from_secs(3)) {
+                    Ok(tracker) => tracker,
+                    Err(error) => {
+                        warn!(%error, "wlroots window tracker failed to start after probe succeeded");
+                        return;
+                    }
+                };
+                info!("window tracker active (wlr-foreign-toplevel-management-v1)");
+                loop {
+                    match tracker.next_window_timeout(Duration::from_secs(2)) {
+                        Ok(Some(window)) => {
+                            if sender.send(window).is_err() {
+                                break;
+                            }
+                        }
+                        // Nothing changed within the timeout: expected and frequent.
+                        Ok(None) => {}
+                        Err(error) => {
+                            warn!(%error, "wlroots window tracker stopped");
+                            break;
+                        }
+                    }
+                }
+            });
+            Some(receiver)
         }
-    });
-    Some(receiver)
+        Err(_) => {
+            info!("window tracking unavailable; app_filter-scoped expansions will not match");
+            None
+        }
+    }
 }
 
 /// Drain any pending window-change events from the tracker's receiver
