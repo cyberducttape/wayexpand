@@ -1,3 +1,14 @@
+wayexpand (1.1.2-2) focal; urgency=high
+
+  * Fix P0 blockers for v1.2 release candidate
+  * Fix #15: doctor now recognizes evdev+libei as valid deployment (user-blocking)
+  * Fix #19: app-filter security issue - window title no longer overrides app_id mismatch
+  * Add CLAUDE.md with comprehensive development guidance
+  * Fix CI workflow - replace unavailable rustsec action with cargo audit
+  * All 179 unit tests passing with new app-filter security tests
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 19 Sep 2026 02:30:00 +0000
+
 wayexpand (1.1.2-1) focal; urgency=high
 
   * Release v1.1.2: Security hardening and correctness fixes
