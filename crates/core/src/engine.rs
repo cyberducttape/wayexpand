@@ -24,10 +24,15 @@ pub enum InputEvent {
     Backspace,
     Boundary,
     /// Changes capture policy for the focused surface. Sensitive fields must
-    /// disable matching and clear any text already buffered.
+    /// disable matching and clear any text already buffered. This is a
+    /// compositor/backend signal, not a user action (use `PauseChanged` for that).
     FocusChanged {
         sensitive: bool,
     },
+    /// User-initiated pause/resume of text expansion. Independent from
+    /// `FocusChanged`: both conditions disable capture when active.
+    /// Resuming does not re-enable capture if still in a sensitive field.
+    PauseChanged(bool),
     /// Reports which application is now focused, for `app_filter`-scoped
     /// expansions. `None` means unknown (no window tracker running, or the
     /// compositor does not support one) -- app-restricted expansions fail
@@ -92,7 +97,11 @@ pub struct ExpansionEngine {
     /// character existed but was evicted" -- the two cases an empty
     /// `rev().nth(length)` cannot tell apart on its own.
     buffer_truncated: bool,
-    capture_enabled: bool,
+    /// User-initiated pause state. Independent from sensitive field detection.
+    user_paused: bool,
+    /// Compositor/backend signal that focused field is sensitive (password,
+    /// OTP, etc.). Independent from user_paused.
+    sensitive_focus: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
     current_window: Option<WindowContext>,
@@ -168,7 +177,8 @@ impl ExpansionEngine {
             buffer: VecDeque::new(),
             max_buffer_chars,
             buffer_truncated: false,
-            capture_enabled: true,
+            user_paused: false,
+            sensitive_focus: false,
             command_cache,
             hotkeys,
             current_window: None,
@@ -195,11 +205,17 @@ impl ExpansionEngine {
         self.current_window = window;
     }
 
+    /// Whether text expansion capture is currently enabled.
+    /// Both user pause and sensitive field focus independently disable capture.
+    fn is_capture_enabled(&self) -> bool {
+        !self.user_paused && !self.sensitive_focus
+    }
+
     /// Resolve a normalized key chord into configured actions. This method is
     /// side-effect free; the daemon or script runtime owns execution policy,
     /// cancellation, and capability checks.
     pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {
-        if !self.capture_enabled {
+        if !self.is_capture_enabled() {
             return Vec::new();
         }
         self.hotkeys
@@ -224,7 +240,7 @@ impl ExpansionEngine {
     /// `None` if undo is unconfigured, paused, the chord doesn't match, or
     /// nothing is pending to undo.
     pub fn try_undo(&mut self, chord: &KeyChord) -> Option<ExpansionResult> {
-        if !self.capture_enabled {
+        if !self.is_capture_enabled() {
             return None;
         }
         if !self.undo_chord.as_ref()?.matches(chord) {
@@ -287,7 +303,7 @@ impl ExpansionEngine {
             InputEvent::Text(text) => {
                 let mut results = Vec::new();
                 let mut result_bytes = 0usize;
-                if !self.capture_enabled {
+                if !self.is_capture_enabled() {
                     return results;
                 }
                 for character in text.chars() {
@@ -413,7 +429,12 @@ impl ExpansionEngine {
                 result.into_iter().collect()
             }
             InputEvent::FocusChanged { sensitive } => {
-                self.capture_enabled = !sensitive;
+                self.sensitive_focus = sensitive;
+                self.clear_buffer();
+                Vec::new()
+            }
+            InputEvent::PauseChanged(paused) => {
+                self.user_paused = paused;
                 self.clear_buffer();
                 Vec::new()
             }
@@ -892,6 +913,69 @@ mod tests {
     }
 
     #[test]
+    fn pause_changed_disables_capture_and_clears_buffer() {
+        let mut engine = engine();
+        engine.process(InputEvent::Text(":hel".into()));
+        engine.process(InputEvent::PauseChanged(true));
+        // Capture disabled, buffer cleared
+        let results = engine.process(InputEvent::Text("lo".into()));
+        assert!(results.is_empty(), "paused engine must not produce expansions");
+    }
+
+    #[test]
+    fn pause_changed_resume_re_enables_capture() {
+        let mut engine = engine();
+        // Pause
+        engine.process(InputEvent::PauseChanged(true));
+        let results = engine.process(InputEvent::Text(":hello".into()));
+        assert!(results.is_empty(), "paused engine must not expand");
+
+        // Resume
+        engine.process(InputEvent::PauseChanged(false));
+        let mut results = engine.process(InputEvent::Text(":hello".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert_eq!(
+            results.pop().unwrap().insert,
+            "Hello from Wayland!",
+            "resumed engine must expand"
+        );
+    }
+
+    #[test]
+    fn sensitive_focus_and_pause_are_independent() {
+        // P0 security fix: resume must not re-enable capture if in sensitive field
+        let mut engine = engine();
+
+        // 1. Enter sensitive field (password input)
+        engine.process(InputEvent::FocusChanged { sensitive: true });
+        assert!(
+            engine.process(InputEvent::Text(":hello".into())).is_empty(),
+            "must not expand in sensitive field"
+        );
+
+        // 2. User pauses (independently)
+        engine.process(InputEvent::PauseChanged(true));
+
+        // 3. User resumes (independently)
+        engine.process(InputEvent::PauseChanged(false));
+
+        // 4. Should still be disabled because sensitive field is still active!
+        let results = engine.process(InputEvent::Text(":hello".into()));
+        assert!(
+            results.is_empty(),
+            "resume must not re-enable capture while still in sensitive field"
+        );
+
+        // 5. Leave sensitive field
+        engine.process(InputEvent::FocusChanged { sensitive: false });
+
+        // 6. Now expansion works
+        let mut results = engine.process(InputEvent::Text(":hello".into()));
+        results.extend(engine.process(InputEvent::Boundary));
+        assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
+    }
+
+    #[test]
     fn dispatches_enabled_hotkey_actions_without_side_effects() {
         let config = Config::parse(
             r#"
@@ -914,6 +998,15 @@ mod tests {
 
         engine.process(InputEvent::FocusChanged { sensitive: true });
         assert!(engine.process_key(&chord).is_empty());
+
+        engine.process(InputEvent::FocusChanged { sensitive: false });
+        assert!(engine.process_key(&chord).len() == 1);
+
+        engine.process(InputEvent::PauseChanged(true));
+        assert!(engine.process_key(&chord).is_empty());
+
+        engine.process(InputEvent::PauseChanged(false));
+        assert!(engine.process_key(&chord).len() == 1);
     }
 
     #[test]
