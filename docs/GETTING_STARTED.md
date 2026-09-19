@@ -126,11 +126,12 @@ verified.
 
 ### Sway / Hyprland / river ⚠️
 
-Wlroots-based compositors have active development in progress. Window tracking is nearly ready.
+Wlroots-based compositor support has active development in progress. Window
+tracking is not currently shipped.
 
 **Current status:**
 - ✅ Text capture and injection work (via input-method-v2 or evdev)
-- ⏳ Window tracking (app_filter) remains a scaffold awaiting protocol-flow and compositor certification
+- ⏳ Window tracking (app_filter) is not shipped on wlroots; the integration remains future experimental work
 - ⚠️ Password field detection requires input-method-v2
 
 **Getting started:**

@@ -153,11 +153,14 @@ allows the match once a `WindowChanged` event has reported a window whose
 app id or title actually contains one of the filter strings. Unfiltered
 expansions are entirely unaffected.
 
-wlroots compositor support (via `wlr-foreign-toplevel-management-unstable-v1`)
-is currently only scaffold work and is not an active window-tracking backend;
-it is not integrated into the daemon. GNOME (Mutter) exposes no equivalent
-bridge without a shell extension, so no fully evidence-based path exists there
-today.
+Wlroots compositor support via `wlr-foreign-toplevel-management-unstable-v1`
+is not currently shipped. A previous prototype was removed from the production
+workspace because its constructor was disabled and its event-loop/lifetime
+behavior was not ready for compositor use. A future implementation must be
+feature-gated, tested against real Sway/Hyprland/river sessions, and prove
+safe handle removal before it is reconsidered. GNOME (Mutter) exposes no
+equivalent bridge without a shell extension, so no fully evidence-based path
+exists there today.
 
 ## wlroots virtual keyboard and uinput
 

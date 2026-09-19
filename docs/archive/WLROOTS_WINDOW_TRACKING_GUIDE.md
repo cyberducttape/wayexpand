@@ -1,5 +1,9 @@
 # Wlroots Window Tracking Implementation Guide
 
+> **Archived design guide.** The prototype referenced below is not shipped and
+> was removed from the production workspace. This document describes future
+> work only; see [BACKENDS.md](../BACKENDS.md) for current support status.
+
 ## Overview
 
 Window tracking for wlroots-based compositors (Sway, Hyprland, river) using the `wlr-foreign-toplevel-management-unstable-v1` protocol. Currently only KDE Plasma (D-Bus) is implemented.
@@ -14,7 +18,8 @@ Window tracking for wlroots-based compositors (Sway, Hyprland, river) using the 
 
 ### Proposed wlroots Backend
 
-New crate: `crates/backend-wlroots-toplevel` implementing `WindowTracker` trait
+Future crate: `crates/backend-wlroots-toplevel` implementing `WindowTracker`
+after a new implementation passes compositor and event-lifecycle testing.
 
 ```
 WindowTracker trait:

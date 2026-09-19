@@ -1,5 +1,10 @@
 # Phase 3: Daemon Integration - Wlroots Window Tracking
 
+> **Archived historical plan.** The prototype described here was removed from
+> the production workspace because it was disabled and not ready for compositor
+> use. Wlroots window tracking is not currently shipped; see
+> [BACKENDS.md](../BACKENDS.md) for the current boundary.
+
 This document describes Phase 3 of the wlroots window tracking implementation: integrating the tracker into the daemon event loop so `app_filter`-scoped snippets work on Sway, Hyprland, and river.
 
 ## What Phase 3 Accomplishes
@@ -207,7 +212,7 @@ Use this to verify Phase 3 is working correctly:
 
 - [docs/WLROOTS_WINDOW_TRACKING_GUIDE.md](WLROOTS_WINDOW_TRACKING_GUIDE.md) - Protocol details
 - [docs/DESKTOP_STATUS.md](DESKTOP_STATUS.md) - Per-compositor support
-- [crates/backend-wlroots-toplevel/src/lib.rs](../../crates/backend-wlroots-toplevel/src/lib.rs) - Implementation
+- Historical prototype implementation: removed; no production crate currently exists
 - [crates/daemon/src/main.rs](../../crates/daemon/src/main.rs) - Integration point
 
 ## Timeline and Commits

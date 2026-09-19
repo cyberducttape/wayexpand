@@ -3976,17 +3976,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wayexpand-backend-wlroots-toplevel"
-version = "1.1.2"
-dependencies = [
- "thiserror 2.0.20",
- "tracing",
- "wayexpand-core",
- "wayland-client",
- "wayland-protocols-wlr",
-]
-
-[[package]]
 name = "wayexpand-core"
 version = "1.1.2"
 dependencies = [
@@ -4016,7 +4005,6 @@ dependencies = [
  "wayexpand-backend-libei",
  "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
- "wayexpand-backend-wlroots-toplevel",
  "wayexpand-core",
 ]
 
