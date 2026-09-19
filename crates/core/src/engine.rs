@@ -554,10 +554,14 @@ impl ExpansionEngine {
     }
 
     /// An expansion with an empty `app_filter` matches everywhere. A
-    /// non-empty filter requires a known focused window whose app id or
-    /// title contains one of the filter substrings (case-insensitive); if
+    /// non-empty filter requires a known focused window whose app id contains
+    /// one of the filter substrings (case-insensitive, preferred) or whose
+    /// title contains one (as a fallback when app_id is unavailable); if
     /// window tracking is unavailable, this fails closed rather than
     /// matching unconditionally.
+    ///
+    /// App ID matching is preferred because it's more reliable than window
+    /// titles, which can be user-editable or transient.
     fn app_filter_allows(&self, expansion: &crate::ExpansionConfig) -> bool {
         if expansion.app_filter.is_empty() {
             return true;
@@ -567,14 +571,18 @@ impl ExpansionEngine {
         };
         expansion.app_filter.iter().any(|filter| {
             let filter = filter.to_lowercase();
+            // Prefer app_id matching (reliable, set by compositor)
+            if let Some(app_id) = window.app_id.as_deref() {
+                if app_id.to_lowercase().contains(&filter) {
+                    return true;
+                }
+            }
+            // Fall back to title matching only if app_id is unavailable
+            // or doesn't contain the filter
             window
-                .app_id
+                .title
                 .as_deref()
-                .is_some_and(|id| id.to_lowercase().contains(&filter))
-                || window
-                    .title
-                    .as_deref()
-                    .is_some_and(|title| title.to_lowercase().contains(&filter))
+                .is_some_and(|title| title.to_lowercase().contains(&filter))
         })
     }
 
