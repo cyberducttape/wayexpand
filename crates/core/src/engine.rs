@@ -769,11 +769,6 @@ impl ExpansionEngine {
         if expansion.app_filter.is_empty() {
             return true;
         }
-        // Policy: disable_title_matching prevents app_filter from working
-        // (all apps match, effectively disabling the filter)
-        if self.config.organization.disable_title_matching {
-            return true;
-        }
         let Some(window) = &self.current_window else {
             return false;
         };
@@ -784,8 +779,12 @@ impl ExpansionEngine {
             // user-editable and can be spoofed to match sensitive filters.
             if let Some(app_id) = window.app_id.as_deref() {
                 app_id.to_lowercase().contains(&filter)
+            } else if self.config.organization.disable_title_matching {
+                // Policy: disable_title_matching means no title fallback.
+                // Fail closed: don't match without app_id (per CLAUDE.md conventions).
+                false
             } else {
-                // App ID unavailable: fall back to title matching only
+                // App ID unavailable but title matching allowed: fall back to title
                 window
                     .title
                     .as_deref()
@@ -2307,6 +2306,52 @@ replacement = "bad\u0000value""#;
             results.len(),
             1,
             "expansion with empty app_filter should match anywhere"
+        );
+    }
+
+    #[test]
+    fn disable_title_matching_policy_fails_closed_without_app_id() {
+        // Regression test: disable_title_matching must NOT disable app filtering.
+        // It should only disable the title-based fallback.
+        // When app_id is unavailable and disable_title_matching=true, must fail closed.
+        let mut config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        config.organization.disable_title_matching = true;
+
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: None, // Only title available
+            title: Some("Thunderbird Mail Client".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            0,
+            "disable_title_matching=true should prevent title fallback, fail closed"
+        );
+    }
+
+    #[test]
+    fn disable_title_matching_allows_app_id_match() {
+        // When app_id IS available and matches, disable_title_matching should NOT block it.
+        let mut config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        config.organization.disable_title_matching = true;
+
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: Some("org.thunderbird.Thunderbird".into()),
+            title: Some("Some Email".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            1,
+            "disable_title_matching should not affect app_id matching"
         );
     }
 
