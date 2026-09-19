@@ -18,6 +18,7 @@ pub struct ReloadableConfig {
     stamp: Option<FileStamp>,
     observed: Option<FileStamp>,
     last_fingerprint_check: Option<Instant>,
+    last_metadata: Option<MetadataStamp>,
     pub engine: ExpansionEngine,
     healthy: bool,
 }
@@ -30,6 +31,46 @@ struct FileStamp {
     change_time: i64,
     change_time_nsec: i64,
     fingerprint: u64,
+}
+
+/// Cheap metadata-only stamp (without reading content or computing fingerprint).
+/// Used for fast change detection before doing expensive file reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MetadataStamp {
+    modified: SystemTime,
+    length: u64,
+    inode: u64,
+    change_time: i64,
+    change_time_nsec: i64,
+}
+
+/// Fast metadata-only check without reading file contents. Used to detect if
+/// a full file_stamp() call is needed. This avoids reading large configs when
+/// metadata hasn't changed.
+fn metadata_stamp(path: &Path) -> Option<MetadataStamp> {
+    let descriptor = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    let file = fs::File::from(descriptor);
+    let metadata = file.metadata().ok()?;
+    if !metadata.file_type().is_file() {
+        return None;
+    }
+    let modified = metadata.modified().ok()?;
+    let length = metadata.len();
+    let inode = metadata.ino();
+    let change_time = metadata.ctime();
+    let change_time_nsec = metadata.ctime_nsec();
+    Some(MetadataStamp {
+        modified,
+        length,
+        inode,
+        change_time,
+        change_time_nsec,
+    })
 }
 
 fn file_stamp(path: &Path) -> Option<FileStamp> {
@@ -81,6 +122,13 @@ impl ReloadableConfig {
         let (config, stamp) = load_consistent(&path)?;
         let engine = ExpansionEngine::new(config)
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
+        let last_metadata = stamp.map(|s| MetadataStamp {
+            modified: s.modified,
+            length: s.length,
+            inode: s.inode,
+            change_time: s.change_time,
+            change_time_nsec: s.change_time_nsec,
+        });
         Ok(Self {
             path,
             stamp,
@@ -88,6 +136,7 @@ impl ReloadableConfig {
             // Force a content fingerprint on the first polling cycle. This
             // catches same-size edits on filesystems with coarse timestamps.
             last_fingerprint_check: None,
+            last_metadata,
             engine,
             healthy: true,
         })
@@ -107,6 +156,13 @@ impl ReloadableConfig {
     pub fn reload_now(&mut self) {
         let current = file_stamp(&self.path);
         self.last_fingerprint_check = Some(Instant::now());
+        self.last_metadata = current.map(|s| MetadataStamp {
+            modified: s.modified,
+            length: s.length,
+            inode: s.inode,
+            change_time: s.change_time,
+            change_time_nsec: s.change_time_nsec,
+        });
         self.observed = current;
         self.reload_current(current);
     }
@@ -161,24 +217,43 @@ impl ReloadableConfig {
         self.healthy
     }
 
-    /// Rate-limited to at most one full read-and-hash per
-    /// `FINGERPRINT_REFRESH_INTERVAL`, regardless of how often this is
-    /// polled or how often the file's metadata appears to change. A path
-    /// whose mtime is touched every poll cycle without content changing
-    /// (a noisy watcher, an editor that re-saves repeatedly) must not turn
-    /// into a full config read on every call: this runs on the daemon's
-    /// main event-processing thread. The tradeoff is that a genuine edit
-    /// can take up to one interval longer to be observed.
+    /// Check for file changes efficiently. First checks metadata only (cheap),
+    /// then only does full read-and-hash if metadata changed or if it's been
+    /// a full FINGERPRINT_REFRESH_INTERVAL since the last content check.
+    /// This avoids repeatedly reading/hashing large configs when they haven't
+    /// actually changed.
     fn poll_stamp(&mut self) -> Option<FileStamp> {
+        let current_metadata = metadata_stamp(&self.path)?;
+
+        // If metadata hasn't changed since last check, return cached stamp
+        if let Some(last) = self.last_metadata {
+            if current_metadata == last {
+                return self.observed;
+            }
+        }
+
+        // Metadata changed, or this is the first check. Now do full content hash.
+        // But still rate-limit full reads if metadata keeps changing without
+        // content actually changing (noisy filesystem operations).
         let too_soon = self
             .last_fingerprint_check
             .is_some_and(|checked| checked.elapsed() < FINGERPRINT_REFRESH_INTERVAL);
         if too_soon {
+            // Metadata changed but we're still in rate-limit window. This
+            // can happen with editors that touch mtime repeatedly. Return
+            // the observed stamp and retry next interval.
             return self.observed;
         }
 
         let current = file_stamp(&self.path);
         self.last_fingerprint_check = Some(Instant::now());
+        self.last_metadata = current.map(|s| MetadataStamp {
+            modified: s.modified,
+            length: s.length,
+            inode: s.inode,
+            change_time: s.change_time,
+            change_time_nsec: s.change_time_nsec,
+        });
         current
     }
 }

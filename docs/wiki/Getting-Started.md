@@ -11,19 +11,22 @@ wayexpand test ';;hello' --json
 ```
 
 The simulation is a dry run: it cannot type into another application. Once it
-produces the expected result, use `wayexpand doctor` and follow the backend
-support matrix before enabling a service.
+produces the expected result, **run `wayexpand doctor`** to see which input and
+output backends your compositor actually supports. Different compositors require
+different backend combinations — there is no single "default" setup that works
+everywhere.
 
 ## Requirements
 
 - Linux with a Wayland session for global input capture.
 - Rust stable and Cargo for building from source.
 - `systemd --user` for the shipped service workflow.
-- A compositor implementing input-method-v2 for the integrated global source.
+- One of: input-method-v2 protocol support, libei/EIS, or access to `/dev/input`
 
 The core engine and CLI can be built and tested without a compositor. Backend
-availability is environment-dependent; `wayexpand doctor` reports what the
-current session supports.
+and input source availability is environment-dependent; **always run
+`wayexpand doctor` first** to see what your session actually supports before
+starting any service.
 
 ## Build and test
 
@@ -89,18 +92,33 @@ wayexpand test ';;hello'
 
 ## Start the real source
 
-Enable exactly one service:
+First, check what your session actually supports:
 
 ```sh
-systemctl --user enable --now wayexpand-input-method.service
-systemctl --user status wayexpand-input-method.service
+wayexpand doctor
+```
+
+This shows you which input sources and output backends are available on your
+compositor. For **KDE Plasma/KWin**, the most common setup is:
+
+```sh
+systemctl --user enable --now wayexpand-evdev.service
 wayexpand status
 ```
 
-Expected status includes `source=input-method`, `backend=input-method-v2`,
-`state=connected`, and `config_state=ok`. A running service with
-`state=reconnecting` is intentionally not injecting text until the compositor
-connection is safe again.
+For **GNOME and other compositors** with libei support:
+
+```sh
+systemctl --user enable --now wayexpand.service
+wayexpand status
+```
+
+Enable exactly one service. Expected status includes `source=(stdin|input-method|evdev)`,
+`backend=(none|input-method-v2|wlroots-virtual-keyboard|libei)`, `state=connected`,
+and `config_state=ok`. A running service with `state=reconnecting` is intentionally
+not injecting text until the compositor connection is safe again.
+
+See [SUPPORT_MATRIX.md](../SUPPORT_MATRIX.md) for the complete backend compatibility matrix.
 
 ## Stop, pause, and inspect
 

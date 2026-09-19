@@ -125,12 +125,13 @@ rm /tmp/wayexpand-window-tracker-*.js
 
 Normal daemon shutdown cleans these up automatically.
 
-## Wlroots Compositors (Sway, Hyprland) - Coming in 1.1
+## Wlroots Compositors (Sway, Hyprland)
 
 Window tracking (`app_filter`) is not yet implemented for wlroots compositors.
-The feature is planned for 1.1 using the standard `wlr-foreign-toplevel-management`
-protocol.
+The feature is planned using the standard `wlr-foreign-toplevel-management`
+protocol, which would enable app-scoped expansions on Sway, Hyprland, and
+other wlroots-based compositors.
 
-**Workaround:** Disable app filters until 1.1, or use global expansions only.
-
-**Tracking:** See the [1.0 checklist](../RELEASE_1.0_CHECKLIST.md#5-this-sessions-own-follow-through-items).
+**Workaround:** Disable app filters, or use global expansions only. App filters
+will fail closed (never match) if window tracking is unavailable, so they are safe
+to enable; they just won't provide filtering.
