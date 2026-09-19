@@ -104,12 +104,14 @@ Command processes receive a minimal environment by default (`HOME`, `USER`,
 `PATH`, and `LANG`). Use `pass_env` for specific additional variables; use
 `environment = "inherit"` only as an explicit trust decision because it passes
 desktop-session variables and other daemon environment values to the child.
-The daemon runs these programs on a bounded background queue, so a slow command
-does not block keyboard capture or control-socket handling. Output is applied
-only while the trigger remains the newest processed input. If the user types,
-changes focus, pauses, or reloads configuration first, the output is discarded
-rather than risking deletion at a moved cursor. Successful stale invocations
-still populate a configured cache for the next match.
+The daemon runs expansion commands and hotkey actions on a bounded background
+queue, so a slow command does not block keyboard capture or control-socket
+handling. Hotkey completion is logged asynchronously; a full action queue
+drops the action with a warning rather than making the input loop wait. Output
+is applied only while the trigger remains the newest processed input. If the
+user types, changes focus, pauses, or reloads configuration first, the output
+is discarded rather than risking deletion at a moved cursor. Successful stale
+invocations still populate a configured cache for the next match.
 The program inherits the daemon's user environment, receives no stdin, and
 has stderr discarded. Output is capped at 1 MiB, arguments are bounded, and
 the timeout is limited to 1–5000 milliseconds. A missing program, non-zero
