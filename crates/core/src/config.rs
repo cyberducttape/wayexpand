@@ -51,7 +51,7 @@ pub struct HotkeyConfig {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub max_buffer_chars: usize,
@@ -118,6 +118,13 @@ impl Default for Settings {
             font_scale: FontScale::Normal,
             libei_token_persistence: true,
         }
+    }
+}
+
+impl Settings {
+    /// Check if settings match defaults (no custom configuration)
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
     }
 }
 

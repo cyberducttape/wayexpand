@@ -3,6 +3,7 @@
 mod backend;
 mod config;
 mod engine;
+mod fleet;
 mod keys;
 mod matcher;
 mod migration;
@@ -17,6 +18,7 @@ pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
     Settings,
 };
+pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use engine::{
     run_command, CommandError, ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError,
     HotkeyResult, InputEvent, WindowContext,
