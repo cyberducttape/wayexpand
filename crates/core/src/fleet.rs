@@ -141,6 +141,69 @@ impl FleetConfig {
         merger.merge()
     }
 
+    /// Load the standard fleet layers on top of the user's primary config.
+    ///
+    /// The primary config remains the lowest-priority layer so enabling fleet
+    /// configuration does not make existing personal snippets disappear.
+    ///
+    /// **Policy enforcement:** If organization policy restricts allowed_packs,
+    /// pack-sourced expansions not in the allowed list are filtered out.
+    pub fn load_standard_with_base(base: Config) -> Result<Self, FleetError> {
+        let mut fleet = Self::load_standard()?;
+        let fleet_settings = fleet.config.settings.clone();
+        let fleet_organization = fleet.config.organization.clone();
+        let base_expansions = base.expansion.len();
+        let base_hotkeys = base.hotkey.len();
+
+        let mut config = base;
+
+        // Policy enforcement: filter pack-sourced expansions if allowed_packs is set
+        if !fleet_organization.allowed_packs.is_empty() {
+            fleet.config.expansion.retain(|expansion| {
+                if let Some(prov) = fleet.expansions_source.get(&expansion.trigger) {
+                    // Keep organization and user layers, filter packs
+                    prov.layer == "organization"
+                        || prov.layer == "user"
+                        || prov.layer.starts_with("pack:")
+                            && fleet_organization
+                                .pack_allowed(prov.layer.strip_prefix("pack:").unwrap_or(""))
+                } else {
+                    true
+                }
+            });
+            fleet.config.hotkey.retain(|hotkey| {
+                if let Some(prov) = fleet.hotkeys_source.get(&hotkey.chord) {
+                    prov.layer == "organization"
+                        || prov.layer == "user"
+                        || prov.layer.starts_with("pack:")
+                            && fleet_organization
+                                .pack_allowed(prov.layer.strip_prefix("pack:").unwrap_or(""))
+                } else {
+                    true
+                }
+            });
+        }
+
+        config.expansion.extend(fleet.config.expansion);
+        config.hotkey.extend(fleet.config.hotkey);
+        if !fleet_settings.is_default() {
+            config.settings = fleet_settings;
+        }
+        if fleet_organization.is_active() {
+            config.organization = fleet_organization;
+        }
+        config.validate().map_err(FleetError::Config)?;
+        fleet.config = config;
+        fleet.stats.total_expansions += base_expansions;
+        fleet.stats.total_hotkeys += base_hotkeys;
+        fleet.stats.total_files_loaded += usize::from(base_expansions > 0 || base_hotkeys > 0);
+        fleet
+            .stats
+            .layers_applied
+            .insert(0, "base (primary config)".to_string());
+        Ok(fleet)
+    }
+
     /// Load and merge from custom layer directories.
     pub fn load_layers(layers: Vec<(Layer, PathBuf)>) -> Result<Self, FleetError> {
         let mut merger = ConfigMerger::new();
