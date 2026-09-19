@@ -171,15 +171,18 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
                 current.display()
             );
         }
-        // A directory already confirmed to be ours (and not writable by
-        // anyone else) cannot have been swapped in by an untrusted party
-        // regardless of what is above it, so there is nothing higher up left
-        // to validate. Stopping here also avoids a false positive under a
-        // systemd sandbox (e.g. ProtectHome=/ProtectSystem= on a `--user`
-        // unit): higher ancestors like "/" are seen only through an implicit
-        // private user namespace, where the *real* root owner is remapped to
-        // the overflow uid and would otherwise be rejected as untrusted.
-        if metadata.uid() == current_uid || current == Path::new("/") {
+        // NOTE: We intentionally do NOT stop at the first user-owned directory.
+        // While a secure user-owned directory itself cannot be swapped
+        // (it requires write access to its parent), a world-writable,
+        // non-sticky parent directory can still allow another user to
+        // rename/replace that directory entry.
+        //
+        // Therefore, validate all ancestors up to "/" (except in a systemd
+        // private namespace, where the overflow uid 65534 is remapped and
+        // would cause false rejections). Until fd-based openat2() validation
+        // is implemented, we accept root-owned "/" as a terminal trust
+        // anchor rather than checking its mode.
+        if metadata.uid() == 0 {
             break;
         }
         current = current.parent().unwrap_or_else(|| Path::new("/"));

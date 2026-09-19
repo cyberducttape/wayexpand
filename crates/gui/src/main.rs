@@ -714,9 +714,20 @@ impl GuiApp {
         };
         let mut candidate = self.config.clone();
         if let Some(draft) = &self.draft {
+            // Copy all draft fields to the preview expansion, including filters
+            // and options that affect matching (app_filter, enabled, propagate_case)
             candidate.expansion[index].trigger = draft.trigger.clone();
             candidate.expansion[index].replacement = draft.replacement.clone();
             candidate.expansion[index].match_mode = draft.match_mode;
+            candidate.expansion[index].enabled = draft.enabled;
+            candidate.expansion[index].propagate_case = draft.propagate_case;
+            candidate.expansion[index].app_filter =
+                draft.app_filter.split(',').map(|s| s.trim().to_string()).collect();
+            candidate.expansion[index].description = draft.description.clone();
+            candidate.expansion[index].tags =
+                draft.tags.split(',').map(|s| s.trim().to_string()).collect();
+            candidate.expansion[index].category = draft.category.clone();
+            candidate.expansion[index].command = draft.command_config().ok().flatten();
         }
         let Ok(mut engine) = ExpansionEngine::new(candidate) else {
             return "Configuration is invalid".into();
