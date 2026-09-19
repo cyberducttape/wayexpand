@@ -108,7 +108,11 @@ fn main() -> Result<()> {
     // is fatal so a management update cannot silently disable restrictions.
     let policy = policy::load_policy()
         .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
-    config.engine.set_commands_disabled(policy.disable_commands);
+
+    // Respect safe_mode semantics: only disable commands in the engine when in enforcement mode.
+    // In audit mode (safe_mode=false), commands are allowed but violations are logged by check_and_log_expansion_violations().
+    let should_disable_commands = policy.disable_commands && policy.safe_mode;
+    config.engine.set_commands_disabled(should_disable_commands);
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
