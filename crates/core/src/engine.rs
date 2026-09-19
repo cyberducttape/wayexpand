@@ -571,18 +571,18 @@ impl ExpansionEngine {
         };
         expansion.app_filter.iter().any(|filter| {
             let filter = filter.to_lowercase();
-            // Prefer app_id matching (reliable, set by compositor)
+            // If app_id is available, ONLY match against it (never fall back to title).
+            // Rationale: app_id is set by the compositor and reliable; title is
+            // user-editable and can be spoofed to match sensitive filters.
             if let Some(app_id) = window.app_id.as_deref() {
-                if app_id.to_lowercase().contains(&filter) {
-                    return true;
-                }
+                app_id.to_lowercase().contains(&filter)
+            } else {
+                // App ID unavailable: fall back to title matching only
+                window
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| title.to_lowercase().contains(&filter))
             }
-            // Fall back to title matching only if app_id is unavailable
-            // or doesn't contain the filter
-            window
-                .title
-                .as_deref()
-                .is_some_and(|title| title.to_lowercase().contains(&filter))
         })
     }
 
@@ -1800,5 +1800,97 @@ replacement = "bad\u0000value""#;
             .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
             .unwrap();
         assert_eq!(undo.insert, ":SIG");
+    }
+
+    #[test]
+    fn app_filter_matches_on_app_id_when_available() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: Some("org.mozilla.Thunderbird".into()),
+            title: Some("Some Mail".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].insert, "contact@example.com");
+    }
+
+    #[test]
+    fn app_filter_uses_title_only_when_app_id_unavailable() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: None,
+            title: Some("Thunderbird Mail Client".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            1,
+            "should match title as fallback when app_id is unavailable"
+        );
+    }
+
+    #[test]
+    fn app_filter_rejects_title_match_when_app_id_is_available_but_different() {
+        // Security test: window title should NOT override app_id mismatch.
+        // Example: Konsole titled "Thunderbird troubleshooting" should NOT match
+        // app_filter=["thunderbird"] meant for the actual Thunderbird application.
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("Thunderbird troubleshooting".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            0,
+            "title should NOT override app_id mismatch"
+        );
+    }
+
+    #[test]
+    fn app_filter_with_no_window_fails_closed() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(None);
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            0,
+            "expansion without window context should not match"
+        );
+    }
+
+    #[test]
+    fn app_filter_empty_matches_everywhere() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_current_window(Some(WindowContext {
+            app_id: Some("org.example.AnyApp".into()),
+            title: Some("Some Window".into()),
+        }));
+        let results = engine.process(InputEvent::Text(":email".into()));
+        assert_eq!(
+            results.len(),
+            1,
+            "expansion with empty app_filter should match anywhere"
+        );
     }
 }
