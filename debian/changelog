@@ -1,3 +1,16 @@
+wayexpand (1.1.2-1) focal; urgency=high
+
+  * Release v1.1.2: Security hardening and correctness fixes
+  * Fix P0: Cross-window buffer isolation - prevent text deletion in wrong application
+  * Fix P0: Separate pause and sensitive-field state - resume cannot bypass password field protection
+  * Fix P0: Complete ancestor path validation - writable parent cannot replace secure config
+  * Fix P0: Remove silent clipboard fallback - multiline text routing is now explicit
+  * Fix P0: input-method-v2 key loss - add clear warning about unsupported key pass-through limitation
+  * 170+ regression tests added for security fixes
+  * All CI checks passing: formatting, linting, tests, builds
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 19 Sep 2026 01:00:00 +0000
+
 wayexpand (1.1.1-1) focal; urgency=medium
 
   * Release v1.1.1: Accessibility, themes, and sysadmin documentation
