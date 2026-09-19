@@ -3792,6 +3792,7 @@ dependencies = [
  "wayexpand-backend-kwin-window",
  "wayexpand-backend-libei",
  "wayexpand-backend-wlroots",
+ "wayexpand-backend-wlroots-toplevel",
  "wayexpand-core",
 ]
 
