@@ -96,6 +96,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 | [FLEET_CONFIG.md](FLEET_CONFIG.md) | Enterprise teams | Multi-layer configuration |
 | [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) | Enterprise teams | Policy enforcement and compliance |
 | [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) | Enterprise teams | Handling sensitive data |
+| [ACTION_BROKER_DESIGN.md](ACTION_BROKER_DESIGN.md) | SRE/security architects | Planned command/action privilege boundary |
 | [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) | DevOps/SRE | Ansible playbooks |
 | [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) | DevOps/SRE | Puppet modules |
 

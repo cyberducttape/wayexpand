@@ -75,12 +75,17 @@ manually may fail when invoked as a WayExpand expansion if it tries to:
 - Perform other operations restricted by the systemd unit
 
 The systemd unit is deliberately restrictive to limit the blast radius of a
-compromised or misconfigured command. If a command needs capabilities the
-daemon's sandbox forbids, either relax the restrictions in
-`systemd/wayexpand.service` (requires manual editing) or run a less restricted
-wrapper script. The `wayexpand-gui` preview feature can help identify these
-issues: a command that fails in Preview due to sandbox restrictions will also
-fail when triggered during typing.
+compromised or misconfigured command. Do not relax the restrictions in
+`systemd/wayexpand.service` or use a wrapper script as a way to bypass them.
+There is currently no supported path for SRE commands that require network,
+home-directory, or broader filesystem access. The planned Action Broker is a
+separate privilege/environment boundary for that use case; it must receive an
+explicit action name and enforce its own allowlist, environment, cwd, network
+policy, timeout, output limit, and audit result. See
+[`docs/ACTION_BROKER_DESIGN.md`](docs/ACTION_BROKER_DESIGN.md). The
+`wayexpand-gui` preview feature can help identify these issues: a command that
+fails in Preview due to sandbox restrictions will also fail when triggered
+during typing.
 
 The input-method source fails closed when it cannot safely pass through a
 non-text key or determine a UTF-8-safe Backspace range from surrounding text.
@@ -147,7 +152,8 @@ shipped systemd user units.
 ## Command execution architecture limitations
 
 The current command-backed expansion architecture prioritizes safety at the cost
-of restrictive resource constraints:
+of restrictive resource constraints. It is not an Action Broker and is not an
+SRE command-execution boundary:
 
 **Current design:**
 - Commands run directly in the daemon process, subject to systemd hardening
@@ -165,7 +171,7 @@ command = "kubectl get svc -o wide"
 This command fails in the current sandbox and cannot be fixed without materially
 weakening the daemon's security posture for all users.
 
-**Planned mitigation: Action Broker architecture (v1.3+)**
+**P1 mitigation: Action Broker architecture (not implemented)**
 
 Future versions will separate concerns:
 
