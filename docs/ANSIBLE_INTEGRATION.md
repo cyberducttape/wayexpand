@@ -186,9 +186,13 @@ category = "logging"
 
 [[expansion]]
 trigger = ":restart-daemon"
-command = "systemctl --user restart wayexpand-input-method.service"
 description = "Restart WayExpand daemon"
 category = "operations"
+
+[expansion.command]
+program = "systemctl"
+args = ["--user", "restart", "wayexpand-input-method.service"]
+timeout_ms = 5000
 
 [[expansion]]
 trigger = ":test-snippet"
