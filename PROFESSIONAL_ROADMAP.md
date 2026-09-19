@@ -171,6 +171,42 @@ desktop Linux users but does not prevent use in controlled environments
 
 ---
 
+## In Progress / Planned (v1.3+)
+
+### Command Execution Architecture: Action Broker
+
+**Status:** Planned (post-v1.2)  
+**Why:** Current command-backed expansions run in the hardened daemon sandbox, preventing legitimate SRE tools (kubectl, aws, vault, etc.)  
+**Scope:** Separate capture/match/inject daemon from optional policy-driven action broker
+
+**Design:**
+- Capture process stays extremely locked down (no network, no HOME write, strict syscalls)
+- Action broker runs with exactly the permissions needed for each environment
+- Per-expansion policy: allowed commands, network access, filesystem paths, environment variables
+- Organization can set `safe_mode = true` to completely disable command execution
+- Commands are whitelisted by name, not arbitrary executables
+
+**Benefit:** Enables enterprise/SRE use cases without weakening the capture daemon's security posture
+
+**Architecture:**
+```
+Daemon (capture/match/inject)
+   ├─ ProtectHome=strict
+   ├─ ProtectSystem=strict
+   ├─ RestrictAddressFamilies=AF_UNIX
+   └─ No network/FS access
+      │
+      └─ constrained IPC (command name + args only)
+         ▼
+      Optional Action Broker (per-user or per-org policy)
+         ├─ Whitelist enforcement
+         ├─ Network policy
+         ├─ FS sandbox (per-command)
+         └─ Resource limits
+```
+
+---
+
 ## Future Considerations (v1.2+)
 
 ### Localization Expansion

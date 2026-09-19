@@ -129,3 +129,51 @@ memory, tasks, file descriptors, and restart frequency.
 They additionally isolate temporary files, devices, mounts, kernel interfaces,
 process visibility, realtime scheduling, and syscall architecture through the
 shipped systemd user units.
+
+## Command execution architecture limitations
+
+The current command-backed expansion architecture prioritizes safety at the cost
+of restrictive resource constraints:
+
+**Current design:**
+- Commands run directly in the daemon process, subject to systemd hardening
+- `ProtectHome=read-only`, `ProtectSystem=strict`, no network access
+- Prevents legitimate SRE tools from working: `kubectl`, `aws`, `vault`, `ssh`, etc.
+
+**Enterprise/SRE use case conflict:**
+A typical SRE might want:
+```toml
+[[expansion]]
+trigger = ":shortlist"
+command = "kubectl get svc -o wide"
+```
+
+This command fails in the current sandbox and cannot be fixed without materially
+weakening the daemon's security posture for all users.
+
+**Planned mitigation: Action Broker architecture (v1.3+)**
+
+Future versions will separate concerns:
+
+```
+Capture/Match/Injection Process (extremely locked down)
+         │
+         │ constrained IPC (command name + args only)
+         ▼
+Optional Action Broker (per-user policy engine)
+         └─ allowed executables whitelist
+         └─ network access policy
+         └─ filesystem access policy
+         └─ environment variable allowlist
+         └─ command timeouts and resource limits
+```
+
+Benefits:
+- Capture daemon stays extremely hardened, never touches the network or home dir
+- Action broker runs with exactly the permissions needed for each environment
+- Organization deploys `safe_mode = true` in config to completely disable command execution
+- Command policies are inspectable and auditable
+- Legitimate commands can be whitelisted by organization policy
+
+This approach is particularly valuable for the target audience: SREs and system
+administrators who need to trust WayExpand in hardened environments.
