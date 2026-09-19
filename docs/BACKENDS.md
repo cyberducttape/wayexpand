@@ -196,7 +196,9 @@ are not available at the kernel level.
 
 **Requires:** Membership in the `input` group, which grants raw keyboard access
 to **all keystrokes** system-wide (not just WayExpand's). See SECURITY.md for
-the full security model and explicit opt-in procedure.
+the full security model and explicit opt-in procedure. This is the current
+legacy/simple permission model; active-seat ACLs and a device broker are future
+investigation work documented in [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md).
 
 ### Known Limitations
 

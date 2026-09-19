@@ -7,9 +7,11 @@
 # beyond what a standard systemd installation already grants members of
 # the `input` group.
 #
-# Installed by scripts/install-evdev-permissions.sh, which also adds the
-# invoking user to the `input` group. Read docs/SECURITY.md for what that
+# This is the current legacy/simple permission model. It is installed by
+# scripts/install-evdev-permissions.sh, which also adds the
+# invoking user to the `input` group. Read SECURITY.md for what that
 # membership grants before enabling --source=evdev: it lets a process read
 # every keystroke typed on this system, in any session, not only ones
-# passed to WayExpand's own matcher.
+# passed to WayExpand's own matcher. See docs/EVDEV_ACCESS_DESIGN.md for the
+# active-seat ACL and device-broker investigation.
 SUBSYSTEM=="input", KERNEL=="event*", GROUP="input", MODE="0660"
