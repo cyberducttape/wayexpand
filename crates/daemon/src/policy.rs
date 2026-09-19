@@ -2,6 +2,7 @@
 ///
 /// Loads policies from /etc/wayexpand/policy.toml and enforces them
 /// at runtime, blocking unsafe operations and logging violations to journald.
+use serde::Deserialize;
 use std::path::Path;
 use tracing::{error, warn};
 use wayexpand_core::OrganizationPolicy;
@@ -47,10 +48,31 @@ fn load_policy_internal() -> Result<OrganizationPolicy, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("could not read {}: {}", POLICY_PATH, e))?;
 
-    let policy: OrganizationPolicy =
+    // Support documented enterprise format: [organization] table
+    // Also support flat format for direct deserialization
+    #[derive(Deserialize)]
+    struct PolicyFile {
+        #[serde(default)]
+        organization: Option<OrganizationPolicy>,
+    }
+
+    let file: PolicyFile =
         toml::from_str(&content).map_err(|e| format!("invalid policy TOML: {}", e))?;
 
-    Ok(policy)
+    // Check for [organization] table first (documented enterprise format)
+    if let Some(policy) = file.organization {
+        return Ok(policy);
+    }
+
+    // Fall back to flat format for backward compatibility
+    // Try to deserialize entire file as OrganizationPolicy
+    match toml::from_str::<OrganizationPolicy>(&content) {
+        Ok(policy) => Ok(policy),
+        Err(e) => Err(format!(
+            "policy file must contain either [organization] table or flat policy fields: {}",
+            e
+        )),
+    }
 }
 
 /// Check if an expansion should be allowed under the current policy
@@ -105,6 +127,14 @@ pub fn log_violation(policy: &OrganizationPolicy, violation: &str) {
     }
 }
 
+// Internal wrapper for parsing policy files with [organization] table
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct PolicyFile {
+    #[serde(default)]
+    organization: Option<OrganizationPolicy>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +179,31 @@ mod tests {
             ..Default::default()
         };
         assert!(check_hotkey_allowed(&policy).is_err());
+    }
+
+    #[test]
+    fn load_policy_with_organization_table() {
+        // Test documented enterprise format: [organization] table
+        let toml_content = r#"
+[organization]
+safe_mode = true
+disable_commands = false
+disable_hotkeys = false
+disable_title_matching = false
+max_replacement_size = 65536
+allowed_backends = ["libei"]
+allowed_packs = []
+audit_prefix = "wayexpand"
+"#;
+        let policy: Result<OrganizationPolicy, String> = toml::from_str::<PolicyFile>(toml_content)
+            .map_err(|e| format!("invalid policy TOML: {}", e))
+            .and_then(|file| {
+                file.organization
+                    .ok_or_else(|| "no [organization] table found".to_string())
+            });
+        assert!(policy.is_ok());
+        let policy = policy.unwrap();
+        assert!(policy.safe_mode);
+        assert_eq!(policy.max_replacement_size, 65536);
     }
 }
