@@ -164,11 +164,11 @@ To deploy with organization policy enforcement:
           disable_hotkeys = false
           disable_title_matching = false
           max_replacement_size = 65536
-          allowed_backends = ["input-method", "libei"]
+          allowed_backends = ["input-method-v2", "libei"]
         dest: /etc/wayexpand/policy.toml
         owner: root
         group: root
-        mode: '0644'
+        mode: '0600'
 ```
 
 ## Example Snippet Files
