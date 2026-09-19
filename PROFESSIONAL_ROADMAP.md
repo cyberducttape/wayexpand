@@ -175,11 +175,20 @@ desktop Linux users but does not prevent use in controlled environments
 
 ## In Progress / Planned (v1.3+)
 
-### Command Execution Architecture: Action Broker
+### P1 Security Gate: Action Broker
 
-**Status:** Planned (post-v1.2)  
-**Why:** Current command-backed expansions run in the hardened daemon sandbox, preventing legitimate SRE tools (kubectl, aws, vault, etc.)  
-**Scope:** Separate capture/match/inject daemon from optional policy-driven action broker
+**Status:** P1 architecture gate; not implemented
+**Why:** Current command-backed expansions run in the hardened daemon sandbox,
+which intentionally prevents legitimate SRE tools (`kubectl`, `aws`, `vault`,
+`ssh`, `terraform`, and similar workflows). This is a product boundary, not a
+reason to weaken the capture daemon.
+**Scope:** Separate capture/match/inject daemon from an optional policy-driven
+action broker
+
+Until this gate is complete, WayExpand supports direct commands only for
+sandbox-compatible local actions. Infrastructure actions are explicitly
+unsupported; users must not relax the shipped daemon unit or treat a wrapper
+script as a supported escape hatch.
 
 **Design:**
 - Capture process stays extremely locked down (no network, no HOME write, strict syscalls)
@@ -189,6 +198,22 @@ desktop Linux users but does not prevent use in controlled environments
 - Commands are whitelisted by name, not arbitrary executables
 
 **Benefit:** Enables enterprise/SRE use cases without weakening the capture daemon's security posture
+
+**Exit criteria:**
+- [ ] Protocol is bounded, versioned, authenticated with peer credentials, and
+      action-name based; the daemon cannot submit arbitrary executable paths,
+      arguments, or environment variables.
+- [ ] Broker has an independently hardened systemd unit and trusted action
+      configuration ownership checks.
+- [ ] Per-action executable, arguments, environment, cwd, network policy,
+      timeout, output limit, and audit result are enforced by the broker.
+- [ ] Broker denial/unavailability fails closed; the daemon never falls back to
+      local execution.
+- [ ] Integration tests cover framing, auth, policy denial, timeout, output
+      limits, and the absence of daemon network/home access.
+
+See [docs/ACTION_BROKER_DESIGN.md](docs/ACTION_BROKER_DESIGN.md) for the
+protocol, threat boundary, and acceptance criteria.
 
 **Architecture:**
 ```

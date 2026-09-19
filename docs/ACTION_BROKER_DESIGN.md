@@ -1,7 +1,13 @@
 # Action Broker: Separating Capture from Execution
 
-**Status:** Design proposal for v1.3+  
+**Status:** P1 security architecture gate; not implemented
 **Audience:** SREs, DevOps teams, enterprise administrators
+
+This document defines the boundary required before WayExpand can claim to
+support infrastructure actions. The current daemon does **not** implement an
+Action Broker, and its direct command feature remains limited by the daemon's
+systemd sandbox. Do not weaken that sandbox to make `kubectl`, `aws`, `vault`,
+`ssh`, or `terraform` work.
 
 ## Problem
 
@@ -57,7 +63,7 @@ command = { program = "/usr/bin/kubectl", args = ["config", "current-context"] }
 
 No way to restrict: networking, environment access, timeout, output size.
 
-### After (Proposed)
+### After (Target design; not yet supported)
 
 In expansion (remains in primary config):
 ```toml
@@ -66,6 +72,10 @@ trigger = ":kctx"
 replacement = ""
 action = "kubectl_current_context"
 ```
+
+The `action` field above is deliberately not accepted by the current 1.1
+configuration schema. It is the target broker-facing schema, not a workaround
+that users can enable today.
 
 In action broker config (`~/.config/wayexpand/actions.toml` or `/etc/wayexpand/actions.d/`):
 ```toml
@@ -124,11 +134,21 @@ sandbox = true               # seccomp/pledge/pledge equivalent
 
 ## Implementation Roadmap
 
+### Phase 0: Security and protocol gate (before implementation)
+- Keep direct daemon commands available only for sandbox-compatible, trusted
+  local actions.
+- Define the broker protocol and threat model below.
+- Add integration tests proving that the capture daemon cannot request an
+  arbitrary executable, pass arbitrary environment variables, or bypass the
+  broker's allowlist.
+- Document that SRE workflows are unsupported until this gate is complete.
+
 ### Phase 1: IPC Plumbing (v1.3)
-- Define Unix socket protocol between daemon and broker
-- Implement authenticated IPC (SO_PEERCRED verification)
-- Add `wayexpand-action-broker` service
-- Maintain backward compatibility (single-process mode as default)
+- Define the Unix socket protocol between daemon and broker.
+- Implement authenticated IPC (`SO_PEERCRED` verification on Linux).
+- Add the `wayexpand-action-broker` service with a separate systemd unit.
+- Maintain backward compatibility: direct command mode remains the default for
+  existing local snippets, while broker actions are explicit opt-in.
 
 ### Phase 2: Action Configuration (v1.3)
 - Extend expansion config with `action` field
@@ -147,6 +167,64 @@ sandbox = true               # seccomp/pledge/pledge equivalent
 - Multi-broker deployment (different services on different machines)
 - Centralized action library (git repo or central server)
 - Action approval workflows (optional per-action confirmation)
+
+## Broker protocol and trust boundary
+
+The broker is a privilege and capability boundary, not merely a second command
+worker. The daemon sends an action identifier; it must not send a program path,
+shell text, unrestricted arguments, or an environment map.
+
+The initial Linux transport should be a user-owned `AF_UNIX` stream socket in
+`$XDG_RUNTIME_DIR/wayexpand/action-broker.sock`, mode `0600`, with the broker
+verifying the connecting process credentials (`SO_PEERCRED`) before reading a
+request. The broker must also validate its own socket and configuration
+parents, matching the existing control-socket ownership rules. A future
+organization deployment may use a separately managed broker user and an
+explicitly trusted group, but that must be a deliberate policy choice rather
+than an ambient filesystem permission.
+
+Requests should use bounded length-prefixed JSON for the first implementation:
+
+```json
+{
+  "protocol": 1,
+  "request_id": "uuid-or-random-opaque-id",
+  "action": "kubectl_current_context"
+}
+```
+
+The broker response must be similarly bounded and distinguish these outcomes:
+`accepted`, `completed`, `denied`, `timed_out`, `failed`, and `unavailable`.
+Responses may contain bounded UTF-8 stdout for text-producing actions, but must
+never include secrets in ordinary audit logs. The broker owns the action's
+absolute executable path, fixed arguments, explicit environment allowlist,
+working directory, network policy, timeout, output limit, and audit metadata.
+
+The broker must reject unknown fields, unknown action names, oversized frames,
+duplicate or malformed request IDs, shell metacharacter interpretation, and
+requests that attempt to override action policy. The daemon must fail closed
+when the broker is unavailable; it must never fall back to executing the
+requested SRE command locally.
+
+Each action execution needs an audit record containing the authenticated
+caller, action name, request ID, start/end result, timeout/failure category,
+and output byte count. It must not contain typed triggers, replacement text,
+secret values, or arbitrary command arguments.
+
+### Acceptance criteria
+
+The broker is not ready for production until all of the following are tested:
+
+1. The hardened capture daemon has no network or home-directory access even
+   when an action request is triggered.
+2. A fake broker can prove framing, credential checks, timeout handling, and
+   bounded output without starting an arbitrary process.
+3. An action configuration owned by another user, writable by group/other, or
+   containing an unresolved executable path is rejected before startup.
+4. The daemon cannot use a broker denial or disconnect as permission to run the
+   command itself.
+5. The broker's systemd unit has an independently reviewed hardening profile
+   and service-account/secret ownership model.
 
 ## Comparison: Action Broker vs Current Model
 
