@@ -11,6 +11,8 @@ use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
+    sync::mpsc,
+    thread,
     time::Duration,
 };
 use theme::Palette;
@@ -62,6 +64,15 @@ enum PendingAction {
     Delete,
     Reload,
     Undo,
+    Close,
+}
+
+/// Result of a background "Use current app" detection attempt (see
+/// `GuiApp::app_detection`).
+enum AppDetection {
+    Found(wayexpand_core::WindowContext),
+    NoWindow,
+    Unavailable,
 }
 
 struct GuiApp {
@@ -99,6 +110,20 @@ struct GuiApp {
     /// run has happened yet for the current draft. Cleared on selection
     /// change so a stale result from a different snippet is never shown.
     command_preview_result: Option<Result<String, String>>,
+    /// A background "Use current app" detection in progress: `KwinWindowTracker::new()`
+    /// itself has no bound on its D-Bus connection/script-loading step (only
+    /// the window-wait after it is bounded), so this runs off the UI thread
+    /// with the receiver polled each frame instead of calling it inline,
+    /// which could otherwise freeze the whole GUI indefinitely rather than
+    /// for the intended few seconds. `None` means no detection is running.
+    app_detection: Option<mpsc::Receiver<AppDetection>>,
+    /// Set by `execute_action(PendingAction::Close)` once the user has
+    /// confirmed closing with an unsaved draft (or there was nothing to
+    /// confirm). The original OS close request was already cancelled by
+    /// then (see `ui()`), so this tells the next frame to issue a fresh
+    /// one -- which will not be cancelled again since the draft is no
+    /// longer dirty by that point.
+    close_after_confirm: bool,
 }
 
 impl GuiApp {
@@ -180,6 +205,8 @@ impl GuiApp {
             colorpack: prefs.colorpack,
             colorpack_selector_open: false,
             command_preview_result: None,
+            app_detection: None,
+            close_after_confirm: false,
         })
     }
 
@@ -422,6 +449,7 @@ impl GuiApp {
             PendingAction::Delete => self.perform_delete_selected(),
             PendingAction::Reload => self.perform_reload(),
             PendingAction::Undo => self.undo(),
+            PendingAction::Close => self.close_after_confirm = true,
         }
     }
 
@@ -806,13 +834,31 @@ impl eframe::App for GuiApp {
             || self.import_open
             || self.settings_open
             || self.pending_action.is_some();
-        let (want_save, want_new, want_escape) = ui.ctx().input(|input| {
+        let (want_save, want_new, want_escape, close_requested) = ui.ctx().input(|input| {
             (
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
                 input.key_pressed(egui::Key::Escape),
+                input.viewport().close_requested(),
             )
         });
+        if close_requested && self.draft_is_dirty() {
+            // The user clicked the window's close button (or an OS-level
+            // quit) with an unsaved draft open. Every other action that can
+            // discard a draft (Select, Delete, Reload, Undo) already
+            // confirms first; closing the whole app was the one silent
+            // exit left. Cancel this close and route it through the same
+            // Save/Discard/Cancel dialog; if confirmed, close_after_confirm
+            // (below) re-issues the close next frame, by which point the
+            // draft is no longer dirty so it goes through uncancelled.
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request_action(PendingAction::Close);
+        }
+        if self.close_after_confirm {
+            self.close_after_confirm = false;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if want_save && self.selected.is_some() {
             self.save_selected();
         }
@@ -1418,7 +1464,17 @@ impl eframe::App for GuiApp {
                             .hint_text(self.strings.app_filter_hint())
                             .desired_width(300.0),
                     );
-                    if ui
+                    if self.app_detection.is_some() {
+                        ui.spinner();
+                        ui.label("Detecting focused application…");
+                        if ui.small_button("Cancel").clicked() {
+                            // The spawned thread is not joined/cancelled --
+                            // it may itself be stuck in a hung D-Bus call --
+                            // just stop waiting on it and discard whatever
+                            // it eventually sends.
+                            self.app_detection = None;
+                        }
+                    } else if ui
                         .button(self.strings.detect_app())
                         .on_hover_text(self.strings.detect_app_tooltip())
                         .clicked()
@@ -1456,29 +1512,42 @@ impl eframe::App for GuiApp {
                         .desired_width(f32::INFINITY),
                 );
             });
-            if detect_app_clicked {
-                // Bounded so a KWin version mismatch, a D-Bus hiccup, or any
-                // other reason the tracker's script never calls back cannot
-                // freeze the GUI: this runs synchronously on the UI thread.
+            if detect_app_clicked && self.app_detection.is_none() {
+                // Run entirely off the UI thread: KwinWindowTracker::new()
+                // itself (D-Bus connection, script load, name registration)
+                // has no bound of its own -- only the window-wait after it
+                // does -- so calling it inline here could freeze the whole
+                // GUI indefinitely rather than for the intended few
+                // seconds, exactly the failure mode found and fixed in the
+                // daemon's KwinWindowTracker::probe() (a hung session bus
+                // or leftover KWin script state from a prior instance can
+                // make the D-Bus call itself never return). The receiver is
+                // polled below on every frame instead.
                 use wayexpand_backend_kwin_window::KwinWindowTracker;
-                use wayexpand_core::{WindowContext, WindowTracker};
-                enum Detection {
-                    Found(WindowContext),
-                    NoWindow,
-                    Unavailable,
-                }
-                let detection = match KwinWindowTracker::new() {
-                    Ok(mut tracker) => {
-                        match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
-                            Ok(Some(Some(window))) => Detection::Found(window),
-                            Ok(Some(None)) => Detection::NoWindow,
-                            Ok(None) | Err(_) => Detection::Unavailable,
+                use wayexpand_core::WindowTracker;
+                let (sender, receiver) = mpsc::channel();
+                self.app_detection = Some(receiver);
+                thread::spawn(move || {
+                    let detection = match KwinWindowTracker::new() {
+                        Ok(mut tracker) => {
+                            match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
+                                Ok(Some(Some(window))) => AppDetection::Found(window),
+                                Ok(Some(None)) => AppDetection::NoWindow,
+                                Ok(None) | Err(_) => AppDetection::Unavailable,
+                            }
                         }
-                    }
-                    Err(_) => Detection::Unavailable,
-                };
-                match detection {
-                    Detection::Found(window) => {
+                        Err(_) => AppDetection::Unavailable,
+                    };
+                    // The GUI may have given up waiting (Cancel, or the
+                    // window closed) by the time this send happens; that is
+                    // not an error, there is simply nothing left to notify.
+                    let _ = sender.send(detection);
+                });
+            }
+            if let Some(receiver) = &self.app_detection {
+                match receiver.try_recv() {
+                    Ok(AppDetection::Found(window)) => {
+                        self.app_detection = None;
                         let value = window.app_id.or(window.title).unwrap_or_default();
                         if value.is_empty() {
                             self.message = "Could not identify the focused window".into();
@@ -1492,14 +1561,30 @@ impl eframe::App for GuiApp {
                             self.message = format!("Added \"{value}\" to the app filter");
                         }
                     }
-                    Detection::NoWindow => {
+                    Ok(AppDetection::NoWindow) => {
+                        self.app_detection = None;
                         self.message = "No focused window to detect (focus is on the desktop)"
                             .into();
                     }
-                    Detection::Unavailable => {
+                    Ok(AppDetection::Unavailable) => {
+                        self.app_detection = None;
                         self.message =
                             "Window detection is unavailable here (KDE Plasma only for now)"
                                 .into();
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // Still waiting: request another repaint soon so
+                        // this gets polled promptly instead of only on the
+                        // next user-driven event, without busy-looping.
+                        ui.ctx().request_repaint_after(Duration::from_millis(100));
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // The sender was dropped without sending, which
+                        // should not happen (the spawned thread always
+                        // sends before exiting) -- treat it the same as an
+                        // explicit Unavailable rather than waiting forever.
+                        self.app_detection = None;
+                        self.message = "Window detection failed unexpectedly".into();
                     }
                 }
             }
@@ -1697,6 +1782,7 @@ impl eframe::App for GuiApp {
                         Some(PendingAction::Delete) => self.strings.unsaved_deleting(),
                         Some(PendingAction::Reload) => self.strings.unsaved_reloading(),
                         Some(PendingAction::Undo) => self.strings.unsaved_undoing(),
+                        Some(PendingAction::Close) => self.strings.unsaved_closing(),
                         None => "continuing",
                     };
                     if self.draft_is_dirty() {
@@ -1729,6 +1815,19 @@ impl eframe::App for GuiApp {
                 });
         }
     }
+}
+
+/// Best-effort check of whether the running daemon currently has expansion
+/// matching paused, so the GUI's Pause/Resume button can start in sync with
+/// reality instead of always assuming "running". Returns `None` if the
+/// daemon isn't reachable or its response doesn't include the field, in
+/// which case the caller should keep its own default.
+fn query_daemon_paused() -> Option<bool> {
+    let response = control_command("status").ok()?;
+    response.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key == "paused").then(|| value == "true")
+    })
 }
 
 fn control_command(command: &str) -> Result<String> {
@@ -1879,6 +1978,16 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let mut app = GuiApp::load(path)?;
+    // The daemon may already be paused from a prior CLI `pause` command
+    // before this GUI ever opened; without this, the button always starts
+    // believing the daemon is running, and the first click sends the wrong
+    // operation (asking an already-paused daemon to pause again does
+    // nothing, leaving the button permanently out of sync with reality
+    // until the user notices and clicks it twice more). Best-effort: if the
+    // daemon isn't reachable yet, `paused` simply keeps its default (false).
+    if let Some(paused) = query_daemon_paused() {
+        app.paused = paused;
+    }
     let saved_dark_mode = load_gui_prefs().dark_mode;
     let colorpack = app.colorpack;
     let icon = eframe::icon_data::from_png_bytes(include_bytes!(

@@ -1,33 +1,33 @@
 # WayExpand Professional Roadmap
 
-WayExpand v1.0.0 is production-ready and recommended for deployment on Wayland desktops. This roadmap covers planned enhancements for 1.x releases and beyond.
+The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
 
-## ✅ Completed: v1.0.0 (2026-09-17)
+## Completed: v1.0.0 (2026-09-17)
 
 Production release with:
-- ✅ Stability guarantees for CLI, JSON, and config schema
-- ✅ Security audit and formal threat model documentation
-- ✅ Package distribution: Ubuntu PPA and Arch AUR (Fedora has no Copr repo
+- Stability guarantees for CLI, JSON, and config schema
+- Security audit and formal threat model documentation
+- Package distribution: Ubuntu PPA and Arch AUR (Fedora has no Copr repo
   yet -- see docs/PACKAGING_CHECKLIST.md)
-- ✅ Professional GUI with themes, language packs, and accessibility support
-- ✅ KDE Plasma support (evdev capture + KWin window tracking)
-- ✅ Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
-- ✅ Stability guarantees documented in COMPATIBILITY.md
+- Professional GUI with themes, language packs, and accessibility support
+- KDE Plasma support (evdev capture + KWin window tracking)
+- Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
+- Stability guarantees documented in COMPATIBILITY.md
 
-## ✅ Completed: v1.1.x (2026-09-18)
+## Completed: v1.1.x (2026-09-18)
 
 Shipped as v1.1.0 through v1.1.2. Note this covered accessibility/GUI
 polish rather than the wlroots window tracking originally planned for this
 slot (moved below to the next unscheduled milestone):
-- ✅ GUI font scaling (0.8x-2.0x) for accessibility
-- ✅ 8 color packs, including new Terminal Blue (IBM 3270) and Commodore 64
+- GUI font scaling (0.8x-2.0x) for accessibility
+- 8 color packs, including new Terminal Blue (IBM 3270) and Commodore 64
   retro themes, all meeting WCAG 2.1 AA contrast
-- ✅ Keyboard focus indicators, typography hierarchy, hover-state polish
-- ✅ Sysadmin-focused example snippet documentation
+- Keyboard focus indicators, typography hierarchy, hover-state polish
+- Sysadmin-focused example snippet documentation
 
 ---
 
-## 🚀 Next (unscheduled)
+## Next (unscheduled)
 
 ### Window Tracking for wlroots Compositors
 
@@ -61,7 +61,7 @@ original v1.1 slot since v1.1.x shipped other work instead
 
 ---
 
-## 💡 Future Considerations (v1.2+)
+## Future Considerations (v1.2+)
 
 ### Localization Expansion
 
@@ -94,15 +94,16 @@ Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippet
 
 ---
 
-## 🎯 Success Metrics for Professional Status
+## Success Metrics for Professional Status
 
 Achieved at v1.0.0:
-- ✅ Available in 3+ package managers (AUR, Debian, Fedora)
-- ✅ Documented security policy with vulnerability disclosure process
-- ✅ Stability guarantees (COMPATIBILITY.md)
-- ✅ No known critical bugs
-- ✅ Public changelog for releases
-- ✅ GitHub repository with active CI
+- Available via Ubuntu PPA and Arch AUR (Fedora Copr not yet published —
+  see [docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md))
+- Documented security policy with vulnerability disclosure process
+- Stability guarantees (COMPATIBILITY.md)
+- No known critical bugs
+- Public changelog for releases
+- GitHub repository with active CI
 
 Ongoing:
 - 1000+ GitHub stars (community adoption)
@@ -114,8 +115,8 @@ Ongoing:
 
 ## Release Schedule
 
-**v1.0.0:** Released 2026-09-17 ✅  
-**v1.1.x:** Released 2026-09-18 ✅ (GUI accessibility, themes, docs)  
+**v1.0.0:** Released 2026-09-17  
+**v1.1.x:** Released 2026-09-18 (GUI accessibility, themes, docs)  
 **v1.2+:** No committed date. wlroots window tracking is the leading
 candidate; otherwise driven by community feedback and contributions.
 

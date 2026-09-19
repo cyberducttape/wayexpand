@@ -350,6 +350,34 @@ impl App {
     }
 }
 
+/// Restores the terminal to its normal (cooked, main-screen, visible-cursor)
+/// state when dropped. Without this, a panic anywhere in `run()` -- which
+/// spends nearly all of this program's runtime in raw mode with the
+/// alternate screen active -- unwinds straight past a plain
+/// enable-then-restore-at-the-end sequence and leaves the user's terminal
+/// stuck showing nothing and echoing nothing until they run `reset` or
+/// `stty sane` blind. `Drop` still runs during a panicking unwind (Rust's
+/// default panic strategy), so tying the restore to this guard's lifetime
+/// covers that case as well as the normal and early-return-on-error ones.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn enter(stdout: &mut io::Stdout) -> Result<Self> {
+        terminal::enable_raw_mode().context("enabling terminal input mode")?;
+        execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        // Best-effort: if these fail (e.g. stdout already gone), there is
+        // nothing further to do, and this must not panic-while-panicking.
+        let _ = execute!(io::stdout(), cursor::Show, terminal::LeaveAlternateScreen);
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
 fn main() -> Result<()> {
     let argument = env::args().nth(1);
     if matches!(argument.as_deref(), Some("--help" | "-h")) {
@@ -363,13 +391,9 @@ fn main() -> Result<()> {
     if let Ok(status) = control_command("status") {
         app.paused = status.lines().any(|line| line == "paused=true");
     }
-    terminal::enable_raw_mode().context("enabling terminal input mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
-    let result = run(&mut stdout, &mut app);
-    let restore_result = execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)
-        .and_then(|_| terminal::disable_raw_mode());
-    result.and(restore_result.map_err(Into::into))
+    let _terminal_guard = TerminalGuard::enter(&mut stdout)?;
+    run(&mut stdout, &mut app)
 }
 
 fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {

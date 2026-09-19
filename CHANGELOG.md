@@ -4,12 +4,59 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-Ongoing development after v1.0.0. These features are stable and tested but not yet released.
+Changes since v1.1.2, not yet tagged.
+
+### Fixed
+
+- **Correctness/safety**: the GUI's live snippet preview built a real expansion engine and ran it on every repaint, which for a command-backed expansion meant its configured program executed continuously while the editor was simply open, including a program not yet saved. Preview now never runs a command-backed snippet's program automatically; an explicit "Run once" button does, with its result cached and cleared on selection change.
+- **Reliability**: `KwinWindowTracker::probe()` called `zbus`'s blocking D-Bus session connection synchronously in the daemon's `main()`, before its event loop starts, with no timeout. A session bus or KWin left in a bad state (observed after a prior forcibly-killed daemon instance) could hang this indefinitely, meaning the daemon never processed a single keystroke — with no log output to explain why. Now bounded to 3 seconds on a detached thread.
+- **Reliability**: the GUI's "Use current app" button had the same unbounded-hang exposure (`KwinWindowTracker::new()`'s own D-Bus/script-loading step was never time-bounded, only the window-wait after it was). Moved to a background thread with non-blocking polling, a spinner, and a Cancel button, so a hang there can no longer freeze the whole window.
+- **Reliability**: every external process the clipboard backend spawns (`xclip`, `xsel`, `xdotool`, `which`) had no timeout at all, unlike the daemon's command-expansion runner. Reachable synchronously from the daemon's main loop for any expansion containing a newline; a hung `xclip` (wedged X server, a clipboard manager holding the selection) could stall the whole daemon the same way. Now bounded to 3 seconds per call.
+- **Data loss**: Undo bypassed the unsaved-draft confirmation every other destructive action (Select, Delete, Reload) already went through, silently discarding in-progress edits. Also fixed a related transactional-ordering bug where a failed disk write after Undo still consumed the undo-history entry and changed in-memory state.
+- **Data loss**: closing the GUI window with an unsaved draft had no confirmation at all — the one exit path that could silently discard edits. Now routed through the same Save/Discard/Cancel dialog as every other action.
+- **Correctness**: Create, Duplicate, Delete, and Undo saved to disk but never asked the running daemon to reload, unlike Save — a user could delete a snippet, see it disappear from the GUI, and have the daemon keep expanding it. A failed reload request is now surfaced in the status message instead of silently discarded.
+- **Correctness**: `propagate_case` could silently collide with an unrelated snippet. Validation checked literal configured triggers for duplicates, but the matcher is built from *effective* triggers (a `propagate_case` expansion also inserts its uppercase/capitalized forms) — `:sig` with `propagate_case` generates `:SIG`, which could silently shadow a separately-configured `:SIG` expansion with no validation error. Validation now checks effective triggers.
+- **Correctness**: `erase()`/`move_cursor_left()` in the clipboard backend checked only whether `xdotool` spawned, not its exit status — a failed erase could let the replacement get typed after the still-present trigger instead of in place of it.
+- **Correctness**: the GUI's Pause/Resume button always assumed the daemon was running on startup, regardless of whether it had already been paused via the CLI; it now queries actual daemon state first.
+- **Stability**: a poisoned mutex in the KWin window-tracker's D-Bus callback (which runs on every window-focus event) would have panicked and permanently broken `app_filter`-scoped snippets until daemon restart; now handled without panicking.
+- **Stability**: `wayexpand-ui` had no panic-safety for terminal state — a panic during its main loop (which runs almost entirely in raw mode with the alternate screen active) would leave the terminal stuck until the user ran `reset` blind. Now restored via an RAII guard whose `Drop` runs even during a panicking unwind.
+- Installers/packaging: the application icon was missing from every install path except the Debian package (PKGBUILD, RPM spec, `install-user.sh`, `install-release.sh`, the release tarball workflow) — fixed on all of them.
+
+### Changed
+
+- `docs/COMPATIBILITY.md`'s `status --json` section documented fields (`uptime_seconds`, `config_reloads`, `expansions_evaluated`) that do not exist anywhere in the implementation, while labeling them "Stable — guaranteed." Corrected to document the fields that actually exist, with a two-sided contract test (daemon-side and CLI-side) so this can't silently drift again.
+- README.md and README.de.md rewritten: an architecture diagram, a factual comparison against Espanso/AutoKey, and a toned-down compatibility banner that matches `docs/SUPPORT_MATRIX.md` instead of overclaiming. README.de.md specifically had drifted into claiming GNOME support that doesn't exist and listing an already-fixed bug as a roadmap item.
+- Resolved a direct contradiction between `PROFESSIONAL_ROADMAP.md` (called GNOME window tracking "out of scope") and `docs/SUPPORT_MATRIX.md` (called it "planned for v1.1") — neither was accurate; both now state plainly that no GNOME implementation exists or is scheduled.
+- CI's release workflow now also verifies `debian/changelog`'s version against the release tag, not just `Cargo.toml` — the gap that let v1.0.1/v1.1.0/v1.1.1 all ship with a stale `debian/changelog` and confused Launchpad's PPA builds.
+
+## [1.1.2] - 2026-09-18
+
+### Added
+
+- `docs/RETRO_FONTS.md`: font recommendations and installation instructions (Ubuntu, Fedora, Arch, openSUSE) for pairing the retro color packs with period-appropriate fonts.
+
+### Fixed
+
+- Default theme's muted-text and border colors were brightened for WCAG AA contrast compliance on dark backgrounds.
+
+## [1.1.1] - 2026-09-18
+
+### Added
+
+- `docs/SYSADMIN_EXAMPLES.md`: 30+ production-ready snippet templates (SSL certificates, logrotate, systemd units, firewall rules, Docker, deployment scripts).
+
+### Fixed
+
+- Color contrast in the Classic White, Terminal Blue, and Commodore 64 themes, which were hard to read against their backgrounds.
+
+## [1.1.0] - 2026-09-18
 
 ### Added
 
 - **GUI language support**: English and German, with in-app switching (🌐 button), `LANG` environment auto-detection, and persisted preference. See [docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md).
-- **GUI color packs**: six selectable themes including retro monochrome terminal styles (Classic Green, Classic Amber, Classic White), a Retro 80s Neon theme, and a High Contrast accessibility theme, alongside the existing Default theme. Preference persists across restarts. See [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md).
+- **GUI color packs**: eight selectable themes, including retro monochrome terminal styles (Classic Green, Classic Amber, Classic White), Retro 80s Neon, a High Contrast accessibility theme, and two new additions this release — Terminal Blue (IBM 3270) and Commodore 64 — alongside the Default theme. Preference persists across restarts. See [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md).
+- **GUI font scaling**: 0.8x-2.0x, for accessibility and high-DPI displays, with a 5-option selector in Settings.
+- **Keyboard focus indicators, typography hierarchy, and hover-state polish** across the GUI.
 - **German README** (`README.de.md`).
 - `ExpansionConfig::propagate_case`: opt-in case propagation — typing a trigger in `UPPERCASE` or `Capitalized` form applies the same casing to the replacement. Exposed as a checkbox in the GUI editor. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - **Date math in templates**: `{{date}}`, `{{time}}`, and `{{datetime}}` accept a relative offset, e.g. `{{date+3d}}`, `{{date-1w}}`, `{{time+5h}}`, `{{datetime+90m}}`.
@@ -183,7 +230,10 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/itchyitchy123/wayexpand/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v1.0.0
 [0.2.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.2.0
 [0.1.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.1.0
