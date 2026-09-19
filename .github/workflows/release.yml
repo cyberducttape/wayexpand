@@ -13,18 +13,10 @@ jobs:
     name: Verify
     uses: ./.github/workflows/ci.yml
 
-  linux:
-    name: Linux ${{ matrix.arch }} release
+  linux-x86_64:
+    name: Linux x86_64 release
     needs: ci
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: x86_64
-          - runner: ubuntu-24.04-arm
-            arch: aarch64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          root="wayexpand-${version}-linux-${{ matrix.arch }}"
+          root="wayexpand-${version}-linux-x86_64"
           mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev"
           install -m 0755 target/release/wayexpand "$root/bin/"
           install -m 0755 target/release/wayexpand-daemon "$root/bin/"
