@@ -226,8 +226,8 @@ pub fn discover_backends() -> Vec<BackendStatus> {
         },
         BackendStatus {
             kind: BackendKind::Clipboard,
-            state: BackendState::Implemented,
-            detail: "paste-based fallback implemented; requires xclip/xsel and xdotool".into(),
+            state: BackendState::NotImplemented,
+            detail: "paste-based clipboard injection was removed from the daemon to prevent silent XWayland window targeting; use an explicit backend (libei/wlroots) instead".into(),
         },
         {
             let (state, detail) = discover_window_tracker(wayland);
@@ -363,7 +363,7 @@ mod tests {
             .expect("clipboard status is always reported");
 
         assert_ne!(uinput.state, BackendState::Available);
-        assert_eq!(clipboard.state, BackendState::Implemented);
+        assert_eq!(clipboard.state, BackendState::NotImplemented);
     }
 
     #[test]

@@ -15,9 +15,9 @@ public GitHub issue.
 We aim to acknowledge new reports within 5 business days and to provide a
 status update (triage result, expected timeline) within 14 days. If a report
 is confirmed, we will coordinate a disclosure timeline with the reporter and
-credit them in the release notes unless they prefer to stay anonymous. This
-project is experimental (pre-1.0); fixes ship as patch releases as soon as
-they are ready rather than on a fixed embargo schedule.
+credit them in the release notes unless they prefer to stay anonymous.
+Confirmed security fixes ship as patch releases as soon as they are ready
+rather than on a fixed embargo schedule.
 
 Do not report non-security bugs through the advisory process — use a regular
 GitHub issue for those.
@@ -94,8 +94,9 @@ Backends must document their permission requirements explicitly:
 - direct libei/EIS requires an explicitly configured `LIBEI_SOCKET`; portal
   libei requires explicit backend selection and an approved desktop
   remote-desktop session;
-- uinput requires device access and emits synthetic keyboard events;
-- clipboard fallback can overwrite or expose clipboard contents;
+- wlroots virtual-keyboard is compositor-specific and requires the protocol
+  to be available;
+- uinput backend is not currently implemented;
 - plugin execution must be disabled by default and sandboxed if added.
 
 The control socket lives at `$XDG_RUNTIME_DIR/wayexpand.sock` (or the explicit

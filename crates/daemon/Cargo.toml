@@ -21,5 +21,4 @@ wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-evdev = { path = "../backend-evdev" }
-wayexpand-backend-clipboard = { path = "../backend-clipboard" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
