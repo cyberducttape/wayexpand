@@ -3,7 +3,7 @@
 [![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](https://www.rust-lang.org/)
 
 **Text expansion built for Wayland, rather than adapted to it.**
 
@@ -36,7 +36,7 @@ X11-shaped implementation with Wayland support bolted on.
 - 🧰 **Portal recovery controls:** Inspect or forget the stored restoration token with `wayexpand portal status` and `wayexpand portal reset`.
 - 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion working correctly.
 - 📚 **Clarity on compositor support:** [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) documents what's verified vs. in-progress. [GETTING_STARTED.md](docs/GETTING_STARTED.md) provides per-compositor quick starts.
-- 🧪 **197 tests passing:** Full coverage across core engine, CLI, daemon, wlroots integration, and all backends.
+- 🧪 **Workspace test suite:** Run `cargo test --locked --workspace` for the current test set across the core engine, CLI, daemon, wlroots integration, and all backends.
 
 **Get started:** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for your desktop.
 

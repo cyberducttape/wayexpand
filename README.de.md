@@ -241,7 +241,7 @@ ausführen, die Sie nicht selbst geschrieben haben.
 
 ## Entwicklung
 
-- **Rust 1.93+** (`rustup update`)
+- **Rust 1.87+** (`rustup update`)
 - Wayland-Entwicklungsbibliotheken (Ubuntu/Debian: `libwayland-dev
   libxkbcommon-dev`; Fedora: `wayland-devel libxkbcommon-devel`)
 

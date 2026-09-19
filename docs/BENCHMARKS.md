@@ -14,7 +14,8 @@ cargo bench --locked -p wayexpand-core --bench matcher
 ## Baseline: 2026-09-19
 
 Captured on an AMD Ryzen 7 7735U (16 logical CPUs), Linux x86_64, with
-`rustc 1.93.1` and Criterion 0.5.1:
+`rustc 1.93.1` and Criterion 0.5.1. This is the benchmark recording
+toolchain; the project MSRV remains Rust 1.87 (see `Cargo.toml`):
 
 | Snippets | Median | 95% interval |
 | ---: | ---: | ---: |

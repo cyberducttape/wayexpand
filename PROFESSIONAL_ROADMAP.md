@@ -113,7 +113,9 @@ desktop Linux users but does not prevent use in controlled environments
 - ✅ Daemon event loop integration
 - ✅ Window focus changes routed to engine.process(InputEvent::WindowChanged)
 - ✅ app_filter matching with focused window context
-- ✅ 191+ tests covering protocol detection, naming, timeout, daemon integration
+- ✅ Workspace tests covering protocol detection, naming, timeout, daemon integration,
+  configuration safety, matching, and backend behavior; run
+  `cargo test --locked --workspace` for the current count
 
 **Commits:**
 - 1f58bc43: Phase 1 foundation
