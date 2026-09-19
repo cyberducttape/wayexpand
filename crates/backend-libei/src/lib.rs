@@ -35,12 +35,12 @@
 use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{self, File, OpenOptions},
     io::{Read as _, Seek, SeekFrom, Write},
     os::fd::OwnedFd,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     os::unix::net::UnixStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -66,6 +66,8 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
 const PORTAL_TOKEN_FILENAME: &str = "libei-portal-token";
+const MAX_PORTAL_TOKEN_BYTES: usize = 4096;
+const PORTAL_TOKEN_TEMP_ATTEMPTS: usize = 16;
 
 #[derive(Debug, Error)]
 pub enum LibeiError {
@@ -725,47 +727,274 @@ pub fn portal_token_path() -> Option<PathBuf> {
 }
 
 pub fn reset_portal_token() -> std::io::Result<bool> {
-    let Some(path) = portal_token_path() else {
-        return Ok(false);
+    let path = match secure_portal_token_path(false) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
     };
-    match std::fs::remove_file(path) {
+    reset_portal_token_at(&path)
+}
+
+fn reset_portal_token_at(path: &Path) -> std::io::Result<bool> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal token path has no parent directory",
+        )
+    })?;
+    validate_token_parent_chain(parent)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_token_metadata(path, &metadata)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    match fs::remove_file(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
 }
 
-/// Read a stored portal session token, if one exists and is accessible.
-fn read_portal_token() -> Option<String> {
-    let path = portal_token_path()?;
-    std::fs::read_to_string(&path).ok()
+/// Read a stored portal session token after validating both its parent and
+/// the opened file descriptor. Invalid or unsafe token state is reported to
+/// the caller instead of being silently treated as an absent token.
+fn read_portal_token() -> std::io::Result<Option<String>> {
+    let path = match secure_portal_token_path(false) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    read_portal_token_at(&path)
 }
 
-/// Store a portal session token with restricted permissions (0600).
+fn read_portal_token_at(path: &Path) -> std::io::Result<Option<String>> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal token path has no parent directory",
+        )
+    })?;
+    validate_token_parent_chain(parent)?;
+    let mut file = OpenOptions::new();
+    file.read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    let file = match file.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    validate_token_metadata(path, &metadata)?;
+    if metadata.len() > MAX_PORTAL_TOKEN_BYTES as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "portal restoration token is too large",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take((MAX_PORTAL_TOKEN_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_PORTAL_TOKEN_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "portal restoration token is too large",
+        ));
+    }
+    let token = String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "portal restoration token is not valid UTF-8",
+        )
+    })?;
+    if token.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "portal restoration token is empty",
+        ));
+    }
+    Ok(Some(token))
+}
+
+/// Store a portal session token with restricted permissions (0600), using an
+/// atomic durable replacement. The target is never truncated in place.
 fn store_portal_token(token: &str) -> std::io::Result<()> {
-    let path = portal_token_path().ok_or_else(|| {
+    if token.is_empty() || token.len() > MAX_PORTAL_TOKEN_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal restoration token has an invalid size",
+        ));
+    }
+    if token.contains('\0') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal restoration token contains NUL",
+        ));
+    }
+
+    let path = secure_portal_token_path(true)?;
+    store_portal_token_at(&path, token)
+}
+
+fn store_portal_token_at(path: &Path, token: &str) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal token path has no parent directory",
+        )
+    })?;
+    validate_token_parent_chain(parent)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_token_metadata(path, &metadata)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut temporary = None;
+    let mut file = None;
+    for attempt in 0..PORTAL_TOKEN_TEMP_ATTEMPTS {
+        let candidate = parent.join(format!(
+            ".{PORTAL_TOKEN_FILENAME}.tmp.{}.{}",
+            std::process::id(),
+            attempt
+        ));
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        match options.open(&candidate) {
+            Ok(created) => {
+                temporary = Some(candidate);
+                file = Some(created);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let temporary = temporary.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique portal token temporary file",
+        )
+    })?;
+    let result = (|| -> std::io::Result<()> {
+        let mut file = file.expect("temporary token file must exist");
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn secure_portal_token_path(create_parent: bool) -> std::io::Result<PathBuf> {
+    let raw_path = portal_token_path().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "cannot determine config directory for portal token",
         )
     })?;
+    let raw_parent = raw_path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal token path has no parent directory",
+        )
+    })?;
+    let parent = trusted_token_parent(raw_parent, create_parent)?;
+    let filename = raw_path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "portal token path has no file name",
+        )
+    })?;
+    Ok(parent.join(filename))
+}
 
-    // Ensure directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+fn trusted_token_parent(path: &Path, create: bool) -> std::io::Result<PathBuf> {
+    if create {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "portal token parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir_all(path)?;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) => return Err(error),
+        }
     }
+    let resolved = fs::canonicalize(path)?;
+    validate_token_parent_chain(&resolved)?;
+    Ok(resolved)
+}
 
-    // Write token with strict permissions (0600 = user read+write)
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)?;
-    file.write_all(token.as_bytes())?;
+fn validate_token_parent_chain(path: &Path) -> std::io::Result<()> {
+    let current_uid = rustix::process::geteuid().as_raw();
+    let mut current = path;
+    loop {
+        let metadata = fs::symlink_metadata(current)?;
+        if !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                "portal token parent is not a directory",
+            ));
+        }
+        if metadata.uid() != current_uid && metadata.uid() != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "portal token parent has an untrusted owner",
+            ));
+        }
+        // Only check sticky bit for non-root-owned directories; root-owned
+        // directories like / are inherently safe even without sticky bit.
+        if metadata.uid() != 0 {
+            let mode = metadata.permissions().mode() & 0o7777;
+            if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "portal token parent is writable by group or other users",
+                ));
+            }
+        }
+        if current == Path::new("/") {
+            break;
+        }
+        current = current.parent().unwrap_or_else(|| Path::new("/"));
+    }
+    Ok(())
+}
 
-    // Set restrictive permissions (0600)
-    let perms = std::fs::Permissions::from_mode(0o600);
-    std::fs::set_permissions(&path, perms)?;
+fn validate_token_metadata(path: &Path, metadata: &fs::Metadata) -> std::io::Result<()> {
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("portal token is not a regular file: {}", path.display()),
+        ));
+    }
+    let current_uid = rustix::process::geteuid().as_raw();
+    if metadata.uid() != current_uid {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "portal token has an untrusted owner",
+        ));
+    }
+    if metadata.permissions().mode() & 0o7777 != 0o600 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "portal token permissions must be 0600",
+        ));
+    }
     Ok(())
 }
 
@@ -794,7 +1023,11 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
             // Request explicitly-revoked persistent mode to enable session restoration tokens.
             // If we have a stored token, pass it to skip the consent dialog on reconnect.
             // The portal will restore permissions from the token if it's valid.
-            let stored_token = read_portal_token();
+            let stored_token = read_portal_token().map_err(|error| {
+                LibeiError::Portal(format!(
+                    "could not securely read portal restoration token: {error}"
+                ))
+            })?;
             proxy
                 .select_devices(
                     &session,
@@ -814,7 +1047,11 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
 
             // Extract and store restoration token for next connection
             if let Some(token) = start_response.restore_token() {
-                let _ = store_portal_token(token);
+                store_portal_token(token).map_err(|error| {
+                    LibeiError::Portal(format!(
+                        "could not securely store portal restoration token: {error}"
+                    ))
+                })?;
             }
 
             let fd = proxy
@@ -929,7 +1166,11 @@ fn validate_text(text: &str) -> Result<(), LibeiError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{os::unix::net::UnixStream, time::Duration};
+    use std::{
+        fs,
+        os::unix::{fs::PermissionsExt, net::UnixStream},
+        time::Duration,
+    };
 
     #[test]
     fn backend_name_is_stable() {
@@ -972,6 +1213,65 @@ mod tests {
     #[test]
     fn empty_text_has_no_protocol_chunk() {
         assert!(super::split_text_chunks("").is_empty());
+    }
+
+    fn token_test_parent(name: &str) -> std::path::PathBuf {
+        let parent = std::env::temp_dir().join(format!(
+            "wayexpand-libei-token-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&parent);
+        fs::create_dir_all(&parent).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+        parent
+    }
+
+    #[test]
+    fn portal_token_is_readable_only_after_private_atomic_save() {
+        let parent = token_test_parent("secure");
+        let path = parent.join(super::PORTAL_TOKEN_FILENAME);
+        super::store_portal_token_at(&path, "restoration-token").unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            super::read_portal_token_at(&path).unwrap().as_deref(),
+            Some("restoration-token")
+        );
+        assert!(super::reset_portal_token_at(&path).unwrap());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn portal_token_rejects_symlinks_and_insecure_parents() {
+        let parent = token_test_parent("unsafe");
+        let path = parent.join(super::PORTAL_TOKEN_FILENAME);
+        let target = parent.join("target");
+        fs::write(&target, "do not replace").unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(super::store_portal_token_at(&path, "new-token").is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "do not replace");
+        fs::remove_file(&path).unwrap();
+
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(super::store_portal_token_at(&path, "new-token").is_err());
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn portal_token_read_rejects_oversized_or_wrongly_permissioned_files() {
+        let parent = token_test_parent("validation");
+        let path = parent.join(super::PORTAL_TOKEN_FILENAME);
+        fs::write(&path, "token").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(super::read_portal_token_at(&path).is_err());
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&path, "x".repeat(super::MAX_PORTAL_TOKEN_BYTES + 1)).unwrap();
+        assert!(super::read_portal_token_at(&path).is_err());
+        let _ = fs::remove_dir_all(parent);
     }
 
     #[test]
