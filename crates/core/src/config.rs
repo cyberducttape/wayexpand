@@ -66,6 +66,17 @@ pub struct Settings {
     /// and high-DPI displays.
     #[serde(default)]
     pub font_scale: FontScale,
+    /// Enable persistent portal session tokens for libei/RemoteDesktop portal.
+    /// When enabled, the daemon stores session restoration tokens to avoid
+    /// showing consent dialogs on every reconnect. Tokens are stored in
+    /// ~/.config/wayexpand/ with mode 0600 (user-only read/write).
+    /// Defaults to true. Set to false to request fresh consent every time.
+    #[serde(default = "default_libei_persistence")]
+    pub libei_token_persistence: bool,
+}
+
+fn default_libei_persistence() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -105,6 +116,7 @@ impl Default for Settings {
             max_buffer_chars: 128,
             undo_chord: None,
             font_scale: FontScale::Normal,
+            libei_token_persistence: true,
         }
     }
 }

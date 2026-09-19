@@ -172,6 +172,9 @@ impl ReloadableConfig {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
                     Ok(mut engine) => {
+                        if self.engine.async_commands_enabled() {
+                            engine.enable_async_commands();
+                        }
                         // A fresh engine has no window context yet. Without
                         // this, any reload (e.g. every GUI save) would
                         // wrongly fail-close `app_filter`-scoped expansions

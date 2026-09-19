@@ -16,6 +16,7 @@ use std::{
 const MAX_RESULTS_PER_EVENT: usize = 1024;
 const MAX_RESULT_BYTES_PER_EVENT: usize = 4 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
+const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputEvent {
@@ -66,16 +67,13 @@ pub struct ExpansionResult {
     /// cursor at the end, matching every replacement written before this
     /// existed.
     pub cursor_offset: Option<usize>,
-    /// Character to re-insert after the replacement. Evdev capture is
+    /// Character to preserve after the replacement. Evdev capture is
     /// non-exclusive, so the key that completes a word-boundary trigger or a
     /// trigger that is a prefix of another (e.g., `:a` vs `:address`) has
     /// already reached the app by the time the engine matches. Normally we
-    /// would delete it along with the trigger (evdev sees `:sig` + space, we
-    /// delete `:sig `, then insert replacement). But character-by-character
-    /// deletion in evdev is slow and fragile. Instead: delete only the
-    /// trigger, insert the replacement, then re-type the terminating
-    /// character. This field is `None` for input-method backends (which
-    /// control capture exclusively) and for non-boundary triggers.
+    /// delete it together with the trigger and append it to the replacement
+    /// in one backend operation (`:sig ` becomes `signature `). This field is
+    /// `None` for matches that complete immediately without a trailing key.
     pub reinsert_after: Option<char>,
 }
 
@@ -131,12 +129,34 @@ pub struct ExpansionEngine {
     /// repositioned cursor has no single well-defined "erase N characters
     /// backward" meaning.
     last_expansion: Option<(String, usize)>,
+    input_generation: u64,
+    async_commands: Option<AsyncCommandRuntime>,
 }
 
 #[derive(Debug, Clone)]
 struct CommandCacheEntry {
     expires_at: Instant,
     value: String,
+}
+
+struct AsyncCommandRuntime {
+    sender: mpsc::SyncSender<AsyncCommandJob>,
+    receiver: mpsc::Receiver<AsyncCommandCompletion>,
+}
+
+struct AsyncCommandJob {
+    config_index: usize,
+    generation: u64,
+    command: CommandConfig,
+    result: ExpansionResult,
+}
+
+struct AsyncCommandCompletion {
+    config_index: usize,
+    generation: u64,
+    cache_ms: u64,
+    result: ExpansionResult,
+    output: Result<String, CommandError>,
 }
 
 impl ExpansionEngine {
@@ -202,7 +222,86 @@ impl ExpansionEngine {
             current_window: None,
             undo_chord,
             last_expansion: None,
+            input_generation: 0,
+            async_commands: None,
         })
+    }
+
+    /// Run command-backed expansions on a bounded worker queue. This is
+    /// enabled by the daemon; CLI and GUI previews remain synchronous so an
+    /// explicit preview call can return its result directly.
+    pub fn enable_async_commands(&mut self) {
+        if self.async_commands.is_some() {
+            return;
+        }
+        let (job_sender, job_receiver) =
+            mpsc::sync_channel::<AsyncCommandJob>(ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (completion_sender, completion_receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("wayexpand-command-worker".into())
+            .spawn(move || {
+                while let Ok(job) = job_receiver.recv() {
+                    let cache_ms = job.command.cache_ms;
+                    let output = run_command(&job.command);
+                    if completion_sender
+                        .send(AsyncCommandCompletion {
+                            config_index: job.config_index,
+                            generation: job.generation,
+                            cache_ms,
+                            result: job.result,
+                            output,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("command worker thread should start");
+        self.async_commands = Some(AsyncCommandRuntime {
+            sender: job_sender,
+            receiver: completion_receiver,
+        });
+    }
+
+    pub fn async_commands_enabled(&self) -> bool {
+        self.async_commands.is_some()
+    }
+
+    /// Return completed command expansions that are still safe to apply.
+    /// Any intervening input, focus, pause, or window event advances the
+    /// generation and causes late output to be discarded rather than erasing
+    /// text at a cursor that may have moved.
+    pub fn drain_completed_commands(&mut self) -> Vec<ExpansionResult> {
+        let Some(runtime) = self.async_commands.as_ref() else {
+            return Vec::new();
+        };
+        let completions: Vec<_> = runtime.receiver.try_iter().collect();
+        let mut results = Vec::new();
+        for mut completion in completions {
+            let Ok(mut output) = completion.output else {
+                continue;
+            };
+            if completion.cache_ms > 0 {
+                self.command_cache[completion.config_index] = Some(CommandCacheEntry {
+                    expires_at: Instant::now() + Duration::from_millis(completion.cache_ms),
+                    value: output.clone(),
+                });
+            }
+            if self.config.expansion[completion.config_index].propagate_case {
+                output = apply_case_style(&completion.result.typed_trigger, &output);
+            }
+            if completion.generation != self.input_generation || !self.is_capture_enabled() {
+                continue;
+            }
+            completion.result.insert = output;
+            self.last_expansion = Some((
+                completion.result.typed_trigger.clone(),
+                completion.result.insert.chars().count(),
+            ));
+            results.push(completion.result);
+        }
+        results
     }
 
     /// The currently known focused window, if any. Used to carry window
@@ -328,6 +427,7 @@ impl ExpansionEngine {
                     return results;
                 }
                 for character in text.chars() {
+                    self.input_generation = self.input_generation.wrapping_add(1);
                     let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
                         if let Some(config_index) = self.matcher_indices.get(index).copied() {
@@ -375,13 +475,9 @@ impl ExpansionEngine {
                             self.clear_buffer();
                             continue;
                         };
-                        let (trigger, match_mode, propagate_case) = {
+                        let (trigger, match_mode) = {
                             let expansion = &self.config.expansion[config_index];
-                            (
-                                expansion.trigger.clone(),
-                                expansion.match_mode,
-                                expansion.propagate_case,
-                            )
+                            (expansion.trigger.clone(), expansion.match_mode)
                         };
                         // The actually-typed suffix, which may be an
                         // uppercase or capitalized variant of `trigger` for
@@ -399,35 +495,17 @@ impl ExpansionEngine {
                         {
                             continue;
                         }
-                        if !self.match_allowed(config_index, length) {
-                            continue;
+                        if let Some(result) = self.take_match(config_index, length, None) {
+                            let expansion_bytes = trigger.len().saturating_add(result.insert.len());
+                            if result_bytes.saturating_add(expansion_bytes)
+                                > MAX_RESULT_BYTES_PER_EVENT
+                            {
+                                self.clear_buffer();
+                                break;
+                            }
+                            result_bytes = result_bytes.saturating_add(expansion_bytes);
+                            results.push(result);
                         }
-                        let Ok((mut insert, cursor_offset)) = self.render_expansion(config_index)
-                        else {
-                            self.clear_buffer();
-                            continue;
-                        };
-                        if propagate_case {
-                            insert = apply_case_style(&typed, &insert);
-                        }
-                        let expansion_bytes = trigger.len().saturating_add(insert.len());
-                        if result_bytes.saturating_add(expansion_bytes) > MAX_RESULT_BYTES_PER_EVENT
-                        {
-                            self.clear_buffer();
-                            break;
-                        }
-                        result_bytes = result_bytes.saturating_add(expansion_bytes);
-                        if cursor_offset.is_none() {
-                            self.last_expansion = Some((typed.clone(), insert.chars().count()));
-                        }
-                        results.push(ExpansionResult {
-                            trigger,
-                            typed_trigger: typed.clone(),
-                            erase_chars: length,
-                            insert,
-                            cursor_offset,
-                            reinsert_after: None,
-                        });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
                         self.clear_buffer();
@@ -436,10 +514,12 @@ impl ExpansionEngine {
                 results
             }
             InputEvent::Backspace => {
+                self.input_generation = self.input_generation.wrapping_add(1);
                 self.buffer.pop_back();
                 Vec::new()
             }
             InputEvent::Boundary => {
+                self.input_generation = self.input_generation.wrapping_add(1);
                 let result = self
                     .matcher
                     .find_suffix(self.buffer.iter().rev().copied())
@@ -453,16 +533,19 @@ impl ExpansionEngine {
                 result.into_iter().collect()
             }
             InputEvent::FocusChanged { sensitive } => {
+                self.input_generation = self.input_generation.wrapping_add(1);
                 self.sensitive_focus = sensitive;
                 self.clear_buffer();
                 Vec::new()
             }
             InputEvent::PauseChanged(paused) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
                 self.user_paused = paused;
                 self.clear_buffer();
                 Vec::new()
             }
             InputEvent::WindowChanged(window) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
                 // The text in the buffer belongs to the previously-focused
                 // application. Text expansion state must be scoped to the
                 // focused window, not to the desktop session. Even if
@@ -497,7 +580,42 @@ impl ExpansionEngine {
             let start = self.buffer.len().saturating_sub(length);
             self.buffer.iter().skip(start).collect()
         };
-        let (mut insert, cursor_offset) = self.render_expansion(config_index).ok()?;
+        let expansion = &self.config.expansion[config_index];
+        let cached_command = expansion.command.as_ref().and_then(|command| {
+            (command.cache_ms > 0)
+                .then(|| self.command_cache[config_index].as_ref())
+                .flatten()
+                .filter(|entry| entry.expires_at > Instant::now())
+                .map(|entry| entry.value.clone())
+        });
+        let (mut insert, cursor_offset) = if let Some(value) = cached_command {
+            (value, None)
+        } else if let (Some(runtime), Some(command)) =
+            (self.async_commands.as_ref(), expansion.command.as_ref())
+        {
+            let result = ExpansionResult {
+                trigger,
+                typed_trigger: typed,
+                erase_chars: length,
+                insert: String::new(),
+                cursor_offset: None,
+                reinsert_after: terminating_char,
+            };
+            let job = AsyncCommandJob {
+                config_index,
+                generation: self.input_generation,
+                command: command.clone(),
+                result,
+            };
+            for _ in 0..length {
+                self.buffer.pop_back();
+            }
+            self.last_expansion = None;
+            runtime.sender.try_send(job).ok()?;
+            return None;
+        } else {
+            self.render_expansion(config_index).ok()?
+        };
         if propagate_case {
             insert = apply_case_style(&typed, &insert);
         }
@@ -1137,6 +1255,60 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "kernel-6.1");
+    }
+
+    #[test]
+    fn asynchronous_command_expansion_does_not_block_input_processing() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.1; printf finished"]
+            timeout_ms = 500
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        let started = Instant::now();
+        assert!(engine.process(InputEvent::Text(":slow".into())).is_empty());
+        assert!(started.elapsed() < Duration::from_millis(50));
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let result = loop {
+            if let Some(result) = engine.drain_completed_commands().pop() {
+                break result;
+            }
+            assert!(Instant::now() < deadline, "command did not complete");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(result.insert, "finished");
+        assert_eq!(result.typed_trigger, ":slow");
+    }
+
+    #[test]
+    fn asynchronous_command_output_is_discarded_after_more_input() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.05; printf stale"]
+            timeout_ms = 500
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.enable_async_commands();
+        assert!(engine.process(InputEvent::Text(":slow".into())).is_empty());
+        assert!(engine.process(InputEvent::Text("x".into())).is_empty());
+        thread::sleep(Duration::from_millis(100));
+        assert!(engine.drain_completed_commands().is_empty());
     }
 
     #[test]
