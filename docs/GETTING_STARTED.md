@@ -149,8 +149,8 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 
 **Snippets aren't expanding?**
 1. Run `wayexpand doctor` to check backend status
-2. Verify the daemon is running: `systemctl --user status wayexpand`
-3. Check logs: `journalctl --user -u wayexpand -n 20`
+2. Verify the daemon is running: `systemctl --user status wayexpand-input-method.service`
+3. Check logs: `journalctl --user -u wayexpand-input-method.service -n 20`
 4. Try a simple test: `;;hello` should become `Hello, world!`
 
 **Password field protection not working?**
