@@ -194,7 +194,7 @@ WayExpand's deployment depends on your compositor and its Wayland protocol suppo
 
 **Option 1: input-method-v2 (single unified backend)**
 
-For compositors advertising `zwp_input_method_manager_v2` (GNOME, some others):
+For compositors advertising `zwp_input_method_manager_v2` (e.g. wlroots-based ones such as Sway and Hyprland):
 ```sh
 systemctl --user enable --now wayexpand-input-method.service
 ```
@@ -209,7 +209,7 @@ Cons:
 
 **Option 2: evdev + libei/wlroots (split capture/output)**
 
-For compositors without input-method-v2 (KDE Plasma/KWin 6.6+, Sway, Hyprland):
+For compositors without input-method-v2 (e.g. KDE Plasma/KWin 6.6+), or when Option 1 loses keys you need. Output goes through `--backend=libei` on desktops with a RemoteDesktop portal (KDE Plasma, GNOME) or `--backend=wlroots` on wlroots compositors; the shipped unit uses libei:
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
 sudo ./scripts/install-evdev-permissions.sh             # then apply
@@ -218,7 +218,7 @@ systemctl --user enable --now wayexpand-evdev.service
 
 Pros:
 - Better keyboard fidelity (all keys pass through)
-- Works on any Wayland compositor
+- Capture works on any compositor (output still needs libei or wlroots support)
 
 Cons:
 - **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
@@ -241,7 +241,7 @@ wayexpand doctor
 
 If you're on KDE Plasma, use **Option 2** (evdev) — it's the only tested path with good keyboard fidelity.
 
-If you're on GNOME or another input-method-v2 compositor, try **Option 1** first; if you lose keyboard input (Escape/arrows), switch to Option 2 if your compositor supports it, or accept the limitation.
+If you're on Sway, Hyprland, or another input-method-v2 compositor, try **Option 1** first; if you lose keyboard input (Escape/arrows), switch to Option 2 if your compositor supports it, or accept the limitation.
 
 **Granting evdev permission**
 

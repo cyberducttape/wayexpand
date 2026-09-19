@@ -27,6 +27,45 @@ slot (moved below to the next unscheduled milestone):
 
 ---
 
+## Before v1.2
+
+Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
+#19, app_filter preferring `app_id` over window title, are done.)
+
+- [ ] **#16 Mark v1.1.2 as the latest GitHub release.** GitHub's
+      `/releases/latest` still resolves to v0.2.1. Manual: Releases → v1.1.2 →
+      Edit → "Set as the latest release".
+- [ ] **#17 Separate implementation status from environment status in
+      diagnostics.** `BackendState` mixes "not implemented" with "needs
+      permission" (uinput reports `RequiresPermission` although no uinput
+      backend exists). Report implementation, device/protocol presence,
+      permission and connection separately, in `doctor` and `doctor --json`.
+- [ ] **#18 Contract test for documented backend states.** COMPATIBILITY.md
+      now lists the real `BackendState` values; add a test that fails when the
+      enum and the documented list diverge. Depends on #17.
+- [ ] **#20 App context for previewing `app_filter` snippets.** Preview has
+      no focused window, so app-restricted snippets always show "no match".
+      Add an app selector (GUI, TUI) and `--preview-app=<id>` (CLI) that feeds
+      a simulated `WindowChanged`. Expected: `app_filter = ["thunderbird"]`
+      matches with `thunderbird` selected, not with `konsole` or no context.
+- [ ] **evdev: text typed to end a trigger is erased instead of the
+      trigger's first character.** evdev capture is non-exclusive, so the
+      space/Enter/other key that completes a word-boundary trigger (or a
+      trigger that is a prefix of a longer one) has already reached the app
+      when the engine erases only the trigger. Typing `:sig` + space leaves
+      `:regards` with the space gone; Enter may submit a form first. Needs a
+      decision: erase and re-type the terminator, or defer the match until
+      the key is released. input-method-v2 is unaffected.
+
+### v1.2.1
+
+- [ ] **#25 Command expansions block the input thread** (up to the command
+      timeout). Run them asynchronously with a bounded queue.
+- [ ] **#27 Command timeouts kill only the direct child.** Spawn commands in
+      their own process group and kill the group on timeout.
+
+---
+
 ## Next (unscheduled)
 
 ### Window Tracking for wlroots Compositors
@@ -51,9 +90,9 @@ original v1.1 slot since v1.1.x shipped other work instead
 
 ### Polish & Quality Improvements
 
-- [ ] Move long-running KWin window-tracker operations (used by "Use
-      current app" in the snippet editor) to a background thread -- it
-      currently blocks the GUI thread for up to 5 seconds
+- [x] ~~Move long-running KWin window-tracker operations (used by "Use
+      current app" in the snippet editor) to a background thread~~ -- done:
+      detection runs on a worker thread and the GUI polls for the result
 - [x] ~~Cleanup predictable `/tmp/wayexpand-window-tracker-*.js` files on
       daemon startup~~ -- done: the path now includes a random component
       and is opened with `O_CREAT|O_EXCL`, refusing to write through
