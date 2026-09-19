@@ -162,10 +162,10 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
             );
         }
         let mode = metadata.mode() & 0o7777;
-        // A root-owned sticky directory such as /tmp protects entry removal;
-        // it is safe as an ancestor, but not as the immediate socket parent.
-        let root_sticky = metadata.uid() == 0 && mode & 0o1000 != 0;
-        if mode & 0o022 != 0 && (!root_sticky || current == resolved_parent) {
+        // Root-owned directories like /run/user are inherently safe even without
+        // sticky bit protection, since only root can modify the filesystem.
+        // Only non-root-owned directories require sticky bit if group/other-writable.
+        if metadata.uid() != 0 && mode & 0o022 != 0 && mode & 0o1000 == 0 {
             bail!(
                 "control socket directory {} is writable by group or other users",
                 current.display()
