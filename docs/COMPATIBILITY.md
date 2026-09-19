@@ -155,8 +155,10 @@ Lists all configured expansions and hotkeys.
       "description": "Personal email",
       "enabled": true,
       "tags": ["contact"],
-      "mode": "word-boundary",
-      "app_filter": null,
+      "match_mode": "word-boundary",
+      "app_filter": [],
+      "command": null,
+      "propagate_case": false,
       "category": "Personal"
     }
   ],
@@ -164,15 +166,13 @@ Lists all configured expansions and hotkeys.
     {
       "chord": "Ctrl+Alt+M",
       "description": "Standup template",
-      "action": {
-        "description": "Insert template",
-        "command": {
-          "program": "/usr/bin/cat",
-          "args": ["/home/user/templates/standup"]
-        }
+      "command": {
+        "program": "/usr/bin/cat",
+        "args": ["/home/user/templates/standup"],
+        "timeout_ms": 5000,
+        "cache_ms": 0
       },
-      "enabled": true,
-      "category": "Work"
+      "enabled": true
     }
   ]
 }
@@ -208,8 +208,10 @@ Searches expansions by trigger, description, and tags.
       "description": "Personal email",
       "enabled": true,
       "tags": ["contact"],
-      "mode": "word-boundary",
-      "app_filter": null,
+      "match_mode": "word-boundary",
+      "app_filter": [],
+      "command": null,
+      "propagate_case": false,
       "category": "Personal"
     }
   ]
@@ -330,16 +332,17 @@ The configuration file format (`~/.config/wayexpand/expansions.toml`) is stable 
 ### Schema Guarantees
 
 **Existing fields** (0.1.0+):
-- `[[expansion]]` section with `trigger`, `replacement`, `description`, `enabled`, `mode`
-- `[[hotkey]]` section with `chord`, `action.description`, `action.command`
+- `[[expansion]]` section with `trigger`, `replacement`, `description`, `enabled`
+- `[[hotkey]]` section with `chord`, `description`, `command`
 - Global `[settings]` section with `max_buffer_chars`
 
 These fields are guaranteed present and backward-compatible. Missing fields use `#[serde(default)]` to provide sensible defaults.
 
 **New fields** (0.2.0+):
 - `ExpansionConfig::category` — optional categorization
-- `ExpansionConfig::app_filter` — optional app-scoped restrictions
+- `ExpansionConfig::app_filter` — optional app-scoped restrictions (Vec<String>)
 - `ExpansionConfig::tags` — optional searchable tags
+- `ExpansionConfig::match_mode` — expansion matching mode ("immediate" or "word-boundary", default "immediate")
 
 **New fields** (1.0.1+):
 - `ExpansionConfig::propagate_case` (bool, default `false`) — when enabled,

@@ -38,19 +38,34 @@ const EXIT_DAEMON: i32 = 4;
 /// parsing free-form text, while avoiding a bespoke error type per site.
 fn exit_code_for(error: &anyhow::Error) -> i32 {
     let message = error.to_string();
+
+    // Check for usage errors (must be exact or prefix match)
     if message.starts_with("usage:") || message.starts_with("unknown command") {
-        EXIT_USAGE
-    } else if message.contains("configuration invalid") {
-        EXIT_CONFIG
-    } else if message.contains("connecting to")
+        return EXIT_USAGE;
+    }
+
+    // Check for configuration errors
+    if message.starts_with("configuration invalid:") || message.contains("invalid TOML") {
+        return EXIT_CONFIG;
+    }
+
+    // Check for daemon control errors by looking at specific substrings that
+    // indicate daemon communication failures. These checks are exact enough to
+    // avoid false positives while remaining stable across minor message rewording.
+    let is_daemon_error = message.starts_with("connecting to")
+        || message.starts_with("could not connect")
         || message.contains("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")
         || message.contains("daemon control response")
         || message.contains("daemon returned a non-UTF-8")
-    {
-        EXIT_DAEMON
-    } else {
-        1
+        || message.contains("cannot connect to")
+        || message.contains("control socket");
+
+    if is_daemon_error {
+        return EXIT_DAEMON;
     }
+
+    // Generic error
+    1
 }
 
 fn main() {
