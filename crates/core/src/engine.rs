@@ -332,14 +332,21 @@ impl ExpansionEngine {
                     if let Some((index, length)) = pending {
                         if let Some(config_index) = self.matcher_indices.get(index).copied() {
                             let trigger = &self.config.expansion[config_index].trigger;
+                            let match_mode = self.config.expansion[config_index].match_mode;
                             if !self.matcher.can_continue(trigger, character) {
-                                let trailing_word_character = self.config.expansion[config_index]
-                                    .match_mode
-                                    == MatchMode::WordBoundary
-                                    && is_word_character(character);
+                                let trailing_word_character =
+                                    match_mode == MatchMode::WordBoundary && is_word_character(character);
                                 if !trailing_word_character {
+                                    // Only pass the terminating character for word-boundary triggers,
+                                    // where it will be re-inserted after the replacement.
+                                    let terminating_char =
+                                        if match_mode == MatchMode::WordBoundary {
+                                            Some(character)
+                                        } else {
+                                            None
+                                        };
                                     if let Some(result) =
-                                        self.take_match(config_index, length, Some(character))
+                                        self.take_match(config_index, length, terminating_char)
                                     {
                                         let bytes = result
                                             .trigger
@@ -421,23 +428,13 @@ impl ExpansionEngine {
                         if cursor_offset.is_none() {
                             self.last_expansion = Some((typed.clone(), insert.chars().count()));
                         }
-                        // Only re-insert the terminating character if it is not a
-                        // word character (i.e., it is a boundary like space or
-                        // punctuation). If it is a word character (like the start
-                        // of another trigger), do not re-insert it -- the normal
-                        // matching logic will handle it.
-                        let reinsert_after = if !is_word_character(character) {
-                            Some(character)
-                        } else {
-                            None
-                        };
                         results.push(ExpansionResult {
                             trigger,
                             typed_trigger: typed.clone(),
                             erase_chars: length,
                             insert,
                             cursor_offset,
-                            reinsert_after,
+                            reinsert_after: Some(character),
                         });
                         // Do not allow a replacement to combine with the
                         // next typed text and accidentally trigger again.
@@ -626,18 +623,27 @@ impl ExpansionEngine {
         injector: &mut I,
         result: &ExpansionResult,
     ) -> Result<(), ExpansionError> {
-        injector.replace(&result.trigger, &result.insert)?;
-        // If a terminating character is present (e.g., a space that ended a
-        // word-boundary trigger in evdev mode), re-insert it after the
-        // replacement. Evdev capture is non-exclusive, so the terminating
-        // character has already reached the app; we now type it again.
-        if let Some(ch) = result.reinsert_after {
-            let _ = injector.insert(&ch.to_string());
+        // Input capture is non-exclusive, so a character that completed a
+        // delayed match has already reached the application. Replace that
+        // character together with the trigger and append it to the replacement
+        // in one backend operation. Use the text actually typed for exact
+        // surrounding-text validation and case-propagated triggers.
+        let mut erase = result.typed_trigger.clone();
+        let mut insert = result.insert.clone();
+        if let Some(character) = result.reinsert_after {
+            erase.push(character);
+            insert.push(character);
         }
+        injector.replace(&erase, &insert)?;
         // Best-effort: a `{{cursor}}` marker's placement failing (or being
         // unsupported by this backend) does not mean the expansion itself
         // failed, since the replacement text above was already inserted.
-        if let Some(offset) = result.cursor_offset.filter(|offset| *offset > 0) {
+        let trailing_offset = usize::from(result.reinsert_after.is_some());
+        if let Some(offset) = result
+            .cursor_offset
+            .map(|offset| offset.saturating_add(trailing_offset))
+            .filter(|offset| *offset > 0)
+        {
             let _ = injector.move_cursor_left(offset);
         }
         Ok(())
@@ -1970,8 +1976,10 @@ replacement = "bad\u0000value""#;
     #[test]
     fn word_boundary_triggers_reinsert_terminating_character() {
         // Evdev capture is non-exclusive: the space that ends a word-boundary
-        // trigger has already reached the app. We must erase only the trigger,
-        // insert the replacement, then re-type the terminating character.
+        // trigger has already reached the app. The engine must report that
+        // the terminating character should be re-inserted after the replacement.
+        // The backend will erase trigger + terminator, insert replacement, then
+        // re-insert the terminator.
         let config = Config::parse(
             "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
         )
@@ -1984,42 +1992,23 @@ replacement = "bad\u0000value""#;
     }
 
     #[test]
-    fn prefix_free_triggers_reinsert_non_word_boundary_characters() {
-        // When a non-word-boundary trigger becomes prefix-free (typing a
-        // non-word character breaks the continuation), we re-insert that
-        // terminating character. Example: `:ab` is in the trie; when we type
-        // `:a`, we have a match (and continue checking for `:ab`). When we
-        // then type `.` (a non-word character), `:a.` is not in the trie, so
-        // the match completes and we need to re-insert the `.`.
+    fn non_word_boundary_triggers_do_not_reinsert() {
+        // Regular (non-word-boundary) triggers that lose their continuation
+        // should not set reinsert_after. The character that breaks continuation
+        // (e.g., `:` between `:a` and `:ab`) is handled normally and may start
+        // a new match. Only word-boundary mode needs re-insertion because it's
+        // waiting for a non-word character specifically to complete.
         let config = Config::parse(
-            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"",
+            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"\n[[expansion]]\ntrigger = \":b\"\nreplacement = \"beta\"",
         )
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
-        let results = engine.process(InputEvent::Text(":a.".into()));
-        // The `.` breaks the continuation, so we get a match for `:a` with
-        // the `.` re-inserted (not a match for `:ab`).
-        assert_eq!(results.len(), 1);
+        // Typing `:a:b` should produce matches for `:a` (broken by `:`) and `:b`.
+        let results = engine.process(InputEvent::Text(":a:b".into()));
+        assert_eq!(results.len(), 2);
         assert_eq!(results[0].trigger, ":a");
-        assert_eq!(results[0].insert, "alpha");
-        assert_eq!(results[0].reinsert_after, Some('.'));
-    }
-
-    #[test]
-    fn prefix_free_triggers_do_not_reinsert_word_characters() {
-        // When typing a word character breaks a trigger's continuation,
-        // do not re-insert it -- the normal matching logic will handle it
-        // as a potential new trigger start.
-        let config = Config::parse(
-            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"",
-        )
-        .unwrap();
-        let mut engine = ExpansionEngine::new(config).unwrap();
-        // Typing `:a` followed by `b` should produce a match for `:ab`
-        // (no re-insertion of `b`), not a match for `:a` with `b` re-inserted.
-        let results = engine.process(InputEvent::Text(":ab".into()));
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].trigger, ":ab");
         assert_eq!(results[0].reinsert_after, None);
+        assert_eq!(results[1].trigger, ":b");
+        assert_eq!(results[1].reinsert_after, None);
     }
 }
