@@ -1,4 +1,3 @@
-mod auto_select;
 mod control;
 mod policy;
 mod reload;
@@ -23,6 +22,7 @@ use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_libei::LibeiInjector;
+use wayexpand_backend_selection::auto_select;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_backend_wlroots_toplevel::WlrootsToplevelTracker;
 use wayexpand_core::{
@@ -87,9 +87,8 @@ fn main() -> Result<()> {
 
     // Resolve automatic and partial explicit selections once. From this point
     // onward the daemon only consumes the canonical, compatible pair.
-    let selection =
-        auto_select::auto_select(explicit_source.as_deref(), explicit_backend.as_deref())
-            .map_err(|error| anyhow::anyhow!("backend selection failed: {error}"))?;
+    let selection = auto_select(explicit_source.as_deref(), explicit_backend.as_deref())
+        .map_err(|error| anyhow::anyhow!("backend selection failed: {error}"))?;
     info!("{}", selection.reason);
     let resolved_pair = selection.pair;
     let source_name = resolved_pair.source();

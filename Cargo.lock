@@ -3883,6 +3883,7 @@ dependencies = [
  "toml",
  "wayexpand-backend-input-method",
  "wayexpand-backend-libei",
+ "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
  "wayexpand-core",
 ]
@@ -3952,6 +3953,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayexpand-backend-selection"
+version = "1.1.2"
+dependencies = [
+ "tracing",
+ "wayexpand-backend-input-method",
+ "wayexpand-backend-wlroots",
+]
+
+[[package]]
 name = "wayexpand-backend-wlroots"
 version = "1.1.2"
 dependencies = [
@@ -4004,6 +4014,7 @@ dependencies = [
  "wayexpand-backend-input-method",
  "wayexpand-backend-kwin-window",
  "wayexpand-backend-libei",
+ "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
  "wayexpand-backend-wlroots-toplevel",
  "wayexpand-core",

@@ -14,6 +14,7 @@ const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
+use wayexpand_backend_selection::explain_auto_selection;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind,
@@ -807,91 +808,9 @@ fn print_backend_diagnostics() -> bool {
 }
 
 fn print_backend_selection_explain() {
-    let backends = discover_backends();
-    let evdev_ready = backends.iter().any(|status| {
-        status.kind == BackendKind::Evdev && status.state == BackendState::Implemented
-    });
-    let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    let desktop_lower = desktop.to_lowercase();
-    let conservative_compositor = desktop_lower.contains("kde")
-        || desktop_lower.contains("sway")
-        || desktop_lower.contains("hypr")
-        || desktop_lower.contains("river");
-    let libei_plausible = env::var_os("LIBEI_SOCKET").is_some()
-        || desktop_lower.contains("kde")
-        || desktop_lower.contains("gnome");
-    let input_method_ready =
-        env::var_os("WAYLAND_DISPLAY").is_some() && InputMethodSource::probe().is_ok();
-
-    let (capture, injection, reason) = if conservative_compositor && evdev_ready {
-        (
-            "evdev",
-            if libei_plausible {
-                "libei"
-            } else {
-                "unverified"
-            },
-            "input-method-v2 is not certified for this compositor; readable evdev is available",
-        )
-    } else if input_method_ready {
-        (
-            "input-method-v2",
-            "input-method-v2",
-            "input-method-v2 manager and seat probe succeeded",
-        )
-    } else if evdev_ready {
-        (
-            "evdev",
-            if libei_plausible {
-                "libei"
-            } else {
-                "unverified"
-            },
-            "input-method-v2 probe failed; readable evdev is available",
-        )
-    } else {
-        ("none", "none", "no supported capture source was detected")
-    };
-    let tracking = if desktop_lower.contains("kde") {
-        "kwin (best-effort)"
-    } else if conservative_compositor {
-        "wlroots scaffold (not active tracking)"
-    } else {
-        "none"
-    };
-
-    println!("Selected:");
-    println!("  capture: {capture}");
-    println!("  injection: {injection}");
-    println!("  window tracking: {tracking}");
-    println!();
-    println!("Reason:");
-    println!("  {reason}");
-    println!(
-        "  desktop: {}",
-        if desktop.is_empty() {
-            "unknown"
-        } else {
-            &desktop
-        }
-    );
-    println!(
-        "  /dev/input readable: {}",
-        if evdev_ready { "yes" } else { "no" }
-    );
-    println!(
-        "  RemoteDesktop portal plausible: {}",
-        if libei_plausible { "yes" } else { "no" }
-    );
-    println!();
-    println!("Security tradeoffs:");
-    if capture == "evdev" {
-        println!("  password-field detection unavailable with evdev");
-        println!("  global keyboard visibility requires explicit input permissions");
-    } else if capture == "input-method-v2" {
-        println!("  exclusive capture may drop unsupported navigation/function keys");
-    } else {
-        println!("  no automatic input path selected; use explicit backend flags after doctor");
+    match explain_auto_selection() {
+        Ok(explanation) => print!("{explanation}"),
+        Err(error) => eprintln!("backend selection failed: {error}"),
     }
 }
 

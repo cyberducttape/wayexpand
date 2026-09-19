@@ -26,3 +26,4 @@ wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-evdev = { path = "../backend-evdev" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
+wayexpand-backend-selection = { path = "../backend-selection" }
