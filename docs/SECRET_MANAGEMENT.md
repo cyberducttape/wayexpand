@@ -71,7 +71,7 @@ args_prefix = ["kv", "get"]
 secrets = ["VAULT_TOKEN", "VAULT_ADDR"]  # Injected automatically
 ```
 
-See [P2_action_broker_architecture](../memory/P2_action_broker_architecture.md).
+Future versions (v1.3+) will support per-action permission control via an Action Broker, tracked in [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md).
 
 ## Security Best Practices
 
