@@ -1,4 +1,4 @@
-use crate::{config::MAX_CONFIG_BYTES, Config, ConfigError, ExpansionConfig, MatchMode, Settings};
+use crate::{config::{MAX_CONFIG_BYTES, OrganizationPolicy}, Config, ConfigError, ExpansionConfig, MatchMode, Settings};
 use serde::Deserialize;
 use std::{fs, io::Read, path::Path};
 use thiserror::Error;
@@ -105,6 +105,7 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
         expansion,
         hotkey: Vec::new(),
         settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
     };
     config.validate()?;
     Ok(EspansoImport { config, skipped })

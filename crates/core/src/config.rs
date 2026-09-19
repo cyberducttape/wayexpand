@@ -37,6 +37,8 @@ pub struct Config {
     pub hotkey: Vec<HotkeyConfig>,
     #[serde(default)]
     pub settings: Settings,
+    #[serde(default)]
+    pub organization: OrganizationPolicy,
 }
 
 /// A keyboard chord which invokes a bounded direct program action.
@@ -125,6 +127,102 @@ impl Settings {
     /// Check if settings match defaults (no custom configuration)
     pub fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+}
+
+/// Organization-managed policy for compliance and security.
+///
+/// Root-owned policies enforce constraints on user expansions, preventing
+/// accidental or malicious use in sensitive contexts. Violations are logged
+/// clearly and prevent expansions from executing.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct OrganizationPolicy {
+    /// Enable strict policy enforcement. When true, any policy violation
+    /// is logged and prevents the expansion from executing. When false,
+    /// violations are warnings only.
+    pub safe_mode: bool,
+
+    /// Disable command execution entirely. Overrides individual expansion
+    /// command settings. Useful for locked-down environments.
+    pub disable_commands: bool,
+
+    /// Disable hotkey execution. Hotkeys still parse but refuse to run.
+    pub disable_hotkeys: bool,
+
+    /// Disable title-based app filtering. Expansions with app_filter still
+    /// match, but the filter is ignored (all apps match).
+    pub disable_title_matching: bool,
+
+    /// Maximum replacement size in bytes. Replacements larger than this
+    /// are rejected. Prevents DoS via huge expansions. 0 = unlimited.
+    pub max_replacement_size: usize,
+
+    /// Allowed output backends. If non-empty, only these backends are allowed.
+    /// Examples: "libei", "input-method", "wlroots", "none"
+    pub allowed_backends: Vec<String>,
+
+    /// Allowed curated packs. If non-empty, only these packs are allowed
+    /// in ~/.local/share/wayexpand/packs/. Pack names must match directory names.
+    pub allowed_packs: Vec<String>,
+
+    /// Policy violation audit log. When violations occur, they're logged
+    /// to journald with this prefix for easy filtering.
+    pub audit_prefix: String,
+}
+
+impl Default for OrganizationPolicy {
+    fn default() -> Self {
+        Self {
+            safe_mode: false,
+            disable_commands: false,
+            disable_hotkeys: false,
+            disable_title_matching: false,
+            max_replacement_size: 0,
+            allowed_backends: Vec::new(),
+            allowed_packs: Vec::new(),
+            audit_prefix: "wayexpand-policy".to_string(),
+        }
+    }
+}
+
+impl OrganizationPolicy {
+    /// Check if any policies are active
+    pub fn is_active(&self) -> bool {
+        self.safe_mode
+            || self.disable_commands
+            || self.disable_hotkeys
+            || self.disable_title_matching
+            || self.max_replacement_size > 0
+            || !self.allowed_backends.is_empty()
+            || !self.allowed_packs.is_empty()
+    }
+
+    /// Check if policy allows a backend
+    pub fn backend_allowed(&self, backend: &str) -> bool {
+        if self.allowed_backends.is_empty() {
+            true
+        } else {
+            self.allowed_backends.iter().any(|b| b == backend)
+        }
+    }
+
+    /// Check if policy allows a pack
+    pub fn pack_allowed(&self, pack_name: &str) -> bool {
+        if self.allowed_packs.is_empty() {
+            true
+        } else {
+            self.allowed_packs.iter().any(|p| p == pack_name)
+        }
+    }
+
+    /// Check if replacement size is allowed
+    pub fn replacement_size_allowed(&self, size: usize) -> bool {
+        if self.max_replacement_size == 0 {
+            true
+        } else {
+            size <= self.max_replacement_size
+        }
     }
 }
 
@@ -310,6 +408,8 @@ pub enum ConfigError {
     Serialize(#[from] toml::ser::Error),
     #[error("expansion {index} has an invalid replacement template: {source}")]
     InvalidTemplate { index: usize, source: TemplateError },
+    #[error("organization policy configuration error: {0}")]
+    InvalidPolicyConfig(String),
 }
 
 impl ConfigError {
@@ -393,6 +493,7 @@ impl ConfigError {
             Self::InvalidTemplate { index, source } => {
                 format!("expansion {index} has an invalid replacement template ({source})")
             }
+            Self::InvalidPolicyConfig(msg) => format!("organization policy configuration error: {msg}"),
         }
     }
 }
@@ -812,6 +913,26 @@ impl Config {
                 });
             }
         }
+
+        // Validate organization policies
+        if self.organization.max_replacement_size > 0
+            && self.organization.max_replacement_size < 256
+        {
+            return Err(ConfigError::InvalidPolicyConfig(
+                "max_replacement_size must be 0 (unlimited) or at least 256 bytes".to_string(),
+            ));
+        }
+
+        // Validate that safe_mode doesn't ban all backends
+        if self.organization.safe_mode
+            && !self.organization.allowed_backends.is_empty()
+            && self.organization.allowed_backends.iter().all(|b| b == "none")
+        {
+            return Err(ConfigError::InvalidPolicyConfig(
+                "safe_mode with allowed_backends=['none'] would prevent all expansions".to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -1046,6 +1167,7 @@ mod tests {
             expansion: Vec::new(),
             hotkey: Vec::new(),
             settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
         };
         config.save_atomic(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap().expansion.len(), 0);

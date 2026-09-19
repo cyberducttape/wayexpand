@@ -307,6 +307,7 @@ impl ConfigMerger {
             expansion,
             hotkey,
             settings,
+            organization: crate::OrganizationPolicy::default(),
         };
 
         config.validate().map_err(FleetError::Config)?;

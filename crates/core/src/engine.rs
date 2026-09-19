@@ -26,6 +26,8 @@ pub enum InputEvent {
     Key(KeyChord),
     Backspace,
     Boundary,
+    Delimiter(char),
+    Reset,
     /// Changes capture policy for the focused surface. Sensitive fields must
     /// disable matching and clear any text already buffered. This is a
     /// compositor/backend signal, not a user action (use `PauseChanged` for that).
@@ -540,6 +542,9 @@ impl ExpansionEngine {
                 }
                 results
             }
+            InputEvent::Delimiter(character) => {
+                self.process(InputEvent::Text(character.to_string()))
+            }
             InputEvent::Backspace => {
                 self.input_generation = self.input_generation.wrapping_add(1);
                 self.buffer.pop_back();
@@ -558,6 +563,11 @@ impl ExpansionEngine {
                     });
                 self.clear_buffer();
                 result.into_iter().collect()
+            }
+            InputEvent::Reset => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.clear_buffer();
+                Vec::new()
             }
             InputEvent::FocusChanged { sensitive } => {
                 self.input_generation = self.input_generation.wrapping_add(1);
@@ -1448,6 +1458,7 @@ mod tests {
             }],
             hotkey: Vec::new(),
             settings: crate::Settings::default(),
+            organization: crate::config::OrganizationPolicy::default(),
         };
         assert!(matches!(
             ExpansionEngine::new(config),

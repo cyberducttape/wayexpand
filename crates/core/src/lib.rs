@@ -16,7 +16,7 @@ pub use backend::{
 };
 pub use config::{
     CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
-    Settings,
+    OrganizationPolicy, Settings,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use engine::{
