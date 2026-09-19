@@ -1,73 +1,92 @@
 # WayExpand
 
-> Ein datenschutzfreundlicher, Wayland-nativer Text-Expander für Linux
-
-**WayExpand** verwandelt kurze Tastenkombinationen in lange Text-Ersetzungen. Tippen Sie `;sig` um eine Signatur einzufügen, `;today` um das aktuelle Datum zu erhalten – oder schreiben Sie eigene Snippets in unter 30 Sekunden.
-
 [![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
-[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**Text-Expansion, gebaut für Wayland statt nachträglich daran angepasst.**
+
+Tippen Sie einen kurzen Trigger wie `;;hello` und er wird zu einem
+gespeicherten Snippet — Signaturen, Runbook-Befehle, Ticket-Antworten,
+Boilerplate-Code, Datumsangaben oder alles andere, was Sie regelmäßig neu
+eintippen. Geschrieben in Rust; die Expansion-Engine ist strikt von der
+Eingabe-Erfassung und Text-Injektion getrennt, die als austauschbare,
+explizit ausgewählte Backends pro Wayland-Protokoll implementiert sind
+(`input-method-v2`, `wlroots virtual-keyboard`, `libei`/EIS) — statt einer
+X11-Implementierung mit nachträglich angeflanschter Wayland-Unterstützung.
 
 *[English](README.md) | Deutsch*
 
----
+> **Kompatibilitätsangaben sind präzise, nicht optimistisch formuliert.**
+> Die Kern-Engine, das TOML-Konfigurationsformat und die CLI/JSON-Verträge
+> sind stabil (siehe [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Die
+> Unterstützung der Desktop-Backends hängt vom Compositor ab, und mehrere
+> Erfassungs-/Ausgabe-Pfade sind noch **experimentell** — die
+> [Support-Matrix](docs/SUPPORT_MATRIX.md) benennt genau, was verifiziert
+> wurde und was nur implementiert, aber ungetestet ist. `wayexpand doctor`
+> zeigt, was Ihre eigene Sitzung tatsächlich unterstützt, bevor Sie sich
+> darauf verlassen. KDE Plasma (KWin 6.6+) hat aktuell die vollständigste
+> verifizierte Abdeckung. **GNOME (Mutter) wird derzeit nicht unterstützt**
+> — es existiert keine Implementierung für Fenster-Tracking, und keine ist
+> terminiert.
 
-## Features
+## Warum nicht einfach Espanso oder AutoKey?
 
-- **🔒 Datenschutz-fokussiert** — Keine Telemetrie, keine Cloud-Abhängigkeiten
-- **⚡ Wayland-nativ** — Funktioniert auf Sway, Hyprland, KDE Plasma und GNOME
-- **🛡️ Sicher** — Keine Shell-Interpretation, getestete Berechtigungen, Sockets mit Umask
-- **📝 Einfache Konfiguration** — TOML-basiert, einfach zu lesen und zu schreiben
-- **🎯 Gezielt** — Snippets können auf bestimmte Apps begrenzt werden
-- **⚙️ Dynamisch** — Führe Befehle zur Laufzeit aus und nutze Template-Variablen
-- **🌍 Mehrsprachig** — Englisch und Deutsch (weitere Sprachen willkommen)
+| | **WayExpand** | Espanso | AutoKey |
+|---|---|---|---|
+| Wayland-Eingabepfad | Native Backends pro Protokoll (`input-method-v2`, `wlroots virtual-keyboard`, `libei`/EIS), explizit ausgewählt | XTest über XWayland, oder ein Wayland-Modus mit engerer Compositor-Unterstützung | Nur X11/XTest — kein nativer Wayland-Pfad |
+| Architektur | Matching-Engine und Injektions-Backend sind getrennte Crates hinter einem Trait; eine Backend-Lücke blockiert nie den Matcher | Ein Rust-Binary, Backend-Auswahl ist intern | Python, an GTK gebunden |
+| Konfigurationssicherheit | Parse-then-swap: eine fehlerhafte Konfiguration wird abgelehnt, bevor sie die laufende ersetzt | Reload ersetzt die Konfiguration; Validierung ist impliziter | Reload ersetzt die Konfiguration |
+| Sensible Felder | Matching wird automatisch in Passwortfeldern ausgesetzt, wenn das Backend den Fokus meldet (siehe [SECURITY.md](SECURITY.md)) | Nicht explizit modelliert | Nicht modelliert |
+| GUI | Native egui-App: Suche, Live-Vorschau, Diagnose, Espanso-Import, atomares Speichern, begrenzte Undo-Historie | Keine (YAML-Dateien) | Native GTK-Oberfläche |
+| Diagnose | `wayexpand doctor` meldet den tatsächlichen Zustand jedes Backends (`Implemented`/`RequiresPermission`/`Unavailable`) samt Begründung, plus nicht-mutierende Protokoll-Tests | Eingeschränkt | Eingeschränkt |
+| Telemetrie | Keine — kein Konto, keine Cloud, niemals | Keine | Keine |
 
----
+Diese Tabelle behauptet nicht, dass WayExpand heute in jeder Dimension
+überlegen ist — Espanso hat aktuell insbesondere eine breitere
+Compositor-Abdeckung von Haus aus. Der Unterschied ist architektonisch:
+WayExpand behandelt "welches Wayland-Protokoll unterstützt dieser
+Compositor tatsächlich" als Frage, die die Software Ihnen beantworten kann
+(`wayexpand doctor`), statt etwas, das Sie erst merken, wenn Tastenanschläge
+stillschweigend nicht expandieren.
 
-## Installation
+## Schnellstart
 
-### Ubuntu/Debian (empfohlen)
+**Ubuntu/Debian (PPA):**
 
 ```bash
 sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
+sudo apt update && sudo apt install wayexpand
+wayexpand doctor          # zeigt, was Ihr Compositor tatsächlich unterstützt
+wayexpand-gui             # Snippets grafisch verwalten
 ```
 
-### Arch Linux (AUR)
+**Arch Linux (AUR):**
 
 ```bash
 yay -S wayexpand
 ```
 
-### Aus Quellen bauen
+> Prüfen Sie vor der Nutzung, ob das AUR-Paket aktuell ist — vergleichen
+> Sie `pkgver` im `PKGBUILD` mit dem [letzten
+> Release](https://github.com/itchyitchy123/wayexpand/releases). Für
+> Fedora existiert noch kein Copr-Repository.
+
+**Aus Quellen:**
 
 ```bash
-git clone https://github.com/itchyitchy123/wayexpand.git
+git clone https://github.com/itchyitchy123/wayexpand
 cd wayexpand
-cargo build --release
-./scripts/install-user.sh
-./scripts/install-evdev-permissions.sh
+./scripts/install-user.sh          # baut Release-Binaries, installiert nach ~/.local/bin
+wayexpand doctor
 ```
 
----
+Beide Installer sind standardmäßig nicht-destruktiv (kein Dienst wird
+aktiviert oder gestartet, bis `--enable` übergeben wird) und verweigern die
+Ausführung als root.
 
-## Schnellstart
+## Konfiguration
 
-### 1. Konfiguration öffnen
-
-WayExpand wird konfiguriert über `~/.config/wayexpand/expansions.toml`:
-
-```bash
-wayexpand-gui
-```
-
-Dies öffnet den grafischen Editor. Sie können die Datei auch direkt bearbeiten:
-
-```bash
-$EDITOR ~/.config/wayexpand/expansions.toml
-```
-
-### 2. Ein einfaches Snippet hinzufügen
+### Einfaches Snippet
 
 ```toml
 [[expansion]]
@@ -76,90 +95,45 @@ replacement = "Hello, world!"
 description = "A friendly greeting"
 ```
 
-### 3. Daemon starten
-
-Die Auswahl der Backend hängt von Ihrem Kompositor ab:
-
-**KDE Plasma 6.6+**
-```bash
-systemctl --user enable --now wayexpand-evdev.service
-```
-
-**Sway/Hyprland (input-method-v2)**
-```bash
-systemctl --user enable --now wayexpand-input-method.service
-```
-
-**GNOME (input-method-v2)**
-```bash
-systemctl --user enable --now wayexpand-input-method.service
-```
-
-### 4. Testen
-
-Öffnen Sie einen Texteditor und tippen Sie `;hello`. Es sollte zu "Hello, world!" expandiert werden.
-
----
-
-## Konfiguration
-
-### Basis-Snippet
-
-```toml
-[[expansion]]
-trigger = ";email"
-replacement = "my.email@example.com"
-description = "Meine E-Mail-Adresse"
-tags = ["kontakt", "e-mail"]
-category = "Kontakt"
-enabled = true
-match_mode = "Immediate"  # oder "WordBoundary"
-```
+Bearbeiten Sie `~/.config/wayexpand/expansions.toml` direkt oder über
+`wayexpand-gui`.
 
 ### Template-Variablen
-
-Verwenden Sie eingebaute Variablen in Ersetzungen:
 
 ```toml
 [[expansion]]
 trigger = ";sig"
 replacement = """Beste Grüße,
 {{username}}
-–
-{{date}} at {{time}}"""
+—
+{{date}} um {{time}}"""
 ```
 
-Verfügbare Variablen:
-- `{{date}}` — UTC-Datum (YYYY-MM-DD)
-- `{{time}}` — UTC-Zeit (HH:MM:SS)
-- `{{datetime}}` — Beide kombiniert
-- `{{username}}` — Aktueller Benutzer
-- `{{hostname}}` — Lokaler Hostname
-- `{{unix_timestamp}}` — Unix-Zeitstempel
-- `{{newline}}` — Zeilenumbruch
-- `{{tab}}` — Tabulatorzeichen
+Verfügbare Variablen: `{{date}}`, `{{time}}`, `{{datetime}}`,
+`{{date+3d}}` (relative Offsets: Tage/Wochen/Stunden/Minuten),
+`{{username}}`, `{{hostname}}`, `{{unix_timestamp}}`, `{{newline}}`,
+`{{tab}}`, `{{cursor}}` (Cursor-Platzierung nach der Expansion).
 
-### Bedingte Expansion (App-Filter)
-
-Aktivieren Sie Snippets nur in bestimmten Anwendungen:
+### App-Filter
 
 ```toml
 [[expansion]]
 trigger = ";bug"
 replacement = "BUG: [describe the issue]"
-app_filter = ["vim", "nvim", "code"]  # Nur in diesen Apps
+app_filter = ["vim", "nvim", "code"]
 ```
 
-Verfügbar auf KDE Plasma 6.6+. Auf anderen Compositoren deaktiviert.
+Ein Snippet mit `app_filter` **matcht nie**, wenn Fenster-Tracking auf dem
+laufenden Compositor nicht verfügbar ist — es matcht nicht etwa überall,
+sondern schlägt gezielt fehl ("fail closed"). Aktuell nur auf KDE Plasma
+(KWin) implementiert.
 
 ### Dynamische Befehle
-
-Führe beliebige Programme aus statt Texte zu ersetzen:
 
 ```toml
 [[expansion]]
 trigger = ";sys"
-replacement = "[uname output]"  # Fallback-Text
+replacement = "[uname output]"
 [expansion.command]
 program = "uname"
 args = ["-s", "-r", "-m"]
@@ -167,202 +141,119 @@ timeout_ms = 500
 cache_ms = 0
 ```
 
-- **timeout_ms** — Max. Zeit für Programmausführung
-- **cache_ms** — Ergebnis zwischenspeichern (0 = kein Caching)
+Das konfigurierte Programm wird direkt ausgeführt (keine Shell-Syntax).
+`timeout_ms` begrenzt die Laufzeit, `cache_ms` cached das Ergebnis (`0` =
+kein Caching).
 
----
+## Daemon und Backends
 
-## Daemons und Backends
-
-WayExpand unterstützt mehrere Text-Injektions-Methoden, je nach Kompositor:
-
-| Kompositor | Backend | Service | Status |
+| Situation | Backend | Dienst | Status |
 |---|---|---|---|
-| **KDE Plasma 6.6+** | evdev + libei | `wayexpand-evdev.service` | ✅ Unterstützt |
-| **KDE Plasma 6.7+** | evdev + input-method-v2 | `wayexpand-input-method.service` | ✅ Empfohlen |
-| **GNOME (Mutter)** | input-method-v2 | `wayexpand-input-method.service` | ✅ Empfohlen |
-| **Sway/Hyprland** | input-method-v2 | `wayexpand-input-method.service` | ✅ Empfohlen |
-| **Andere (X11)** | Nicht unterstützt | — | ❌ |
+| Compositor bietet `input-method-v2`/virtual-keyboard | `--source=input-method` | `wayexpand-input-method.service` | Experimentell (siehe [Support-Matrix](docs/SUPPORT_MATRIX.md)) |
+| Compositor bietet keins davon (z. B. KWin/KDE Plasma bis 6.6) | `--source=evdev --backend=libei` | `wayexpand-evdev.service` | Experimentell, benötigt `input`-Gruppenmitgliedschaft, **keine Sensible-Feld-Erkennung** |
+| Fenster-Tracking (`app_filter`) | KWin-Scripting-Bridge | — | Nur KDE Plasma (KWin 6.6+) verifiziert |
 
-### Daemon Status überprüfen
+`--source=evdev` funktioniert compositor-unabhängig, liest aber
+Tastatur-Events direkt vom Kernel und erkennt daher **keine** Passwortfelder
+— lesen Sie [SECURITY.md](SECURITY.md), bevor Sie es aktivieren. Die
+nötige Berechtigung wird nie automatisch von den Installern vergeben:
+
+```bash
+sudo ./scripts/install-evdev-permissions.sh --dry-run
+sudo ./scripts/install-evdev-permissions.sh
+```
 
 ```bash
 systemctl --user status wayexpand-evdev.service
-# oder
 wayexpand status
 ```
 
-### Problembehebung
+Der `wayexpand-evdev.service`-Dienst startet nach einem Fehler bewusst
+**nicht** automatisch neu: das `libei`-Backend verbindet sich über das
+RemoteDesktop-Portal ohne dauerhafte Zustimmung, jeder Verbindungsversuch
+zeigt also einen neuen Berechtigungsdialog. Nach einem Compositor-Neustart
+oder Portal-Problem: `systemctl --user restart wayexpand-evdev.service`.
 
-Siehe [docs/wiki/Troubleshooting.md](docs/wiki/Troubleshooting.md) für detaillierte Lösungen.
-
----
+Details zur Problembehebung: [docs/wiki/Troubleshooting.md](docs/wiki/Troubleshooting.md).
 
 ## Sicherheit
 
-WayExpand wurde nach einem Bedrohungsmodell überprüft. Siehe [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
+Siehe [SECURITY.md](SECURITY.md) für das vollständige Bedrohungsmodell.
+Kurz zusammengefasst:
 
-**Sicherheits-Highlights:**
-- ✅ Keine Shell-Interpretation (Befehle sind keine Shell-Syntax)
-- ✅ Konfigurationsdatei-Berechtigungen werden erzwungen (Modus 0600)
-- ✅ Control-Sockets mit Umask 0o077
-- ✅ Keine D-Bus-Namenskollisionen (eindeutige Service-Namen)
-
----
+- Keine Shell-Interpretation — konfigurierte Befehle sind ein Programm plus
+  Argumentliste, keine Shell-Syntax
+- Konfigurationsdatei-Berechtigungen werden erzwungen (Modus 0600) und vor
+  jedem Laden/Speichern geprüft
+- Control-Socket ist auf ein privates, eigentümer-verifiziertes Verzeichnis
+  beschränkt
+- Matching wird automatisch in Passwortfeldern ausgesetzt — außer bei
+  `--source=evdev`, das dafür keine Signal-Quelle hat
 
 ## Stabilität
 
-WayExpand 1.0.0 bietet Stabilitätsgarantien für:
+Die Kern-Engine, das TOML-Schema und ausgewählte CLI/JSON-Ausgaben
+(`list --json`, `preview --json`, `status --json`, `doctor --json`) sind
+stabil dokumentierte Verträge. Siehe
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) für die exakte Feldliste
+jedes Vertrags — das ist genauer als eine pauschale
+"stabil"-Behauptung und wird bei jeder Änderung mitgepflegt.
 
-- ✅ **CLI-Ausstiegscodes** — Definiert und dokumentiert
-- ✅ **JSON-Ausgabeformen** — `wayexpand test`, `doctor`, etc.
-- ✅ **TOML-Konfigurationsschema** — Rückwärts- und vorwärtskompatibel
-- ✅ **Kommandobefehl-Ausgaben** — Stabil in Minor-Versionen
-
-Siehe [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) für vollständige Details.
-
----
-
-## Roadmap 1.1
-
-- [ ] **wlroots Window Tracker** — Für Sway/Hyprland Window-Tracking (15-20 Stunden)
-- [ ] **GUI Performance** — Async-Loading für "Use current app"-Button (1-2 Stunden)
-- [ ] **Zusätzliche Backends** — X11 Input-Extension, weitere Wayland-Protokolle
-
-Siehe [docs/WLROOTS_WINDOW_TRACKER_PLAN.md](docs/WLROOTS_WINDOW_TRACKER_PLAN.md) für technische Details.
-
----
-
-## GUI-Modus
-
-Öffnen Sie den graphischen Editor:
+## GUI
 
 ```bash
 wayexpand-gui
 ```
 
-**Funktionen:**
-- 🖱️ Visuelle Snippet-Verwaltung
-- 📋 Vorschau mit Live-Expansion
-- 🎯 "Use current app"-Button zur App-Erkennung
-- 💾 Atomare Speicherung
-- ↩️ Rückgängig (32-fach)
-- 📥 Espanso-Import
-- 🔧 Diagnose-Panel
-
----
+Suche, Kategorie-Filter, Live-Vorschau (die niemals automatisch ein
+befehlsgestütztes Snippet ausführt — dafür gibt es einen expliziten
+"Run once"-Button), Metadaten-Bearbeitung, Espanso-Import mit Vorschau,
+Diagnose-Panel, atomares Speichern, begrenzte Undo-Historie (32 Schritte),
+Daemon-Pause/Fortsetzen. Acht Farbschemata inklusive Retro-Terminal-Themes
+(VT220-Grün, IBM-3270-Blau, Commodore 64) — siehe
+[docs/COLOR_PACKS.md](docs/COLOR_PACKS.md). Schriftskalierung (0,8×–2,0×)
+und WCAG-2.1-AA-Kontrast für Barrierefreiheit — siehe
+[docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md).
 
 ## CLI-Befehle
 
 ```bash
-# Konfiguration validieren
 wayexpand validate ~/.config/wayexpand/expansions.toml
-
-# Expansion testen
-wayexpand test ";hello"
-
-# Hotkey-Bindung testen
-wayexpand test-hotkey Ctrl+Alt+E
-
-# Vorschau
-wayexpand preview ";hello" ";;hallo"
-
-# Alle Snippets auflisten
-wayexpand list
-
-# Schnellsuche
-wayexpand search "email"
-
-# Diagnose
-wayexpand doctor
-
-# Daemon-Status
-wayexpand status
+wayexpand test ";hello"                    # simuliert Matching, druckt das Ergebnis
+wayexpand test-hotkey Ctrl+Alt+E           # testet eine Hotkey-Bindung
+wayexpand preview ";hello"                 # rendert das Template für einen Trigger
+wayexpand list                             # alle Snippets auflisten
+wayexpand search "email"                   # Snippets durchsuchen
+wayexpand doctor                           # Backend-/Sitzungsbericht
+wayexpand status                           # Daemon-Status
 ```
 
----
-
-## Daemon-Kontrolle
-
-```bash
-# Daemon pausieren
-systemctl --user stop wayexpand-evdev.service
-
-# Daemon fortsetzen
-systemctl --user start wayexpand-evdev.service
-
-# Neustart
-systemctl --user restart wayexpand-evdev.service
-
-# Aktivieren bei Login
-systemctl --user enable wayexpand-evdev.service
-```
-
----
+`test`/`preview` injizieren niemals Text in eine andere Anwendung. Für ein
+einfaches (Template-)Snippet ist `test` ein reiner, folgenloser Trockenlauf.
+Für ein **befehlsgestütztes** Snippet führt `test` das konfigurierte
+Programm trotzdem real aus, um dessen Ausgabe zu erzeugen — es gibt keine
+Möglichkeit, die Ausgabe eines Befehls zu sehen, ohne ihn auszuführen.
+Prüfen Sie `program`/`args`, bevor Sie `test` gegen eine Konfiguration
+ausführen, die Sie nicht selbst geschrieben haben.
 
 ## Entwicklung
 
-### Abhängigkeiten
-
-- **Rust 1.70+** — `rustup update`
-- **Wayland-Entwicklungsbibliotheken**
-
-Ubuntu/Debian:
-```bash
-sudo apt install libwayland-dev libxkbcommon-dev
-```
-
-Fedora:
-```bash
-sudo dnf install wayland-devel libxkbcommon-devel
-```
-
-### Bauen
+- **Rust 1.93+** (`rustup update`)
+- Wayland-Entwicklungsbibliotheken (Ubuntu/Debian: `libwayland-dev
+  libxkbcommon-dev`; Fedora: `wayland-devel libxkbcommon-devel`)
 
 ```bash
+git clone https://github.com/itchyitchy123/wayexpand
+cd wayexpand
 cargo build --release
+cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
 ```
 
-### Tests
-
-```bash
-cargo test
-```
-
-### Formatierung
-
-```bash
-cargo fmt
-```
-
----
-
-## Beitrag leisten
-
-Beiträge sind willkommen! Bitte:
-
-1. Forken Sie das Repository
-2. Erstellen Sie einen Feature-Branch (`git checkout -b feature/my-feature`)
-3. Committen Sie Ihre Änderungen (`git commit -am 'Add feature'`)
-4. Pushen Sie zum Branch (`git push origin feature/my-feature`)
-5. Öffnen Sie einen Pull Request
-
-Siehe [CONTRIBUTING.md](CONTRIBUTING.md) für detaillierte Richtlinien.
-
----
+Details zu Projektstruktur und PR-Ablauf: [CONTRIBUTING.md](CONTRIBUTING.md)
+(Englisch).
 
 ## Lizenz
 
-MIT License — Siehe [LICENSE](LICENSE) für Details.
-
----
-
-## Fragen?
-
-- 📖 Dokumentation: [docs/](docs/)
-- 🐛 Probleme: [GitHub Issues](https://github.com/itchyitchy123/wayexpand/issues)
-- 💬 Diskussionen: [GitHub Discussions](https://github.com/itchyitchy123/wayexpand/discussions)
-
----
-
-**Gebaut mit ❤️ für Wayland-Nutzer überall.**
+[MIT](LICENSE)

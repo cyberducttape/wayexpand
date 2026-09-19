@@ -746,6 +746,13 @@ impl Strings {
         }
     }
 
+    pub fn unsaved_closing(&self) -> &'static str {
+        match self.lang {
+            Language::English => "closing WayExpand",
+            Language::German => "WayExpand schließen",
+        }
+    }
+
     pub fn save_before(&self, action: &str) -> String {
         match self.lang {
             Language::English => format!("Save changes before {}?", action),

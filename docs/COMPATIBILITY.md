@@ -113,7 +113,8 @@ Shows what an expansion would produce without actually expanding.
 {
   "matched": true,
   "trigger": ";email",
-  "replacement": "user@example.com"
+  "replacement": "user@example.com",
+  "cursor_offset": null
 }
 ```
 
@@ -128,6 +129,10 @@ Shows what an expansion would produce without actually expanding.
 - `matched` (bool): Always present
 - `trigger` (string): Present only if `matched: true`
 - `replacement` (string): Present only if `matched: true`
+- `cursor_offset` (int or null): Present only if `matched: true`. Characters
+  from the end of `replacement` where the cursor should land, for a
+  template containing `{{cursor}}`; `null` if the template has no cursor
+  marker.
 
 **Stability:** 🔒 **Stable** — presence of optional fields conditional on `matched`
 

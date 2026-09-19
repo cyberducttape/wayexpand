@@ -15,6 +15,7 @@ use std::{
     io::Write,
     process,
     sync::{mpsc, Mutex},
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -25,6 +26,11 @@ const BACKEND_NAME: &str = "kwin-window";
 const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
+/// Upper bound on how long `probe()` waits for the session bus / KWin to
+/// answer before giving up. A local D-Bus round trip normally completes in
+/// well under this; this exists specifically for the case where it does
+/// not (see `probe()`'s doc comment).
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -85,7 +91,36 @@ impl KwinWindowTracker {
     /// trying: confirms `org.kde.KWin` answers on the session bus and
     /// advertises the scripting interface, without loading or running
     /// anything.
+    ///
+    /// Called synchronously from the daemon's `main()` before its event
+    /// loop starts (see `spawn_window_tracker`), so this must never be
+    /// allowed to block indefinitely: `zbus::blocking::connection::Connection::session()`
+    /// has no timeout of its own, and a session bus or KWin left in a bad
+    /// state (observed in practice after a KWin script/D-Bus name from a
+    /// prior, forcibly-killed daemon instance was not cleaned up) can hang
+    /// it forever, which previously meant the *entire daemon* never
+    /// reached its main loop -- no expansions worked, and no log line
+    /// even indicated why, since the hang happened before any logging
+    /// past this call. Bounded by running the real check on its own
+    /// thread and abandoning it (not joining) if it doesn't answer in
+    /// time, the same pattern already used for the output injector's
+    /// drop on shutdown.
     pub fn probe() -> Result<(), KwinWindowError> {
+        let (sender, receiver) = mpsc::channel();
+        // Intentionally not joined: if probe_blocking() is itself stuck in
+        // a hung D-Bus call, this thread may never finish. Leaking it here
+        // is preferable to letting that hang propagate to the caller --
+        // the OS reclaims it when the process exits either way.
+        thread::spawn(move || {
+            let _ = sender.send(Self::probe_blocking());
+        });
+        match receiver.recv_timeout(PROBE_TIMEOUT) {
+            Ok(result) => result,
+            Err(_) => Err(KwinWindowError::NotAvailable),
+        }
+    }
+
+    fn probe_blocking() -> Result<(), KwinWindowError> {
         let connection = Connection::session()?;
         let reply = connection
             .call_method(

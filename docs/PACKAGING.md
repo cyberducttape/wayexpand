@@ -101,7 +101,7 @@ git push
 debuild -S -sa
 
 # Upload to PPA
-dput ppa:username/wayexpand ../wayexpand_1.0.0-1_source.changes
+dput ppa:cyberducttape/ppa ../wayexpand_1.1.1-1_source.changes
 ```
 
 ### Fedora/Copr
@@ -132,7 +132,7 @@ wayexpand-gui
 # In a container
 docker run -it debian:bookworm bash
 # Add PPA and install
-add-apt-repository ppa:itchyitchy123/wayexpand
+add-apt-repository ppa:cyberducttape/ppa
 apt update && apt install wayexpand
 wayexpand-gui
 ```

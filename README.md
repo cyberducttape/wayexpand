@@ -3,278 +3,282 @@
 [![CI](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/itchyitchy123/wayexpand/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org/)
 
 **Text expansion built for Wayland, rather than adapted to it.**
 
-> The core engine, configuration format, and CLI/JSON contracts are stable
-> (see [COMPATIBILITY.md](docs/COMPATIBILITY.md)). Desktop backend support
-> varies by compositor and several capture/output backends are still
-> **experimental** -- run `wayexpand doctor` on your own session before
-> relying on it, and check the [support matrix](docs/SUPPORT_MATRIX.md) for
-> what's actually been verified versus implemented-but-untested. KDE Plasma
-> (KWin 6.6+) has the most complete verified coverage today. [Release
-> notes](https://github.com/itchyitchy123/wayexpand/releases)
+Type a short trigger like `;;hello` and it becomes a saved snippet —
+signatures, runbook commands, ticket responses, boilerplate code, dates, or
+anything else you retype every day. Written in Rust, with the expansion
+engine kept entirely separate from input capture and text injection, which
+are pluggable, explicitly-selected backends per Wayland protocol
+(`input-method-v2`, `wlroots virtual-keyboard`, `libei`/EIS) rather than one
+X11-shaped implementation with Wayland support bolted on.
 
-WayExpand is a privacy-first text expander for Linux Wayland desktops. Type a
-short trigger like `;;hello` and it replaces it with a saved snippet —
-signatures, runbook commands, ticket responses, code, dates, or anything else
-you retype often.
-
-Written in Rust, with native Wayland input and output backends, GUI and CLI
-snippet management, Espanso import, parse-before-swap configuration reloads,
-and local-only operation that never logs your typed text.
-
-Privacy-first • Rust • Wayland-native • GUI + CLI • Espanso import
+> **Compatibility is stated precisely, not optimistically.** The core
+> engine, TOML config format, and CLI/JSON contracts are stable (see
+> [COMPATIBILITY.md](docs/COMPATIBILITY.md)). Desktop backend support is
+> compositor-dependent and several capture/output paths are still
+> **experimental** — the [support matrix](docs/SUPPORT_MATRIX.md) states
+> exactly what's been verified versus implemented-but-untested, and
+> `wayexpand doctor` tells you what your own session can actually use
+> before you rely on it. KDE Plasma (KWin 6.6+) has the deepest verified
+> coverage today.
 
 ![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
 
-## Why WayExpand?
+## Why not just use Espanso or AutoKey?
 
-- **Wayland-native architecture.** The expansion engine is
-  platform-independent; input capture and text insertion are separate,
-  explicitly selected backends (`input-method-v2`, wlroots virtual-keyboard,
-  libei/EIS, and an evdev capture fallback) rather than an X11 design with
-  Wayland bolted on.
-- **Local and private by default.** No account, no cloud, no telemetry. The
-  daemon never logs typed text or snippet contents, matching is suspended in
-  password fields on backends that report them, and control surfaces are
-  permission-checked.
-- **Explicit over magical.** Configuration is validated before it replaces
-  live state, elevated permissions are separate opt-in steps you run
-  yourself, and `wayexpand doctor` explains exactly what your compositor does
-  and does not support.
-- **Both audiences.** Manage snippets in a native GUI without touching TOML,
-  or drive the whole thing from the CLI and keep your configuration in Git.
+|                          | **WayExpand**                                                        | Espanso                                        | AutoKey                             |
+| ------------------------ | --------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ |
+| Wayland input path       | Native per-protocol backends (`input-method-v2`, wlroots virtual-keyboard, libei/EIS), selected explicitly | XTest via XWayland, or a Wayland mode with narrower compositor support | X11/XTest only — no native Wayland path |
+| Architecture             | Matching engine and injection backend are separate crates behind a trait; a backend gap never blocks the matcher | Single Rust binary, backend selection is internal | Python, GTK-bound |
+| Config safety            | Parse-then-swap: a malformed config is rejected before it ever replaces the live one | Reload replaces config; validation is more implicit | Reload replaces config |
+| Sensitive-field handling | Matching suspends automatically in password fields on backends that report focus (see [SECURITY.md](SECURITY.md)) | Not modeled explicitly | Not modeled |
+| GUI                      | Native egui app: search, live preview, diagnostics, Espanso import, atomic saves, bounded undo | None (YAML files) | Native GTK editor |
+| Diagnostics              | `wayexpand doctor` reports per-backend state (`Implemented` / `RequiresPermission` / `Unavailable`) with the *reason*, plus non-mutating protocol probes | Limited | Limited |
+| Telemetry                | None — no account, no cloud, no phone-home, ever | None | None |
 
-Compositor coverage is still uneven, and that is a property of Wayland rather
-than a shipping omission: see the [support matrix](docs/SUPPORT_MATRIX.md) for
-what is tested versus experimental, and run `wayexpand doctor` to see which
-backends your own session can actually use.
+This table is not a claim that WayExpand is strictly better in every
+dimension today — Espanso in particular has broader out-of-the-box
+compositor coverage right now. The distinction is architectural: WayExpand
+treats "which Wayland protocol does this compositor actually implement" as
+a first-class question the software can answer for you (`wayexpand doctor`),
+rather than something you find out by watching keystrokes silently fail to
+expand.
 
-## Documentation
+## Architecture
 
-The [project wiki](docs/wiki/README.md) includes a guided installation,
-configuration reference, GUI walkthrough with screenshots, operations runbook,
-security model, troubleshooting playbook, and contributor release checklist.
-
-GUI customization (languages, color packs including retro terminal themes) is
-covered in [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md); see also
-[docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md) and
-[docs/COLOR_PACKS.md](docs/COLOR_PACKS.md).
-
-**For system administrators**: See [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md)
-for production-ready snippets covering SSL certificates, logrotate, systemd
-services, firewall rules, Docker, and deployment automation.
-
-Non-English documentation: [Deutsch](README.de.md).
-
-## Current milestone
-
-This repository contains a hardened core plus opt-in Wayland source and output
-paths:
-
-- Rust workspace with a reusable core engine
-- TOML configuration
-- Unicode-safe suffix matching with a trie
-- malformed configuration fails before replacing live state
-- CLI test command
-- daemon stdin harness for exercising matching without a compositor
-- backend capability reporting via `wayexpand doctor`
-- parse-then-swap configuration reloads while the daemon is running
-- sensitive-focus events disable matching and clear buffered input
-- isolated wlroots virtual-keyboard output backend
-- isolated libei/EIS output backend using UTF-8 text insertion, with a
-  layout-dependent keysym-synthesis fallback when the EIS server does not
-  offer `ei_text`
-- isolated input-method-v2 source with timeout-aware daemon integration
-- protected Unix control socket with status/reload/stop commands
-- longest-match trigger families (for example `:a` and `:address`)
-- optional Unicode-aware `word-boundary` matching for triggers that must not
-  expand inside larger words
-- safe built-in replacement templates and CLI preview/list/validation commands
-- bounded direct-program expansions for trusted local system information
-- searchable snippet descriptions and tags
-- UI-editable immediate and Unicode-aware word-boundary modes
-- runtime pause/resume without stopping the daemon
-- interactive terminal settings app with live preview and safe editing
-- native Wayland-capable graphical editor with diagnostics, settings, import,
-  template helpers, duplication, and bounded undo history
-- shared normalized key-chord model ready for cross-backend hotkey dispatch
-- validated hotkey action declarations with sensitive-focus-aware dispatch
-- app-scoped expansions (`app_filter`) with a KDE Plasma (KWin) focused-window
-  tracker; fails closed (never matches) rather than matching everywhere when
-  window tracking is unavailable
-
-The default daemon mode remains a stdin harness. An explicit
-`--source=input-method` mode can use the input-method-v2 source as both the
-capture and insertion path; it fails closed for unsupported non-text keys and
-for unsafe Unicode Backspace situations. Unsupported grabbed events may be
-lost until compositor-specific pass-through is implemented, but do not restart
-the daemon. Output backends remain explicit:
-`--backend=wlroots` or `--backend=libei`. Input-method startup and transport
-loss, plus runtime output-session loss in the stdin harness, are recovered with
-bounded backoff. Compositor coverage, preedit support, and ordinary non-text
-pass-through still require compositor integration testing.
-
-For compositors that do not advertise `zwp_input_method_manager_v2` or
-`zwp_virtual_keyboard_manager_v1` at all (for example KWin/KDE Plasma as of
-KWin 6.6), an experimental `--source=evdev` mode reads keyboard events
-directly from the kernel instead, paired with an independent
-`--backend=wlroots` or `--backend=libei` output. This works on any
-compositor but requires `input` group membership and has **no sensitive-field
-signal**, so matching is never suspended in password fields; read
-[SECURITY.md](SECURITY.md) before enabling it. Granting the required
-permission is a separate, explicit, root-requiring step, never run
-automatically by the installers above:
-
-```sh
-sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
-sudo ./scripts/install-evdev-permissions.sh             # then apply
+```
+                    ┌─────────────────────────────┐
+                    │   wayexpand-core (engine)   │
+                    │  trie matcher · templates   │
+                    │  config validation · undo   │
+                    └───────────┬─────────────────┘
+                                │  TextInjector / InputSource traits
+                ┌───────────────┼────────────────────┐
+                │               │                    │
+      ┌─────────▼──────┐ ┌──────▼───────┐  ┌─────────▼─────────┐
+      │ input-method-v2│ │ wlr-virtual- │  │   libei / EIS      │
+      │  (capture+type)│ │  keyboard    │  │ (portal-mediated)  │
+      └────────────────┘ └──────────────┘  └────────────────────┘
+                │                                    │
+      ┌─────────▼──────────┐            ┌────────────▼───────────┐
+      │ evdev capture       │            │ clipboard fallback     │
+      │ (compositor-agnostic│            │ (XTest paste, for      │
+      │  fallback, needs    │            │  newline-bearing text) │
+      │  `input` group)     │            └────────────────────────┘
+      └─────────────────────┘
 ```
 
-Once `wayexpand doctor` reports capture readiness, `wayexpand-evdev.service` runs
-this combination (`--source=evdev --backend=libei` by default; edit the unit
-to `--backend=wlroots` if your compositor supports the wlroots
-virtual-keyboard protocol instead):
+Every backend implements a small trait (`InputSource` for capture,
+`TextInjector` for output) and is selected explicitly at daemon startup
+(`--source=`, `--backend=`) — never auto-detected silently. A backend that
+doesn't exist for your compositor is a documented gap, not a runtime
+surprise: `app_filter`-scoped snippets **fail closed** (never match) rather
+than matching everywhere when window tracking isn't available, the same
+philosophy the matcher applies to `word-boundary` mode when its rolling
+buffer has already evicted the context it needs.
 
-```sh
-systemctl --user enable --now wayexpand-evdev.service
-```
-
-Unlike the other two units, this one does not auto-restart on failure. The
-`libei` backend connects through the desktop RemoteDesktop portal without
-persisting consent (see `crates/backend-libei`), so every connection attempt
-shows a fresh permission dialog; auto-restarting would re-show it faster than
-you can respond. `enable --now` starts it once so you can grant that consent;
-after any later failure (compositor restart, portal hiccup), restart it
-yourself with `systemctl --user restart wayexpand-evdev.service`.
-
-## Try it
-
-```sh
-cargo test
-cargo run -p wayexpand -- test ';;hello' expansions.toml
-cargo run -p wayexpand -- test ';;hello' --json expansions.toml
-cargo run -p wayexpand -- preview ':today' expansions.toml
-cargo run -p wayexpand -- list expansions.toml
-cargo run -p wayexpand -- validate expansions.toml
-cargo run -p wayexpand -- list --json expansions.toml
-cargo run -p wayexpand -- preview ':today' --json expansions.toml
-cargo run -p wayexpand -- set-enabled ':sig' off expansions.toml
-cargo run -p wayexpand -- set-mode ':sig' word-boundary expansions.toml
-cargo run -p wayexpand -- import espanso ~/.config/espanso/match/base.yml > imported.toml
-cargo run -p wayexpand-daemon -- expansions.toml
-cargo run -p wayexpand-daemon -- --source=input-method expansions.toml
-cargo run -p wayexpand -- doctor [config]
-cargo run -p wayexpand -- doctor --json [config]
-cargo run -p wayexpand -- backend
-cargo run -p wayexpand-ui -- expansions.toml
-cargo run -p wayexpand-gui -- expansions.toml
-```
-
-`test` simulates matching and prints the result without injecting text into
-another application. For a plain (template) expansion this is a pure,
-side-effect-free dry run. For a **command-backed** expansion, `test` still
-runs the configured program for real to produce its output -- there is no
-way to preview what a command would produce without running it. Review any
-command-backed snippet's `program`/`args` before running `test` against a
-config you did not write yourself. Add `--json` when consuming the result
-from CI, scripts, or an editor integration.
-
-### Installation via Package Manager
+## Quick start
 
 **Ubuntu/Debian (PPA):**
 
 ```sh
 sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
+sudo apt update && sudo apt install wayexpand
+wayexpand doctor          # see what your compositor actually supports
+wayexpand-gui             # manage snippets graphically
 ```
 
 **Arch Linux (AUR):**
 
 ```sh
 yay -S wayexpand
-# or
-git clone https://aur.archlinux.org/wayexpand.git
+```
+
+> Verify the AUR package is current before relying on it in a script —
+> check `pkgver` in its `PKGBUILD` against the [latest
+> release](https://github.com/itchyitchy123/wayexpand/releases). Fedora has
+> no Copr repository yet; see [docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md).
+
+**From source** (any distro, no packaging required):
+
+```sh
+git clone https://github.com/itchyitchy123/wayexpand
 cd wayexpand
-makepkg -si
+./scripts/install-user.sh          # builds release binaries, installs to ~/.local/bin
+wayexpand doctor
 ```
 
-> Verify the AUR package is current before relying on it in a script --
-> check the `pkgver` in its `PKGBUILD` against the [latest
-> release](https://github.com/itchyitchy123/wayexpand/releases).
+Both installers are non-destructive by default (no service is enabled or
+started until you pass `--enable`) and refuse to run as root — see
+[Installation](#installation) below for the full picture, including
+`--source=evdev` for compositors with no `input-method-v2` or
+virtual-keyboard support (KWin/KDE Plasma, as of KWin 6.6).
 
-**Fedora:** No Copr repository exists yet. Build from source with
-`./scripts/install-user.sh` below, or track
-[docs/PACKAGING_CHECKLIST.md](docs/PACKAGING_CHECKLIST.md) for Fedora
-packaging status.
+## Screenshots
 
-For a user-local installation with systemd units, built from source:
+The dashboard above shows the snippet library: search, category filters,
+per-row status toggles, and a live preview pane that never auto-executes a
+command-backed snippet (see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)).
+
+**Diagnostics** reports every backend's actual state
+(`Implemented`/`RequiresPermission`/`Unavailable`) plus non-mutating
+protocol probes, in one view — the same information `wayexpand doctor
+--json` exposes to scripts and health checks:
+
+![WayExpand diagnostics](docs/wiki/assets/diagnostics.png)
+
+Eight color packs ship in the GUI, including retro terminal themes (VT220
+green, IBM 3270 blue, Commodore 64) alongside the default — see
+[docs/COLOR_PACKS.md](docs/COLOR_PACKS.md) and
+[docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md). Full accessibility support
+(font scaling 0.8×–2.0×, WCAG 2.1 AA contrast, keyboard focus indicators) is
+documented alongside them.
+
+## Features
+
+**Core engine**
+- Unicode-safe suffix matching via a trie; longest-match trigger families
+  (`:a` and `:address` coexist correctly)
+- Optional `word-boundary` matching for triggers that must not fire inside
+  larger words — fails closed if its context window has been evicted rather
+  than guessing
+- `propagate_case`: typing a trigger as `UPPERCASE` or `Capitalized`
+  applies the same casing to the replacement (validated against generated
+  case variants, not just the literal trigger, so it can't silently collide
+  with another snippet)
+- Template variables (`{{date}}`, `{{date+3d}}`, `{{username}}`,
+  `{{cursor}}` placement, and more) rendered without shelling out
+- Bounded, cached, direct-program expansions for dynamic content (no shell
+  interpretation — a program and argument list, executed directly)
+- `app_filter`: restrict a snippet to specific applications, backed by a
+  focused-window tracker (KDE Plasma via KWin's scripting bridge today)
+- Undo-last-expansion via a configurable key chord
+
+**Safety and reliability**
+- Parse-then-swap config reloads: a malformed config is rejected before it
+  replaces the live one, both from the CLI and from the daemon watching the
+  file
+- Matching suspends automatically in password fields on backends that
+  report sensitive focus
+- The control socket is permission-checked and confined to a private,
+  owner-verified directory
+- Every backend, queue, and child process is bounded — see
+  [SECURITY.md](SECURITY.md) for the full threat model
+
+**Interfaces**
+- Native Wayland-capable GUI (`wayexpand-gui`): search, live preview,
+  metadata editing, Espanso import with a diff-style preview, diagnostics,
+  atomic saves, bounded undo history, daemon pause/resume
+- Dependency-light terminal UI (`wayexpand-ui`) for SSH sessions and
+  systems without a GPU presentation path
+- Scriptable CLI with stable `--json` output for `list`, `preview`,
+  `status`, and `doctor` — see [COMPATIBILITY.md](docs/COMPATIBILITY.md)
+  for exactly which fields are guaranteed
+- One-shot, atomic `set-enabled`/`set-mode` commands so a script or
+  integration never needs to hand-edit TOML
+
+**Migration**
+- Espanso import (`wayexpand import espanso`) converts YAML matches to
+  TOML, skips unsupported non-string matches with a warning, and never
+  touches the source file
+
+See [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md) for
+production-ready snippets (SSL certs, logrotate, systemd units, firewall
+rules, Docker, deployment scripts) if you want a running start rather than
+an empty library.
+
+## Installation
+
+For compositors that advertise `zwp_input_method_manager_v2` or
+`zwp_virtual_keyboard_manager_v1`, an explicit `--source=input-method` mode
+uses input-method-v2 for both capture and insertion, paired with
+`--backend=wlroots` or `--backend=libei` for output. Unsupported grabbed
+key events may be lost until compositor-specific pass-through is
+implemented (tracked in the [support matrix](docs/SUPPORT_MATRIX.md)); this
+does not restart the daemon.
+
+For compositors that advertise neither protocol at all — KWin/KDE Plasma as
+of 6.6 is the primary example — an experimental `--source=evdev` mode reads
+keyboard events directly from the kernel instead. This works on any
+compositor but requires `input` group membership and has **no
+sensitive-field signal**, so matching is never suspended in password
+fields. Read [SECURITY.md](SECURITY.md) before enabling it. Granting the
+permission is a separate, explicit, root-requiring step the installers
+never run for you:
 
 ```sh
-./scripts/install-user.sh
+sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
+sudo ./scripts/install-evdev-permissions.sh             # then apply
 ```
 
-Installing from a downloaded [release](https://github.com/itchyitchy123/wayexpand/releases)
-tarball instead uses the prebuilt binaries and does not require Cargo:
+Once `wayexpand doctor` reports capture readiness:
 
 ```sh
-tar -xzf wayexpand-*-linux-x86_64.tar.gz
-cd wayexpand-*-linux-x86_64
-./scripts/install-release.sh
+systemctl --user enable --now wayexpand-evdev.service
 ```
 
-Both installers are intentionally non-destructive by default. After reviewing
-`wayexpand doctor`, the complete setup can be requested explicitly:
+This unit does not auto-restart on failure by design: the `libei` backend
+connects through the desktop RemoteDesktop portal without persisting
+consent, so every connection attempt shows a fresh permission dialog, and
+auto-restarting would re-show it faster than you could respond. Restart it
+yourself after a compositor restart or portal hiccup:
+`systemctl --user restart wayexpand-evdev.service`.
+
+Neither installer runs as root, enables a service automatically, or
+overwrites an existing configuration. `install-user.sh` builds from source;
+`install-release.sh` installs the prebuilt binaries from a downloaded
+[release](https://github.com/itchyitchy123/wayexpand/releases) tarball. To
+remove an installation, run `./scripts/uninstall-user.sh` (`--purge` also
+deletes the configuration directory).
+
+## Using the CLI
 
 ```sh
-./scripts/install-user.sh --enable \
-  --service=wayexpand-input-method.service
+wayexpand test ';;hello' expansions.toml           # simulate matching, print the result
+wayexpand test ';;hello' --json expansions.toml
+wayexpand preview ':today' expansions.toml         # render templates without matching
+wayexpand list expansions.toml
+wayexpand validate expansions.toml
+wayexpand set-enabled ':sig' off expansions.toml   # atomic, single-snippet edit
+wayexpand set-mode ':sig' word-boundary expansions.toml
+wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+wayexpand doctor                                   # human-readable backend/session report
+wayexpand doctor --json                            # stable schema for health checks
 ```
 
-Do not run either installer as root or with `sudo`; they install user binaries
-and user systemd units and must inherit the desktop user's Wayland
-environment. Use `--help` on either script for the supported options.
+`test`/`preview` never inject text into another application. For a plain
+(template) expansion, `test` is a pure, side-effect-free dry run. For a
+**command-backed** expansion, `test` still runs the configured program for
+real to produce its output — there's no way to preview a command's output
+without running it. Review `program`/`args` before running `test` against
+a config you didn't write yourself.
 
-`install-user.sh` builds release binaries from source before installing them;
-`install-release.sh` installs the prebuilt binaries already present in the
-extracted tarball. Both install to `~/.local/bin`, install all three user
-units, register the graphical editor with the desktop application menu, and create
-the example configuration only when one does not already exist. Neither
-enables or starts a service automatically unless `--enable` is passed. To
-remove an installation made by either script, run
-`./scripts/uninstall-user.sh` (add `--purge` to also delete the configuration
-directory).
+## Documentation
 
-Espanso users can migrate without replacing their existing files. The importer
-writes converted TOML to standard output and leaves the source untouched;
-unsupported non-string matches are skipped with a warning.
+The [project wiki](docs/wiki/README.md) has a guided installation walk,
+configuration reference, GUI tour, operations runbook, security model, and
+troubleshooting playbook. Also see:
 
-Configuration errors are reported without silently accepting invalid entries. Reloads parse a new configuration completely before swapping it into the running daemon. Replacement contents are intentionally never printed by the daemon harness.
+- [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — tested vs. experimental, per compositor
+- [docs/BACKENDS.md](docs/BACKENDS.md) — backend design decisions
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) / [SECURITY.md](SECURITY.md) — operational and security constraints
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — exactly which CLI/JSON/config fields are stable
+- [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md), [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md), [docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md) — GUI theming and i18n
+- [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md) — ready-made snippets
 
-Operational and security constraints are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md) and [SECURITY.md](SECURITY.md). Backend design decisions are tracked in [docs/BACKENDS.md](docs/BACKENDS.md), with the external compositor test matrix in [docs/INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md).
+Non-English documentation: [Deutsch](README.de.md).
 
-The repository runs formatting, workspace tests, and Clippy in CI.
-CI also exercises the daemon smoke test, installer idempotence in an isolated
-home, shell scripts, and systemd unit validation.
-Dependency advisories are checked in a separate CI supply-chain job. The
-[support matrix](docs/SUPPORT_MATRIX.md) distinguishes tested behavior from
-experimental backends and explicitly records the current pass-through gap.
-Tagged releases are built by CI with the locked dependency graph and publish a
-Linux x86_64 archive plus SHA256 checksum; see [docs/RELEASING.md](docs/RELEASING.md).
+## Contributing
 
-The CLI's `list --json`, `preview --json`, and lifecycle `status --json`
-commands provide a machine-readable surface for settings frontends and desktop
-integrations; human-readable output remains the default.
-`doctor --json` provides a stable health snapshot for systemd checks, shell
-monitoring, and fleet diagnostics without running compositor probes.
-`set-enabled` and `set-mode` edit a single snippet through an atomic, validated replacement
-so a UI or script never needs to rewrite configuration unsafely.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, PR
+checklist, and project structure. CI runs formatting, the full test suite,
+Clippy with warnings denied, shellcheck, installer idempotence in an
+isolated home, systemd unit validation, and a separate dependency-advisory
+job on every change.
 
-`wayexpand-ui` is the dependency-light terminal settings frontend. The native
-Wayland-capable `wayexpand-gui` frontend provides a graphical snippet browser,
-search, live preview, metadata editing, bounded direct-program expansion
-editing, Espanso import with preview, diagnostics, atomic saves, undo, and
-daemon pause/resume controls. Both frontends use the same core model and
-control contract.
+## License
+
+[MIT](LICENSE)
