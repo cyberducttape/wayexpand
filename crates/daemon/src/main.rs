@@ -290,6 +290,7 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
+                    drain_pending_window_events(&window_tracker, &mut config.engine)?;
                     let result = match input_method.as_mut() {
                         Some(source) => process_event(&mut config.engine, event, Some(source)),
                         None => {
@@ -389,6 +390,7 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
+                    drain_pending_window_events(&window_tracker, &mut config.engine)?;
                     let result = if let Some(mut backend) = injector.take() {
                         // Capture is non-exclusive and a match fires on
                         // key-down, so the trigger's last key is still held
@@ -475,6 +477,7 @@ fn main() -> Result<()> {
         };
         match receiver.recv_timeout(Duration::from_millis(250)) {
             Ok(line) => {
+                drain_pending_window_events(&window_tracker, &mut config.engine)?;
                 if injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
@@ -598,6 +601,25 @@ fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
         }
     });
     Some(receiver)
+}
+
+/// Drain any pending window-change events from the tracker's receiver
+/// and apply them to the engine. This prevents app-filter races where a
+/// focus change arrives between input-event wait and processing.
+fn drain_pending_window_events(
+    window_tracker: &Option<mpsc::Receiver<Option<WindowContext>>>,
+    engine: &mut ExpansionEngine,
+) -> Result<()> {
+    if let Some(receiver) = window_tracker.as_ref() {
+        let mut latest = None;
+        while let Ok(window) = receiver.try_recv() {
+            latest = Some(window);
+        }
+        if let Some(window) = latest {
+            process_event(engine, InputEvent::WindowChanged(window), None)?;
+        }
+    }
+    Ok(())
 }
 
 fn next_retry_delay(delay: Duration) -> Duration {
@@ -923,7 +945,7 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>)> {
         } else if let Some(value) = argument.strip_prefix("--source=") {
             source = Some(value.to_string());
         } else if matches!(argument.as_str(), "--help" | "-h") {
-            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method] [--backend=none|wlroots|libei] [config]", env!("CARGO_PKG_VERSION"));
+            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [config]", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         } else if matches!(argument.as_str(), "--version" | "-V") {
             println!("wayexpand-daemon {}", env!("CARGO_PKG_VERSION"));

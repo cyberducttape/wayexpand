@@ -56,19 +56,19 @@ expand.
                     │  config validation · undo   │
                     └───────────┬─────────────────┘
                                 │  TextInjector / InputSource traits
-                ┌───────────────┼────────────────────┐
-                │               │                    │
-      ┌─────────▼──────┐ ┌──────▼───────┐  ┌─────────▼─────────┐
-      │ input-method-v2│ │ wlr-virtual- │  │   libei / EIS      │
-      │  (capture+type)│ │  keyboard    │  │ (portal-mediated)  │
-      └────────────────┘ └──────────────┘  └────────────────────┘
-                │                                    │
-      ┌─────────▼──────────┐            ┌────────────▼───────────┐
-      │ evdev capture       │            │ clipboard fallback     │
-      │ (compositor-agnostic│            │ (XTest paste, for      │
-      │  fallback, needs    │            │  newline-bearing text) │
-      │  `input` group)     │            └────────────────────────┘
-      └─────────────────────┘
+                ┌───────────────┼──────────────────────────┐
+                │               │                          │
+      ┌─────────▼──────┐ ┌──────▼──────────┐   ┌──────────▼─────────┐
+      │ input-method-v2│ │ evdev capture   │   │   libei / EIS      │
+      │  (capture+type)│ │(compositor-     │   │ (portal-mediated)  │
+      │ (exclusive,    │ │ agnostic, needs │   │     output)        │
+      │  XKB-based)    │ │ `input` group)  │   └────────────────────┘
+      └────────────────┘ └─────────────────┘
+                                │
+                    ┌───────────▼──────────────┐
+                    │ wlroots virtual-keyboard│
+                    │    (output only)         │
+                    └──────────────────────────┘
 ```
 
 Every backend implements a small trait (`InputSource` for capture,

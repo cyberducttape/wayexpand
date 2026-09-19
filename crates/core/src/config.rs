@@ -13,6 +13,7 @@ const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
 const MAX_DESCRIPTION_CHARS: usize = 512;
 const MAX_TAGS: usize = 32;
 const MAX_TAG_CHARS: usize = 64;
+const MAX_CATEGORY_CHARS: usize = 64;
 const MAX_APP_FILTERS: usize = 32;
 const MAX_APP_FILTER_CHARS: usize = 256;
 const MAX_COMMAND_ARGS: usize = 32;
@@ -256,6 +257,8 @@ pub enum ConfigError {
     InvalidTags { index: usize },
     #[error("expansion {index} has an invalid app filter")]
     InvalidAppFilter { index: usize },
+    #[error("expansion {index} has an invalid category")]
+    InvalidCategory { index: usize },
     #[error("expansion {index} has an invalid command: {reason}")]
     InvalidCommand { index: usize, reason: &'static str },
     #[error("duplicate trigger {trigger:?} in expansions {first} and {second}")]
@@ -337,6 +340,9 @@ impl ConfigError {
             Self::InvalidTags { index } => format!("expansion {index} has invalid tags"),
             Self::InvalidAppFilter { index } => {
                 format!("expansion {index} has an invalid app filter")
+            }
+            Self::InvalidCategory { index } => {
+                format!("expansion {index} has an invalid category")
             }
             Self::InvalidCommand { index, reason } => {
                 format!("expansion {index} has an invalid command ({reason})")
@@ -679,6 +685,11 @@ impl Config {
                 })
             {
                 return Err(ConfigError::InvalidAppFilter { index });
+            }
+            if expansion.category.chars().count() > MAX_CATEGORY_CHARS
+                || expansion.category.contains('\0')
+            {
+                return Err(ConfigError::InvalidCategory { index });
             }
             if let Some(command) = &expansion.command {
                 if command.program.trim().is_empty() {

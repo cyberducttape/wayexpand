@@ -3775,7 +3775,6 @@ dependencies = [
  "signal-hook 0.4.4",
  "tracing",
  "tracing-subscriber",
- "wayexpand-backend-clipboard",
  "wayexpand-backend-evdev",
  "wayexpand-backend-input-method",
  "wayexpand-backend-kwin-window",
