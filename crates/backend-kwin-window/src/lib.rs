@@ -167,8 +167,7 @@ impl KwinWindowTracker {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        let script_path =
-            std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
+        let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
             .write(true)

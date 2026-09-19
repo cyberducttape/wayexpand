@@ -234,7 +234,9 @@ impl Strings {
     pub fn buffer_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => "Characters retained while looking for a trigger (1–4096).",
-            Language::German => "Zeichen, die bei der Suche nach einem Auslöser beibehalten werden (1–4096).",
+            Language::German => {
+                "Zeichen, die bei der Suche nach einem Auslöser beibehalten werden (1–4096)."
+            }
         }
     }
 
@@ -380,7 +382,9 @@ impl Strings {
     pub fn build_description(&self) -> &'static str {
         match self.lang {
             Language::English => "Turn repetitive text into a fast, reliable shortcut.",
-            Language::German => "Verwandeln Sie wiederholten Text in eine schnelle, zuverlässige Verknüpfung.",
+            Language::German => {
+                "Verwandeln Sie wiederholten Text in eine schnelle, zuverlässige Verknüpfung."
+            }
         }
     }
 
@@ -649,8 +653,12 @@ impl Strings {
 
     pub fn command_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => "⚠ Advanced: this runs a local executable when the trigger matches.",
-            Language::German => "⚠ Erweitert: Dieses Programm wird ausgeführt, wenn der Auslöser passt.",
+            Language::English => {
+                "⚠ Advanced: this runs a local executable when the trigger matches."
+            }
+            Language::German => {
+                "⚠ Erweitert: Dieses Programm wird ausgeführt, wenn der Auslöser passt."
+            }
         }
     }
 
@@ -691,8 +699,12 @@ impl Strings {
 
     pub fn command_backed_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "This snippet is command-backed; replacement is stored fallback text.",
-            Language::German => "Dieses Snippet wird durch Befehl unterstützt; Der Ersatz ist Fallback-Text.",
+            Language::English => {
+                "This snippet is command-backed; replacement is stored fallback text."
+            }
+            Language::German => {
+                "Dieses Snippet wird durch Befehl unterstützt; Der Ersatz ist Fallback-Text."
+            }
         }
     }
 
@@ -776,8 +788,12 @@ impl Strings {
 
     pub fn delete_confirm(&self) -> &'static str {
         match self.lang {
-            Language::English => "Delete this snippet? This cannot be recovered except through Undo.",
-            Language::German => "Dieses Snippet löschen? Dies kann nur über Rückgängig wiederhergestellt werden.",
+            Language::English => {
+                "Delete this snippet? This cannot be recovered except through Undo."
+            }
+            Language::German => {
+                "Dieses Snippet löschen? Dies kann nur über Rückgängig wiederhergestellt werden."
+            }
         }
     }
 

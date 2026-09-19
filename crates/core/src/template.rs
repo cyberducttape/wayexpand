@@ -261,9 +261,18 @@ mod tests {
             unix_timestamp: 1_704_067_200, // 2024-01-01T00:00:00Z (a Monday)
             ..TemplateContext::default()
         };
-        assert_eq!(render_template("{{date+3d}}", &context).unwrap(), "2024-01-04");
-        assert_eq!(render_template("{{date-1d}}", &context).unwrap(), "2023-12-31");
-        assert_eq!(render_template("{{date+1w}}", &context).unwrap(), "2024-01-08");
+        assert_eq!(
+            render_template("{{date+3d}}", &context).unwrap(),
+            "2024-01-04"
+        );
+        assert_eq!(
+            render_template("{{date-1d}}", &context).unwrap(),
+            "2023-12-31"
+        );
+        assert_eq!(
+            render_template("{{date+1w}}", &context).unwrap(),
+            "2024-01-08"
+        );
     }
 
     #[test]
@@ -272,7 +281,10 @@ mod tests {
             unix_timestamp: 1_704_067_200, // 2024-01-01T00:00:00Z
             ..TemplateContext::default()
         };
-        assert_eq!(render_template("{{time+5h}}", &context).unwrap(), "05:00:00");
+        assert_eq!(
+            render_template("{{time+5h}}", &context).unwrap(),
+            "05:00:00"
+        );
         assert_eq!(
             render_template("{{datetime+90m}}", &context).unwrap(),
             "2024-01-01T01:30:00Z"
@@ -285,13 +297,21 @@ mod tests {
             unix_timestamp: 1_704_067_200, // 2024-01-01T00:00:00Z
             ..TemplateContext::default()
         };
-        assert_eq!(render_template("{{date-1d}}", &context).unwrap(), "2023-12-31");
+        assert_eq!(
+            render_template("{{date-1d}}", &context).unwrap(),
+            "2023-12-31"
+        );
     }
 
     #[test]
     fn date_math_rejects_malformed_or_overflowing_offsets_as_unknown_variables() {
         let context = TemplateContext::default();
-        for template in ["{{date+3x}}", "{{date+}}", "{{date+99999999999999999999d}}", "{{date+999999999999999999w}}"] {
+        for template in [
+            "{{date+3x}}",
+            "{{date+}}",
+            "{{date+99999999999999999999d}}",
+            "{{date+999999999999999999w}}",
+        ] {
             assert!(matches!(
                 render_template(template, &context),
                 Err(TemplateError::UnknownVariable { .. })

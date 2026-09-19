@@ -1,11 +1,11 @@
-mod theme;
-mod lang;
 mod colorpack;
+mod lang;
+mod theme;
 
 use anyhow::{Context, Result};
-use lang::{Language, Strings};
 use colorpack::ColorPack;
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
+use lang::{Language, Strings};
 use std::{
     env, fs,
     io::{Read, Write},
@@ -20,8 +20,8 @@ use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FontScale, InputEvent, MatchMode,
-    Settings,
+    CommandConfig, Config, ConfigError, ExpansionConfig, ExpansionEngine, FontScale, InputEvent,
+    MatchMode, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -31,8 +31,14 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{date}}", "UTC date"),
     ("{{time}}", "UTC time"),
     ("{{datetime}}", "UTC date and time"),
-    ("{{date+1d}}", "tomorrow's date (also: -1d, +1w, date/time/datetime, d/w/h/m units)"),
-    ("{{cursor}}", "place the cursor here after expanding (supported on the libei and wlroots backends)"),
+    (
+        "{{date+1d}}",
+        "tomorrow's date (also: -1d, +1w, date/time/datetime, d/w/h/m units)",
+    ),
+    (
+        "{{cursor}}",
+        "place the cursor here after expanding (supported on the libei and wlroots backends)",
+    ),
     ("{{username}}", "current user"),
     ("{{hostname}}", "local hostname"),
     ("{{unix_timestamp}}", "Unix timestamp"),
@@ -274,8 +280,8 @@ impl GuiApp {
         candidate.settings.max_buffer_chars = max_buffer_chars;
         candidate.settings.font_scale = self.settings_font_scale;
         let undo_chord_input = self.settings_undo_chord.trim();
-        candidate.settings.undo_chord = (!undo_chord_input.is_empty())
-            .then(|| undo_chord_input.to_owned());
+        candidate.settings.undo_chord =
+            (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
         if let Err(error) = candidate.validate() {
             let error = error.safe_summary();
             self.message = format!("Settings rejected: {error}");
@@ -927,10 +933,18 @@ impl eframe::App for GuiApp {
                             });
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                         }
-                        if ui.button("🌐 EN/DE").on_hover_text("Switch language").clicked() {
+                        if ui
+                            .button("🌐 EN/DE")
+                            .on_hover_text("Switch language")
+                            .clicked()
+                        {
                             self.language_selector_open = !self.language_selector_open;
                         }
-                        if ui.button("🎨 Theme").on_hover_text("Switch color pack").clicked() {
+                        if ui
+                            .button("🎨 Theme")
+                            .on_hover_text("Switch color pack")
+                            .clicked()
+                        {
                             self.colorpack_selector_open = !self.colorpack_selector_open;
                         }
                         if ui.button(self.strings.settings()).clicked() {
@@ -980,7 +994,11 @@ impl eframe::App for GuiApp {
                 .show(ui.ctx(), |ui| {
                     theme::section_header(ui, "🖥", self.strings.runtime_health());
                     ui.add_space(4.0);
-                    ui.label(RichText::new(self.strings.daemon()).color(palette.muted).small());
+                    ui.label(
+                        RichText::new(self.strings.daemon())
+                            .color(palette.muted)
+                            .small(),
+                    );
                     egui::Frame::group(ui.style())
                         .fill(palette.surface_hover)
                         .show(ui, |ui| {
@@ -1041,12 +1059,14 @@ impl eframe::App for GuiApp {
                     );
                     ui.label(
                         RichText::new(self.strings.import_preview_info())
-                        .small()
-                        .color(palette.muted),
+                            .small()
+                            .color(palette.muted),
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if theme::primary_button(ui, &palette, self.strings.load_preview()).clicked() {
+                        if theme::primary_button(ui, &palette, self.strings.load_preview())
+                            .clicked()
+                        {
                             self.preview_import();
                         }
                         if ui.button(self.strings.cancel()).clicked() {
@@ -1061,7 +1081,8 @@ impl eframe::App for GuiApp {
                             config.expansion.len(),
                             skipped
                         ));
-                        if theme::primary_button(ui, &palette, self.strings.replace_library()).clicked()
+                        if theme::primary_button(ui, &palette, self.strings.replace_library())
+                            .clicked()
                         {
                             self.apply_import();
                         }
@@ -1100,7 +1121,13 @@ impl eframe::App for GuiApp {
                     ui.add_space(8.0);
                     ui.label("🔤 Font Size");
                     ui.horizontal(|ui| {
-                        for scale in &[FontScale::Small, FontScale::Normal, FontScale::Large, FontScale::ExtraLarge, FontScale::Huge] {
+                        for scale in &[
+                            FontScale::Small,
+                            FontScale::Normal,
+                            FontScale::Large,
+                            FontScale::ExtraLarge,
+                            FontScale::Huge,
+                        ] {
                             let label = match scale {
                                 FontScale::Small => "Small (80%)",
                                 FontScale::Normal => "Normal",
@@ -1108,7 +1135,10 @@ impl eframe::App for GuiApp {
                                 FontScale::ExtraLarge => "Extra Large (150%)",
                                 FontScale::Huge => "Huge (200%)",
                             };
-                            if ui.selectable_label(*scale == self.settings_font_scale, label).clicked() {
+                            if ui
+                                .selectable_label(*scale == self.settings_font_scale, label)
+                                .clicked()
+                            {
                                 self.settings_font_scale = *scale;
                             }
                         }
@@ -1143,7 +1173,9 @@ impl eframe::App for GuiApp {
 
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if theme::primary_button(ui, &palette, self.strings.save_settings()).clicked() {
+                        if theme::primary_button(ui, &palette, self.strings.save_settings())
+                            .clicked()
+                        {
                             self.save_settings();
                         }
                         if ui.button(self.strings.close()).clicked() {
@@ -1162,12 +1194,18 @@ impl eframe::App for GuiApp {
                 .show(ui.ctx(), |ui| {
                     ui.label("Choose your language:");
                     ui.add_space(6.0);
-                    if ui.selectable_label(self.language == Language::English, "English").clicked() {
+                    if ui
+                        .selectable_label(self.language == Language::English, "English")
+                        .clicked()
+                    {
                         self.language = Language::English;
                         self.strings.set_language(Language::English);
                         save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                     }
-                    if ui.selectable_label(self.language == Language::German, "Deutsch").clicked() {
+                    if ui
+                        .selectable_label(self.language == Language::German, "Deutsch")
+                        .clicked()
+                    {
                         self.language = Language::German;
                         self.strings.set_language(Language::German);
                         save_gui_prefs(self.language, self.colorpack, self.dark_mode);
@@ -1191,7 +1229,13 @@ impl eframe::App for GuiApp {
                     ui.separator();
                     for pack in ColorPack::all() {
                         let selected = self.colorpack == *pack;
-                        if ui.selectable_label(selected, format!("{}  —  {}", pack.name(), pack.description())).clicked() {
+                        if ui
+                            .selectable_label(
+                                selected,
+                                format!("{}  —  {}", pack.name(), pack.description()),
+                            )
+                            .clicked()
+                        {
                             self.colorpack = *pack;
                             theme::install_pack(ui.ctx(), *pack, self.config.settings.font_scale);
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
@@ -1239,7 +1283,10 @@ impl eframe::App for GuiApp {
                     if ui.button(self.strings.duplicate()).clicked() {
                         self.request_action(PendingAction::Duplicate);
                     }
-                    if ui.button(self.strings.undo_button(self.undo.len())).clicked() {
+                    if ui
+                        .button(self.strings.undo_button(self.undo.len()))
+                        .clicked()
+                    {
                         self.request_action(PendingAction::Undo);
                     }
                 });
@@ -1264,7 +1311,9 @@ impl eframe::App for GuiApp {
                         for category in &categories {
                             let selected =
                                 self.category_filter.as_deref() == Some(category.as_str());
-                            if theme::chip_scaled(ui, &palette, category, selected, font_scale).clicked() {
+                            if theme::chip_scaled(ui, &palette, category, selected, font_scale)
+                                .clicked()
+                            {
                                 self.category_filter = if selected {
                                     None
                                 } else {
@@ -1307,7 +1356,9 @@ impl eframe::App for GuiApp {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
                             ui.label(RichText::new("📭").size(28.0));
-                            ui.label(RichText::new(self.strings.no_snippets()).color(palette.muted));
+                            ui.label(
+                                RichText::new(self.strings.no_snippets()).color(palette.muted),
+                            );
                             ui.add_space(6.0);
                             if theme::primary_button(ui, &palette, self.strings.create_first())
                                 .clicked()
@@ -1346,430 +1397,457 @@ impl eframe::App for GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
             .show(ui, |ui| {
-            let Some(index) = self.selected else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(70.0);
-                    ui.label(RichText::new("✨").size(40.0));
-                    ui.add_space(6.0);
-                    ui.heading(self.strings.build_first());
-                    ui.label(
-                        RichText::new(self.strings.build_description())
-                            .color(palette.muted),
-                    );
-                    ui.add_space(10.0);
-                    if theme::primary_button(ui, &palette, self.strings.create_snippet()).clicked() {
-                        self.request_action(PendingAction::New);
-                    }
-                });
-                return;
-            };
-            if index >= self.config.expansion.len() {
-                self.selected = None;
-                self.draft = None;
-                ui.label("Selection is out of date; choose a snippet again.");
-                return;
-            }
-            if self.draft.is_none() {
-                self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
-            }
-            let command_backed = self.config.expansion[index].command.is_some();
-            let mut detect_app_clicked = false;
-            ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .id_salt("editor_scroll")
-                .show(ui, |ui| {
-            egui::Frame::new()
-                .fill(palette.surface)
-                .stroke(egui::Stroke::new(1.0, palette.border))
-                .corner_radius(egui::CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(14))
-                .show(ui, |ui| {
-                theme::section_header(ui, "✏", self.strings.snippet_details());
-                ui.add_space(6.0);
-                let categories = self.categories();
-                let Some(draft) = self.draft.as_mut() else {
-                    ui.label("Snippet draft unavailable; choose a snippet again.");
+                let Some(index) = self.selected else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(70.0);
+                        ui.label(RichText::new("✨").size(40.0));
+                        ui.add_space(6.0);
+                        ui.heading(self.strings.build_first());
+                        ui.label(
+                            RichText::new(self.strings.build_description()).color(palette.muted),
+                        );
+                        ui.add_space(10.0);
+                        if theme::primary_button(ui, &palette, self.strings.create_snippet())
+                            .clicked()
+                        {
+                            self.request_action(PendingAction::New);
+                        }
+                    });
                     return;
                 };
-                ui.horizontal(|ui| {
-                    ui.label(self.strings.trigger());
-                    ui.add(
-                        TextEdit::singleline(&mut draft.trigger)
-                            .hint_text(self.strings.trigger_hint())
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(300.0),
-                    );
-                });
-                let duplicate_trigger = !draft.trigger.is_empty()
-                    && self
-                        .config
-                        .expansion
-                        .iter()
-                        .enumerate()
-                        .any(|(other_index, other)| {
-                            other_index != index && other.trigger == draft.trigger
-                        });
-                if duplicate_trigger {
-                    ui.colored_label(
-                        palette.danger,
-                        self.strings.duplicate_trigger(),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new(self.strings.trigger_tip())
-                            .small()
-                            .color(palette.muted),
-                    );
+                if index >= self.config.expansion.len() {
+                    self.selected = None;
+                    self.draft = None;
+                    ui.label("Selection is out of date; choose a snippet again.");
+                    return;
                 }
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(self.strings.description());
-                    ui.add(TextEdit::singleline(&mut draft.description).desired_width(420.0));
-                });
-                ui.horizontal(|ui| {
-                    ui.label(self.strings.tags());
-                    ui.add(
-                        TextEdit::singleline(&mut draft.tags)
-                            .hint_text(self.strings.tags_hint())
-                            .desired_width(420.0),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label(self.strings.category());
-                    ui.add(
-                        TextEdit::singleline(&mut draft.category)
-                            .hint_text(self.strings.category_hint())
-                            .desired_width(260.0),
-                    );
-                    if !categories.is_empty() {
-                        egui::ComboBox::from_id_salt("category_picker")
-                            .selected_text(self.strings.existing())
-                            .width(140.0)
-                            .show_ui(ui, |ui| {
-                                for category in &categories {
-                                    if ui
-                                        .selectable_label(draft.category == *category, category)
+                if self.draft.is_none() {
+                    self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
+                }
+                let command_backed = self.config.expansion[index].command.is_some();
+                let mut detect_app_clicked = false;
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .id_salt("editor_scroll")
+                    .show(ui, |ui| {
+                        egui::Frame::new()
+                            .fill(palette.surface)
+                            .stroke(egui::Stroke::new(1.0, palette.border))
+                            .corner_radius(egui::CornerRadius::same(10))
+                            .inner_margin(egui::Margin::same(14))
+                            .show(ui, |ui| {
+                                theme::section_header(ui, "✏", self.strings.snippet_details());
+                                ui.add_space(6.0);
+                                let categories = self.categories();
+                                let Some(draft) = self.draft.as_mut() else {
+                                    ui.label("Snippet draft unavailable; choose a snippet again.");
+                                    return;
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.trigger());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.trigger)
+                                            .hint_text(self.strings.trigger_hint())
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_width(300.0),
+                                    );
+                                });
+                                let duplicate_trigger = !draft.trigger.is_empty()
+                                    && self.config.expansion.iter().enumerate().any(
+                                        |(other_index, other)| {
+                                            other_index != index && other.trigger == draft.trigger
+                                        },
+                                    );
+                                if duplicate_trigger {
+                                    ui.colored_label(
+                                        palette.danger,
+                                        self.strings.duplicate_trigger(),
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new(self.strings.trigger_tip())
+                                            .small()
+                                            .color(palette.muted),
+                                    );
+                                }
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.description());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.description)
+                                            .desired_width(420.0),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.tags());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.tags)
+                                            .hint_text(self.strings.tags_hint())
+                                            .desired_width(420.0),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.category());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.category)
+                                            .hint_text(self.strings.category_hint())
+                                            .desired_width(260.0),
+                                    );
+                                    if !categories.is_empty() {
+                                        egui::ComboBox::from_id_salt("category_picker")
+                                            .selected_text(self.strings.existing())
+                                            .width(140.0)
+                                            .show_ui(ui, |ui| {
+                                                for category in &categories {
+                                                    if ui
+                                                        .selectable_label(
+                                                            draft.category == *category,
+                                                            category,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        draft.category = category.clone();
+                                                    }
+                                                }
+                                            });
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.app_filter());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.app_filter)
+                                            .hint_text(self.strings.app_filter_hint())
+                                            .desired_width(300.0),
+                                    );
+                                    if self.app_detection.is_some() {
+                                        ui.spinner();
+                                        ui.label("Detecting focused application…");
+                                        if ui.small_button("Cancel").clicked() {
+                                            // The spawned thread is not joined/cancelled --
+                                            // it may itself be stuck in a hung D-Bus call --
+                                            // just stop waiting on it and discard whatever
+                                            // it eventually sends.
+                                            self.app_detection = None;
+                                        }
+                                    } else if ui
+                                        .button(self.strings.detect_app())
+                                        .on_hover_text(self.strings.detect_app_tooltip())
                                         .clicked()
                                     {
-                                        draft.category = category.clone();
+                                        detect_app_clicked = true;
+                                    }
+                                });
+                                if !draft.app_filter.trim().is_empty() {
+                                    ui.label(
+                                        RichText::new(self.strings.window_tracking_warning())
+                                            .small()
+                                            .color(palette.muted),
+                                    );
+                                }
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut draft.enabled, self.strings.enabled());
+                                    ui.separator();
+                                    ui.radio_value(
+                                        &mut draft.match_mode,
+                                        MatchMode::Immediate,
+                                        self.strings.immediate(),
+                                    );
+                                    ui.radio_value(
+                                        &mut draft.match_mode,
+                                        MatchMode::WordBoundary,
+                                        self.strings.word_boundary(),
+                                    );
+                                    ui.separator();
+                                    ui.checkbox(
+                                        &mut draft.propagate_case,
+                                        self.strings.propagate_case(),
+                                    )
+                                    .on_hover_text(self.strings.propagate_case_tooltip());
+                                });
+                                ui.add_space(4.0);
+                                ui.label(self.strings.replacement());
+                                ui.add(
+                                    TextEdit::multiline(&mut draft.replacement)
+                                        .font(egui::TextStyle::Monospace)
+                                        .desired_rows(9)
+                                        .desired_width(f32::INFINITY),
+                                );
+                            });
+                        if detect_app_clicked && self.app_detection.is_none() {
+                            // Run entirely off the UI thread: KwinWindowTracker::new()
+                            // itself (D-Bus connection, script load, name registration)
+                            // has no bound of its own -- only the window-wait after it
+                            // does -- so calling it inline here could freeze the whole
+                            // GUI indefinitely rather than for the intended few
+                            // seconds, exactly the failure mode found and fixed in the
+                            // daemon's KwinWindowTracker::probe() (a hung session bus
+                            // or leftover KWin script state from a prior instance can
+                            // make the D-Bus call itself never return). The receiver is
+                            // polled below on every frame instead.
+                            use wayexpand_backend_kwin_window::KwinWindowTracker;
+                            use wayexpand_core::WindowTracker;
+                            let (sender, receiver) = mpsc::channel();
+                            self.app_detection = Some(receiver);
+                            thread::spawn(move || {
+                                let detection = match KwinWindowTracker::new() {
+                                    Ok(mut tracker) => {
+                                        match tracker
+                                            .next_window_timeout(std::time::Duration::from_secs(5))
+                                        {
+                                            Ok(Some(Some(window))) => AppDetection::Found(window),
+                                            Ok(Some(None)) => AppDetection::NoWindow,
+                                            Ok(None) | Err(_) => AppDetection::Unavailable,
+                                        }
+                                    }
+                                    Err(_) => AppDetection::Unavailable,
+                                };
+                                // The GUI may have given up waiting (Cancel, or the
+                                // window closed) by the time this send happens; that is
+                                // not an error, there is simply nothing left to notify.
+                                let _ = sender.send(detection);
+                            });
+                        }
+                        if let Some(receiver) = &self.app_detection {
+                            match receiver.try_recv() {
+                                Ok(AppDetection::Found(window)) => {
+                                    self.app_detection = None;
+                                    let value = window.app_id.or(window.title).unwrap_or_default();
+                                    if value.is_empty() {
+                                        self.message =
+                                            "Could not identify the focused window".into();
+                                    } else if let Some(draft) = self.draft.as_mut() {
+                                        if draft.app_filter.trim().is_empty() {
+                                            draft.app_filter = value.clone();
+                                        } else {
+                                            draft.app_filter.push_str(", ");
+                                            draft.app_filter.push_str(&value);
+                                        }
+                                        self.message =
+                                            format!("Added \"{value}\" to the app filter");
+                                    }
+                                }
+                                Ok(AppDetection::NoWindow) => {
+                                    self.app_detection = None;
+                                    self.message =
+                                        "No focused window to detect (focus is on the desktop)"
+                                            .into();
+                                }
+                                Ok(AppDetection::Unavailable) => {
+                                    self.app_detection = None;
+                                    self.message =
+                            "Window detection is unavailable here (KDE Plasma only for now)"
+                                .into();
+                                }
+                                Err(mpsc::TryRecvError::Empty) => {
+                                    // Still waiting: request another repaint soon so
+                                    // this gets polled promptly instead of only on the
+                                    // next user-driven event, without busy-looping.
+                                    ui.ctx().request_repaint_after(Duration::from_millis(100));
+                                }
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    // The sender was dropped without sending, which
+                                    // should not happen (the spawned thread always
+                                    // sends before exiting) -- treat it the same as an
+                                    // explicit Unavailable rather than waiting forever.
+                                    self.app_detection = None;
+                                    self.message = "Window detection failed unexpectedly".into();
+                                }
+                            }
+                        }
+                        if command_backed {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(self.strings.command_backed_help())
+                                    .italics()
+                                    .color(palette.muted),
+                            );
+                        }
+                        ui.add_space(10.0);
+                        ui.collapsing(format!("🔣 {}", self.strings.template_variables()), |ui| {
+                            ui.label(
+                                RichText::new(self.strings.template_help())
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            ui.horizontal_wrapped(|ui| {
+                                for (variable, description) in TEMPLATE_VARIABLES {
+                                    if ui.button(*variable).on_hover_text(*description).clicked() {
+                                        if let Some(draft) = self.draft.as_mut() {
+                                            draft.replacement.push_str(variable);
+                                        }
                                     }
                                 }
                             });
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label(self.strings.app_filter());
-                    ui.add(
-                        TextEdit::singleline(&mut draft.app_filter)
-                            .hint_text(self.strings.app_filter_hint())
-                            .desired_width(300.0),
-                    );
-                    if self.app_detection.is_some() {
-                        ui.spinner();
-                        ui.label("Detecting focused application…");
-                        if ui.small_button("Cancel").clicked() {
-                            // The spawned thread is not joined/cancelled --
-                            // it may itself be stuck in a hung D-Bus call --
-                            // just stop waiting on it and discard whatever
-                            // it eventually sends.
-                            self.app_detection = None;
-                        }
-                    } else if ui
-                        .button(self.strings.detect_app())
-                        .on_hover_text(self.strings.detect_app_tooltip())
-                        .clicked()
-                    {
-                        detect_app_clicked = true;
-                    }
-                });
-                if !draft.app_filter.trim().is_empty() {
-                    ui.label(
-                        RichText::new(self.strings.window_tracking_warning())
-                        .small()
-                        .color(palette.muted),
-                    );
-                }
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut draft.enabled, self.strings.enabled());
-                    ui.separator();
-                    ui.radio_value(&mut draft.match_mode, MatchMode::Immediate, self.strings.immediate());
-                    ui.radio_value(
-                        &mut draft.match_mode,
-                        MatchMode::WordBoundary,
-                        self.strings.word_boundary(),
-                    );
-                    ui.separator();
-                    ui.checkbox(&mut draft.propagate_case, self.strings.propagate_case())
-                        .on_hover_text(self.strings.propagate_case_tooltip());
-                });
-                ui.add_space(4.0);
-                ui.label(self.strings.replacement());
-                ui.add(
-                    TextEdit::multiline(&mut draft.replacement)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_rows(9)
-                        .desired_width(f32::INFINITY),
-                );
-            });
-            if detect_app_clicked && self.app_detection.is_none() {
-                // Run entirely off the UI thread: KwinWindowTracker::new()
-                // itself (D-Bus connection, script load, name registration)
-                // has no bound of its own -- only the window-wait after it
-                // does -- so calling it inline here could freeze the whole
-                // GUI indefinitely rather than for the intended few
-                // seconds, exactly the failure mode found and fixed in the
-                // daemon's KwinWindowTracker::probe() (a hung session bus
-                // or leftover KWin script state from a prior instance can
-                // make the D-Bus call itself never return). The receiver is
-                // polled below on every frame instead.
-                use wayexpand_backend_kwin_window::KwinWindowTracker;
-                use wayexpand_core::WindowTracker;
-                let (sender, receiver) = mpsc::channel();
-                self.app_detection = Some(receiver);
-                thread::spawn(move || {
-                    let detection = match KwinWindowTracker::new() {
-                        Ok(mut tracker) => {
-                            match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
-                                Ok(Some(Some(window))) => AppDetection::Found(window),
-                                Ok(Some(None)) => AppDetection::NoWindow,
-                                Ok(None) | Err(_) => AppDetection::Unavailable,
-                            }
-                        }
-                        Err(_) => AppDetection::Unavailable,
-                    };
-                    // The GUI may have given up waiting (Cancel, or the
-                    // window closed) by the time this send happens; that is
-                    // not an error, there is simply nothing left to notify.
-                    let _ = sender.send(detection);
-                });
-            }
-            if let Some(receiver) = &self.app_detection {
-                match receiver.try_recv() {
-                    Ok(AppDetection::Found(window)) => {
-                        self.app_detection = None;
-                        let value = window.app_id.or(window.title).unwrap_or_default();
-                        if value.is_empty() {
-                            self.message = "Could not identify the focused window".into();
-                        } else if let Some(draft) = self.draft.as_mut() {
-                            if draft.app_filter.trim().is_empty() {
-                                draft.app_filter = value.clone();
-                            } else {
-                                draft.app_filter.push_str(", ");
-                                draft.app_filter.push_str(&value);
-                            }
-                            self.message = format!("Added \"{value}\" to the app filter");
-                        }
-                    }
-                    Ok(AppDetection::NoWindow) => {
-                        self.app_detection = None;
-                        self.message = "No focused window to detect (focus is on the desktop)"
-                            .into();
-                    }
-                    Ok(AppDetection::Unavailable) => {
-                        self.app_detection = None;
-                        self.message =
-                            "Window detection is unavailable here (KDE Plasma only for now)"
-                                .into();
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // Still waiting: request another repaint soon so
-                        // this gets polled promptly instead of only on the
-                        // next user-driven event, without busy-looping.
-                        ui.ctx().request_repaint_after(Duration::from_millis(100));
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // The sender was dropped without sending, which
-                        // should not happen (the spawned thread always
-                        // sends before exiting) -- treat it the same as an
-                        // explicit Unavailable rather than waiting forever.
-                        self.app_detection = None;
-                        self.message = "Window detection failed unexpectedly".into();
-                    }
-                }
-            }
-            if command_backed {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(self.strings.command_backed_help())
-                    .italics()
-                    .color(palette.muted),
-                );
-            }
-            ui.add_space(10.0);
-            ui.collapsing(format!("🔣 {}", self.strings.template_variables()), |ui| {
-                ui.label(
-                    RichText::new(self.strings.template_help())
-                        .small()
-                        .color(palette.muted),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    for (variable, description) in TEMPLATE_VARIABLES {
-                        if ui.button(*variable).on_hover_text(*description).clicked() {
-                            if let Some(draft) = self.draft.as_mut() {
-                                draft.replacement.push_str(variable);
-                            }
-                        }
-                    }
-                });
-            });
-            ui.add_space(4.0);
-            ui.collapsing(format!("🛠 {}", self.strings.dynamic_command()), |ui| {
-                let Some(draft) = self.draft.as_mut() else {
-                    ui.label("Snippet draft unavailable; choose a snippet again.");
-                    return;
-                };
-                ui.checkbox(
-                    &mut draft.command_enabled,
-                    self.strings.command_checkbox(),
-                );
-                ui.label(
-                    RichText::new(self.strings.command_help())
-                    .small()
-                    .color(palette.muted),
-                );
-                if draft.command_enabled {
-                    egui::Frame::new()
-                        .fill(theme::tint(palette.warning, 30))
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 5))
-                        .show(ui, |ui| {
-                            ui.colored_label(
-                                palette.warning,
-                                self.strings.command_warning(),
-                            );
                         });
-                }
-                ui.add_enabled_ui(draft.command_enabled, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(self.strings.program());
-                        ui.add(
-                            TextEdit::singleline(&mut draft.command_program)
-                                .hint_text(self.strings.program_hint())
-                                .desired_width(300.0),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.strings.timeout_ms());
-                        ui.add(
-                            TextEdit::singleline(&mut draft.command_timeout_ms).desired_width(90.0),
-                        );
-                        ui.label(self.strings.cache_ms());
-                        ui.add(
-                            TextEdit::singleline(&mut draft.command_cache_ms).desired_width(90.0),
-                        );
-                    });
-                    ui.label(self.strings.arguments());
-                    ui.add(
-                        TextEdit::multiline(&mut draft.command_args)
-                            .desired_rows(3)
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-            });
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if theme::primary_button(ui, &palette, self.strings.save_changes())
-                    .on_hover_text(self.strings.save_tooltip())
-                    .clicked()
-                {
-                    self.save_selected();
-                }
-                if theme::danger_button(ui, &palette, self.strings.delete()).clicked() {
-                    self.request_action(PendingAction::Delete);
-                }
-            });
-            ui.add_space(14.0);
-            theme::section_header(ui, "▶", self.strings.preview());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(self.strings.input());
-                ui.add(
-                    TextEdit::singleline(&mut self.preview_input)
-                        .hint_text(self.strings.input_hint())
-                        .desired_width(420.0),
-                );
-                if ui.button(self.strings.use_trigger()).clicked() {
-                    self.preview_input = self
-                        .draft
-                        .as_ref()
-                        .map(|draft| draft.trigger.clone())
-                        .unwrap_or_default();
-                }
-            });
-            ui.add_space(4.0);
-            let command_backed = self.draft.as_ref().is_some_and(|draft| draft.command_enabled);
-            if command_backed {
-                // Never auto-run a configured program from a render/repaint
-                // path: unlike a template, this has real side effects and
-                // this code runs every frame the editor is open. Running is
-                // opt-in via the button below, and only ever once per click.
-                egui::Frame::new()
-                    .fill(theme::tint(palette.warning, 20))
-                    .stroke(egui::Stroke::new(1.0, palette.warning))
-                    .corner_radius(egui::CornerRadius::same(8))
-                    .inner_margin(egui::Margin::symmetric(12, 10))
-                    .show(ui, |ui| {
-                        ui.label(
+                        ui.add_space(4.0);
+                        ui.collapsing(format!("🛠 {}", self.strings.dynamic_command()), |ui| {
+                            let Some(draft) = self.draft.as_mut() else {
+                                ui.label("Snippet draft unavailable; choose a snippet again.");
+                                return;
+                            };
+                            ui.checkbox(
+                                &mut draft.command_enabled,
+                                self.strings.command_checkbox(),
+                            );
+                            ui.label(
+                                RichText::new(self.strings.command_help())
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            if draft.command_enabled {
+                                egui::Frame::new()
+                                    .fill(theme::tint(palette.warning, 30))
+                                    .corner_radius(egui::CornerRadius::same(6))
+                                    .inner_margin(egui::Margin::symmetric(8, 5))
+                                    .show(ui, |ui| {
+                                        ui.colored_label(
+                                            palette.warning,
+                                            self.strings.command_warning(),
+                                        );
+                                    });
+                            }
+                            ui.add_enabled_ui(draft.command_enabled, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.program());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.command_program)
+                                            .hint_text(self.strings.program_hint())
+                                            .desired_width(300.0),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.strings.timeout_ms());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.command_timeout_ms)
+                                            .desired_width(90.0),
+                                    );
+                                    ui.label(self.strings.cache_ms());
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.command_cache_ms)
+                                            .desired_width(90.0),
+                                    );
+                                });
+                                ui.label(self.strings.arguments());
+                                ui.add(
+                                    TextEdit::multiline(&mut draft.command_args)
+                                        .desired_rows(3)
+                                        .desired_width(f32::INFINITY),
+                                );
+                            });
+                        });
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if theme::primary_button(ui, &palette, self.strings.save_changes())
+                                .on_hover_text(self.strings.save_tooltip())
+                                .clicked()
+                            {
+                                self.save_selected();
+                            }
+                            if theme::danger_button(ui, &palette, self.strings.delete()).clicked() {
+                                self.request_action(PendingAction::Delete);
+                            }
+                        });
+                        ui.add_space(14.0);
+                        theme::section_header(ui, "▶", self.strings.preview());
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label(self.strings.input());
+                            ui.add(
+                                TextEdit::singleline(&mut self.preview_input)
+                                    .hint_text(self.strings.input_hint())
+                                    .desired_width(420.0),
+                            );
+                            if ui.button(self.strings.use_trigger()).clicked() {
+                                self.preview_input = self
+                                    .draft
+                                    .as_ref()
+                                    .map(|draft| draft.trigger.clone())
+                                    .unwrap_or_default();
+                            }
+                        });
+                        ui.add_space(4.0);
+                        let command_backed = self
+                            .draft
+                            .as_ref()
+                            .is_some_and(|draft| draft.command_enabled);
+                        if command_backed {
+                            // Never auto-run a configured program from a render/repaint
+                            // path: unlike a template, this has real side effects and
+                            // this code runs every frame the editor is open. Running is
+                            // opt-in via the button below, and only ever once per click.
+                            egui::Frame::new()
+                                .fill(theme::tint(palette.warning, 20))
+                                .stroke(egui::Stroke::new(1.0, palette.warning))
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::symmetric(12, 10))
+                                .show(ui, |ui| {
+                                    ui.label(
                             "This snippet runs a program instead of inserting fixed text. \
                              Its output is not shown automatically -- run it once to see \
                              what it currently produces.",
                         );
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if ui.button("▶ Run once").clicked() {
-                                self.run_command_preview();
-                            }
-                            match &self.command_preview_result {
-                                Some(Ok(output)) => {
-                                    let shown: String = if output.chars().count() > 200 {
-                                        output.chars().take(199).collect::<String>() + "…"
-                                    } else {
-                                        output.clone()
-                                    };
-                                    ui.label(RichText::new(shown).monospace());
-                                }
-                                Some(Err(message)) => {
-                                    ui.colored_label(palette.danger, message);
-                                }
-                                None => {}
-                            }
-                        });
-                    });
-            } else {
-                let preview_text = self.preview();
-                egui::Frame::new()
-                    .fill(palette.extreme_bg)
-                    .stroke(egui::Stroke::new(1.0, palette.accent))
-                    .corner_radius(egui::CornerRadius::same(8))
-                    .inner_margin(egui::Margin::symmetric(12, 10))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&preview_text).monospace());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                                if ui
-                                    .small_button(self.strings.copy())
-                                    .on_hover_text(self.strings.copy_tooltip())
-                                    .clicked()
-                                {
-                                    ui.ctx().copy_text(preview_text.clone());
-                                    self.message = "Preview copied to clipboard".into();
-                                }
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        if ui.button("▶ Run once").clicked() {
+                                            self.run_command_preview();
+                                        }
+                                        match &self.command_preview_result {
+                                            Some(Ok(output)) => {
+                                                let shown: String = if output.chars().count() > 200
+                                                {
+                                                    output.chars().take(199).collect::<String>()
+                                                        + "…"
+                                                } else {
+                                                    output.clone()
+                                                };
+                                                ui.label(RichText::new(shown).monospace());
+                                            }
+                                            Some(Err(message)) => {
+                                                ui.colored_label(palette.danger, message);
+                                            }
+                                            None => {}
+                                        }
+                                    });
+                                });
+                        } else {
+                            let preview_text = self.preview();
+                            egui::Frame::new()
+                                .fill(palette.extreme_bg)
+                                .stroke(egui::Stroke::new(1.0, palette.accent))
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::symmetric(12, 10))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(&preview_text).monospace());
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::TOP),
+                                            |ui| {
+                                                if ui
+                                                    .small_button(self.strings.copy())
+                                                    .on_hover_text(self.strings.copy_tooltip())
+                                                    .clicked()
+                                                {
+                                                    ui.ctx().copy_text(preview_text.clone());
+                                                    self.message =
+                                                        "Preview copied to clipboard".into();
+                                                }
+                                            },
+                                        );
+                                    });
+                                });
+                        }
+                        ui.add_space(12.0);
+                        let (message_color, message_bg) = status_tone(&self.message, &palette);
+                        egui::Frame::new()
+                            .fill(message_bg)
+                            .corner_radius(egui::CornerRadius::same(6))
+                            .inner_margin(egui::Margin::symmetric(10, 6))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(&self.message).color(message_color));
                             });
-                        });
                     });
-            }
-            ui.add_space(12.0);
-            let (message_color, message_bg) = status_tone(&self.message, &palette);
-            egui::Frame::new()
-                .fill(message_bg)
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(10, 6))
-                .show(ui, |ui| {
-                    ui.label(RichText::new(&self.message).color(message_color));
-                });
             });
-        });
         if self.pending_action.is_some() {
             egui::Window::new(self.strings.unsaved_title())
                 .collapsible(false)
@@ -1789,7 +1867,9 @@ impl eframe::App for GuiApp {
                         ui.label(self.strings.save_before(action));
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if theme::primary_button(ui, &palette, self.strings.save_continue()).clicked() {
+                            if theme::primary_button(ui, &palette, self.strings.save_continue())
+                                .clicked()
+                            {
                                 self.save_and_execute_pending();
                             }
                             if ui.button(self.strings.discard()).clicked() {
@@ -1803,7 +1883,9 @@ impl eframe::App for GuiApp {
                         ui.label(self.strings.delete_confirm());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if theme::danger_button(ui, &palette, self.strings.delete_button()).clicked() {
+                            if theme::danger_button(ui, &palette, self.strings.delete_button())
+                                .clicked()
+                            {
                                 self.pending_action = None;
                                 self.execute_action(PendingAction::Delete);
                             }
@@ -2005,7 +2087,11 @@ fn main() -> Result<()> {
         "WayExpand",
         options,
         Box::new(move |creation_context| {
-            theme::install_pack(&creation_context.egui_ctx, colorpack, app.config.settings.font_scale);
+            theme::install_pack(
+                &creation_context.egui_ctx,
+                colorpack,
+                app.config.settings.font_scale,
+            );
             // Only override with the OS-detected theme when the user has
             // never explicitly chosen one; otherwise a saved preference
             // would flip back to the system default on every launch.

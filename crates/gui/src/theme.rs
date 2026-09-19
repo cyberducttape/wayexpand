@@ -2,10 +2,10 @@
 //! of custom-painted widgets (snippet rows, pills, section headers) that
 //! `selectable_label`/`label` alone cannot express.
 
+use crate::colorpack::{ColorPack, ColorScheme};
 use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle, Vec2,
 };
-use crate::colorpack::{ColorPack, ColorScheme};
 use wayexpand_core::FontScale;
 
 #[derive(Clone, Copy)]
@@ -134,7 +134,10 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
             TextStyle::Heading,
             FontId::new(21.0 * scale, FontFamily::Proportional),
         ),
-        (TextStyle::Body, FontId::new(14.5 * scale, FontFamily::Proportional)),
+        (
+            TextStyle::Body,
+            FontId::new(14.5 * scale, FontFamily::Proportional),
+        ),
         (
             TextStyle::Button,
             FontId::new(14.5 * scale, FontFamily::Proportional),
@@ -354,7 +357,10 @@ pub fn snippet_row_scaled(
             let pad = Vec2::new(8.0, 3.0) * scale;
             let chip_size = galley.size() + pad * 2.0;
             let chip_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - chip_size.x - 10.0 * scale, rect.top() + 9.0 * scale),
+                egui::pos2(
+                    rect.right() - chip_size.x - 10.0 * scale,
+                    rect.top() + 9.0 * scale,
+                ),
                 chip_size,
             );
             painter.rect_filled(chip_rect, CornerRadius::same(255), tint(palette.accent, 30));

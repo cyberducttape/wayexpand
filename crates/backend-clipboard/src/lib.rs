@@ -84,8 +84,12 @@ fn run_bounded(
             }
         }
     };
-    let stdout = stdout_rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default();
-    let stderr = stderr_rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default();
+    let stdout = stdout_rx
+        .recv_timeout(Duration::from_millis(500))
+        .unwrap_or_default();
+    let stderr = stderr_rx
+        .recv_timeout(Duration::from_millis(500))
+        .unwrap_or_default();
     Ok(Output {
         status,
         stdout,
@@ -153,13 +157,17 @@ impl ClipboardInjector {
         // Try xclip first, fall back to xsel
         let mut command = Command::new("xclip");
         command.arg("-selection").arg("clipboard").arg("-i");
-        if run_bounded(command, Some(text), COMMAND_TIMEOUT).is_ok_and(|output| output.status.success()) {
+        if run_bounded(command, Some(text), COMMAND_TIMEOUT)
+            .is_ok_and(|output| output.status.success())
+        {
             return Ok(());
         }
 
         let mut command = Command::new("xsel");
         command.arg("--clipboard").arg("--input");
-        if run_bounded(command, Some(text), COMMAND_TIMEOUT).is_ok_and(|output| output.status.success()) {
+        if run_bounded(command, Some(text), COMMAND_TIMEOUT)
+            .is_ok_and(|output| output.status.success())
+        {
             return Ok(());
         }
 
@@ -226,10 +234,12 @@ impl TextInjector for ClipboardInjector {
             .arg("--repeat")
             .arg(backspace_count.to_string())
             .arg("BackSpace");
-        let output = run_bounded(command, None, COMMAND_TIMEOUT).map_err(|e| wayexpand_core::InjectorError {
-            backend: BACKEND_NAME,
-            message: format!("xdotool backspace failed: {}", e),
-            retryable: false,
+        let output = run_bounded(command, None, COMMAND_TIMEOUT).map_err(|e| {
+            wayexpand_core::InjectorError {
+                backend: BACKEND_NAME,
+                message: format!("xdotool backspace failed: {}", e),
+                retryable: false,
+            }
         })?;
         // A non-zero exit means the trigger was NOT actually erased. This
         // must be a hard error, not a warning: `replace()` calls `insert()`
@@ -279,9 +289,8 @@ impl TextInjector for ClipboardInjector {
         // large snippets this backend exists for) and scale a little with
         // text size as a best-effort margin, not a real synchronization.
         if let Some(original) = original_clipboard {
-            let restore_delay = std::time::Duration::from_millis(
-                (150 + text.len() as u64 / 100).min(500),
-            );
+            let restore_delay =
+                std::time::Duration::from_millis((150 + text.len() as u64 / 100).min(500));
             std::thread::sleep(restore_delay);
             let _ = self.copy_to_clipboard(&original);
         }
@@ -305,10 +314,12 @@ impl TextInjector for ClipboardInjector {
             .arg("--repeat")
             .arg(count.to_string())
             .arg("Left");
-        let output = run_bounded(command, None, COMMAND_TIMEOUT).map_err(|e| wayexpand_core::InjectorError {
-            backend: BACKEND_NAME,
-            message: format!("xdotool cursor-left failed: {}", e),
-            retryable: false,
+        let output = run_bounded(command, None, COMMAND_TIMEOUT).map_err(|e| {
+            wayexpand_core::InjectorError {
+                backend: BACKEND_NAME,
+                message: format!("xdotool cursor-left failed: {}", e),
+                retryable: false,
+            }
         })?;
         if !output.status.success() {
             return Err(wayexpand_core::InjectorError {

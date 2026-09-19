@@ -154,7 +154,10 @@ impl ExpansionConfig {
     pub(crate) fn effective_triggers(&self) -> Vec<String> {
         let mut variants = vec![self.trigger.clone()];
         if self.propagate_case {
-            for variant in [self.trigger.to_uppercase(), capitalize_first_letter(&self.trigger)] {
+            for variant in [
+                self.trigger.to_uppercase(),
+                capitalize_first_letter(&self.trigger),
+            ] {
                 if !variants.contains(&variant) {
                     variants.push(variant);
                 }
