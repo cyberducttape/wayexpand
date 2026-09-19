@@ -10,10 +10,12 @@
 #      reloads udev rules.
 #   2. Adds the invoking (non-root) user to the `input` group.
 #
-# `input` group membership lets a process read every keystroke typed on
-# this system, in any session -- including other users' terminals and
-# password fields -- not only keystrokes WayExpand's matcher sees. Read
-# SECURITY.md before running this.
+# This is the current legacy/simple access model. `input` group membership
+# lets a process read every keystroke typed on this system, in any session --
+# including other users' terminals and password fields -- not only keystrokes
+# WayExpand's matcher sees. It is not the long-term preferred architecture;
+# see docs/EVDEV_ACCESS_DESIGN.md for the active-seat ACL and device-broker
+# investigation. Read SECURITY.md before running this.
 #
 # Usage:
 #   sudo ./scripts/install-evdev-permissions.sh [--dry-run] [--uninstall]
@@ -135,7 +137,7 @@ else
 fi
 printf '\n%s\n' "The \`input\` group can read every keystroke typed on this system, in any"
 printf '%s\n' "session -- not only keystrokes WayExpand matches against. See"
-printf '%s\n' "SECURITY.md before continuing."
+printf '%s\n' "SECURITY.md and docs/EVDEV_ACCESS_DESIGN.md before continuing."
 
 if [ "$dry_run" -eq 1 ]; then
     printf '\n%s\n' "(dry run; no changes made)"

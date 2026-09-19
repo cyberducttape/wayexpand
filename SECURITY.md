@@ -106,6 +106,12 @@ automatically by the user installers, which install
 already ship, rather than granting anything broader) and add the invoking
 user to `input`. Run `sudo scripts/install-evdev-permissions.sh --uninstall`
 to reverse it.
+This input-group path is the current legacy/simple access model, not the
+long-term preferred architecture. Active-seat ACLs through logind/udev and a
+small device broker are investigation candidates; their session, seat,
+hotplug, and distribution behavior must be tested before either can replace
+the current path. See [docs/EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
+for the investigation plan and acceptance criteria.
 
 Backends must document their permission requirements explicitly:
 

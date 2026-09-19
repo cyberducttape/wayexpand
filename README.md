@@ -262,6 +262,7 @@ Pros:
 Cons:
 - **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
 - **No password-field protection** — matching is never suspended in password fields
+- **Legacy/simple permission model** — active-seat ACLs or a device broker are future security work; see [EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
 - Experimental — read [SECURITY.md](SECURITY.md) before enabling
 
 This unit does not auto-restart on failure by design. A portal session may

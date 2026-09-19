@@ -570,6 +570,9 @@ wayexpand reload
    - Explicit root step (`install-evdev-permissions.sh`)
    - Requires active consent
    - Document that users are granting `input` group membership
+   - Treat the input-group grant as the current legacy/simple model; review
+     [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) for the planned
+     active-seat ACL/device-broker investigation
 
 ### Systemd Sandbox Constraints
 
