@@ -48,6 +48,7 @@ RestrictAddressFamilies=AF_UNIX
 MemoryMax=256M
 TasksMax=16
 LimitNOFILE=64
+LimitCORE=0
 
 # The daemon reads the user's config and writes only its user runtime socket.
 ReadWritePaths=%t
