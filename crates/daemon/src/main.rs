@@ -963,7 +963,10 @@ mod tests {
             Path::new("/home/user/.config/wayexpand/expansions.toml"),
             true,
         );
-        let mut fields: Vec<&str> = body.lines().filter_map(|line| line.split_once('=').map(|(key, _)| key)).collect();
+        let mut fields: Vec<&str> = body
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(key, _)| key))
+            .collect();
         fields.sort_unstable();
         assert_eq!(
             fields,

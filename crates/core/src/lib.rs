@@ -14,7 +14,8 @@ pub use backend::{
     InputSourceError, TextInjector, WindowTracker, WindowTrackerError,
 };
 pub use config::{
-    CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode, Settings,
+    CommandConfig, Config, ConfigError, ExpansionConfig, FontScale, HotkeyConfig, MatchMode,
+    Settings,
 };
 pub use engine::{
     run_command, CommandError, ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError,

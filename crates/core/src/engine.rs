@@ -569,7 +569,6 @@ fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 
-
 /// Recases `text` (a rendered replacement) to match the casing pattern of
 /// `typed` (the trigger as the user actually typed it), for expansions with
 /// `propagate_case` enabled. A single capitalized letter or a capitalized
@@ -577,7 +576,10 @@ fn is_word_character(character: char) -> bool {
 /// yield a fully uppercased replacement; anything else (typed as
 /// configured, or mixed case) leaves the replacement unchanged.
 fn apply_case_style(typed: &str, text: &str) -> String {
-    let letters: Vec<char> = typed.chars().filter(|character| character.is_alphabetic()).collect();
+    let letters: Vec<char> = typed
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .collect();
     match letters.as_slice() {
         [] => text.to_owned(),
         [single] if single.is_uppercase() => capitalize_first_letter(text),
