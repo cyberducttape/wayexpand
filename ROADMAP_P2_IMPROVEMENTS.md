@@ -30,41 +30,19 @@ Silently swallows `SendError` when queue full.
 
 ---
 
-### 2. Process Cleanup on Successful Exit
+### 2. Process Cleanup on Successful Exit — RESOLVED
 
-**Problem:** Process descendants survive when direct child exits with status 0.
+**Problem:** Process descendants survived when the direct child exited with
+status 0.
 
-**Regression Test:** `process_descendants_cleaned_up_on_successful_exit` (ignored in engine.rs)
+**Resolution:** `run_command()` and `execute_hotkey()` now terminate the
+process group after every ordinary child exit, including successful and
+non-zero exits. The regression test
+`process_descendants_cleaned_up_on_successful_exit` is enabled and verifies
+that a descendant cannot continue running after successful completion.
 
-**Root Cause:**
-```rust
-pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
-    // ... spawn child ...
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-            Ok(None) => {
-                kill_process_group(&child);  // ← Only on TIMEOUT
-                let _ = child.wait();
-                return Err(CommandError::Timeout);
-            }
-            // ... error cases ...
-        }
-    }
-    // ← No kill_process_group() call for successful completion!
-}
-```
-
-**Solution:**
-Move `kill_process_group(&child)` call outside the timeout condition:
-```rust
-match child.try_wait() { ... }
-kill_process_group(&child);  // Always, regardless of exit status
-let _ = child.wait();
-```
-
-**Impact:** Prevents resource leaks, especially in unsandboxed CLI/GUI preview execution paths.
+**Impact:** Prevents resource leaks, especially in unsandboxed CLI/GUI preview
+execution paths.
 
 ---
 

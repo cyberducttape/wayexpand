@@ -23,6 +23,9 @@ also exercise newer compilers, but a release must not depend on whichever
 
 1. Run the complete verification suite from
    [DEVELOPMENT.md](DEVELOPMENT.md) (see Release Process section).
+   A stable release must not contain an ignored test documenting a known
+   production bug. Any intentionally ignored test must name an explicitly
+   accepted issue and release disposition; otherwise it is a release blocker.
 2. Run the isolated release smoke test:
 
    ```sh
