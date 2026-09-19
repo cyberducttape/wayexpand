@@ -3,7 +3,7 @@
 /// Loads policies from /etc/wayexpand/policy.toml and enforces them
 /// at runtime, blocking unsafe operations and logging violations to journald.
 use serde::Deserialize;
-use std::path::Path;
+use std::{os::unix::fs::MetadataExt, path::Path};
 use tracing::{error, warn};
 use wayexpand_core::OrganizationPolicy;
 
@@ -12,8 +12,8 @@ const POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
 /// Load organization policy from /etc/wayexpand/policy.toml
 ///
 /// Returns the policy if it exists, or a default (permissive) policy if not.
-/// Policy file errors are logged as warnings but don't prevent daemon startup.
-pub fn load_policy() -> OrganizationPolicy {
+/// An existing policy that cannot be securely read or parsed is fatal.
+pub fn load_policy() -> Result<OrganizationPolicy, String> {
     match load_policy_internal() {
         Ok(policy) => {
             if policy.is_active() {
@@ -27,12 +27,9 @@ pub fn load_policy() -> OrganizationPolicy {
                     }
                 );
             }
-            policy
+            Ok(policy)
         }
-        Err(e) => {
-            tracing::warn!("could not load organization policy: {}", e);
-            OrganizationPolicy::default()
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -42,6 +39,21 @@ fn load_policy_internal() -> Result<OrganizationPolicy, String> {
     // Policy file is optional; no file = default policy
     if !path.exists() {
         return Ok(OrganizationPolicy::default());
+    }
+
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|e| format!("could not inspect {}: {}", POLICY_PATH, e))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("{} is not a regular file", POLICY_PATH));
+    }
+    if metadata.uid() != 0 {
+        return Err(format!("{} must be owned by root", POLICY_PATH));
+    }
+    if metadata.mode() & 0o022 != 0 {
+        return Err(format!(
+            "{} must not be group- or world-writable",
+            POLICY_PATH
+        ));
     }
 
     // Read and parse policy file

@@ -1,13 +1,15 @@
 use anyhow::Result;
 use std::{
+    collections::hash_map::DefaultHasher,
     fs,
+    hash::{Hash, Hasher},
     io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info};
-use wayexpand_core::{Config, ConfigError, ExpansionEngine};
+use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, Layer};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -18,6 +20,9 @@ pub struct ReloadableConfig {
     observed: Option<FileStamp>,
     last_fingerprint_check: Option<Instant>,
     last_metadata: Option<MetadataStamp>,
+    fleet: bool,
+    fleet_signature: u64,
+    last_fleet_check: Instant,
     pub engine: ExpansionEngine,
     healthy: bool,
 }
@@ -117,8 +122,15 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
 
 impl ReloadableConfig {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
-        let (config, stamp) = load_consistent(&path)?;
+        Self::load_mode(path.into(), false)
+    }
+
+    pub fn load_with_fleet(path: impl Into<PathBuf>) -> Result<Self> {
+        Self::load_mode(path.into(), true)
+    }
+
+    fn load_mode(path: PathBuf, fleet: bool) -> Result<Self> {
+        let (config, stamp) = load_for_mode(&path, fleet)?;
         let engine = ExpansionEngine::new(config)
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
         let last_metadata = stamp.map(|s| MetadataStamp {
@@ -136,6 +148,9 @@ impl ReloadableConfig {
             // catches same-size edits on filesystems with coarse timestamps.
             last_fingerprint_check: None,
             last_metadata,
+            fleet,
+            fleet_signature: standard_fleet_signature(),
+            last_fleet_check: Instant::now(),
             engine,
             healthy: true,
         })
@@ -145,7 +160,12 @@ impl ReloadableConfig {
     /// configuration running and are reported to the operator.
     pub fn reload_if_changed(&mut self) {
         let current = self.poll_stamp();
-        if current == self.observed {
+        let fleet_changed =
+            self.fleet && self.last_fleet_check.elapsed() >= FINGERPRINT_REFRESH_INTERVAL && {
+                self.last_fleet_check = Instant::now();
+                standard_fleet_signature() != self.fleet_signature
+            };
+        if current == self.observed && !fleet_changed {
             return;
         }
         self.observed = current;
@@ -167,7 +187,7 @@ impl ReloadableConfig {
     }
 
     fn reload_current(&mut self, current: Option<FileStamp>) {
-        match load_consistent(&self.path) {
+        match load_for_mode(&self.path, self.fleet) {
             Ok((config, stable_stamp)) => {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
@@ -195,6 +215,7 @@ impl ReloadableConfig {
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;
                         self.last_fingerprint_check = Some(Instant::now());
+                        self.fleet_signature = standard_fleet_signature();
                         self.healthy = true;
                         info!(expansions = count, "configuration reloaded");
                     }
@@ -289,6 +310,45 @@ fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>)> {
     anyhow::bail!(
         "configuration changed while being read after {MAX_CONSISTENCY_ATTEMPTS} attempts"
     )
+}
+
+fn load_for_mode(path: &Path, fleet: bool) -> Result<(Config, Option<FileStamp>)> {
+    let (base, stamp) = load_consistent(path)?;
+    if fleet {
+        let merged = FleetConfig::load_standard_with_base(base)
+            .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
+        Ok((merged.config, stamp))
+    } else {
+        Ok((base, stamp))
+    }
+}
+
+fn standard_fleet_signature() -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for (_, directory) in [Layer::Organization, Layer::User, Layer::Pack]
+        .into_iter()
+        .filter_map(|layer| layer.default_dir().map(|directory| (layer, directory)))
+    {
+        directory.hash(&mut hasher);
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        let mut paths: Vec<_> = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "toml")
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            path.hash(&mut hasher);
+            if let Ok(contents) = fs::read(&path) {
+                contents.hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
 }
 
 #[cfg(test)]

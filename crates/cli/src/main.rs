@@ -15,7 +15,7 @@ use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind,
-    BackendState, Config, ExpansionEngine, InputEvent, MatchMode, OrganizationPolicy,
+    BackendState, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
 };
 
 /// Pulls the first `--json` flag out of `args`, wherever it appears, so
@@ -531,6 +531,26 @@ fn run() -> Result<()> {
         Some("backend") => {
             print_backend_diagnostics();
         }
+        Some("fleet") => match args.next().as_deref() {
+            Some("status") => {
+                if args.next().is_some() {
+                    bail!("usage: wayexpand fleet status");
+                }
+                let base = Config::load(default_config_path()).map_err(|error| {
+                    anyhow::anyhow!("configuration invalid: {}", error.safe_summary())
+                })?;
+                let fleet = FleetConfig::load_standard_with_base(base)
+                    .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
+                println!("Fleet configuration: active");
+                println!("Files loaded: {}", fleet.stats.total_files_loaded);
+                println!("Expansions: {}", fleet.stats.total_expansions);
+                println!("Hotkeys: {}", fleet.stats.total_hotkeys);
+                for layer in fleet.stats.layers_applied {
+                    println!("Layer: {layer}");
+                }
+            }
+            _ => bail!("usage: wayexpand fleet status"),
+        },
         Some("portal") => match args.next().as_deref() {
             Some("status") => {
                 if args.next().is_some() {

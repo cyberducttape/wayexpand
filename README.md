@@ -300,7 +300,16 @@ wayexpand set-mode ':sig' word-boundary expansions.toml
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 wayexpand doctor                                   # human-readable backend/session report
 wayexpand doctor --json                            # stable schema for health checks
+wayexpand fleet status                              # inspect merged fleet layers
 ```
+
+When the daemon starts without an explicit config path, it loads the normal
+`~/.config/wayexpand/expansions.toml` first and then merges standard fleet
+layers from `/etc/wayexpand/snippets.d/`,
+`~/.config/wayexpand/snippets.d/`, and
+`~/.local/share/wayexpand/packs/`. Explicit `WAYEXPAND_CONFIG` paths and
+positional config paths retain single-file behavior. Duplicate triggers or
+hotkeys fail closed and are reported as configuration errors.
 
 `test`/`preview` never inject text into another application. For a plain
 (template) expansion, `test` is a pure, side-effect-free dry run. For a
