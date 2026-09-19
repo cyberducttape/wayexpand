@@ -436,7 +436,7 @@ rm -rf ~/.local/share/espanso/
 
 - **Troubleshooting:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 - **Full documentation:** [GETTING_STARTED.md](GETTING_STARTED.md)
-- **Configuration reference:** [docs/](README.md#documentation)
+- **Configuration reference:** [docs/](../README.md#documentation)
 - **Support matrix:** [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)
 - **Issues:** https://github.com/itchyitchy123/wayexpand/issues
 

@@ -51,7 +51,7 @@ The dashboard adapts to your workflow. Common use cases include:
 
 - **System administrators**: SSL certificates, logrotate configs, systemd
   services, firewall rules, Docker commands, deployment scripts. See
-  [SYSADMIN_EXAMPLES.md](../SYSADMIN_EXAMPLES.md) for production-ready templates.
+  [FOR_SYSADMINS.md](../../FOR_SYSADMINS.md) for production-ready templates.
 - **Developers**: Git commands, build chains, testing snippets, environment setup.
 - **DevOps engineers**: Infrastructure provisioning, CI/CD templates, container
   orchestration, monitoring commands.

@@ -177,7 +177,7 @@ RemoteDesktop-Portal ohne dauerhafte Zustimmung, jeder Verbindungsversuch
 zeigt also einen neuen Berechtigungsdialog. Nach einem Compositor-Neustart
 oder Portal-Problem: `systemctl --user restart wayexpand-evdev.service`.
 
-Details zur Problembehebung: [docs/wiki/Troubleshooting.md](docs/wiki/Troubleshooting.md).
+Details zur Problembehebung: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Sicherheit
 

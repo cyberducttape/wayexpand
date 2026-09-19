@@ -20,6 +20,6 @@ or development guidance.
 
 For current operational, development, and compatibility information, refer to:
 - [`docs/SUPPORT_MATRIX.md`](../SUPPORT_MATRIX.md) - Current backend support and compatibility
-- [`docs/wiki/Getting-Started.md`](../wiki/Getting-Started.md) - Setup and installation
+- [`docs/archive/wiki/Getting-Started.md`](wiki/Getting-Started.md) - Setup and installation
 - [`docs/RELEASING.md`](../RELEASING.md) - Release procedures
-- [`SECURITY.md`](/SECURITY.md) - Security model and guarantees
+- [`SECURITY.md`](../../SECURITY.md) - Security model and guarantees

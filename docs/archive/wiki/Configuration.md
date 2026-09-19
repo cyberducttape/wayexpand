@@ -43,7 +43,7 @@ timeout_ms = 1000
 ```
 
 The authoritative resource and validation limits are documented in
-[`CONFIGURATION_LIMITS.md`](../CONFIGURATION_LIMITS.md).
+[`CONFIGURATION_LIMITS.md`](../../CONFIGURATION_LIMITS.md).
 
 ## Field behavior and limits
 

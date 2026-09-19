@@ -658,7 +658,7 @@ No central server required.
 ## Feedback & Contributions
 
 - **Issues:** https://github.com/itchyitchy123/wayexpand/issues
-- **Discussions:** https://github.com/itchyitchy123/wayexpand/discussions
+- **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
 - **Pull Requests:** https://github.com/itchyitchy123/wayexpand/pulls
 
 ---

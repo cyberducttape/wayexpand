@@ -312,6 +312,6 @@ Users with no `app_filter` config are unaffected.
 ## See Also
 
 - [`RELEASE_1.0_CHECKLIST.md` §5.1](RELEASE_1.0_CHECKLIST.md#5-this-sessions-own-follow-through-items) — Original deferred item
-- [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md) — Compositors requiring testing
-- [`crates/backend-kwin-window/`](../crates/backend-kwin-window/) — Reference implementation (KWin)
-- [`wayland-protocols-wlr`](../Cargo.lock) — Protocol definitions (already vendored)
+- [`SUPPORT_MATRIX.md`](../SUPPORT_MATRIX.md) — Compositors requiring testing
+- [`crates/backend-kwin-window/`](../../crates/backend-kwin-window/) — Reference implementation (KWin)
+- [`wayland-protocols-wlr`](../../Cargo.lock) — Protocol definitions (already vendored)

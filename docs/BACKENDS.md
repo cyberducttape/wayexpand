@@ -212,6 +212,18 @@ of compositor certification.
 Because the kernel provides no field-type information, the matcher **never**
 suspends matching in password fields. Sensitive-field detection is unavailable.
 
+**Non-exclusive capture and rapid typing:**
+The focused application receives evdev key events independently of WayExpand.
+For a match completed by a key-down event, the application can therefore see
+the terminating character before WayExpand erases the matched text. The daemon
+waits for held keys to be released and then requires a short quiet period; if
+more input is observed while it is preparing the replacement, it abandons that
+expansion rather than modifying a moving cursor. This bounds the common race,
+but cannot make non-exclusive kernel capture atomic with application delivery.
+Very high-speed typing can still produce an unexpanded trigger or overlapping
+text. Use input-method-v2 where available for exclusive capture when this
+correctness requirement is unacceptable.
+
 This is the primary security limitation of the evdev backend. Before enabling
 evdev, ensure your deployment model accepts this tradeoff (see SECURITY.md).
 

@@ -184,7 +184,7 @@ dpkg -c ../wayexpand_*.deb | grep 'icons/hicolor'
 
 ### Current Status
 
-**AUR:** https://aur.archlinux.org/wayexpand.git  
+**AUR:** not submitted; see the current packaging documentation for status.
 **Maintainer:** Unknown (check PKGBUILD)  
 **Updated for:** 0.2.0 (need to update to 0.2.1)
 
@@ -305,10 +305,10 @@ curl -L https://github.com/itchyitchy123/wayexpand/archive/refs/tags/v0.2.1.tar.
 
 ## References
 
-- [`debian/rules`](../debian/rules) — Current Debian build rules
-- [`Cargo.lock`](../Cargo.lock) — Locked dependencies (vendored in `vendor/`)
+- [`debian/rules`](../../debian/rules) — Current Debian build rules
+- [`Cargo.lock`](../../Cargo.lock) — Locked dependencies (vendored in `vendor/`)
 - [GitHub Releases](https://github.com/itchyitchy123/wayexpand/releases)
-- [Launchpad Recipe](https://launchpad.net/~cyberducttape/+recipes/wayexpand) (if exists)
+- Launchpad recipe (if published)
 
 ---
 

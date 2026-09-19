@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   ci:
@@ -19,9 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.87.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Generate vendored dependencies (offline builds)
@@ -98,6 +102,32 @@ jobs:
           cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
+          cargo metadata --locked --format-version 1 > "${root}.cargo-metadata.json"
+      - name: Generate SBOM (Software Bill of Materials)
+        run: |
+          # Install syft for SBOM generation
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          version="${GITHUB_REF_NAME#v}"
+
+          # Generate SBOM for source tarball (SPDX format)
+          /usr/local/bin/syft "dir:." \
+            --output=spdx-json \
+            --file="wayexpand-${version}.sbom.spdx.json"
+
+          # Generate SBOM for binary artifacts (CycloneDX JSON format, for tool compatibility)
+          /usr/local/bin/syft "dir:." \
+            --output=cyclonedx-json \
+            --file="wayexpand-${version}.sbom.cyclonedx.json"
+
+          # Generate SBOM for vendored dependencies
+          /usr/local/bin/syft "dir:vendor" \
+            --output=spdx-json \
+            --file="wayexpand-${version}-vendored.sbom.spdx.json"
+
+          echo "✓ SBOMs generated:"
+          echo "  - wayexpand-${version}.sbom.spdx.json"
+          echo "  - wayexpand-${version}.sbom.cyclonedx.json"
+          echo "  - wayexpand-${version}-vendored.sbom.spdx.json"
       - name: Generate source tarballs (clean + vendored)
         shell: bash
         run: |
@@ -110,6 +140,7 @@ jobs:
             --output="wayexpand-${version}.tar.gz" \
             HEAD
           sha256sum "wayexpand-${version}.tar.gz" > "wayexpand-${version}.tar.gz.sha256"
+          cargo metadata --locked --format-version 1 > "wayexpand-${version}.cargo-metadata.json"
 
           # Vendored tarball (with vendor/ for offline builds)
           mkdir -p /tmp/wayexpand-vendor-build
@@ -123,10 +154,19 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           sha256sum "wayexpand-${version}-vendored.tar.gz" > "wayexpand-${version}-vendored.tar.gz.sha256"
           rm -rf /tmp/wayexpand-vendor-build
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            wayexpand-*.tar.gz
+            wayexpand-*.cargo-metadata.json
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@71d29a04ae7c63895f38299d7a5e05d238f7f445 # v2.5.1
         with:
           generate_release_notes: true
           files: |
             wayexpand-*.tar.gz
             wayexpand-*.sha256
+            wayexpand-*.cargo-metadata.json
+            wayexpand-*.sbom.spdx.json
+            wayexpand-*.sbom.cyclonedx.json

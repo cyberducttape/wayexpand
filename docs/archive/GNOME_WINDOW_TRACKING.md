@@ -69,7 +69,7 @@ The output will show:
 
 If you'd like to help add GNOME support:
 
-1. **Monitor upcoming GNOME APIs**: GNOME's accessibility API or a future Wayland protocol extension might provide window information. Subscribe to [GNOME Shell development](https://gitlab.gnome.org/GNOME/gnome-shell/-/issues) for updates.
+1. **Monitor upcoming GNOME APIs**: GNOME's accessibility API or a future Wayland protocol extension might provide window information. Subscribe to [GNOME Shell development](https://gitlab.gnome.org/GNOME/gnome-shell) for updates.
 
 2. **Implement a custom D-Bus service**: A separate GNOME extension could provide a simple D-Bus interface that WayExpand queries for the focused app. This would be a community contribution.
 
@@ -77,6 +77,6 @@ If you'd like to help add GNOME support:
 
 ## See Also
 
-- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — Compositor feature matrix
-- [SECURITY.md](../SECURITY.md) — Sensitive field handling
+- [SUPPORT_MATRIX.md](../SUPPORT_MATRIX.md) — Compositor feature matrix
+- [SECURITY.md](../../SECURITY.md) — Sensitive field handling
 - [docs/wiki/Configuration.md](wiki/Configuration.md#app-filtering) — app_filter configuration reference

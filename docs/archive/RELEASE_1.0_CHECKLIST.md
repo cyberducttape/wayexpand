@@ -1,11 +1,11 @@
 # 1.0 release checklist
 
 This is the milestone-level bar for calling a release "1.0" -- distinct from
-[`docs/wiki/Contributing.md`](wiki/Contributing.md)'s per-PR checklist and
-[`docs/RELEASING.md`](RELEASING.md)'s per-tag mechanics, both of which still
+[`docs/archive/wiki/Contributing.md`](wiki/Contributing.md)'s per-PR checklist and
+[`docs/RELEASING.md`](../RELEASING.md)'s per-tag mechanics, both of which still
 apply to every 1.0 release candidate on top of this.
 
-[`docs/RELEASING.md`](RELEASING.md) already states the governing rule:
+[`docs/RELEASING.md`](../RELEASING.md) already states the governing rule:
 
 > Do not call a release stable while the support matrix still marks key
 > pass-through or compositor coverage as unsupported.
@@ -18,11 +18,11 @@ real desktop session, this repository's automation cannot satisfy it --
 
 ## 1. Compositor certification
 
-The single largest gap. [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md)
+The single largest gap. [`docs/SUPPORT_MATRIX.md`](../SUPPORT_MATRIX.md)
 currently marks every input/output backend "Experimental," and CI only runs
 `cargo test`/`clippy` on `ubuntu-latest` with no real compositor. Promotion
 to "Supported" happens per
-[`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md)'s promotion policy,
+[`docs/INTEGRATION_TESTING.md`](../INTEGRATION_TESTING.md)'s promotion policy,
 which requires normal typing, Unicode, deletion, selections, password
 fields, application shortcuts, focus changes, compositor restart, and
 configuration reload -- a passing unit test or a running systemd process is
@@ -184,6 +184,6 @@ limitations.
 
 - [ ] Everything in [`docs/wiki/Contributing.md`](wiki/Contributing.md)'s
       "Release checklist" passes with `--locked --release`.
-- [ ] [`docs/RELEASING.md`](RELEASING.md) followed exactly, including the
+- [ ] [`docs/RELEASING.md`](../RELEASING.md) followed exactly, including the
       isolated `scripts/test-release.sh` smoke test and the tag/version
       match enforced by the release workflow.

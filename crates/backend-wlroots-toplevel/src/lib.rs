@@ -14,7 +14,7 @@ use thiserror::Error;
 use tracing::debug;
 use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
 use wayland_client::protocol::wl_registry;
-use wayland_client::{Connection, Dispatch, EventQueue};
+use wayland_client::{Connection, Dispatch};
 use wayland_protocols_wlr::foreign_toplevel::v1::client::{
     zwlr_foreign_toplevel_handle_v1, zwlr_foreign_toplevel_manager_v1,
 };
@@ -27,11 +27,6 @@ pub enum WlrootsToplevelError {
     ProtocolNotAvailable,
     #[error("window tracking probe timeout")]
     ProbeTimeout,
-}
-
-/// State for tracking toplevels discovered from the Wayland server.
-struct DiscoveryState {
-    found_manager: bool,
 }
 
 /// Main event handler for Wayland protocol events.
@@ -49,33 +44,6 @@ struct ToplevelHandle {
     app_id: Option<String>,
     title: Option<String>,
     focused: bool,
-}
-
-impl Dispatch<wl_registry::WlRegistry, ()> for DiscoveryState {
-    fn event(
-        state: &mut Self,
-        _registry: &wl_registry::WlRegistry,
-        event: wl_registry::Event,
-        _: &(),
-        _: &Connection,
-        _: &wayland_client::QueueHandle<Self>,
-    ) {
-        use wl_registry::Event;
-        match event {
-            Event::Global {
-                name: _,
-                interface,
-                version,
-            } => {
-                if interface == "zwlr_foreign_toplevel_manager_v1" && version >= 3 {
-                    debug!("discovered wlr-foreign-toplevel-manager-v1 (version {version})");
-                    state.found_manager = true;
-                }
-            }
-            Event::GlobalRemove { .. } => {}
-            _ => {}
-        }
-    }
 }
 
 #[allow(dead_code)]

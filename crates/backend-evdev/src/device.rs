@@ -2,6 +2,7 @@
 //! separate from `lib.rs` so the event-translation state machine in `lib.rs`
 //! stays unit-testable without a real device.
 
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::{Path, PathBuf};
 
 use evdev::{Device, KeyCode};
@@ -16,8 +17,8 @@ impl KeyboardDevice {
         &self.path
     }
 
-    pub fn as_raw_fd(&self) -> std::os::fd::RawFd {
-        std::os::fd::AsRawFd::as_raw_fd(&self.device)
+    pub fn as_fd(&self) -> BorrowedFd<'_> {
+        self.device.as_fd()
     }
 
     pub fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>> {

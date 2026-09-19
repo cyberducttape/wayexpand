@@ -615,7 +615,7 @@ fn surrounding_has_selection(surrounding: Option<&SurroundingText>) -> bool {
 
 fn matcher_event_for_deletion(before: u32, after: u32, selected: bool) -> InputEvent {
     if selected || (before == 0 && after == 0) {
-        InputEvent::Boundary
+        InputEvent::EndOfInput
     } else {
         InputEvent::Backspace
     }
@@ -1247,7 +1247,7 @@ mod tests {
         assert!(!surrounding_has_selection(Some(&empty)));
         assert_eq!(
             matcher_event_for_deletion(0, 0, false),
-            InputEvent::Boundary
+            InputEvent::EndOfInput
         );
         assert_eq!(
             matcher_event_for_deletion(2, 0, false),

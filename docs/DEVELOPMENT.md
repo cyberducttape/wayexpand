@@ -368,5 +368,5 @@ CI runs on every PR:
 
 - **Documentation:** `docs/` directory
 - **Issues:** https://github.com/itchyitchy123/wayexpand/issues
-- **Discussions:** https://github.com/itchyitchy123/wayexpand/discussions
+- **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
 - **Review process:** PRs are reviewed for correctness, safety, and adherence to conventions

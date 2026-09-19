@@ -4,7 +4,7 @@
 **Auditor:** Self-audit against SECURITY.md threat model  
 **Status:** Self-audit complete (code-level verification only); external review and live compositor testing still pending
 
-This document verifies that WayExpand's implementation matches the security guarantees documented in [`SECURITY.md`](../SECURITY.md).
+This document verifies that WayExpand's implementation matches the security guarantees documented in [`SECURITY.md`](../../SECURITY.md).
 
 ---
 

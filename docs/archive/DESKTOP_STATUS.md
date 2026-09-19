@@ -117,8 +117,8 @@ Before claiming "Supported" status, a compositor must pass:
    - Link to this page
 
 3. **You want to implement support?**
-   - See [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md) Phase 3 for daemon integration
-   - See [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) for test setup
+   - See [PROFESSIONAL_ROADMAP.md](../../PROFESSIONAL_ROADMAP.md) Phase 3 for daemon integration
+   - See [INTEGRATION_TESTING.md](../INTEGRATION_TESTING.md) for test setup
 
 ## Version Reference
 
