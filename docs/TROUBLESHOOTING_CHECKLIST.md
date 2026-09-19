@@ -74,7 +74,7 @@ has advertised the protocol. The probe lines are the decision:
 
 | Doctor output | Meaning | Next action |
 | --- | --- | --- |
-| `input-method-v2 probe: manager and seat connection succeeded` | Safest direct Wayland path is available | Enable `wayexpand-input-method.service` |
+| `input-method-v2 probe: manager and seat connection succeeded` | Experimental direct Wayland path is available | Use only with explicit opt-in if accepting possible loss of Escape, arrows, or function keys |
 | `wlroots probe: virtual keyboard globals available` | A wlroots output path was detected | Use `--source=evdev --backend=wlroots` only when doctor lists it as usable |
 | `RequiresPermission` / `permission=Required` | The device or portal needs explicit access | Apply the evdev or portal remediation below |
 | `Unavailable` / `NotImplemented` | The path cannot be used in this session | Choose another path or compositor |
@@ -86,10 +86,11 @@ Inspect the conservative selection explanation before choosing a backend:
 wayexpand backend select --explain
 ```
 
-For a normal input-method-v2 setup:
+For an explicit input-method-v2 setup (experimental; unsupported non-text keys
+may be lost):
 
 ```sh
-systemctl --user enable --now wayexpand-input-method.service
+wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
 wayexpand doctor
 ```
 

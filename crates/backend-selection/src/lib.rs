@@ -255,8 +255,6 @@ pub fn select_backend(
                 ResolvedBackendPair::Stdin(backend)
             }
         }
-    } else if capabilities.has_input_method_v2 {
-        ResolvedBackendPair::InputMethod
     } else if capabilities.has_dev_input {
         ResolvedBackendPair::Evdev(InjectorBackend::Libei)
     } else {
@@ -291,19 +289,26 @@ fn selection_reason(
         return format!("user-specified backend: {backend}");
     }
     match pair {
-        ResolvedBackendPair::InputMethod => {
-            "auto-selected input-method-v2: safest option (password field protection)".to_string()
-        }
         ResolvedBackendPair::Evdev(InjectorBackend::Libei) => {
+            let availability = if capabilities.has_input_method_v2 {
+                "input-method-v2 is available but remains opt-in because unsupported non-text keys may be lost"
+            } else {
+                "input-method-v2 is unavailable"
+            };
             let socket = if capabilities.has_direct_libei_socket {
                 ", direct EIS socket available"
             } else {
                 "; portal consent will be requested when libei starts"
             };
-            format!("auto-selected evdev + libei: input-method-v2 unavailable{socket}")
+            format!("auto-selected evdev + libei: {availability}{socket}")
         }
         ResolvedBackendPair::Stdin(InjectorBackend::Libei) => {
-            "conservative fallback: stdin + libei (no other input sources available)".to_string()
+            let availability = if capabilities.has_input_method_v2 {
+                "input-method-v2 remains opt-in because unsupported non-text keys may be lost"
+            } else {
+                "no evdev device is readable and input-method-v2 is unavailable"
+            };
+            format!("conservative fallback: stdin + libei ({availability})")
         }
         _ => format!("selected {} + {}", pair.source(), pair.backend()),
     }
@@ -390,6 +395,11 @@ impl BackendSelection {
                     "  exclusive capture may drop unsupported navigation/function keys"
                 )
                 .unwrap();
+                writeln!(
+                    output,
+                    "  experimental opt-in only: input-method-v2 does not provide general key pass-through"
+                )
+                .unwrap();
             }
             ResolvedBackendPair::Stdin(_) => {
                 writeln!(output, "  no automatic input path is selected").unwrap();
@@ -419,13 +429,33 @@ mod tests {
     }
 
     #[test]
-    fn automatic_resolution_and_explanation_share_the_same_pair() {
+    fn automatic_resolution_avoids_input_method_even_when_available() {
         let selection = select_backend(&capabilities(true, true, false), None, None).unwrap();
+        assert_eq!(
+            selection.pair,
+            ResolvedBackendPair::Evdev(InjectorBackend::Libei)
+        );
+        assert!(selection.reason.contains("remains opt-in"));
+        assert!(selection.explanation().contains("capture: evdev"));
+        assert!(selection.explanation().contains("injection: libei"));
+    }
+
+    #[test]
+    fn input_method_remains_available_as_an_explicit_opt_in() {
+        let selection =
+            select_backend(&capabilities(true, true, false), Some("input-method"), None).unwrap();
         assert_eq!(selection.pair, ResolvedBackendPair::InputMethod);
-        assert!(selection.explanation().contains("capture: input-method-v2"));
-        assert!(selection
-            .explanation()
-            .contains("injection: input-method-v2"));
+        assert!(selection.explanation().contains("experimental opt-in only"));
+    }
+
+    #[test]
+    fn automatic_fallback_also_avoids_input_method_without_evdev() {
+        let selection = select_backend(&capabilities(true, false, false), None, None).unwrap();
+        assert_eq!(
+            selection.pair,
+            ResolvedBackendPair::Stdin(InjectorBackend::Libei)
+        );
+        assert!(selection.reason.contains("remains opt-in"));
     }
 
     #[test]

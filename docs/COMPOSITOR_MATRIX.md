@@ -10,7 +10,7 @@ common GTK, Qt, browser, terminal, and password-field targets.
 | Sway | evdev + libei | evdev + libei; input-method-v2 only when probed | wlroots scaffold, not active tracking | Implemented, awaiting compositor certification |
 | Hyprland | evdev + libei | evdev + libei; input-method-v2 only when probed | wlroots scaffold, not active tracking | Implemented, awaiting compositor certification |
 | river | evdev + libei | evdev + libei; input-method-v2 only when probed | wlroots scaffold, not active tracking | Implemented, awaiting compositor certification |
-| GNOME | input-method-v2 only when `doctor` confirms it | input-method-v2 or evdev + libei | No supported app tracker | Limited; runtime probing required |
+| GNOME | evdev + libei when readable; stdin + libei otherwise | input-method-v2 (explicit opt-in) or evdev + libei | No supported app tracker | Limited; runtime probing required |
 | X11 / XWayland | explicit evdev route | evdev + compatible output backend | No native tracker | Capture/output compatibility must be verified |
 
 The daemon’s automatic choice is deliberately conservative. Explicit
