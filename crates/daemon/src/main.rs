@@ -125,6 +125,13 @@ fn main() -> Result<()> {
         }
     }
     let input_method_mode = source_name.as_deref() == Some("input-method");
+    if input_method_mode {
+        warn!(
+            "input-method-v2 backend selected: exclusive keyboard capture is active; \
+            unsupported keys (Escape, arrows, F-keys, etc.) will not pass through. \
+            Use libei or wlroots backend for full key support."
+        );
+    }
     let evdev_mode = source_name.as_deref() == Some("evdev");
     let active_source = source_name.as_deref().unwrap_or("stdin");
     let mut reconnect_delay = Duration::from_millis(250);
