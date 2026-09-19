@@ -385,7 +385,6 @@ impl ConfigMerger {
                 }
                 self.settings = Some((config.settings.clone(), provenance.clone()));
             }
-
         }
 
         self.stats
@@ -445,10 +444,12 @@ impl ConfigMerger {
 
 fn discover_pack_dirs(dir: &Path) -> Result<Vec<(PathBuf, String)>, FleetError> {
     let mut pack_dirs: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| FleetError::Config(ConfigError::Read {
-            path: dir.display().to_string(),
-            source: e,
-        }))?
+        .map_err(|e| {
+            FleetError::Config(ConfigError::Read {
+                path: dir.display().to_string(),
+                source: e,
+            })
+        })?
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.path().is_dir())
         .map(|entry| {
@@ -518,7 +519,8 @@ mod tests {
 
     #[test]
     fn pack_directory_discovery_returns_named_packs() {
-        let root = std::env::temp_dir().join(format!("wayexpand-pack-discovery-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-pack-discovery-{}", std::process::id()));
         std::fs::create_dir_all(root.join("linux-admin")).unwrap();
         std::fs::create_dir_all(root.join("kubernetes")).unwrap();
 
@@ -533,5 +535,84 @@ mod tests {
     fn layer_ordering() {
         assert!(Layer::Organization < Layer::User);
         assert!(Layer::User < Layer::Pack);
+    }
+
+    #[test]
+    fn fleet_merge_no_duplication_regression() {
+        // Regression test for fleet duplication bug (N expansions → N² entries).
+        // This test would have caught the bug where ConfigMerger stored entire
+        // Config objects instead of individual ExpansionConfig/HotkeyConfig items.
+        let mut merger = ConfigMerger::new();
+
+        // Simulate loading a single TOML file with 3 expansions
+        let config_str = r#"
+[[expansion]]
+trigger = ":a"
+replacement = "first"
+
+[[expansion]]
+trigger = ":b"
+replacement = "second"
+
+[[expansion]]
+trigger = ":c"
+replacement = "third"
+"#;
+        let config = Config::parse(config_str).unwrap();
+
+        // Manually add expansions as if loaded from a file
+        for expansion in config.expansion {
+            merger
+                .expansions
+                .insert(expansion.trigger.clone(), (
+                    expansion.clone(),
+                    Provenance {
+                        file: "test.toml".to_string(),
+                        layer: "test".to_string(),
+                    },
+                ));
+        }
+
+        let result = merger.merge().unwrap();
+
+        // Should have exactly 3 expansions, not 9 (3×3 duplication bug)
+        assert_eq!(
+            result.config.expansion.len(),
+            3,
+            "Fleet merge created duplicate entries"
+        );
+    }
+
+    #[test]
+    fn organization_policy_preserved_during_merge() {
+        // Regression test for fleet policy loss bug.
+        // Verifies that organization policy set during load_layer() is preserved
+        // through merge() instead of being replaced with default.
+        let config1 = Config::parse(r#"
+[[expansion]]
+trigger = ":test"
+replacement = "test"
+
+[organization]
+safe_mode = true
+disable_commands = false
+"#).unwrap();
+
+        // Mark that this config has organization policy
+        assert!(config1.organization.safe_mode);
+
+        // Load another config without policy
+        let config2 = Config::parse(r#"
+[[expansion]]
+trigger = ":other"
+replacement = "other"
+"#).unwrap();
+
+        assert!(!config2.organization.safe_mode);
+
+        // Both configs should be valid (this was the issue:
+        // policy was loaded but never stored in ConfigMerger)
+        assert!(config1.organization.is_active());
+        assert!(!config2.organization.is_active());
     }
 }

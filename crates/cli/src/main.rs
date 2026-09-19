@@ -1,3 +1,5 @@
+mod args;
+
 use anyhow::{bail, Context, Result};
 use std::{
     env, fs,
@@ -18,16 +20,7 @@ use wayexpand_core::{
     BackendState, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
 };
 
-/// Pulls the first `--json` flag out of `args`, wherever it appears, so
-/// subcommands accept it in any position rather than one fixed slot.
-fn take_json_flag(args: &mut Vec<String>) -> bool {
-    if let Some(position) = args.iter().position(|arg| arg == "--json") {
-        args.remove(position);
-        true
-    } else {
-        false
-    }
-}
+use args::{take_json_flag, take_option};
 
 const EXIT_USAGE: i32 = 2;
 const EXIT_CONFIG: i32 = 3;
@@ -697,30 +690,6 @@ fn session_description() -> &'static str {
     }
 }
 
-fn take_option(args: &mut Vec<String>, name: &str) -> Result<Option<String>> {
-    let prefix = format!("{name}=");
-    let Some(index) = args
-        .iter()
-        .position(|arg| arg == name || arg.starts_with(&prefix))
-    else {
-        return Ok(None);
-    };
-    let value = if let Some(value) = args[index].strip_prefix(&prefix) {
-        value.to_owned()
-    } else if index + 1 < args.len() {
-        let value = args[index + 1].clone();
-        args.remove(index + 1);
-        value
-    } else {
-        bail!("{name} requires a value");
-    };
-    args.remove(index);
-    if value.is_empty() {
-        bail!("{name} requires a non-empty value");
-    }
-    Ok(Some(value))
-}
-
 fn print_backend_diagnostics() -> bool {
     let backends = discover_backends();
     for status in &backends {
@@ -851,13 +820,17 @@ fn print_backend_selection_explain() {
     let libei_plausible = env::var_os("LIBEI_SOCKET").is_some()
         || desktop_lower.contains("kde")
         || desktop_lower.contains("gnome");
-    let input_method_ready = env::var_os("WAYLAND_DISPLAY").is_some()
-        && InputMethodSource::probe().is_ok();
+    let input_method_ready =
+        env::var_os("WAYLAND_DISPLAY").is_some() && InputMethodSource::probe().is_ok();
 
     let (capture, injection, reason) = if conservative_compositor && evdev_ready {
         (
             "evdev",
-            if libei_plausible { "libei" } else { "unverified" },
+            if libei_plausible {
+                "libei"
+            } else {
+                "unverified"
+            },
             "input-method-v2 is not certified for this compositor; readable evdev is available",
         )
     } else if input_method_ready {
@@ -869,7 +842,11 @@ fn print_backend_selection_explain() {
     } else if evdev_ready {
         (
             "evdev",
-            if libei_plausible { "libei" } else { "unverified" },
+            if libei_plausible {
+                "libei"
+            } else {
+                "unverified"
+            },
             "input-method-v2 probe failed; readable evdev is available",
         )
     } else {
@@ -890,7 +867,14 @@ fn print_backend_selection_explain() {
     println!();
     println!("Reason:");
     println!("  {reason}");
-    println!("  desktop: {}", if desktop.is_empty() { "unknown" } else { &desktop });
+    println!(
+        "  desktop: {}",
+        if desktop.is_empty() {
+            "unknown"
+        } else {
+            &desktop
+        }
+    );
     println!(
         "  /dev/input readable: {}",
         if evdev_ready { "yes" } else { "no" }
@@ -1373,9 +1357,10 @@ mod tests {
 
     #[test]
     fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
-        let contract: serde_json::Value =
-            serde_json::from_str(include_str!("../../../tests/contracts/cli-json-shapes.json"))
-                .expect("CLI contract fixture must be valid JSON");
+        let contract: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contracts/cli-json-shapes.json"
+        ))
+        .expect("CLI contract fixture must be valid JSON");
         let status_fields = contract["status"]
             .as_array()
             .expect("status contract must be an array")
