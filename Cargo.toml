@@ -12,7 +12,6 @@ members = [
     "crates/backend-evdev",
     "crates/backend-clipboard",
     "crates/backend-kwin-window",
-    "crates/backend-wlroots-toplevel",
 ]
 
 [workspace.package]
