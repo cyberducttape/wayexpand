@@ -160,6 +160,7 @@ pub struct WlrootsInjector {
     keyboard: ZwpVirtualKeyboardV1,
     keymap: Option<File>,
     mappings: HashMap<char, u32>,
+    minimal_keymap: File,
 }
 
 impl WlrootsInjector {
@@ -214,6 +215,7 @@ impl WlrootsInjector {
         connection
             .flush()
             .map_err(|error| WlrootsError::Flush(error.to_string()))?;
+        let minimal_keymap = create_minimal_keymap()?;
         Ok(Self {
             connection,
             event_queue,
@@ -221,6 +223,7 @@ impl WlrootsInjector {
             keyboard,
             keymap: None,
             mappings: HashMap::new(),
+            minimal_keymap,
         })
     }
 
@@ -238,6 +241,19 @@ impl WlrootsInjector {
         self.keyboard
             .keymap(wl_keyboard::KeymapFormat::XkbV1.into(), file.as_fd(), size);
         self.keymap = Some(file);
+        self.connection
+            .flush()
+            .map_err(|error| WlrootsError::Flush(error.to_string()))
+    }
+
+    fn send_minimal_keymap(&mut self) -> Result<(), WlrootsError> {
+        self.mappings.clear();
+        self.minimal_keymap.seek(SeekFrom::Start(0))
+            .map_err(WlrootsError::Keymap)?;
+        let size = self.minimal_keymap.metadata().map_err(WlrootsError::Keymap)?.len() as u32;
+        self.keyboard
+            .keymap(wl_keyboard::KeymapFormat::XkbV1.into(), self.minimal_keymap.as_fd(), size);
+        self.keymap = None;
         self.connection
             .flush()
             .map_err(|error| WlrootsError::Flush(error.to_string()))
@@ -346,13 +362,25 @@ fn tempfile_keymap() -> Result<File, WlrootsError> {
     Ok(file)
 }
 
+fn create_minimal_keymap() -> Result<File, WlrootsError> {
+    let (keymap, _) = build_keymap(std::iter::empty())?;
+    let mut file = tempfile_keymap()?;
+    file.write_all(keymap.as_bytes())
+        .map_err(WlrootsError::Keymap)?;
+    file.write_all(&[0]).map_err(WlrootsError::Keymap)?;
+    file.flush().map_err(WlrootsError::Keymap)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(WlrootsError::Keymap)?;
+    Ok(file)
+}
+
 impl TextInjector for WlrootsInjector {
     fn name(&self) -> &'static str {
         BACKEND_NAME
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.upload_keymap(std::iter::empty())
+        self.send_minimal_keymap()
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -401,7 +429,7 @@ impl TextInjector for WlrootsInjector {
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        self.upload_keymap(std::iter::empty())
+        self.send_minimal_keymap()
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
