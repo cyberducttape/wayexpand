@@ -950,7 +950,13 @@ fn validate_token_parent_chain(path: &Path) -> std::io::Result<()> {
                 "portal token parent is not a directory",
             ));
         }
-        if metadata.uid() != current_uid && metadata.uid() != 0 {
+        // Skip ownership check for system directories (/, /home, /run) where
+        // containerization may cause unexpected UID ownership. User-owned
+        // directories still validate strictly.
+        let is_system_dir = current == Path::new("/")
+            || current == Path::new("/home")
+            || current == Path::new("/run");
+        if !is_system_dir && metadata.uid() != current_uid && metadata.uid() != 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "portal token parent has an untrusted owner",
