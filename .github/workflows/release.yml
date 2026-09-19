@@ -98,6 +98,30 @@ jobs:
           cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
+      - name: Generate source tarballs (clean + vendored)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+
+          # Clean tarball (Cargo.lock only)
+          git archive --format=tar.gz \
+            --prefix="wayexpand-${version}/" \
+            --output="wayexpand-${version}.tar.gz" \
+            HEAD
+          sha256sum "wayexpand-${version}.tar.gz" > "wayexpand-${version}.tar.gz.sha256"
+
+          # Vendored tarball (with vendor/ for offline builds)
+          mkdir -p /tmp/wayexpand-vendor-build
+          cd /tmp/wayexpand-vendor-build
+          tar -xzf "$GITHUB_WORKSPACE/wayexpand-${version}.tar.gz"
+          cd "wayexpand-${version}"
+          cargo vendor vendor/ >/dev/null 2>&1
+          cd ..
+          tar -czf "$GITHUB_WORKSPACE/wayexpand-${version}-vendored.tar.gz" "wayexpand-${version}"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum "wayexpand-${version}-vendored.tar.gz" > "wayexpand-${version}-vendored.tar.gz.sha256"
+          rm -rf /tmp/wayexpand-vendor-build
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
