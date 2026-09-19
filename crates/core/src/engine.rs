@@ -286,6 +286,14 @@ impl ExpansionEngine {
         self.config.organization.disable_commands
     }
 
+    pub fn set_title_matching_disabled(&mut self, disabled: bool) {
+        self.config.organization.disable_title_matching = disabled;
+    }
+
+    pub fn title_matching_disabled(&self) -> bool {
+        self.config.organization.disable_title_matching
+    }
+
     /// Return completed command expansions that are still safe to apply.
     /// Any intervening input, focus, pause, or window event advances the
     /// generation and causes late output to be discarded rather than erasing
@@ -430,12 +438,9 @@ impl ExpansionEngine {
         configure_process_group(&mut command);
         let mut child = command.spawn().map_err(HotkeyError::Spawn)?;
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
-        loop {
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(status)) if status.success() => return Ok(()),
-                Ok(Some(status)) => {
-                    return Err(HotkeyError::Failed(status.to_string()));
-                }
+                Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
                 Ok(None) => {
                     kill_process_group(&child);
@@ -448,6 +453,15 @@ impl ExpansionEngine {
                     return Err(HotkeyError::Spawn(error));
                 }
             }
+        };
+
+        // Kill process group to ensure any descendant processes are terminated
+        kill_process_group(&child);
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(HotkeyError::Failed(status.to_string()))
         }
     }
 
@@ -946,6 +960,10 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
             }
         }
     };
+
+    // Kill process group to ensure any descendant processes are terminated
+    kill_process_group(&child);
+
     if !status.success() {
         return Err(CommandError::NonZeroExit(status.code()));
     }
