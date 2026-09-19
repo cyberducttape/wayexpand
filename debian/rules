@@ -22,6 +22,8 @@ override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand-gui usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-ui usr/bin/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
+	dh_install --package=wayexpand io.github.itchyitchy123.WayExpand.metainfo.xml usr/share/metainfo/
+	dh_install --package=wayexpand docs/wayexpand.1 usr/share/man/man1/
 	dh_install --package=wayexpand assets/icon/hicolor/16x16/apps/wayexpand.png usr/share/icons/hicolor/16x16/apps/
 	dh_install --package=wayexpand assets/icon/hicolor/24x24/apps/wayexpand.png usr/share/icons/hicolor/24x24/apps/
 	dh_install --package=wayexpand assets/icon/hicolor/32x32/apps/wayexpand.png usr/share/icons/hicolor/32x32/apps/

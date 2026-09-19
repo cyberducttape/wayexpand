@@ -65,7 +65,6 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
-#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 const PORTAL_TOKEN_FILENAME: &str = "libei-portal-token";
 
 #[derive(Debug, Error)]
@@ -727,14 +726,12 @@ fn portal_token_path() -> Option<PathBuf> {
 }
 
 /// Read a stored portal session token, if one exists and is accessible.
-#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 fn read_portal_token() -> Option<String> {
     let path = portal_token_path()?;
     std::fs::read_to_string(&path).ok()
 }
 
 /// Store a portal session token with restricted permissions (0600).
-#[allow(dead_code)] // infrastructure for restoration_token extraction when ashpd API updates
 fn store_portal_token(token: &str) -> std::io::Result<()> {
     let path = portal_token_path().ok_or_else(|| {
         std::io::Error::new(
@@ -777,29 +774,39 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
             let proxy: RemoteDesktop<'static> = RemoteDesktop::new()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
+
+            // Create a fresh session (restoration happens via select_devices token)
             let session = proxy
                 .create_session()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
+
             // Request explicitly-revoked persistent mode to enable session restoration tokens.
-            // When enabled, the portal provides a restoration token that allows
-            // reconnecting without showing the consent dialog again. The token is
-            // extracted after successful connection and stored locally.
+            // If we have a stored token, pass it to skip the consent dialog on reconnect.
+            // The portal will restore permissions from the token if it's valid.
+            let stored_token = read_portal_token();
             proxy
                 .select_devices(
                     &session,
                     DeviceType::Keyboard.into(),
-                    None,
+                    stored_token.as_deref(),
                     PersistMode::ExplicitlyRevoked,
                 )
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
-            proxy
+
+            let start_response = proxy
                 .start(&session, None)
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?
                 .response()
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
+
+            // Extract and store restoration token for next connection
+            if let Some(token) = start_response.restore_token() {
+                let _ = store_portal_token(token);
+            }
+
             let fd = proxy
                 .connect_to_eis(&session)
                 .await
@@ -809,14 +816,6 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
         .await
         .map_err(|_| LibeiError::Portal("portal session timed out after 30 seconds".into()))?
     })?;
-
-    // TODO: Extract restoration token from session and store it.
-    // Once ashpd exposes Session::restoration_token() or similar, extract the token here:
-    //   if let Ok(token) = session.restoration_token() {
-    //       let _ = store_portal_token(&token);
-    //   }
-    // On next connection attempt, try read_portal_token() first and call
-    // proxy.restore_session(token) instead of create_session().
 
     Ok((
         stream,

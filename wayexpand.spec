@@ -45,6 +45,9 @@ install -Dm755 target/release/wayexpand-gui %{buildroot}%{_bindir}/wayexpand-gui
 install -Dm755 target/release/wayexpand-ui %{buildroot}%{_bindir}/wayexpand-ui
 
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
+install -Dm644 io.github.itchyitchy123.WayExpand.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml
+install -Dm644 docs/wayexpand.1 %{buildroot}%{_mandir}/man1/wayexpand.1
 
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     install -Dm644 assets/icon/hicolor/${size}/apps/wayexpand.png \
@@ -68,6 +71,8 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_bindir}/wayexpand-gui
 %{_bindir}/wayexpand-ui
 %{_datadir}/applications/wayexpand.desktop
+%{_datadir}/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml
+%{_mandir}/man1/wayexpand.1
 %{_userunitdir}/wayexpand.service
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service

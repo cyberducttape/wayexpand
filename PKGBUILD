@@ -3,7 +3,7 @@ pkgname=wayexpand
 pkgver=1.1.2
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url="https://github.com/itchyitchy123/wayexpand"
 license=('MIT')
 depends=(
@@ -48,6 +48,9 @@ package() {
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
+    install -Dm644 io.github.itchyitchy123.WayExpand.metainfo.xml \
+        "${pkgdir}/usr/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml"
+    install -Dm644 docs/wayexpand.1 "${pkgdir}/usr/share/man/man1/wayexpand.1"
 
     # Install application icon at every size the desktop entry's Icon=
     # lookup can resolve to; without these the app shows a generic icon.

@@ -30,6 +30,8 @@ config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
+metainfo_dir="$HOME/.local/share/metainfo"
+man_dir="$HOME/.local/share/man/man1"
 
 if command -v systemctl >/dev/null 2>&1; then
     for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
@@ -62,6 +64,15 @@ if [ -e "$application_dir/wayexpand.desktop" ]; then
     rm -f -- "$application_dir/wayexpand.desktop"
     printf '%s\n' "Removed $application_dir/wayexpand.desktop"
 fi
+
+for installed_file in \
+    "$metainfo_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
+    "$man_dir/wayexpand.1"; do
+    if [ -e "$installed_file" ]; then
+        rm -f -- "$installed_file"
+        printf '%s\n' "Removed $installed_file"
+    fi
+done
 
 icon_base="$HOME/.local/share/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do

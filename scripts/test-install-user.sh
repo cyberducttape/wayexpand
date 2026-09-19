@@ -44,6 +44,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
+[ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
+[ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]

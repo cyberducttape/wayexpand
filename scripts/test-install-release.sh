@@ -6,7 +6,7 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
-mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/scripts" "$release_dir/udev"
+mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev"
 for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
@@ -26,6 +26,9 @@ install -m 0644 "$project_dir/udev/71-wayexpand-evdev.rules" "$release_dir/udev/
 "$release_dir/scripts/install-evdev-permissions.sh" --dry-run >/dev/null
 
 mkdir -p "$test_root/home" "$test_root/config"
+install -m 0644 "$project_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
+    "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml"
+install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
 
 # Stub out systemctl so this test never touches the invoking user's real
 # systemd session, no matter what HOME/XDG_CONFIG_HOME are set to (systemctl
@@ -48,6 +51,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
+[ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
+[ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
@@ -63,6 +68,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ ! -e "$test_root/home/.local/bin/wayexpand-ui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-gui" ]
 [ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
+[ ! -e "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
+[ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
