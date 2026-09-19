@@ -57,14 +57,27 @@ Organizations can restrict which packs are allowed:
 allowed_packs = ["approved-pack-1", "approved-pack-2"]
 ```
 
-## Conflict Resolution
+## Layer Precedence and Conflict Resolution
 
-When the same trigger appears in multiple layers:
-- Organization layer wins (highest priority)
-- User layer second
-- Packs third (lowest priority)
+**Layer Loading Order:** Organization → User → Packs → Base config (primary config appended last, lowest priority)
 
-Duplicate triggers across same layer are rejected with clear error messages.
+**Duplicate/Conflict Behavior:**
+
+| Object | Duplicate behavior | Notes |
+|--------|-------------------|-------|
+| Expansion trigger | Hard error, rejected | Fail-closed: prevents accidental overwrites. Use distinct trigger names. |
+| Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
+| Settings (max_replacement_size, etc.) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins. |
+| Organization policy | Organization layer wins | If fleet organization policy exists, it replaces base config policy entirely. |
+| Curated packs | Filtered by policy | Organization policy `allowed_packs` restricts which packs are active. |
+| Base config | Appended last (lowest priority) | Fleet layers are merged first, then base config expansions/hotkeys are appended. Base settings only override if fleet has no settings. |
+
+**Example precedence:**
+- If organization defines `max_replacement_size = 1024` and pack defines `max_replacement_size = 2048`, pack value wins (2048).
+- If organization defines `;sig` trigger and user also defines `;sig`, deployment fails with duplicate-trigger error.
+- Base config's existing snippets are appended to fleet snippets (no override, no error).
+
+**For Infrastructure:** Ensure distinct trigger/hotkey names across organizational, user, and pack layers. Use policy enforcement (`safe_mode = true`) to catch duplicate-trigger errors during validation before deployment.
 
 ## See Also
 

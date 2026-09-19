@@ -8,7 +8,25 @@
 /// 3. `~/.local/share/wayexpand/packs/` (optional curated packs)
 ///
 /// Each layer is a directory of .toml files. Within a layer, files are merged
-/// alphabetically. Duplicate triggers are rejected with source provenance.
+/// alphabetically.
+///
+/// ## Precedence and Conflict Resolution
+///
+/// **Expansion triggers and hotkey chords:** Duplicates are rejected with error
+/// (fail-closed). Each trigger/chord name must be unique across all layers and
+/// the base config.
+///
+/// **Settings:** Last layer wins. Pack settings override user settings, which
+/// override organization settings. Within a layer, later files override earlier.
+///
+/// **Organization policy:** If fleet organization policy exists, it replaces
+/// the base config policy entirely (not merged).
+///
+/// **Curated packs:** Filtered by organization policy `allowed_packs`. Only
+/// packs in the allowed list are loaded and merged.
+///
+/// **Base config:** Appended last (lowest priority for expansions/hotkeys).
+/// Base settings only override if no layer provides settings.
 use crate::{Config, ConfigError};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -229,9 +247,16 @@ impl FleetConfig {
 }
 
 /// Merges configuration from multiple layers with duplicate detection.
+///
+/// Implements fleet precedence: duplicates are rejected (fail-closed) for triggers
+/// and hotkeys, settings follow "last wins", policy is replaced (not merged).
+///
+/// Duplicate detection across all loaded layers ensures configuration safety:
+/// accidental trigger collisions are caught early rather than silently masked
+/// by load order. This is intentional and trusted behavior for enterprise fleets.
 struct ConfigMerger {
-    // BUG FIX: Store individual items, not entire Config objects.
-    // Previous bug: storing entire Config per trigger caused N expansions → N² items after flattening.
+    // Individual items keyed by trigger/chord for duplicate detection.
+    // Stores (item, provenance) to report exact source on conflict.
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
     settings: Option<(crate::Settings, Provenance)>,
