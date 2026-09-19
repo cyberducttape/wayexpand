@@ -64,6 +64,7 @@ Duplicate triggers across same layer are rejected with clear error messages.
 
 ## See Also
 
-- [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) - Policy enforcement
-- [ENTERPRISE_ROADMAP.md](ENTERPRISE_ROADMAP.md) - Fleet architecture details
-- [OPERATIONS.md](OPERATIONS.md) - Deployment guide for fleet systems
+- [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) - Policy enforcement and compliance
+- [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) - Ansible playbooks for fleet deployment
+- [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) - Puppet modules for fleet management
+- [OPERATIONS.md](OPERATIONS.md) - Running and maintaining WayExpand
