@@ -1031,8 +1031,7 @@ fn apply_case_style(typed: &str, text: &str) -> String {
 }
 
 /// Why a command-backed expansion's configured program did not produce
-/// usable output. Kept narrow (no raw OS error strings) since this can be
-/// surfaced to the GUI/CLI, not just logged internally.
+/// usable output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandError {
     /// The program could not be started at all (not found, not executable,
@@ -1040,6 +1039,8 @@ pub enum CommandError {
     SpawnFailed,
     /// The program did not exit within `command.timeout_ms` and was killed.
     Timeout,
+    /// The process status could not be obtained after the program was started.
+    WaitFailed(String),
     /// The program exited but reported failure.
     NonZeroExit(Option<i32>),
     /// Output exceeded the bounded size this engine will buffer.
@@ -1058,6 +1059,9 @@ impl std::fmt::Display for CommandError {
         match self {
             CommandError::SpawnFailed => write!(f, "could not start the program"),
             CommandError::Timeout => write!(f, "timed out before it produced output"),
+            CommandError::WaitFailed(error) => {
+                write!(f, "failed while obtaining process status: {error}")
+            }
             CommandError::NonZeroExit(Some(code)) => write!(f, "exited with status {code}"),
             CommandError::NonZeroExit(None) => write!(f, "was terminated by a signal"),
             CommandError::OutputTooLarge => write!(
@@ -1109,10 +1113,10 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
                 let _ = child.wait();
                 return Err(CommandError::Timeout);
             }
-            Err(_) => {
+            Err(error) => {
                 kill_process_group(&child);
                 let _ = child.wait();
-                return Err(CommandError::Timeout);
+                return Err(CommandError::WaitFailed(error.to_string()));
             }
         }
     };
@@ -1617,6 +1621,17 @@ mod tests {
             assert!(Instant::now() < deadline, "command metrics did not update");
             thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    #[test]
+    fn command_wait_failures_are_not_reported_as_timeouts() {
+        let error = CommandError::WaitFailed("child status unavailable".into());
+
+        assert_ne!(error, CommandError::Timeout);
+        assert_eq!(
+            error.to_string(),
+            "failed while obtaining process status: child status unavailable"
+        );
     }
 
     #[test]
