@@ -17,6 +17,10 @@ ExecStart=/usr/bin/env wayexpand-daemon --source=evdev --backend=libei
 # persists portal consent tokens, so daemon reconnections skip the consent
 # dialog after the first connection. The daemon's internal backoff
 # (crates/daemon/src/main.rs) handles output loss gracefully.
+# Rate limiting prevents restart loops if evdev persistently fails
+# (max 5 restarts within 60 seconds before unit enters failed state).
+StartLimitIntervalSec=60
+StartLimitBurst=5
 Restart=on-failure
 RestartSec=2s
 SuccessExitStatus=SIGTERM
