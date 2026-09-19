@@ -56,15 +56,22 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
     file.take(16 * 1024 * 1024 + 1)
         .read_to_end(&mut contents)
         .ok()?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    contents.hash(&mut hasher);
+    // Use a stable hash algorithm independent of Rust compiler version.
+    // A simple byte-wise XOR and sum is sufficient to detect content changes
+    // on filesystems with coarse timestamps (same-size edits).
+    let mut fingerprint: u64 = 0;
+    for chunk in contents.chunks(8) {
+        let mut bytes = [0_u8; 8];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        fingerprint = fingerprint.wrapping_add(u64::from_le_bytes(bytes));
+    }
     Some(FileStamp {
         modified,
         length,
         inode,
         change_time,
         change_time_nsec,
-        fingerprint: hasher.finish(),
+        fingerprint,
     })
 }
 
