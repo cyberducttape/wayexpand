@@ -855,13 +855,11 @@ impl TextInjector for InputMethodSource {
         };
         input_method.delete_surrounding_text(bytes, 0);
         input_method.commit(self.state.commit_serial);
-        self.connection
-            .flush()
-            .map_err(|error| InjectorError {
-                backend: SOURCE_NAME,
-                message: error.to_string(),
-                retryable: true,
-            })?;
+        self.connection.flush().map_err(|error| InjectorError {
+            backend: SOURCE_NAME,
+            message: error.to_string(),
+            retryable: true,
+        })?;
         optimistic_replace(&mut self.state.surrounding_text, trigger, "")
     }
 
@@ -879,13 +877,11 @@ impl TextInjector for InputMethodSource {
         };
         input_method.commit_string(text.to_owned());
         input_method.commit(self.state.commit_serial);
-        self.connection
-            .flush()
-            .map_err(|error| InjectorError {
-                backend: SOURCE_NAME,
-                message: error.to_string(),
-                retryable: true,
-            })?;
+        self.connection.flush().map_err(|error| InjectorError {
+            backend: SOURCE_NAME,
+            message: error.to_string(),
+            retryable: true,
+        })?;
         optimistic_commit(&mut self.state.surrounding_text, text);
         Ok(())
     }
@@ -905,13 +901,11 @@ impl TextInjector for InputMethodSource {
             input_method.commit_string(text.to_owned());
         }
         input_method.commit(self.state.commit_serial);
-        self.connection
-            .flush()
-            .map_err(|error| InjectorError {
-                backend: SOURCE_NAME,
-                message: error.to_string(),
-                retryable: true,
-            })?;
+        self.connection.flush().map_err(|error| InjectorError {
+            backend: SOURCE_NAME,
+            message: error.to_string(),
+            retryable: true,
+        })?;
         optimistic_replace(&mut self.state.surrounding_text, trigger, text)
     }
 }
@@ -1276,6 +1270,21 @@ mod tests {
         assert!(surrounding_ends_with_trigger(Some(&surrounding), ":x"));
         assert!(!surrounding_ends_with_trigger(Some(&surrounding), ":y"));
         assert!(!surrounding_ends_with_trigger(None, ":x"));
+    }
+
+    #[test]
+    fn forwarded_text_updates_context_before_immediate_replacement() {
+        let mut surrounding = Some(SurroundingText {
+            text: ":".into(),
+            cursor: 1,
+            anchor: 1,
+        });
+
+        optimistic_commit(&mut surrounding, "x");
+
+        assert!(surrounding_ends_with_trigger(surrounding.as_ref(), ":x"));
+        optimistic_replace(&mut surrounding, ":x", "expanded").unwrap();
+        assert_eq!(surrounding.as_ref().unwrap().text, "expanded");
     }
 
     #[test]

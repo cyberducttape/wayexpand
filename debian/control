@@ -14,7 +14,7 @@ Build-Depends:
     libxkbcommon-dev
 
 Package: wayexpand
-Architecture: amd64
+Architecture: any
 Depends:
     ${shlibs:Depends},
     ${misc:Depends},

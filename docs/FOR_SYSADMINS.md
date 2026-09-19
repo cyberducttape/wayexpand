@@ -269,7 +269,7 @@ No central server required.
 | State | `$XDG_RUNTIME_DIR/wayexpand.sock` | User | 0600 |
 | Systemd unit | `~/.config/systemd/user/wayexpand-*.service` | User | 0644 |
 | Example config | `/etc/wayexpand/expansions.toml.example` | Root | 0644 |
-| Man pages | `/usr/share/man/man1/wayexpand.1` | Root | 0644 |
+| Man page | `/usr/share/man/man1/wayexpand.1` (distribution packages) or `~/.local/share/man/man1/wayexpand.1` (user installer) | Package/user | 0644 |
 
 ## Support Resources
 

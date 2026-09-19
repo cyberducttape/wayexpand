@@ -8,7 +8,7 @@ Changes not yet released.
 
 - Forward evdev kernel auto-repeat into matcher state without repeating global
   hotkeys or changing physical held-key state.
-- Build native Linux release archives for both x86_64 and aarch64.
+- Track native Linux release archives for x86_64 and aarch64 as a packaging goal; only x86_64 is currently published by the release workflow.
 - Run daemon command-backed expansions on a bounded background queue. Command
   output is applied only if no intervening input or focus-state change makes
   the original trigger location stale.

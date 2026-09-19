@@ -1,6 +1,6 @@
 use crate::{
     config::capitalize_first_letter, render_template_with_cursor, CommandConfig, Config,
-    ConfigError, HotkeyConfig, KeyChord, MatchMode, Matcher, TextInjector,
+    ConfigError, HotkeyConfig, InjectorError, KeyChord, MatchMode, Matcher, TextInjector,
 };
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -124,11 +124,11 @@ pub struct ExpansionEngine {
     undo_chord: Option<KeyChord>,
     /// The most recent successful expansion, kept only until the very next
     /// event of any other kind (see `process`): `(text to type back,
-    /// characters to erase)`. Not set for a result with a `{{cursor}}`
+    /// exact text to erase)`. Not set for a result with a `{{cursor}}`
     /// marker, since undoing after the user has typed more text at that
     /// repositioned cursor has no single well-defined "erase N characters
     /// backward" meaning.
-    last_expansion: Option<(String, usize)>,
+    last_expansion: Option<(String, String)>,
     input_generation: u64,
     async_commands: Option<AsyncCommandRuntime>,
 }
@@ -297,7 +297,7 @@ impl ExpansionEngine {
             completion.result.insert = output;
             self.last_expansion = Some((
                 completion.result.typed_trigger.clone(),
-                completion.result.insert.chars().count(),
+                completion.result.insert.clone(),
             ));
             results.push(completion.result);
         }
@@ -387,11 +387,11 @@ impl ExpansionEngine {
         if !self.undo_chord.as_ref()?.matches(chord) {
             return None;
         }
-        let (restore_text, erase_chars) = self.last_expansion.take()?;
+        let (restore_text, erase_text) = self.last_expansion.take()?;
         Some(ExpansionResult {
             trigger: String::new(),
-            typed_trigger: String::new(),
-            erase_chars,
+            typed_trigger: erase_text.clone(),
+            erase_chars: erase_text.chars().count(),
             insert: restore_text,
             cursor_offset: None,
             reinsert_after: None,
@@ -650,7 +650,7 @@ impl ExpansionEngine {
             self.buffer.pop_back();
         }
         if cursor_offset.is_none() {
-            self.last_expansion = Some((typed.clone(), insert.chars().count()));
+            self.last_expansion = Some((typed.clone(), insert.clone()));
         }
         Some(ExpansionResult {
             trigger,
@@ -770,6 +770,16 @@ impl ExpansionEngine {
         if let Some(character) = result.reinsert_after {
             erase.push(character);
             insert.push(character);
+        }
+        let expected_erase_chars = result
+            .erase_chars
+            .saturating_add(usize::from(result.reinsert_after.is_some()));
+        if erase.chars().count() != expected_erase_chars {
+            return Err(ExpansionError::Injection(InjectorError {
+                backend: injector.name(),
+                message: "expansion erase text does not match its character count".into(),
+                retryable: false,
+            }));
         }
         injector.replace(&erase, &insert)?;
         // Best-effort: a `{{cursor}}` marker's placement failing (or being
@@ -2050,6 +2060,33 @@ replacement = "bad\u0000value""#;
         // trigger back.
         assert_eq!(undo.erase_chars, "regards".chars().count());
         assert_eq!(undo.insert, ":sig");
+    }
+
+    #[test]
+    fn undo_applies_by_erasing_the_inserted_text() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let expansion = engine.process(InputEvent::Text(":sig".into()))[0].clone();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+
+        let undo = engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("an expansion is pending to undo");
+        ExpansionEngine::apply(&mut injector, &undo).unwrap();
+
+        assert_eq!(
+            injector.calls,
+            [
+                "erase::sig",
+                "insert:regards",
+                "erase:regards",
+                "insert::sig"
+            ]
+        );
     }
 
     #[test]

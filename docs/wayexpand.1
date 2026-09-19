@@ -1,0 +1,30 @@
+.TH WAYEXPAND 1 "September 2026" "WayExpand 1.1" "User Commands"
+.SH NAME
+wayexpand \- validate and manage WayExpand text-expansion configuration
+.SH SYNOPSIS
+.B wayexpand
+.BR doctor
+\&|\&
+.B validate
+.I CONFIG
+.SH DESCRIPTION
+WayExpand is a local Wayland text expander. The daemon performs expansion;
+this command provides diagnostics and configuration validation.
+.SH COMMANDS
+.TP
+.B doctor
+Report available input and output backends and their compatibility.
+.TP
+.B validate CONFIG
+Parse and validate a configuration file without starting the daemon.
+.SH FILES
+.TP
+.I ~/.config/wayexpand/expansions.toml
+Per-user expansion configuration.
+.TP
+.I $XDG_RUNTIME_DIR/wayexpand.sock
+User control socket used by the daemon and GUI.
+.SH SEE ALSO
+.I /usr/share/doc/wayexpand/
+.SH REPORTING BUGS
+Report issues at https://github.com/itchyitchy123/wayexpand/issues.

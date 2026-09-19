@@ -54,6 +54,8 @@ config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
+metainfo_dir="$HOME/.local/share/metainfo"
+man_dir="$HOME/.local/share/man/man1"
 
 install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
 install -Dm755 "$release_dir/bin/wayexpand" "$bin_dir/wayexpand"
@@ -67,6 +69,13 @@ install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
+if [ -f "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" ]; then
+    install -Dm644 "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
+        "$metainfo_dir/io.github.itchyitchy123.WayExpand.metainfo.xml"
+fi
+if [ -f "$release_dir/docs/wayexpand.1" ]; then
+    install -Dm644 "$release_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
+fi
 
 icon_base="$HOME/.local/share/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
