@@ -15,7 +15,7 @@ use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, discover_backends, import_espanso, BackendKind, BackendState, Config,
-    ExpansionEngine, InputEvent, MatchMode,
+    ExpansionEngine, InputEvent, MatchMode, OrganizationPolicy,
 };
 
 /// Pulls the first `--json` flag out of `args`, wherever it appears, so
@@ -477,6 +477,23 @@ fn run() -> Result<()> {
             fs::set_permissions(&destination, fs::Permissions::from_mode(0o600))?;
             println!("created configuration backup {}", destination.display());
         }
+        Some("setup") => {
+            if args.next().is_some() {
+                bail!("usage: wayexpand setup");
+            }
+            println!("WayExpand setup (read-only)");
+            println!("Session: {}", session_description());
+            println!("No permissions, services, or configuration will be changed.");
+            println!();
+            let ready = print_backend_diagnostics();
+            println!();
+            if ready {
+                println!("Next step: choose one listed backend and enable its user service.");
+                println!("Run `wayexpand doctor` after enabling it to verify the live daemon.");
+            } else {
+                println!("Next step: resolve the capability or permission warning above, then rerun setup.");
+            }
+        }
         Some("doctor") => {
             let mut rest: Vec<String> = args.collect();
             let requested_json = take_json_flag(&mut rest);
@@ -498,6 +515,7 @@ fn run() -> Result<()> {
             println!("Session: {}", session_description());
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
+            let _policy_ok = print_policy_diagnostics();
             let capture_ready = print_backend_diagnostics();
             if !config_ok || !control_socket_ok || !capture_ready {
                 bail!("doctor found configuration, runtime, or backend problems");
@@ -627,8 +645,18 @@ fn print_backend_diagnostics() -> bool {
         println!("{:28} {:?} ({})", status.kind, status.state, detail);
     }
     // Doctor is also used in CI and for validating a config outside a desktop
-    // session. In that context there is no capture claim to validate.
+    // session. Keep those checks non-failing, but explain the X11 limitation.
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        if std::env::var_os("DISPLAY").is_some() {
+            println!(
+                "X11 session: no native X11 global-capture backend is implemented; evdev + libei "
+            );
+            println!(
+                "is the available cross-session route and requires explicit input permission."
+            );
+        } else {
+            println!("No active Wayland or X11 display detected; backend probes were skipped.");
+        }
         return true;
     }
     let wlroots_available = match WlrootsInjector::probe() {
@@ -695,6 +723,28 @@ fn print_backend_diagnostics() -> bool {
     for combination in &combinations {
         println!("  usable: wayexpand-daemon {combination}");
     }
+    println!("Setup guidance:");
+    if input_method_available {
+        println!("  recommended: systemctl --user enable --now wayexpand-input-method.service");
+        println!("  verify: input-method-v2 support is compositor-dependent");
+    }
+    if evdev_readable {
+        println!(
+            "  evdev alternative: requires the input group/udev grant and has no password-field signal"
+        );
+    }
+    if libei_plausible && evdev_readable {
+        if let Some(path) = portal_token_path() {
+            println!(
+                "  libei portal token: {} (use `wayexpand portal reset` to re-authorize)",
+                if path.is_file() {
+                    "present"
+                } else {
+                    "not present"
+                }
+            );
+        }
+    }
     true
 }
 
@@ -723,6 +773,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             })
         })
         .collect();
+    let policy = print_policy_diagnostics_json();
     let healthy = config_ok && (socket_path.is_none() || socket_exists);
     println!(
         "{}",
@@ -739,6 +790,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "configured": socket_path.is_some(),
                 "exists": socket_exists,
             },
+            "policy": policy,
             "backends": backends,
         })
     );
@@ -952,6 +1004,104 @@ fn print_control_socket_diagnostics() -> bool {
         }
     }
     valid
+}
+
+const POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
+
+fn load_policy() -> Result<OrganizationPolicy> {
+    let content = fs::read_to_string(POLICY_PATH)
+        .with_context(|| format!("reading policy from {}", POLICY_PATH))?;
+    toml::from_str(&content).context("parsing policy TOML")
+}
+
+fn print_policy_diagnostics_json() -> serde_json::Value {
+    let policy_result = load_policy();
+
+    let policy_json = match policy_result {
+        Ok(policy) => {
+            serde_json::json!({
+                "valid": true,
+                "safe_mode": policy.safe_mode,
+                "disable_commands": policy.disable_commands,
+                "disable_hotkeys": policy.disable_hotkeys,
+                "disable_title_matching": policy.disable_title_matching,
+                "max_replacement_size": policy.max_replacement_size,
+                "allowed_backends": policy.allowed_backends,
+                "allowed_packs": policy.allowed_packs,
+                "audit_prefix": policy.audit_prefix,
+                "is_active": policy.is_active(),
+            })
+        }
+        Err(error) => {
+            serde_json::json!({
+                "valid": false,
+                "error": error.to_string(),
+            })
+        }
+    };
+
+    serde_json::json!({
+        "path": POLICY_PATH,
+        "exists": Path::new(POLICY_PATH).exists(),
+        "policy": policy_json,
+    })
+}
+
+fn print_policy_diagnostics() -> bool {
+    if !Path::new(POLICY_PATH).exists() {
+        println!(
+            "Organization policy: {} (not found, using default permissive policy)",
+            POLICY_PATH
+        );
+        return true;
+    }
+
+    match load_policy() {
+        Ok(policy) => {
+            println!("Organization policy: {} (valid)", POLICY_PATH);
+            if policy.is_active() {
+                println!(
+                    "  Safe mode: {}",
+                    if policy.safe_mode {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+                if policy.disable_commands {
+                    println!("  Disable commands: enabled");
+                }
+                if policy.disable_hotkeys {
+                    println!("  Disable hotkeys: enabled");
+                }
+                if policy.disable_title_matching {
+                    println!("  Disable title matching: enabled");
+                }
+                if policy.max_replacement_size > 0 {
+                    println!(
+                        "  Max replacement size: {} bytes",
+                        policy.max_replacement_size
+                    );
+                }
+                if !policy.allowed_backends.is_empty() {
+                    println!("  Allowed backends: {:?}", policy.allowed_backends);
+                }
+                if !policy.allowed_packs.is_empty() {
+                    println!("  Allowed packs: {:?}", policy.allowed_packs);
+                }
+                if !policy.audit_prefix.is_empty() {
+                    println!("  Audit prefix: {}", policy.audit_prefix);
+                }
+            } else {
+                println!("  (all constraints disabled, using defaults)");
+            }
+            true
+        }
+        Err(error) => {
+            println!("Organization policy: {} (invalid: {})", POLICY_PATH, error);
+            false
+        }
+    }
 }
 
 #[cfg(test)]
