@@ -32,6 +32,8 @@ Features:
 %autosetup -n %{name}-%{version}
 
 %build
+# Generate vendored dependencies for offline builds
+cargo vendor vendor/
 export CARGO_NET_OFFLINE=true
 cargo build --release --locked --all
 

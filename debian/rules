@@ -10,6 +10,10 @@ export CARGO_NET_OFFLINE=true
 override_dh_clean:
 	dh_clean -X.orig
 
+override_dh_auto_configure:
+	cargo vendor vendor/ || true
+	dh_auto_configure
+
 override_dh_auto_build:
 	dh_auto_build -- --release --locked
 

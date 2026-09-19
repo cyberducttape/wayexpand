@@ -6,8 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 System deps: `libwayland-dev libxkbcommon-dev pkg-config` (Debian/Ubuntu).
 
-Dependencies are vendored (`.cargo/config.toml` points crates-io at `vendor/`), so builds are offline. Always pass `--locked`, as CI does. Adding or bumping a dependency means re-running `cargo vendor` and committing `vendor/`.
+**Offline builds (optional):**
+For offline builds without network access, generate vendored dependencies locally:
+```sh
+cargo vendor vendor/
+```
+This creates a `vendor/` directory (ignored by git). With vendored dependencies present,
+builds work without network access. Cargo will use the vendored crates if `.cargo/config.toml`
+points to them (it does by default, but only uses vendor/ if present).
 
+**Standard development:**
 ```sh
 cargo build --locked --workspace
 cargo test --locked --workspace
@@ -15,6 +23,9 @@ cargo test --locked -p wayexpand-core app_filter      # tests whose name contain
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings   # CI also runs this with --release
 ```
+
+Cargo.lock is committed and authoritative. When adding or bumping dependencies, Cargo.lock
+is updated automatically. For offline builds, re-run `cargo vendor vendor/` locally.
 
 Clippy results can be stale from the build cache; `touch` a changed crate's `src/lib.rs`/`main.rs` before trusting a clean run.
 
