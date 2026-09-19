@@ -34,6 +34,7 @@ X11-shaped implementation with Wayland support bolted on.
 - ✅ **Wlroots window tracking (Phases 1-3 complete):** Full support for app_filter on Sway, Hyprland, river. Ready for real-world testing.
 - 🎯 **Smart backend auto-detection (Phase 4):** Libei-first strategy with intelligent fallbacks per compositor. No more manual `--source`/`--backend` flags needed for most setups.
 - 🔐 **Portal permission persistence:** One-time libei consent prompt with seamless reconnection. Token stored securely at `~/.config/wayexpand/libei-portal-token`.
+- 🧰 **Portal recovery controls:** Inspect or forget the stored restoration token with `wayexpand portal status` and `wayexpand portal reset`.
 - 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion working correctly.
 - 📚 **Clarity on compositor support:** [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md) documents what's verified vs. in-progress. [GETTING_STARTED.md](docs/GETTING_STARTED.md) provides per-compositor quick starts.
 - 🧪 **197 tests passing:** Full coverage across core engine, CLI, daemon, wlroots integration, and all backends.

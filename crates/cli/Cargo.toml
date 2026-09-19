@@ -19,3 +19,4 @@ rustix.workspace = true
 wayexpand-core = { path = "../core" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
+wayexpand-backend-libei = { path = "../backend-libei" }

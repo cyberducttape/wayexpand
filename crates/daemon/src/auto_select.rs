@@ -4,7 +4,6 @@
 /// 1. Detect compositor and available protocols
 /// 2. Choose optimal source and backend combination
 /// 3. Allow user to override if needed
-
 use std::env;
 use tracing::debug;
 
@@ -22,7 +21,9 @@ pub struct BackendSelection {
 enum Compositor {
     KdePlasma,
     Sway,
+    #[allow(dead_code)]
     Hyprland,
+    #[allow(dead_code)]
     River,
     Gnome,
     X11,
@@ -41,8 +42,8 @@ impl Compositor {
         }
 
         // Check WAYLAND_DISPLAY and WAYLAND_SOCKET for wlroots compositors
-        let is_wayland = env::var_os("WAYLAND_DISPLAY").is_some()
-            || env::var_os("WAYLAND_SOCKET").is_some();
+        let is_wayland =
+            env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("WAYLAND_SOCKET").is_some();
 
         if is_wayland {
             // Try to detect specific wlroots compositor
@@ -136,7 +137,9 @@ pub fn auto_select(
             BackendSelection {
                 source: "evdev".to_string(),
                 backend: "libei".to_string(),
-                reason: "auto-detected wlroots compositor: using evdev + libei (libei-first strategy)".to_string(),
+                reason:
+                    "auto-detected wlroots compositor: using evdev + libei (libei-first strategy)"
+                        .to_string(),
             }
         }
         Compositor::Gnome => {
@@ -145,7 +148,8 @@ pub fn auto_select(
             BackendSelection {
                 source: "input-method".to_string(),
                 backend: "none".to_string(),
-                reason: "auto-detected GNOME: using input-method-v2 (no window tracking available)".to_string(),
+                reason: "auto-detected GNOME: using input-method-v2 (no window tracking available)"
+                    .to_string(),
             }
         }
         Compositor::X11 => {
@@ -162,7 +166,8 @@ pub fn auto_select(
             BackendSelection {
                 source: "stdin".to_string(),
                 backend: "libei".to_string(),
-                reason: "unknown compositor: using stdin + libei (conservative fallback)".to_string(),
+                reason: "unknown compositor: using stdin + libei (conservative fallback)"
+                    .to_string(),
             }
         }
     }

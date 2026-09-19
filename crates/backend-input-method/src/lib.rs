@@ -56,9 +56,11 @@ pub fn classify_keysym(raw_keysym: u32) -> Option<InputEvent> {
         || raw_keysym == xkeysym::key::KP_Enter
         || raw_keysym == xkeysym::key::Tab
     {
-        return Some(InputEvent::Delimiter(
-            if raw_keysym == xkeysym::key::Tab { '\t' } else { '\n' },
-        ));
+        return Some(InputEvent::Delimiter(if raw_keysym == xkeysym::key::Tab {
+            '\t'
+        } else {
+            '\n'
+        }));
     }
 
     None
@@ -539,7 +541,9 @@ pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
         Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Backspace)) => {
             Some(KeyAction::Delete)
         }
-        Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Delimiter(_))) => {
+        Some(raw_keysym)
+            if matches!(classify_keysym(raw_keysym), Some(InputEvent::Delimiter(_))) =>
+        {
             Some(KeyAction::Commit(if raw_keysym == xkeysym::key::Tab {
                 "\t"
             } else {

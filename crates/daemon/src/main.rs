@@ -235,7 +235,13 @@ fn main() -> Result<()> {
                 latest = Some(window);
             }
             if let Some(window) = latest {
-                process_event(&mut config.engine, InputEvent::WindowChanged(window), None, &policy, active_backend)?;
+                process_event(
+                    &mut config.engine,
+                    InputEvent::WindowChanged(window),
+                    None,
+                    &policy,
+                    active_backend,
+                )?;
             }
         }
         let requested_pause = control
@@ -272,7 +278,12 @@ fn main() -> Result<()> {
                     apply_results(completed_commands, Some(source), &policy, active_backend)?;
                 }
             } else if let Some(mut backend) = injector.take() {
-                let result = apply_results(completed_commands, Some(backend.as_mut()), &policy, active_backend);
+                let result = apply_results(
+                    completed_commands,
+                    Some(backend.as_mut()),
+                    &policy,
+                    active_backend,
+                );
                 injector = Some(backend);
                 result?;
             } else {
@@ -325,9 +336,20 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
-                    drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
+                    drain_pending_window_events(
+                        &window_tracker,
+                        &mut config.engine,
+                        &policy,
+                        active_backend,
+                    )?;
                     let result = match input_method.as_mut() {
-                        Some(source) => process_event(&mut config.engine, event, Some(source), &policy, active_backend),
+                        Some(source) => process_event(
+                            &mut config.engine,
+                            event,
+                            Some(source),
+                            &policy,
+                            active_backend,
+                        ),
                         None => {
                             return Err(anyhow::anyhow!(
                                 "input-method source disappeared while processing an event"
@@ -429,7 +451,12 @@ fn main() -> Result<()> {
             let event_result = source.next_event_timeout(Duration::from_millis(250));
             match event_result {
                 Ok(Some(event)) => {
-                    drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
+                    drain_pending_window_events(
+                        &window_tracker,
+                        &mut config.engine,
+                        &policy,
+                        active_backend,
+                    )?;
                     let result = if let Some(mut backend) = injector.take() {
                         // Capture is non-exclusive and a match fires on
                         // key-down, so the trigger's last key is still held
@@ -442,16 +469,20 @@ fn main() -> Result<()> {
                                 warn!(%error, "waiting for key release failed; injecting anyway");
                             }
                         }
-                        let result = if evdev
-                            .as_ref()
-                            .is_some_and(EvdevSource::has_pending_events)
+                        let result = if evdev.as_ref().is_some_and(EvdevSource::has_pending_events)
                         {
                             warn!(
                                 "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                             );
                             process_event(&mut config.engine, event, None, &policy, active_backend)
                         } else {
-                            process_event(&mut config.engine, event, Some(backend.as_mut()), &policy, active_backend)
+                            process_event(
+                                &mut config.engine,
+                                event,
+                                Some(backend.as_mut()),
+                                &policy,
+                                active_backend,
+                            )
                         };
                         injector = Some(backend);
                         result
@@ -500,7 +531,13 @@ fn main() -> Result<()> {
                     warn!(%error, "evdev connection lost; reconnecting");
                     evdev = None;
                     connection_state = "reconnecting";
-                    let _ = process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend);
+                    let _ = process_event(
+                        &mut config.engine,
+                        InputEvent::Boundary,
+                        None,
+                        &policy,
+                        active_backend,
+                    );
                     set_daemon_status(
                         &control,
                         active_source,
@@ -525,16 +562,35 @@ fn main() -> Result<()> {
         };
         match receiver.recv_timeout(Duration::from_millis(250)) {
             Ok(line) => {
-                drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
+                drain_pending_window_events(
+                    &window_tracker,
+                    &mut config.engine,
+                    &policy,
+                    active_backend,
+                )?;
                 if injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
                         let (result, backend) = if let Some(mut backend) = injector.take() {
-                            let result =
-                                process_event(&mut config.engine, event, Some(backend.as_mut()), &policy, active_backend);
+                            let result = process_event(
+                                &mut config.engine,
+                                event,
+                                Some(backend.as_mut()),
+                                &policy,
+                                active_backend,
+                            );
                             (result, Some(backend))
                         } else {
-                            (process_event(&mut config.engine, event, None, &policy, active_backend), None)
+                            (
+                                process_event(
+                                    &mut config.engine,
+                                    event,
+                                    None,
+                                    &policy,
+                                    active_backend,
+                                ),
+                                None,
+                            )
                         };
                         injector = backend;
                         if let Err(error) = result {
@@ -548,7 +604,13 @@ fn main() -> Result<()> {
                                 "output session failed; current expansion is not replayed"
                             );
                             drop(injector.take());
-                            let _ = process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend);
+                            let _ = process_event(
+                                &mut config.engine,
+                                InputEvent::Boundary,
+                                None,
+                                &policy,
+                                active_backend,
+                            );
                             connection_state = "reconnecting";
                             set_daemon_status(
                                 &control,
@@ -574,11 +636,29 @@ fn main() -> Result<()> {
                         }
                     }
                     if let Some(backend) = injector.as_deref_mut() {
-                        process_event(&mut config.engine, InputEvent::Boundary, Some(backend), &policy, active_backend)?;
+                        process_event(
+                            &mut config.engine,
+                            InputEvent::Boundary,
+                            Some(backend),
+                            &policy,
+                            active_backend,
+                        )?;
                     }
                 } else {
-                    process_event(&mut config.engine, InputEvent::Text(line), None, &policy, active_backend)?;
-                    process_event(&mut config.engine, InputEvent::Boundary, None, &policy, active_backend)?;
+                    process_event(
+                        &mut config.engine,
+                        InputEvent::Text(line),
+                        None,
+                        &policy,
+                        active_backend,
+                    )?;
+                    process_event(
+                        &mut config.engine,
+                        InputEvent::Boundary,
+                        None,
+                        &policy,
+                        active_backend,
+                    )?;
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -712,7 +792,13 @@ fn drain_pending_window_events(
             }
         }
         if let Some(window) = latest {
-            process_event(engine, InputEvent::WindowChanged(window), None, policy, active_backend)?;
+            process_event(
+                engine,
+                InputEvent::WindowChanged(window),
+                None,
+                policy,
+                active_backend,
+            )?;
         }
     }
     Ok(())
@@ -1269,7 +1355,14 @@ mod tests {
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
         let policy = wayexpand_core::OrganizationPolicy::default();
-        process_event(&mut engine, InputEvent::Text(":x".into()), None, &policy, "libei").unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            None,
+            &policy,
+            "libei",
+        )
+        .unwrap();
     }
 
     #[test]
