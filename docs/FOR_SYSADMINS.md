@@ -6,14 +6,15 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 
 ### Individual User (Self-Service)
 
-Users install locally from PPA/AUR/source:
+Users install locally from PPA, the repository PKGBUILD preview, or source:
 
 ```bash
 # Ubuntu/Debian
 sudo apt install wayexpand
 
-# Arch
-yay -S wayexpand
+# Arch (packaging preview; not an official AUR package yet)
+git clone https://github.com/itchyitchy123/wayexpand.git
+cd wayexpand && makepkg -si
 
 # From source
 ./scripts/install-user.sh --enable --service=wayexpand-input-method.service

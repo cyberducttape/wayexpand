@@ -453,6 +453,13 @@ All stable surfaces are covered by regression tests in the test suite:
 - JSON output shapes validated (see serde json! macros throughout CLI)
 - Config backward compatibility tested (see config::tests::pre_category_config_without_new_fields_still_parses)
 
+Configuration resource limits are maintained in
+[`CONFIGURATION_LIMITS.md`](CONFIGURATION_LIMITS.md).
+
+The machine-readable contract declarations are versioned in
+`tests/contracts/`. Changes to stable JSON field names or types must update a
+fixture deliberately and include a compatibility note.
+
 Developers adding new features must maintain these stability guarantees or bump to the next major version.
 
 ---

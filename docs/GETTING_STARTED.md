@@ -11,7 +11,7 @@ You have the best support. Start here:
 ```bash
 # Install
 sudo apt install wayexpand  # Ubuntu/Debian
-# or: sudo pacman -S wayexpand  # Arch
+# or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
 
 # Start the daemon
 wayexpand daemon --source=input-method-v2
@@ -157,9 +157,9 @@ See [Configuration.md](wiki/Configuration.md) for the full list of variables and
 - Remember: evdev requires `input` group and has no password protection
 
 **See Also:**
-- [DESKTOP_STATUS.md](DESKTOP_STATUS.md) - Per-compositor details
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - What's verified vs. experimental
-- [SECURITY.md](../SECURITY.md) - Permission model and backend tradeoffs
+- [OPERATIONS.md](OPERATIONS.md) - Systemd management and troubleshooting
+- [BACKENDS.md](BACKENDS.md) - Backend protocols and compatibility
 
 ---
 

@@ -1,11 +1,11 @@
 # Fleet Configuration Management
 
-> **Status:** Documented in [ENTERPRISE_ROADMAP.md](ENTERPRISE_ROADMAP.md)
-
 Fleet configuration enables organizations to deploy company-wide snippets across multiple user machines without owning personal configurations.
 
 See:
 - **Architecture:** [wayexpand-core fleet module](/crates/core/src/fleet.rs)
+- **Enterprise deployment:** [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md), [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md)
+- **Policy enforcement:** [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md)
 - **Configuration layers:**
   1. `/etc/wayexpand/snippets.d/` - Organization layer (root-owned)
   2. `~/.config/wayexpand/snippets.d/` - User layer (personal snippets)
