@@ -116,6 +116,9 @@ struct GuiApp {
     /// run has happened yet for the current draft. Cleared on selection
     /// change so a stale result from a different snippet is never shown.
     command_preview_result: Option<Result<String, String>>,
+    /// Cache of the last plain preview result. Stores (draft_hash, input, result)
+    /// to avoid rebuilding the ExpansionEngine on every repaint.
+    preview_cache: Option<(u64, String, String)>,
     /// A background "Use current app" detection in progress: `KwinWindowTracker::new()`
     /// itself has no bound on its D-Bus connection/script-loading step (only
     /// the window-wait after it is bounded), so this runs off the UI thread
@@ -211,6 +214,7 @@ impl GuiApp {
             colorpack: prefs.colorpack,
             colorpack_selector_open: false,
             command_preview_result: None,
+            preview_cache: None,
             app_detection: None,
             close_after_confirm: false,
         })
@@ -708,14 +712,32 @@ impl GuiApp {
     /// the editor is simply open -- including any side-effecting script the
     /// user has not even saved yet. Command previews are explicit and
     /// user-triggered instead; see `run_command_preview`.
-    fn preview(&self) -> String {
+    fn preview(&mut self) -> String {
         let Some(index) = self.selected else {
             return self.strings.no_selection().into();
         };
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        if let Some(draft) = &self.draft {
+            draft.trigger.hash(&mut hasher);
+            draft.replacement.hash(&mut hasher);
+            draft.match_mode.hash(&mut hasher);
+            draft.enabled.hash(&mut hasher);
+            draft.propagate_case.hash(&mut hasher);
+            draft.app_filter.hash(&mut hasher);
+            draft.description.hash(&mut hasher);
+            draft.tags.hash(&mut hasher);
+            draft.category.hash(&mut hasher);
+        }
+        let draft_hash = hasher.finish();
+        if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
+            if *cached_hash == draft_hash && cached_input == &self.preview_input {
+                return cached_result.clone();
+            }
+        }
         let mut candidate = self.config.clone();
         if let Some(draft) = &self.draft {
-            // Copy all draft fields to the preview expansion, including filters
-            // and options that affect matching (app_filter, enabled, propagate_case)
             candidate.expansion[index].trigger = draft.trigger.clone();
             candidate.expansion[index].replacement = draft.replacement.clone();
             candidate.expansion[index].match_mode = draft.match_mode;
@@ -736,14 +758,18 @@ impl GuiApp {
             candidate.expansion[index].command = draft.command_config().ok().flatten();
         }
         let Ok(mut engine) = ExpansionEngine::new(candidate) else {
-            return "Configuration is invalid".into();
+            let result: String = "Configuration is invalid".into();
+            self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
+            return result;
         };
         let mut results = engine.process(InputEvent::Text(self.preview_input.clone()));
         results.extend(engine.process(InputEvent::Boundary));
-        results
+        let result = results
             .last()
             .map(|result| result.insert.clone())
-            .unwrap_or_else(|| "No expansion matched".into())
+            .unwrap_or_else(|| "No expansion matched".into());
+        self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
+        result
     }
 
     /// Runs the draft's configured command exactly once, on explicit user
