@@ -58,8 +58,10 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 
 ### v1.2.1
 
-- [ ] **#25 Command expansions block the input thread** (up to the command
-      timeout). Run them asynchronously with a bounded queue.
+- [x] **#25 Command expansions block the input thread** (up to the command
+      timeout). Daemon command expansions now run through a bounded background
+      queue. Late output is discarded after intervening input, focus, pause,
+      window, or reload changes so it cannot erase unrelated text.
 - [x] **#27 Command timeouts kill only the direct child.** Spawn commands in
       their own process group and kill the group on timeout.
 - [ ] **Opt-in portal persistence (#28).** Offer an explicit, revocable persistence

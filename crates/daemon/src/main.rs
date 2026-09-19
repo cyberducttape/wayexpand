@@ -82,6 +82,7 @@ fn main() -> Result<()> {
             path.display()
         )
     })?;
+    config.engine.enable_async_commands();
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -244,6 +245,20 @@ fn main() -> Result<()> {
             break;
         }
         config.reload_if_changed();
+        let completed_commands = config.engine.drain_completed_commands();
+        if !completed_commands.is_empty() {
+            if input_method_mode {
+                if let Some(source) = input_method.as_mut() {
+                    apply_results(completed_commands, Some(source))?;
+                }
+            } else if let Some(mut backend) = injector.take() {
+                let result = apply_results(completed_commands, Some(backend.as_mut()));
+                injector = Some(backend);
+                result?;
+            } else {
+                apply_results(completed_commands, None)?;
+            }
+        }
         set_daemon_status(
             &control,
             active_source,
@@ -900,7 +915,14 @@ fn process_event(
         }
         return Ok(());
     }
-    for result in engine.process(event) {
+    apply_results(engine.process(event), injector)
+}
+
+fn apply_results(
+    results: Vec<ExpansionResult>,
+    mut injector: Option<&mut dyn TextInjector>,
+) -> std::result::Result<(), Box<EventError>> {
+    for result in results {
         if let Some(backend) = injector.as_deref_mut() {
             // P0 security fix: Never silently switch output transports.
             // If a replacement contains newlines and the selected backend

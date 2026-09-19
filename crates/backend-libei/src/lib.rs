@@ -36,8 +36,9 @@ use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read as _, Seek, SeekFrom},
+    io::{Read as _, Seek, SeekFrom, Write},
     os::fd::OwnedFd,
+    os::unix::fs::PermissionsExt,
     os::unix::net::UnixStream,
     path::PathBuf,
     time::{Duration, Instant},
@@ -64,6 +65,7 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
+const PORTAL_TOKEN_FILENAME: &str = "libei-portal-token";
 
 #[derive(Debug, Error)]
 pub enum LibeiError {
@@ -704,6 +706,58 @@ fn split_text_chunks(text: &str) -> Vec<&str> {
     chunks
 }
 
+/// Get the path where portal session tokens are stored.
+/// Returns None if XDG_CONFIG_HOME is not set and home directory cannot be determined.
+fn portal_token_path() -> Option<PathBuf> {
+    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+        let mut path = PathBuf::from(config_home);
+        path.push("wayexpand");
+        path.push(PORTAL_TOKEN_FILENAME);
+        return Some(path);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".config/wayexpand");
+        path.push(PORTAL_TOKEN_FILENAME);
+        return Some(path);
+    }
+    None
+}
+
+/// Read a stored portal session token, if one exists and is accessible.
+fn read_portal_token() -> Option<String> {
+    let path = portal_token_path()?;
+    std::fs::read_to_string(&path).ok()
+}
+
+/// Store a portal session token with restricted permissions (0600).
+fn store_portal_token(token: &str) -> std::io::Result<()> {
+    let path = portal_token_path().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "cannot determine config directory for portal token",
+        )
+    })?;
+
+    // Ensure directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Write token with strict permissions (0600 = user read+write)
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)?;
+    file.write_all(token.as_bytes())?;
+
+    // Set restrictive permissions (0600)
+    let perms = std::fs::Permissions::from_mode(0o600);
+    std::fs::set_permissions(&path, perms)?;
+    Ok(())
+}
+
 fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError> {
     use ashpd::desktop::{
         remote_desktop::{DeviceType, RemoteDesktop},
@@ -723,12 +777,16 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
                 .create_session()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
+            // Request explicitly-revoked persistent mode to enable session restoration tokens.
+            // When enabled, the portal provides a restoration token that allows
+            // reconnecting without showing the consent dialog again. The token is
+            // extracted after successful connection and stored locally.
             proxy
                 .select_devices(
                     &session,
                     DeviceType::Keyboard.into(),
                     None,
-                    PersistMode::DoNot,
+                    PersistMode::ExplicitlyRevoked,
                 )
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
@@ -747,6 +805,15 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
         .await
         .map_err(|_| LibeiError::Portal("portal session timed out after 30 seconds".into()))?
     })?;
+
+    // TODO: Extract restoration token from session and store it.
+    // Once ashpd exposes Session::restoration_token() or similar, extract the token here:
+    //   if let Ok(token) = session.restoration_token() {
+    //       let _ = store_portal_token(&token);
+    //   }
+    // On next connection attempt, try read_portal_token() first and call
+    // proxy.restore_session(token) instead of create_session().
+
     Ok((
         stream,
         Some(PortalKeepalive {

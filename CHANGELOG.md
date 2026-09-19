@@ -9,6 +9,9 @@ Changes not yet released.
 - Forward evdev kernel auto-repeat into matcher state without repeating global
   hotkeys or changing physical held-key state.
 - Build native Linux release archives for both x86_64 and aarch64.
+- Run daemon command-backed expansions on a bounded background queue. Command
+  output is applied only if no intervening input or focus-state change makes
+  the original trigger location stale.
 
 ## [1.1.2] - 2026-09-18
 
