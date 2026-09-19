@@ -11,7 +11,8 @@ override_dh_clean:
 	dh_clean -X.orig
 
 override_dh_auto_configure:
-	cargo vendor vendor/ || true
+	mkdir -p .cargo
+	cargo vendor vendor/ > .cargo/config.toml
 	dh_auto_configure
 
 override_dh_auto_build:

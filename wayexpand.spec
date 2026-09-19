@@ -33,7 +33,8 @@ Features:
 
 %build
 # Generate vendored dependencies for offline builds
-cargo vendor vendor/
+mkdir -p .cargo
+cargo vendor vendor/ > .cargo/config.toml
 export CARGO_NET_OFFLINE=true
 cargo build --release --locked --all
 

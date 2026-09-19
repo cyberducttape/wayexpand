@@ -17,14 +17,17 @@ You have the best support. Start here:
 sudo apt install wayexpand  # Ubuntu/Debian
 # or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
 
-# Start the daemon
-wayexpand daemon --source=input-method-v2
+# Start the daemon directly (or enable the installed user service)
+wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
 
 # Launch the GUI
 wayexpand-gui
 ```
 
-**What works:** Everything. Text capture, output injection, password field detection, window tracking (for app-restricted snippets).
+**Current status:** Use `wayexpand doctor` to confirm the available path. The
+KWin window tracker is implemented but still awaiting broader independent
+certification; app-restricted snippets should not be treated as universally
+verified.
 
 **Next:** See [README.md](../README.md) for examples. The GUI walks you through creating your first snippet.
 
@@ -42,7 +45,7 @@ Wlroots-based compositors have active development in progress. Window tracking i
 **Getting started:**
 
 ```bash
-wayexpand daemon --source=input-method-v2
+wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
 wayexpand doctor  # Shows what your session can use
 ```
 
@@ -101,7 +104,7 @@ Click Save, then type `;;hello` in any text field.
 
 **Via CLI:**
 ```bash
-wayexpand config edit  # Opens your config in $EDITOR
+$EDITOR ~/.config/wayexpand/expansions.toml
 ```
 
 Add to the TOML:
@@ -157,7 +160,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 
 **Keys are lost (Escape, arrows, F-keys)?**
 - This is input-method-v2's limitation on some compositors
-- Use evdev as fallback: `wayexpand daemon --source=evdev`
+- Use evdev as fallback: `wayexpand-daemon --source=evdev ~/.config/wayexpand/expansions.toml`
 - Remember: evdev requires `input` group and has no password protection
 
 **See Also:**

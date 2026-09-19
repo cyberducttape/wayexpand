@@ -7,7 +7,7 @@
 //! **Status:** Phase 1-2 (Protocol Connection + Focus Tracking) - async event handling
 //! with focus change notifications via channel-based communication.
 
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
@@ -217,47 +217,15 @@ impl WlrootsToplevelTracker {
     /// Create a new wlroots toplevel tracker with full protocol support.
     /// Probes for protocol availability and initializes event handling.
     pub fn new(_timeout: Duration) -> Result<Self, WlrootsToplevelError> {
-        // Check if WAYLAND_DISPLAY is set
-        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-            return Err(WlrootsToplevelError::Connection(
-                "WAYLAND_DISPLAY not set".into(),
-            ));
-        }
-
-        // Connect to Wayland server
-        let conn = Connection::connect_to_env()
-            .map_err(|e| WlrootsToplevelError::Connection(e.to_string()))?;
-
-        let mut event_queue: EventQueue<DiscoveryState> = conn.new_event_queue();
-        let qh = event_queue.handle();
-
-        let display = conn.display();
-        let _registry = display.get_registry(&qh, ());
-
-        let mut discovery_state = DiscoveryState {
-            found_manager: false,
-        };
-
-        // Quick dispatch to discover protocol
-        for _ in 0..10 {
-            if event_queue.dispatch_pending(&mut discovery_state).is_err() {
-                break;
-            }
-            if discovery_state.found_manager {
-                break;
-            }
-        }
-
-        if !discovery_state.found_manager {
-            return Err(WlrootsToplevelError::ProtocolNotAvailable);
-        }
-
-        debug!("wlroots toplevel tracker: protocol available, initialization complete");
-
-        let (_tx, rx) = channel();
-        let current_window = Arc::new(Mutex::new(None));
-
-        Ok(Self { current_window, rx })
+        // DISABLED: wlroots tracker is incomplete (phase 1-2) and has critical bugs:
+        // 1. Dropped channel sender creates tight loop on successful protocol probe
+        // 2. Vector out-of-bounds in toplevel removal event handler
+        // 3. Timeout logic generates spurious window-change events
+        // See: https://github.com/itchyitchy123/wayexpand/issues/XXXX
+        // TODO(v1.3+): Implement proper ownership of Wayland connection/queue, real
+        // event dispatch, proper shutdown, and add Sway integration tests.
+        // For now, report as unavailable to prevent daemon degradation.
+        Err(WlrootsToplevelError::ProtocolNotAvailable)
     }
 
     /// Get the currently focused window, if any.

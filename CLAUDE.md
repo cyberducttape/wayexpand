@@ -9,11 +9,11 @@ System deps: `libwayland-dev libxkbcommon-dev pkg-config` (Debian/Ubuntu).
 **Offline builds (optional):**
 For offline builds without network access, generate vendored dependencies locally:
 ```sh
-cargo vendor vendor/
+cargo vendor vendor/ > .cargo/config.toml
 ```
-This creates a `vendor/` directory (ignored by git). With vendored dependencies present,
-builds work without network access. Cargo will use the vendored crates if `.cargo/config.toml`
-points to them (it does by default, but only uses vendor/ if present).
+This creates a `vendor/` directory (ignored by git). With the generated source
+replacement config, builds work without network access. A normal clone uses
+crates.io and does not require `vendor/`.
 
 **Standard development:**
 ```sh
@@ -25,7 +25,7 @@ cargo clippy --locked --workspace --all-targets -- -D warnings   # CI also runs 
 ```
 
 Cargo.lock is committed and authoritative. When adding or bumping dependencies, Cargo.lock
-is updated automatically. For offline builds, re-run `cargo vendor vendor/` locally.
+is updated automatically. For offline builds, re-run `cargo vendor vendor/ > .cargo/config.toml` locally.
 
 Clippy results can be stale from the build cache; `touch` a changed crate's `src/lib.rs`/`main.rs` before trusting a clean run.
 

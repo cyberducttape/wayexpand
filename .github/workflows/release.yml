@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Generate vendored dependencies (offline builds)
-        run: cargo vendor vendor/ && echo "vendor/" >> .gitignore
+        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Verify version consistency across all sources
         shell: bash
         run: |
@@ -116,7 +116,8 @@ jobs:
           cd /tmp/wayexpand-vendor-build
           tar -xzf "$GITHUB_WORKSPACE/wayexpand-${version}.tar.gz"
           cd "wayexpand-${version}"
-          cargo vendor vendor/ >/dev/null 2>&1
+          mkdir -p .cargo
+          cargo vendor vendor/ > .cargo/config.toml
           cd ..
           tar -czf "$GITHUB_WORKSPACE/wayexpand-${version}-vendored.tar.gz" "wayexpand-${version}"
           cd "$GITHUB_WORKSPACE"

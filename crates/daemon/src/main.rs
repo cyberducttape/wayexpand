@@ -91,8 +91,13 @@ fn main() -> Result<()> {
         (source_name, backend_name)
     };
 
+    // An absent policy is permissive; an existing invalid or insecure policy
+    // is fatal so a management update cannot silently disable restrictions.
+    let policy = policy::load_policy()
+        .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
+
     let mut config = if use_fleet {
-        ReloadableConfig::load_with_fleet(&path)
+        ReloadableConfig::load_with_fleet_and_policy(&path, policy.clone())
     } else {
         ReloadableConfig::load(&path)
     }
@@ -104,16 +109,14 @@ fn main() -> Result<()> {
     })?;
     config.engine.enable_async_commands();
 
-    // An absent policy is permissive; an existing invalid or insecure policy
-    // is fatal so a management update cannot silently disable restrictions.
-    let policy = policy::load_policy()
-        .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
-
     // Respect safe_mode semantics: only disable commands in the engine when in enforcement mode.
     // In audit mode (safe_mode=false), commands are allowed but violations are logged by check_and_log_expansion_violations().
     config
         .engine
         .set_commands_disabled(policy::commands_enforced(&policy));
+    config
+        .engine
+        .set_title_matching_disabled(policy.disable_title_matching);
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();

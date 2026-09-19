@@ -36,10 +36,11 @@ via an unshifted or Shift-level keysym are typeable -- and a replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
 is never automatic: selecting this backend may request desktop-control
-consent and the portal session is retained for the injector's lifetime. The
-current portal flow deliberately uses non-persistent authorization, so a
-reconnect may require consent again; opt-in persistence and explicit token
-revocation remain future work.
+consent and the portal session is retained for the injector's lifetime. A
+restoration token is stored with user-only permissions after successful portal
+authorization, so normal reconnects can restore consent without another dialog.
+If the token expires or is revoked, fresh consent is required; use
+`wayexpand portal reset` to forget the local token.
 The backend also caps direct text submissions at 1 MiB and validates them before
 queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an
