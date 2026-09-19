@@ -88,12 +88,18 @@ program = "uname"
 args = ["-r"]
 timeout_ms = 500
 cache_ms = 60000
+environment = "minimal"
+pass_env = ["KUBECONFIG"]
 ```
 
 Command stdout becomes the replacement after trailing newlines are removed.
 `cache_ms` is optional and defaults to `0` (no caching); when set, successful
 output is reused for that many milliseconds, which is useful for stable
 system facts such as the kernel release.
+Command processes receive a minimal environment by default (`HOME`, `USER`,
+`PATH`, and `LANG`). Use `pass_env` for specific additional variables; use
+`environment = "inherit"` only as an explicit trust decision because it passes
+desktop-session variables and other daemon environment values to the child.
 The daemon runs these programs on a bounded background queue, so a slow command
 does not block keyboard capture or control-socket handling. Output is applied
 only while the trigger remains the newest processed input. If the user types,

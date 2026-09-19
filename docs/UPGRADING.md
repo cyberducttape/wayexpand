@@ -17,8 +17,8 @@ git pull
 # If installed via PPA
 sudo apt update && sudo apt upgrade wayexpand
 
-# If installed from AUR
-yay -S wayexpand --needed
+# If built from the repository PKGBUILD preview
+git pull && makepkg -si
 ```
 
 The daemon will reload automatically. No service restart required.
@@ -153,14 +153,15 @@ sudo apt-mark hold wayexpand  # Prevent auto-upgrade
 
 To resume auto-updates: `sudo apt-mark unhold wayexpand`
 
-### From AUR
+### Future AUR publication
 
 ```bash
 # Check available versions
-yay -S wayexpand --show
+# Once published, check available versions with:
+# yay -S wayexpand --show
 
 # Downgrade to specific version (requires git history)
-cd /tmp && git clone https://aur.archlinux.org/wayexpand.git
+cd /tmp && git clone https://github.com/itchyitchy123/wayexpand.git
 cd wayexpand
 git checkout v1.1.2
 makepkg -si

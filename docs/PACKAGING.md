@@ -2,21 +2,29 @@
 
 This guide covers building and maintaining WayExpand packages for different Linux distributions.
 
+## Rust toolchain policy
+
+WayExpand supports Rust **1.87 or newer**. This is the project MSRV and is
+declared in the workspace `Cargo.toml`; CI checks both Rust 1.87 and stable.
+Distribution packages must provide at least `rustc 1.87` and `cargo 1.87`.
+Older Debian/Ubuntu releases may need a maintained Rust toolchain from the
+distribution backports or an isolated toolchain installation.
+
 ## Quick Reference
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
-| Arch Linux | `wayexpand` | [AUR](https://aur.archlinux.org) | Community (WayExpand repo provides PKGBUILD) |
+| Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 only |
 | Debian/Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
 | Fedora/RHEL | `wayexpand` | Build from source | ⚠️ No official Copr yet |
 
 ## Building Locally
 
-### Arch Linux (AUR)
+### Arch Linux (packaging preview)
 
 ```bash
 # Clone and build
-git clone https://aur.archlinux.org/wayexpand.git
+git clone https://github.com/itchyitchy123/wayexpand.git
 cd wayexpand
 makepkg -si
 ```
@@ -26,7 +34,7 @@ makepkg -si
 2. Compute SHA256: `sha256sum wayexpand-1.0.0.tar.gz`
 3. Update `sha256sums` array
 4. Test with `makepkg -si`
-5. Push to AUR git repo (requires AUR account)
+5. Before publication, generate `.SRCINFO` and verify in a clean Arch chroot
 
 ### Debian/Ubuntu
 
@@ -133,11 +141,11 @@ dput ppa:cyberducttape/ppa ../wayexpand_1.1.1-1_source.changes
 
 ## Testing Installations
 
-### Test AUR
+### Test Arch packaging
 ```bash
 # In a clean chroot
 archiso-mount-rw
-pacman -S wayexpand
+makepkg -si
 wayexpand-gui
 ```
 

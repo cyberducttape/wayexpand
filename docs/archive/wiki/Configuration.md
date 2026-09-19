@@ -28,6 +28,8 @@ program = "uname"
 args = ["-r"]
 timeout_ms = 500
 cache_ms = 60000
+environment = "minimal" # or "inherit" (explicit opt-in)
+pass_env = ["KUBECONFIG"]
 
 [[hotkey]]
 chord = "Ctrl+Alt+M"
@@ -39,6 +41,9 @@ program = "wayexpand-meeting-helper"
 args = []
 timeout_ms = 1000
 ```
+
+The authoritative resource and validation limits are documented in
+[`CONFIGURATION_LIMITS.md`](../CONFIGURATION_LIMITS.md).
 
 ## Field behavior and limits
 
@@ -55,6 +60,8 @@ timeout_ms = 1000
 | `undo_chord` | Optional key chord (e.g. `"Ctrl+Z"`, same syntax as a hotkey chord). Pressed right after an expansion with nothing typed in between, reverts it. Absent by default (disabled). |
 | `command.timeout_ms` | Defaults to 500 ms; accepted range is 1–5000 ms. |
 | `command.cache_ms` | Defaults to 0; maximum is 60 seconds. |
+| `command.environment` | Defaults to `minimal`; only `HOME`, `USER`, `PATH`, and `LANG` are passed. Set `inherit` only when the command requires the full daemon environment. |
+| `command.pass_env` | Optional allowlist of additional variable names copied in minimal mode. Values are read from the daemon environment and never stored in config. |
 
 Hotkeys are normalized across backends. Modifier aliases such as `Control`,
 `Option`, `Meta`, `Win`, and `Logo` are accepted and canonicalized to
