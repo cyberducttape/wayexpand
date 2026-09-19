@@ -23,19 +23,20 @@ X11-shaped implementation with Wayland support bolted on.
 > exactly what's been verified versus implemented-but-untested, and
 > `wayexpand doctor` tells you what your own session can actually use
 > before you rely on it. See [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md)
-> for per-compositor details. **KDE Plasma (KWin 6.6+)** has the deepest
-> verified coverage. **Sway/Hyprland/river** (wlroots) support is actively
-> in progress — window tracking foundation is complete, daemon integration
-> is next.
+> for per-compositor details. **KDE Plasma (KWin 6.6+)** and 
+> **Sway/Hyprland/river** (wlroots) have full window tracking support;
+> smart backend auto-detection works across all compositors.
 
 ![WayExpand snippet dashboard](docs/wiki/assets/snippets-dashboard.png)
 
 ## What's New (v1.2 in progress)
 
-- 🚀 **Wlroots window tracking (Phases 1-2 complete):** Foundation for Sway, Hyprland, river support. Phase 3 (daemon integration) coming soon.
-- 🔒 **P0 security fix:** Config reload no longer loses password-field protection state.
-- 📚 **Clarity on compositor support:** New [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md) clearly documents what works where and what's in progress.
-- 🧪 **191 tests passing:** Stability across core engine, CLI, daemon, and backends.
+- ✅ **Wlroots window tracking (Phases 1-3 complete):** Full support for app_filter on Sway, Hyprland, river. Ready for real-world testing.
+- 🎯 **Smart backend auto-detection (Phase 4):** Libei-first strategy with intelligent fallbacks per compositor. No more manual `--source`/`--backend` flags needed for most setups.
+- 🔐 **Portal permission persistence:** One-time libei consent prompt with seamless reconnection. Token stored securely at `~/.config/wayexpand/libei-portal-token`.
+- 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion working correctly.
+- 📚 **Clarity on compositor support:** [DESKTOP_STATUS.md](docs/DESKTOP_STATUS.md) documents what's verified vs. in-progress. [GETTING_STARTED.md](docs/GETTING_STARTED.md) provides per-compositor quick starts.
+- 🧪 **197 tests passing:** Full coverage across core engine, CLI, daemon, wlroots integration, and all backends.
 
 **Get started:** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for your desktop.
 
