@@ -358,12 +358,16 @@ $HOME/.config/wayexpand/libei-portal-token
 ```
 
 The token is stored with restricted permissions (mode 0600, user-only readable).
+WayExpand validates the parent chain and file ownership, refuses token
+symlinks, and writes through a durable atomic replacement (`fsync` before the
+rename and on the containing directory). Save or validation failures are
+reported as portal connection errors rather than silently discarding the token.
 On subsequent daemon starts, the stored token is passed to the portal to restore
 the previous session, skipping the user consent dialog if the token is still valid.
 
 If the token expires or the user revokes permissions, the portal will display the
 authorization dialog on the next connection attempt. To manually reset permissions,
-delete the token file.
+use `wayexpand portal reset`, which applies the same path and ownership checks.
 
 ## Native backend prerequisites
 

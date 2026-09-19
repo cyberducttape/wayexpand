@@ -38,9 +38,10 @@ anything is typed, rather than partially or incorrectly inserted. Portal use
 is never automatic: selecting this backend may request desktop-control
 consent and the portal session is retained for the injector's lifetime. A
 restoration token is stored with user-only permissions after successful portal
-authorization, so normal reconnects can restore consent without another dialog.
-If the token expires or is revoked, fresh consent is required; use
-`wayexpand portal reset` to forget the local token.
+authorization using an ownership-checked, no-follow, durable atomic write, so
+normal reconnects can restore consent without another dialog. If the token
+expires or is revoked, fresh consent is required; use `wayexpand portal reset`
+to forget the local token.
 The backend also caps direct text submissions at 1 MiB and validates them before
 queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an
