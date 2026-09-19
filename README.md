@@ -145,7 +145,7 @@ command-backed snippet (see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)).
 protocol probes, in one view — the same information `wayexpand doctor
 --json` exposes to scripts and health checks:
 
-![WayExpand diagnostics](docs/wiki/assets/diagnostics.png)
+![WayExpand diagnostics](docs/archive/wiki/assets/diagnostics.png)
 
 Eight color packs ship in the GUI, including retro terminal themes (VT220
 green, IBM 3270 blue, Commodore 64) alongside the default — see
@@ -329,16 +329,28 @@ Configuration resource limits are documented in
 
 ## Documentation
 
-The [project wiki](docs/wiki/README.md) has a guided installation walk,
-configuration reference, GUI tour, operations runbook, security model, and
-troubleshooting playbook. Also see:
+**Get started:**
+- [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) — installation, first snippet, verify it works
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) — systemd daemon, logs, troubleshooting
+- [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — what's tested vs. experimental per compositor
 
-- [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — tested vs. experimental, per compositor
-- [docs/BACKENDS.md](docs/BACKENDS.md) — backend design decisions
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) / [SECURITY.md](SECURITY.md) — operational and security constraints
-- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — exactly which CLI/JSON/config fields are stable
-- [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md), [docs/COLOR_PACKS.md](docs/COLOR_PACKS.md), [docs/LANGUAGE_SUPPORT.md](docs/LANGUAGE_SUPPORT.md) — GUI theming and i18n
+**Configuration & customization:**
+- [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) — GUI themes, color packs, language support
+- [docs/CONFIGURATION_LIMITS.md](docs/CONFIGURATION_LIMITS.md) — resource and safety boundaries
+
+**Enterprise & security:**
+- [docs/ORGANIZATION_POLICY.md](docs/ORGANIZATION_POLICY.md) — policy enforcement and fleet management
+- [docs/FLEET_CONFIG.md](docs/FLEET_CONFIG.md) — multi-machine deployment (Ansible, Puppet examples)
+- [docs/SECRET_MANAGEMENT.md](docs/SECRET_MANAGEMENT.md) — handling sensitive data safely
+
+**Compatibility & design:**
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — which CLI/JSON/config fields are stable
+- [docs/BACKENDS.md](docs/BACKENDS.md) — backend protocols and architecture
+- [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — tested combinations per desktop/protocol
+
+**Examples & reference:**
 - [docs/SYSADMIN_EXAMPLES.md](docs/SYSADMIN_EXAMPLES.md) — ready-made snippets
+- [docs/ANSIBLE_INTEGRATION.md](docs/ANSIBLE_INTEGRATION.md) — fleet deployment playbooks
 
 Non-English documentation: [Deutsch](README.de.md).
 
