@@ -272,8 +272,8 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `backends` (array): Available backends
-  - `kind` (string): Backend name (e.g., "input-method-v2", "wlroots-virtual-keyboard", "libei", "evdev")
-  - `state` (string): "Implemented", "RequiresPermission", "Unavailable", "Experimental"
+  - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
+  - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These values currently mix implementation status with environment status and are expected to be reworked before v1.2 (see PROFESSIONAL_ROADMAP.md, #17)
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
 
 **Stability:** 🔒 **Stable** — guaranteed to include `healthy`, `config`, `control_socket`, `backends`; new backend states may be added

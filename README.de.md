@@ -69,7 +69,9 @@ yay -S wayexpand
 > Prüfen Sie vor der Nutzung, ob das AUR-Paket aktuell ist — vergleichen
 > Sie `pkgver` im `PKGBUILD` mit dem [letzten
 > Release](https://github.com/itchyitchy123/wayexpand/releases). Für
-> Fedora existiert noch kein Copr-Repository.
+> Fedora existiert noch kein Copr-Repository; bauen Sie aus den Quellen mit
+> der RPM-Spec-Datei im Repository oder nutzen Sie das Release-Tarball mit
+> `install-release.sh`.
 
 **Aus Quellen:**
 
@@ -151,6 +153,7 @@ kein Caching).
 |---|---|---|---|
 | Compositor bietet `input-method-v2`/virtual-keyboard | `--source=input-method` | `wayexpand-input-method.service` | Experimentell (siehe [Support-Matrix](docs/SUPPORT_MATRIX.md)) |
 | Compositor bietet keins davon (z. B. KWin/KDE Plasma bis 6.6) | `--source=evdev --backend=libei` | `wayexpand-evdev.service` | Experimentell, benötigt `input`-Gruppenmitgliedschaft, **keine Sensible-Feld-Erkennung** |
+| wlroots-Compositor (Sway, Hyprland), wenn `--source=input-method` benötigte Tasten verliert | `--source=evdev --backend=wlroots` | — (Daemon manuell starten) | Experimentell, gleiche Einschränkungen wie oben |
 | Fenster-Tracking (`app_filter`) | KWin-Scripting-Bridge | — | Nur KDE Plasma (KWin 6.6+) verifiziert |
 
 `--source=evdev` funktioniert compositor-unabhängig, liest aber
