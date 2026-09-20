@@ -1,12 +1,17 @@
 mod colorpack;
+mod diagnostics;
+mod dialogs;
 mod editor;
+mod import;
 mod lang;
 mod library;
+mod preview;
 mod settings;
 mod theme;
 
 use anyhow::{Context, Result};
 use colorpack::ColorPack;
+use dialogs::{AppDetection, PendingAction};
 use editor::Draft;
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
@@ -21,12 +26,9 @@ use std::{
     time::Duration,
 };
 use theme::Palette;
-use wayexpand_backend_input_method::InputMethodSource;
-use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, discover_backends, import_espanso, BackendState, BackendStatus, Config,
-    ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale, InputEvent, MatchMode,
-    OrganizationPolicy, Settings,
+    default_config_path, discover_backends, BackendState, BackendStatus, Config, ConfigError,
+    ExpansionConfig, FleetConfig, FontScale, MatchMode, OrganizationPolicy, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -50,24 +52,6 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{newline}}", "line break"),
     ("{{tab}}", "tab character"),
 ];
-
-enum PendingAction {
-    Select(usize),
-    New,
-    Duplicate,
-    Delete,
-    Reload,
-    Undo,
-    Close,
-}
-
-/// Result of a background "Use current app" detection attempt (see
-/// `GuiApp::app_detection`).
-enum AppDetection {
-    Found(wayexpand_core::WindowContext),
-    NoWindow,
-    Unavailable,
-}
 
 struct GuiApp {
     path: PathBuf,
@@ -224,28 +208,7 @@ impl GuiApp {
             ),
             Err(error) => format!("invalid: {error}"),
         };
-        self.protocol_probes.clear();
-        if env::var_os("WAYLAND_DISPLAY").is_some() {
-            self.protocol_probes.push((
-                "input-method-v2".into(),
-                match InputMethodSource::probe() {
-                    Ok(()) => "manager and seat available".into(),
-                    Err(error) => format!("unavailable: {error}"),
-                },
-            ));
-            self.protocol_probes.push((
-                "wlroots-virtual-keyboard".into(),
-                match WlrootsInjector::probe() {
-                    Ok(()) => "manager and seat available".into(),
-                    Err(error) => format!("unavailable: {error}"),
-                },
-            ));
-        } else {
-            self.protocol_probes.push((
-                "Wayland protocol probes".into(),
-                "skipped: no Wayland session detected".into(),
-            ));
-        }
+        self.protocol_probes = diagnostics::probe_protocols();
         self.daemon_status = match control_command("status") {
             Ok(response) => response.trim().replace('\n', " · "),
             Err(error) => format!("Unavailable: {error}"),
@@ -316,9 +279,9 @@ impl GuiApp {
 
     fn preview_import(&mut self) {
         let source = expand_user_path(self.import_path.trim());
-        match import_espanso(&source) {
-            Ok(imported) => {
-                self.import_preview = Some((imported.config, imported.skipped));
+        match import::preview_espanso(&source) {
+            Ok((config, skipped)) => {
+                self.import_preview = Some((config, skipped));
                 self.message = "Espanso library loaded for review".into();
             }
             Err(error) => self.message = format!("Import failed: {error}"),
@@ -688,69 +651,19 @@ impl GuiApp {
         let Some(index) = self.selected else {
             return self.strings.no_selection().into();
         };
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        if let Some(draft) = &self.draft {
-            draft.trigger.hash(&mut hasher);
-            draft.replacement.hash(&mut hasher);
-            draft.match_mode.hash(&mut hasher);
-            draft.enabled.hash(&mut hasher);
-            draft.propagate_case.hash(&mut hasher);
-            draft.app_filter.hash(&mut hasher);
-            draft.description.hash(&mut hasher);
-            draft.tags.hash(&mut hasher);
-            draft.category.hash(&mut hasher);
-        }
-        self.preview_app.hash(&mut hasher);
-        let draft_hash = hasher.finish();
+        let draft_hash = preview::cache_key(self.draft.as_ref(), &self.preview_app);
         if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
             if *cached_hash == draft_hash && cached_input == &self.preview_input {
                 return cached_result.clone();
             }
         }
-        let mut candidate = self.config.clone();
-        if let Some(draft) = &self.draft {
-            candidate.expansion[index].trigger = draft.trigger.clone();
-            candidate.expansion[index].replacement = draft.replacement.clone();
-            candidate.expansion[index].match_mode = draft.match_mode;
-            candidate.expansion[index].enabled = draft.enabled;
-            candidate.expansion[index].propagate_case = draft.propagate_case;
-            candidate.expansion[index].app_filter = draft
-                .app_filter
-                .split(',')
-                .map(str::trim)
-                .filter(|filter| !filter.is_empty())
-                .map(str::to_owned)
-                .collect();
-            candidate.expansion[index].description = draft.description.clone();
-            candidate.expansion[index].tags = draft
-                .tags
-                .split(',')
-                .map(str::trim)
-                .filter(|tag| !tag.is_empty())
-                .map(str::to_owned)
-                .collect();
-            candidate.expansion[index].category = draft.category.clone();
-            candidate.expansion[index].command = draft.command_config().ok().flatten();
-        }
-        let Ok(mut engine) = ExpansionEngine::new(candidate) else {
-            let result: String = "Configuration is invalid".into();
-            self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
-            return result;
-        };
-        if !self.preview_app.trim().is_empty() {
-            engine.set_current_window(Some(wayexpand_core::WindowContext {
-                app_id: Some(self.preview_app.trim().to_owned()),
-                title: None,
-            }));
-        }
-        let mut results = engine.process(InputEvent::Text(self.preview_input.clone()));
-        results.extend(engine.process(InputEvent::EndOfInput));
-        let result = results
-            .last()
-            .map(|result| result.insert.clone())
-            .unwrap_or_else(|| "No expansion matched".into());
+        let result = preview::render(
+            self.config.clone(),
+            index,
+            self.draft.as_ref(),
+            &self.preview_input,
+            &self.preview_app,
+        );
         self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
         result
     }
@@ -763,13 +676,7 @@ impl GuiApp {
         let Some(draft) = self.draft.as_ref() else {
             return;
         };
-        let result = match draft.command_config() {
-            Ok(Some(command)) => wayexpand_core::run_command(&command)
-                .map_err(|error| format!("Command failed: {error}")),
-            Ok(None) => Err("Enable the dynamic command first".into()),
-            Err(error) => Err(format!("Command settings invalid: {error}")),
-        };
-        self.command_preview_result = Some(result);
+        self.command_preview_result = Some(preview::run_command_preview(draft));
     }
 
     fn toggle_pause(&mut self) {

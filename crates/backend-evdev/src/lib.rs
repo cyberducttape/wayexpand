@@ -131,7 +131,6 @@ impl EvdevSource {
     /// ready, so callers on the daemon's main loop can still service
     /// stop/pause/reload requests at a steady cadence even while idle.
     fn poll_once(&mut self, timeout: Duration) -> Result<(), EvdevError> {
-        self.refresh_devices();
         if self.devices.is_empty() {
             return Ok(());
         }
@@ -276,6 +275,13 @@ impl EvdevSource {
         !self.pending.is_empty()
     }
 
+    /// Remove translated events that arrived while a replacement was waiting
+    /// for the physical trigger key to be released. Callers must validate the
+    /// events before applying a replacement at the moved cursor.
+    pub fn take_pending_events(&mut self) -> Vec<InputEvent> {
+        self.pending.drain(..).collect()
+    }
+
     /// Waits for a short interval with no newly received input. Returns
     /// `false` if another event arrived during that interval. Non-exclusive
     /// capture cannot prevent the focused application from receiving those
@@ -348,6 +354,11 @@ impl EvdevSource {
         if let Some(event) = self.pending.pop_front() {
             return Ok(Some(event));
         }
+        // Device discovery can be comparatively expensive. Keep it on the
+        // ordinary event-loop path; release and quiet-period safety waits must
+        // remain bounded by their requested timeout or normal follow-up input
+        // can incorrectly cancel an expansion.
+        self.refresh_devices();
         self.poll_once(timeout).map_err(|error| InputSourceError {
             source: SOURCE_NAME,
             retryable: error.is_retryable(),

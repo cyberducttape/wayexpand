@@ -18,9 +18,9 @@ adapter remains separate so matching and deletion semantics stay testable
 without an IBus session.
 
 `app_filter` entries fail closed in this mode because IBus does not provide a
-portable focused-window identity. Sensitive-field handling also remains
-fail-closed until an IBus content-purpose/hints mapping is available from the
-client toolkit.
+portable focused-window identity. IBus content-purpose values for password and
+PIN fields disable matching; other toolkit-specific sensitivity hints are not
+currently interpreted.
 
 After installing, make sure `~/.local/bin` is on `PATH`, then restart IBus and
 select `WayExpand` (`wayexpand` engine) in the desktop input-method settings.

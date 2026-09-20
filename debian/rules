@@ -16,7 +16,7 @@ override_dh_auto_configure:
 	dh_auto_configure
 
 override_dh_auto_build:
-	dh_auto_build -- --release --locked
+	dh_auto_build -- --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
 override_dh_auto_test:
 	dh_auto_test -- --locked --workspace
@@ -26,6 +26,8 @@ override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand-daemon usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-gui usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-ui usr/bin/
+	dh_install --package=wayexpand target/release/wayexpand-ibus usr/bin/
+	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
 	dh_install --package=wayexpand io.github.itchyitchy123.WayExpand.metainfo.xml usr/share/metainfo/
 	dh_install --package=wayexpand docs/wayexpand.1 usr/share/man/man1/

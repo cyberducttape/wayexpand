@@ -44,12 +44,16 @@ struct EngineObject {
 }
 
 impl EngineObject {
-    fn emit_actions(&self, actions: &[IbusAction]) {
+    fn emit_actions(&self, actions: &[IbusAction]) -> zbus::fdo::Result<()> {
         let Ok(connection) = self.connection.lock() else {
-            return;
+            return Err(zbus::fdo::Error::Failed(
+                "IBus connection lock poisoned".into(),
+            ));
         };
         let Some(connection) = connection.as_ref() else {
-            return;
+            return Err(zbus::fdo::Error::Failed(
+                "IBus connection unavailable".into(),
+            ));
         };
         for action in actions {
             let result = match action {
@@ -71,20 +75,27 @@ impl EngineObject {
                     )
                 }
             };
-            let _ = result;
+            result.map_err(zbus::fdo::Error::ZBus)?;
         }
+        Ok(())
     }
 }
 
 #[interface(name = "org.freedesktop.IBus.Engine")]
 impl EngineObject {
-    fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> bool {
+    fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> zbus::fdo::Result<bool> {
         let Ok(mut adapter) = self.adapter.lock() else {
-            return false;
+            return Ok(false);
         };
         let result = adapter.process_key_event(keyval, keycode, state);
-        self.emit_actions(&result.actions);
-        result.handled
+        if let Err(_error) = self.emit_actions(&result.actions) {
+            // The engine has already consumed this event. Reset its matcher
+            // before returning false so a client retry cannot combine with a
+            // half-applied replacement or stale trigger buffer.
+            adapter.reset();
+            return Ok(false);
+        }
+        Ok(result.handled)
     }
 
     fn focus_in(&self) {
@@ -215,8 +226,8 @@ mod tests {
             connection: Arc::new(Mutex::new(None)),
         };
         engine.set_content_type(8, 0);
-        assert!(!engine.process_key_event('a' as u32, 0, 0));
+        assert!(!engine.process_key_event('a' as u32, 0, 0).unwrap());
         engine.set_content_type(0, 0);
-        assert!(engine.process_key_event('a' as u32, 0, 0));
+        assert!(!engine.adapter.lock().unwrap().engine().is_sensitive_focus());
     }
 }

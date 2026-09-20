@@ -157,6 +157,10 @@ pub struct ExpansionEngine {
     input_generation: u64,
     async_commands: Option<AsyncCommandRuntime>,
     command_metrics: Arc<CommandMetricsState>,
+    /// Whether a terminating character should be included in the replacement
+    /// operation. Exclusive input sources have not delivered the delimiter to
+    /// the application yet; non-exclusive sources such as evdev have.
+    reinsert_terminators: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -332,7 +336,19 @@ impl ExpansionEngine {
             input_generation: 0,
             async_commands: None,
             command_metrics: Arc::new(CommandMetricsState::new()),
+            reinsert_terminators: true,
         })
+    }
+
+    /// Configure whether delimiters reported with a match must be reinserted.
+    /// Exclusive sources need this enabled; non-exclusive sources (evdev)
+    /// should leave the physical delimiter to the focused application.
+    pub fn set_reinsert_terminators(&mut self, enabled: bool) {
+        self.reinsert_terminators = enabled;
+    }
+
+    pub fn reinserts_terminators(&self) -> bool {
+        self.reinsert_terminators
     }
 
     /// Run command-backed expansions and hotkey actions on separate bounded
@@ -849,7 +865,7 @@ impl ExpansionEngine {
                 matched_text: typed,
                 insert: String::new(),
                 cursor_offset: None,
-                reinsert_after: terminating_char,
+                reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
                 command_backed: true,
             };
             let job = AsyncCommandJob::Expansion {
@@ -886,7 +902,7 @@ impl ExpansionEngine {
             matched_text: typed,
             insert,
             cursor_offset,
-            reinsert_after: terminating_char,
+            reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
             command_backed: false,
         })
     }
@@ -998,10 +1014,9 @@ impl ExpansionEngine {
         // character together with the trigger and append it to the replacement
         // in one backend operation. Use the text actually typed for exact
         // surrounding-text validation and case-propagated triggers.
-        let mut erase = result.matched_text.clone();
+        let erase = result.matched_text.clone();
         let mut insert = result.insert.clone();
         if let Some(character) = result.reinsert_after {
-            erase.push(character);
             insert.push(character);
         }
         injector.replace(&erase, &insert)?;
@@ -2065,7 +2080,7 @@ replacement = "bad\u0000value""#;
     }
 
     #[test]
-    fn apply_replaces_typed_trigger_and_terminator_together() {
+    fn apply_replaces_typed_trigger_and_commits_terminator() {
         let result = ExpansionResult {
             trigger: ":sig".into(),
             matched_text: ":SIG".into(),
@@ -2078,7 +2093,7 @@ replacement = "bad\u0000value""#;
         ExpansionEngine::apply(&mut injector, &result).unwrap();
         assert_eq!(
             injector.calls,
-            ["erase::SIG ", "insert:Best regards, ", "left:3"]
+            ["erase::SIG", "insert:Best regards, ", "left:3"]
         );
     }
 
@@ -2728,6 +2743,26 @@ replacement = "bad\u0000value""#;
         assert_eq!(result.trigger, ":sig");
         assert_eq!(result.insert, "signature");
         assert_eq!(result.reinsert_after, Some(' '));
+    }
+
+    #[test]
+    fn nonexclusive_input_leaves_terminating_character_to_application() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":sig"
+replacement = "signature"
+match_mode = "word-boundary""#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        engine.set_reinsert_terminators(false);
+
+        let result = engine
+            .process(InputEvent::Text(":sig.".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "signature");
+        assert_eq!(result.reinsert_after, None);
     }
 
     #[test]

@@ -212,6 +212,7 @@ impl ReloadableConfig {
                         }
                         engine.set_commands_disabled(self.engine.commands_disabled());
                         engine.set_title_matching_disabled(self.engine.title_matching_disabled());
+                        engine.set_reinsert_terminators(self.engine.reinserts_terminators());
                         // A fresh engine has no window context yet. Without
                         // this, any reload (e.g. every GUI save) would
                         // wrongly fail-close `app_filter`-scoped expansions
