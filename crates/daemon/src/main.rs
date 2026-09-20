@@ -33,6 +33,10 @@ use wayexpand_core::{
 /// an expansion in evdev mode. Generous enough to cover a deliberate
 /// keypress, bounded so a genuinely held key cannot stall expansion.
 const KEY_RELEASE_TIMEOUT: Duration = Duration::from_millis(400);
+/// Maximum latency before the daemon services completed command results.
+/// Input sources remain blocking, so this is intentionally short: a command
+/// completion must not wait for the old 250 ms reconnect/heartbeat cadence.
+const COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Extra settling time for non-exclusive evdev capture. If another physical
 /// event arrives during this window, the pending expansion is abandoned to
 /// avoid deleting text from a cursor that has already moved.
@@ -366,7 +370,7 @@ fn main() -> Result<()> {
             let Some(source) = input_method.as_mut() else {
                 return Err(anyhow::anyhow!("input-method mode lost its input source"));
             };
-            let event_result = source.next_event_timeout(Duration::from_millis(250));
+            let event_result = source.next_event_timeout(COMPLETION_POLL_INTERVAL);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
@@ -481,7 +485,7 @@ fn main() -> Result<()> {
             let Some(source) = evdev.as_mut() else {
                 return Err(anyhow::anyhow!("evdev mode lost its input source"));
             };
-            let event_result = source.next_event_timeout(Duration::from_millis(250));
+            let event_result = source.next_event_timeout(COMPLETION_POLL_INTERVAL);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
@@ -598,13 +602,13 @@ fn main() -> Result<()> {
             continue;
         }
         if stdin_closed {
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(COMPLETION_POLL_INTERVAL);
             continue;
         }
         let Some(receiver) = receiver.as_ref() else {
             break;
         };
-        match receiver.recv_timeout(Duration::from_millis(250)) {
+        match receiver.recv_timeout(COMPLETION_POLL_INTERVAL) {
             Ok(line) => {
                 drain_pending_window_events(
                     &window_tracker,

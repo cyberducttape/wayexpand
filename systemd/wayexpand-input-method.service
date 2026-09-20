@@ -8,9 +8,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
-ExecStartPre=/usr/bin/env wayexpand validate
-ExecStart=/usr/bin/env wayexpand-daemon --source=input-method
+ExecStartPre=%h/.local/bin/wayexpand validate
+ExecStart=%h/.local/bin/wayexpand-daemon --source=input-method
 Restart=on-failure
 RestartSec=2s
 SuccessExitStatus=SIGTERM

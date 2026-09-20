@@ -269,11 +269,12 @@ expand:
 **Future improvement:** The probe should inspect EV_KEY/key capability bits and
 report actual candidate keyboards specifically.
 
-**No hotplug or per-device tracking:**
-The evdev source probes `/dev/input/event*` at startup and retains that device list.
-If devices are added/removed during operation (USB keyboard unplugged, etc.),
-the source continues using the original devices. This is typically fine for
-built-in keyboards but may affect workflows with multiple input devices.
+**Hotplug and device tracking:**
+The evdev source refreshes its keyboard-device discovery on every bounded poll.
+New readable keyboards are opened automatically, and devices that disappear are
+removed from the active set. This supports USB keyboard hotplug without a daemon
+restart. Device identity is still limited to the discovered evdev nodes; there
+is no administrator-managed per-device allowlist or seat isolation.
 
 For more details on evdev implementation, architecture decisions, and integration
 testing, see the evdev backend crate source code.

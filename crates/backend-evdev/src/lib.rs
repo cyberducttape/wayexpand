@@ -61,11 +61,11 @@ pub enum EvdevError {
     )]
     NoKeyboard,
     #[error(
-        "{count} keyboard device(s) exist under /dev/input but none are readable by this user; \
-         add your user to the `input` group and log in again (see docs/SECURITY.md). If this \
-         still fails after logging out and back in, your systemd --user manager likely did not \
-         restart and is still running with your old group list -- run `loginctl terminate-user \
-         $USER` (ends all your sessions) or reboot, then retry"
+        "no readable keyboard was found; {count} unreadable /dev/input/event* node(s) also exist, \
+         and one or more may be a keyboard. Check input permissions and group membership (see \
+         docs/SECURITY.md). If this still fails after logging out and back in, your systemd \
+         --user manager may still have the old group list -- run `loginctl terminate-user $USER` \
+         (ends all your sessions) or reboot, then retry"
     )]
     PermissionDenied { count: usize },
     #[error("could not build a keymap for the system keyboard layout: {0}")]
@@ -103,11 +103,11 @@ impl EvdevSource {
     pub fn connect() -> Result<Self, EvdevError> {
         let discovery = device::discover_keyboards();
         if discovery.keyboards.is_empty() {
-            return Err(if discovery.permission_denied_paths.is_empty() {
+            return Err(if discovery.unreadable_event_paths.is_empty() {
                 EvdevError::NoKeyboard
             } else {
                 EvdevError::PermissionDenied {
-                    count: discovery.permission_denied_paths.len(),
+                    count: discovery.unreadable_event_paths.len(),
                 }
             });
         }

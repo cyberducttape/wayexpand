@@ -81,9 +81,10 @@ impl Capabilities {
                 exclusive_capture: false,
                 wayland: true,
                 x11: false,
-                app_filter_native: true,
+                // Window tracking is not shipped for wlroots compositors.
+                app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard, native app_filter for Sway/Hyprland/river",
+                feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard output; no native window tracker",
             }),
             "input-method" => Some(Capabilities {
                 backend_name: "input-method",
@@ -95,7 +96,7 @@ impl Capabilities {
                 x11: false,
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "Exclusive keyboard capture, input method protocol, KDE Plasma + GNOME support",
+                feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support must be probed",
             }),
             "evdev" => Some(Capabilities {
                 backend_name: "evdev",
@@ -130,8 +131,10 @@ impl Capabilities {
         self.max_replacement_size == 0 || bytes <= self.max_replacement_size
     }
 
-    /// Check if this backend works in the current environment
-    pub fn works_in_environment(&self) -> bool {
+    /// Check only whether the session type is compatible with this backend.
+    /// This does not probe compositor globals, portals, permissions, or
+    /// initialization; callers must report those as separate live states.
+    pub fn environment_compatible(&self) -> bool {
         let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
         let x11 = std::env::var_os("DISPLAY").is_some();
         (wayland && self.wayland) || (x11 && self.x11)
@@ -182,6 +185,20 @@ mod tests {
     fn input_method_has_exclusive_capture() {
         let caps = Capabilities::for_backend("input-method").unwrap();
         assert!(caps.exclusive_capture);
+    }
+
+    #[test]
+    fn capabilities_do_not_advertise_unshipped_window_trackers() {
+        let caps = Capabilities::for_backend("wlroots").unwrap();
+        assert!(!caps.app_filter_native);
+        assert!(!caps.feature_summary.contains("native app_filter"));
+    }
+
+    #[test]
+    fn input_method_capability_does_not_claim_unprobed_compositors() {
+        let caps = Capabilities::for_backend("input-method").unwrap();
+        assert!(caps.feature_summary.contains("must be probed"));
+        assert!(!caps.feature_summary.contains("KDE Plasma + GNOME"));
     }
 
     #[test]

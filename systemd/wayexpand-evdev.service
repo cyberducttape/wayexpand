@@ -8,14 +8,13 @@ Conflicts=wayexpand.service wayexpand-input-method.service
 
 [Service]
 Type=simple
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
-ExecStartPre=/usr/bin/env wayexpand validate
+ExecStartPre=%h/.local/bin/wayexpand validate
 # --backend=libei is the default pairing: it goes through the desktop portal,
 # which is broadly available even on compositors (e.g. KWin) that do not
 # advertise zwp_input_method_manager_v2 or a wlroots virtual-keyboard
 # protocol. Edit this line to --backend=wlroots if your compositor supports
 # the wlroots virtual-keyboard protocol instead.
-ExecStart=/usr/bin/env wayexpand-daemon --source=evdev --backend=libei
+ExecStart=%h/.local/bin/wayexpand-daemon --source=evdev --backend=libei
 # Restart=on-failure enables auto-restart: the evdev+libei backend now
 # persists portal consent tokens, so daemon reconnections skip the consent
 # dialog after the first connection. The daemon's internal backoff

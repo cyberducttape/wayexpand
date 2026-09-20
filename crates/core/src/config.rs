@@ -1008,7 +1008,6 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
             });
         }
         let mode = metadata.permissions().mode() & 0o7777;
-        let sticky = mode & 0o1000 != 0;
         let uid = metadata.uid();
         // Skip ownership check for system directories (/home, /) where UID
         // remapping in containers may cause unexpected ownership. User-owned
@@ -1020,9 +1019,12 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
                 uid,
             });
         }
-        // Only check sticky bit for non-root-owned directories; root-owned
-        // directories like / are inherently safe even without sticky bit.
-        if uid != 0 && mode & 0o022 != 0 && !sticky {
+        // Trust is determined by writeability, not ownership. A root-owned
+        // directory with group/other write bits is still replaceable by an
+        // unprivileged user and must be rejected unless sticky protection is
+        // present. The filesystem root is normally 0755, so it needs no
+        // special exemption.
+        if !parent_mode_is_secure(mode) {
             return Err(ConfigError::InsecureParent {
                 path: current.display().to_string(),
                 mode,
@@ -1059,6 +1061,10 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn parent_mode_is_secure(mode: u32) -> bool {
+    mode & 0o022 == 0 || mode & 0o1000 != 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1092,16 @@ mod tests {
         let summary = error.safe_summary();
         assert!(summary.contains("1234"));
         assert!(!summary.contains("secret-configs"));
+    }
+
+    #[test]
+    fn root_owned_world_writable_parent_mode_is_not_trusted() {
+        // Ownership cannot make a directory safe when its mode grants write
+        // access to group/other users; this is the regression behind the
+        // parent-directory validation fix.
+        assert!(!parent_mode_is_secure(0o0777));
+        assert!(parent_mode_is_secure(0o1777));
+        assert!(parent_mode_is_secure(0o0755));
     }
 
     #[test]

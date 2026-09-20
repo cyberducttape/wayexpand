@@ -114,6 +114,16 @@ impl EngineObject {
     }
     fn set_cursor_location(&self, _x: i32, _y: i32, _w: i32, _h: i32) {}
     fn set_capabilities(&self, _caps: u32) {}
+    /// IBus purpose values 8 and 9 are PASSWORD and PIN respectively. Both
+    /// hide user input and must disable expansion before the next key arrives.
+    fn set_content_type(&self, purpose: u32, _hints: u32) {
+        let sensitive = matches!(purpose, 8 | 9);
+        if let Ok(mut adapter) = self.adapter.lock() {
+            adapter
+                .engine_mut()
+                .process(wayexpand_core::InputEvent::FocusChanged { sensitive });
+        }
+    }
     fn set_surrounding_text(&self, _text: OwnedValue, _cursor_pos: u32, _anchor_pos: u32) {}
 }
 
@@ -191,5 +201,22 @@ mod tests {
         assert_eq!(factory.create_engine("wayexpand").as_str(), ENGINE_PATH);
         assert_eq!(factory.create_engine("WayExpand").as_str(), ENGINE_PATH);
         assert_eq!(factory.create_engine("other").as_str(), "/");
+    }
+
+    #[test]
+    fn password_and_pin_content_types_disable_expansion() {
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"expanded\"\n")
+                .unwrap();
+        let engine = EngineObject {
+            adapter: Mutex::new(IbusEngineAdapter::new(
+                ExpansionEngine::new(config).unwrap(),
+            )),
+            connection: Arc::new(Mutex::new(None)),
+        };
+        engine.set_content_type(8, 0);
+        assert!(!engine.process_key_event('a' as u32, 0, 0));
+        engine.set_content_type(0, 0);
+        assert!(engine.process_key_event('a' as u32, 0, 0));
     }
 }

@@ -166,7 +166,8 @@ struct CommandCacheEntry {
 }
 
 struct AsyncCommandRuntime {
-    sender: mpsc::SyncSender<AsyncCommandJob>,
+    command_sender: mpsc::SyncSender<AsyncCommandJob>,
+    hotkey_sender: mpsc::SyncSender<HotkeyResult>,
     receiver: mpsc::Receiver<AsyncCommandCompletion>,
     hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
     metrics: Arc<CommandMetricsState>,
@@ -208,9 +209,17 @@ impl CommandMetricsState {
 }
 
 impl AsyncCommandRuntime {
-    fn try_send(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
+    fn try_send_command(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
+        self.try_send(&self.command_sender, job)
+    }
+
+    fn try_send_hotkey(&self, action: HotkeyResult) -> Result<(), QueueSendError> {
+        self.try_send(&self.hotkey_sender, action)
+    }
+
+    fn try_send<T>(&self, sender: &mpsc::SyncSender<T>, job: T) -> Result<(), QueueSendError> {
         self.metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
-        match self.sender.try_send(job) {
+        match sender.try_send(job) {
             Ok(()) => Ok(()),
             Err(mpsc::TrySendError::Full(_)) => {
                 self.metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
@@ -242,7 +251,6 @@ enum AsyncCommandJob {
         command: CommandConfig,
         result: ExpansionResult,
     },
-    Hotkey(HotkeyResult),
 }
 
 struct AsyncCommandCompletion {
@@ -327,16 +335,18 @@ impl ExpansionEngine {
         })
     }
 
-    /// Run command-backed expansions and hotkey actions on a bounded worker
-    /// queue. This is enabled by the daemon; CLI and GUI previews remain
-    /// synchronous so an explicit preview call can return its result
-    /// directly.
+    /// Run command-backed expansions and hotkey actions on separate bounded
+    /// worker queues. A slow expansion command cannot delay an urgent hotkey.
+    /// This is enabled by the daemon; CLI and GUI previews remain synchronous
+    /// so an explicit preview call can return its result directly.
     pub fn enable_async_commands(&mut self) {
         if self.async_commands.is_some() {
             return;
         }
-        let (job_sender, job_receiver) =
+        let (command_sender, command_receiver) =
             mpsc::sync_channel::<AsyncCommandJob>(ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (hotkey_sender, hotkey_receiver) =
+            mpsc::sync_channel::<HotkeyResult>(ASYNC_COMMAND_QUEUE_CAPACITY);
         let (completion_sender, completion_receiver) =
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let (hotkey_completion_sender, hotkey_completion_receiver) =
@@ -344,54 +354,58 @@ impl ExpansionEngine {
         let metrics = Arc::clone(&self.command_metrics);
         let worker_metrics = Arc::clone(&metrics);
         thread::Builder::new()
-            .name("wayexpand-command-worker".into())
+            .name("wayexpand-expansion-worker".into())
             .spawn(move || {
-                while let Ok(job) = job_receiver.recv() {
+                while let Ok(job) = command_receiver.recv() {
                     worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                    match job {
-                        AsyncCommandJob::Expansion {
+                    let AsyncCommandJob::Expansion {
+                        config_index,
+                        generation,
+                        command,
+                        result,
+                    } = job;
+                    let cache_ms = command.cache_ms;
+                    let output = run_command(&command);
+                    if let Err(error) = &output {
+                        worker_metrics.record_error(matches!(error, CommandError::Timeout));
+                    }
+                    if completion_sender
+                        .send(AsyncCommandCompletion {
                             config_index,
                             generation,
-                            command,
+                            cache_ms,
                             result,
-                        } => {
-                            let cache_ms = command.cache_ms;
-                            let output = run_command(&command);
-                            if let Err(error) = &output {
-                                worker_metrics.record_error(matches!(error, CommandError::Timeout));
-                            }
-                            if completion_sender
-                                .send(AsyncCommandCompletion {
-                                    config_index,
-                                    generation,
-                                    cache_ms,
-                                    result,
-                                    output,
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        AsyncCommandJob::Hotkey(action) => {
-                            let output = Self::execute_hotkey(&action);
-                            if let Err(error) = &output {
-                                worker_metrics
-                                    .record_error(matches!(error, HotkeyError::Timeout(_)));
-                            }
-                            if hotkey_completion_sender
-                                .send(AsyncHotkeyCompletion { action, output })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
+                            output,
+                        })
+                        .is_err()
+                    {
+                        break;
                     }
                 }
             })
             .expect("command worker thread should start");
+        let hotkey_metrics = Arc::clone(&metrics);
+        thread::Builder::new()
+            .name("wayexpand-hotkey-worker".into())
+            .spawn(move || {
+                while let Ok(action) = hotkey_receiver.recv() {
+                    hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                    let output = Self::execute_hotkey(&action);
+                    if let Err(error) = &output {
+                        hotkey_metrics.record_error(matches!(error, HotkeyError::Timeout(_)));
+                    }
+                    if hotkey_completion_sender
+                        .send(AsyncHotkeyCompletion { action, output })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("hotkey worker thread should start");
         self.async_commands = Some(AsyncCommandRuntime {
-            sender: job_sender,
+            command_sender,
+            hotkey_sender,
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
             metrics,
@@ -470,7 +484,7 @@ impl ExpansionEngine {
             return Err(HotkeyError::WorkerUnavailable);
         };
         runtime
-            .try_send(AsyncCommandJob::Hotkey(action.clone()))
+            .try_send_hotkey(action.clone())
             .map_err(|error| match error {
                 QueueSendError::Full => HotkeyError::QueueFull,
                 QueueSendError::Disconnected => HotkeyError::WorkerUnavailable,
@@ -844,7 +858,7 @@ impl ExpansionEngine {
                 command: command.clone(),
                 result,
             };
-            if runtime.try_send(job).is_err() {
+            if runtime.try_send_command(job).is_err() {
                 return None;
             }
             // Do not consume the trigger until the worker has accepted the
@@ -1562,10 +1576,12 @@ mod tests {
         // A zero-capacity queue with its receiver held makes try_send return
         // Full deterministically, without starting a child process.
         let (sender, _job_receiver) = mpsc::sync_channel(0);
+        let (hotkey_sender, _hotkey_receiver) = mpsc::sync_channel(0);
         let (_, completion_receiver) = mpsc::sync_channel(1);
         let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
         engine.async_commands = Some(AsyncCommandRuntime {
-            sender,
+            command_sender: sender,
+            hotkey_sender,
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
             metrics: Arc::clone(&engine.command_metrics),
