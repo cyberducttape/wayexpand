@@ -2,6 +2,9 @@
 Description=WayExpand evdev capture text expansion daemon (experimental)
 After=graphical-session.target
 PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+Conflicts=wayexpand.service wayexpand-input-method.service
 
 [Service]
 Type=simple
@@ -19,8 +22,6 @@ ExecStart=/usr/bin/env wayexpand-daemon --source=evdev --backend=libei
 # (crates/daemon/src/main.rs) handles output loss gracefully.
 # Rate limiting prevents restart loops if evdev persistently fails
 # (max 5 restarts within 60 seconds before unit enters failed state).
-StartLimitIntervalSec=60
-StartLimitBurst=5
 Restart=on-failure
 RestartSec=2s
 SuccessExitStatus=SIGTERM

@@ -54,6 +54,7 @@ config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
+ibus_component_dir="$HOME/.local/share/ibus/component"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
 target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
@@ -69,7 +70,8 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand-daemon \
     -p wayexpand \
     -p wayexpand-ui \
-    -p wayexpand-gui
+    -p wayexpand-gui \
+    -p wayexpand-backend-ibus
 
 install -Dm755 "$target_dir/release/wayexpand-daemon" \
     "$bin_dir/wayexpand-daemon"
@@ -79,6 +81,10 @@ install -Dm755 "$target_dir/release/wayexpand-ui" \
     "$bin_dir/wayexpand-ui"
 install -Dm755 "$target_dir/release/wayexpand-gui" \
     "$bin_dir/wayexpand-gui"
+install -Dm755 "$target_dir/release/wayexpand-ibus" \
+    "$bin_dir/wayexpand-ibus"
+install -Dm644 "$project_dir/desktop/wayexpand-ibus.xml" \
+    "$ibus_component_dir/wayexpand.xml"
 install -Dm644 "$project_dir/systemd/wayexpand.service" \
     "$unit_dir/wayexpand.service"
 install -Dm644 "$project_dir/systemd/wayexpand-input-method.service" \
@@ -108,6 +114,7 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
+printf '%s\n' "Installed IBus component in $ibus_component_dir"
 printf '%s\n' "Installed application icon in $icon_base"
 printf '%s\n' ""
 printf '%s\n' "=== NEXT STEPS ==="

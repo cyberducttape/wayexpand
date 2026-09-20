@@ -164,6 +164,12 @@ jobs:
         run: systemd-analyze verify systemd/wayexpand-input-method.service
       - name: Verify wayexpand-evdev.service
         run: systemd-analyze verify systemd/wayexpand-evdev.service
+      - name: Verify backend units are mutually exclusive
+        run: |
+          set -eu
+          grep -Fx 'Conflicts=wayexpand-input-method.service wayexpand-evdev.service' systemd/wayexpand.service
+          grep -Fx 'Conflicts=wayexpand.service wayexpand-evdev.service' systemd/wayexpand-input-method.service
+          grep -Fx 'Conflicts=wayexpand.service wayexpand-input-method.service' systemd/wayexpand-evdev.service
       - name: Security profile analysis
         run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service
 
