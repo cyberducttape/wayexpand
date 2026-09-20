@@ -28,7 +28,7 @@ build() {
     # Generate vendored dependencies for offline builds
     mkdir -p .cargo
     cargo vendor vendor/ > .cargo/config.toml
-    cargo build --release --locked --all
+    cargo build --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 }
 
 check() {
@@ -44,9 +44,11 @@ package() {
     install -Dm755 target/release/wayexpand-daemon "${pkgdir}/usr/bin/wayexpand-daemon"
     install -Dm755 target/release/wayexpand-gui "${pkgdir}/usr/bin/wayexpand-gui"
     install -Dm755 target/release/wayexpand-ui "${pkgdir}/usr/bin/wayexpand-ui"
+    install -Dm755 target/release/wayexpand-ibus "${pkgdir}/usr/bin/wayexpand-ibus"
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
+    install -Dm644 desktop/wayexpand-ibus.xml "${pkgdir}/usr/share/ibus/component/wayexpand-ibus.xml"
     install -Dm644 io.github.itchyitchy123.WayExpand.metainfo.xml \
         "${pkgdir}/usr/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml"
     install -Dm644 docs/wayexpand.1 "${pkgdir}/usr/share/man/man1/wayexpand.1"

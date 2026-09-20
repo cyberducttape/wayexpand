@@ -123,6 +123,12 @@ fn main() -> Result<()> {
     config
         .engine
         .set_title_matching_disabled(policy.disable_title_matching);
+    // evdev observes keystrokes non-exclusively. The focused application will
+    // receive the terminating punctuation itself, so do not erase and
+    // synthesize that character as part of the replacement.
+    config
+        .engine
+        .set_reinsert_terminators(source_name != "evdev");
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -495,36 +501,10 @@ fn main() -> Result<()> {
                         active_backend,
                     )?;
                     let result = if let Some(mut backend) = injector.take() {
-                        // Capture is non-exclusive and a match fires on
-                        // key-down, so the trigger's last key is still held
-                        // right now. Injecting before it comes up makes the
-                        // compositor treat our duplicate press as auto-repeat
-                        // and our release as cancelling the physical one,
-                        // eating exactly those characters.
-                        if let Some(source) = evdev.as_mut() {
-                            if let Err(error) = source.wait_for_key_release(KEY_RELEASE_TIMEOUT) {
-                                warn!(%error, "waiting for key release failed; injecting anyway");
-                            }
-                        }
-                        let input_quiet = evdev
-                            .as_mut()
-                            .map(|source| source.wait_for_input_quiet(EVDEV_QUIET_TIMEOUT))
-                            .transpose();
-                        let input_quiet = match input_quiet {
-                            Ok(value) => value.unwrap_or(false),
-                            Err(error) => {
-                                warn!(%error, "evdev quiet-period check failed; abandoning expansion");
-                                false
-                            }
-                        };
-                        let result = if !input_quiet
-                            || evdev.as_ref().is_some_and(EvdevSource::has_pending_events)
-                        {
-                            warn!(
-                                "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
-                            );
-                            process_event(&mut config.engine, event, None, &policy, active_backend)
-                        } else {
+                        // Match immediately. The release/quiet gates are only
+                        // needed if the matcher actually produced text that
+                        // will modify the focused application.
+                        let result = if matches!(event, InputEvent::Key(_)) {
                             process_event(
                                 &mut config.engine,
                                 event,
@@ -532,6 +512,74 @@ fn main() -> Result<()> {
                                 &policy,
                                 active_backend,
                             )
+                        } else {
+                            let results = config.engine.process(event);
+                            if results.is_empty() {
+                                Ok(())
+                            } else {
+                                // Capture is non-exclusive and a match fires
+                                // on key-down, so the trigger's last key is
+                                // still held right now. Injecting before it
+                                // comes up can make the compositor treat our
+                                // duplicate press as auto-repeat.
+                                if let Some(source) = evdev.as_mut() {
+                                    if let Err(error) =
+                                        source.wait_for_key_release(KEY_RELEASE_TIMEOUT)
+                                    {
+                                        warn!(%error, "waiting for key release failed; injecting anyway");
+                                    }
+                                }
+                                let input_quiet = evdev
+                                    .as_mut()
+                                    .map(|source| source.wait_for_input_quiet(EVDEV_QUIET_TIMEOUT))
+                                    .transpose();
+                                let input_quiet = match input_quiet {
+                                    Ok(value) => value.unwrap_or(false),
+                                    Err(error) => {
+                                        warn!(%error, "evdev quiet-period check failed; abandoning expansion");
+                                        false
+                                    }
+                                };
+                                let mut results = results;
+                                if !input_quiet {
+                                    // A single delimiter may already have
+                                    // reached the application while the
+                                    // trigger key was being released. Extend
+                                    // the atomic erase/reinsert operation so
+                                    // the delimiter is preserved at the new
+                                    // cursor position. Any text, navigation,
+                                    // or multiple follow-up events remain
+                                    // ambiguous and fail closed.
+                                    let follow_up = evdev
+                                        .as_mut()
+                                        .map(EvdevSource::take_pending_events)
+                                        .unwrap_or_default();
+                                    if follow_up.len() == 1 {
+                                        if let InputEvent::Delimiter(character) = &follow_up[0] {
+                                            for result in &mut results {
+                                                result.matched_text.push(*character);
+                                                result.insert.push(*character);
+                                            }
+                                        } else {
+                                            warn!(
+                                                "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                                            );
+                                            results.clear();
+                                        }
+                                    } else {
+                                        warn!(
+                                            "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                                        );
+                                        results.clear();
+                                    }
+                                }
+                                apply_results(
+                                    results,
+                                    Some(backend.as_mut()),
+                                    &policy,
+                                    active_backend,
+                                )
+                            }
                         };
                         injector = Some(backend);
                         result

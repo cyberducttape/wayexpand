@@ -41,7 +41,7 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     exit 1
 fi
-for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui; do
+for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ ! -x "$release_dir/bin/$binary" ]; then
         printf '%s\n' "error: $release_dir/bin/$binary not found" >&2
         printf '%s\n' "run this script from inside the extracted release tarball" >&2
@@ -61,6 +61,11 @@ install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
 install -Dm755 "$release_dir/bin/wayexpand" "$bin_dir/wayexpand"
 install -Dm755 "$release_dir/bin/wayexpand-ui" "$bin_dir/wayexpand-ui"
 install -Dm755 "$release_dir/bin/wayexpand-gui" "$bin_dir/wayexpand-gui"
+install -Dm755 "$release_dir/bin/wayexpand-ibus" "$bin_dir/wayexpand-ibus"
+if [ -f "$release_dir/ibus/component/wayexpand-ibus.xml" ]; then
+    install -Dm644 "$release_dir/ibus/component/wayexpand-ibus.xml" \
+        "$HOME/.local/share/ibus/component/wayexpand.xml"
+fi
 install -Dm644 "$release_dir/systemd/wayexpand.service" \
     "$unit_dir/wayexpand.service"
 install -Dm644 "$release_dir/systemd/wayexpand-input-method.service" \

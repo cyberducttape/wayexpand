@@ -32,6 +32,7 @@ unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
+ibus_component_dir="$HOME/.local/share/ibus/component"
 
 if command -v systemctl >/dev/null 2>&1; then
     for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
@@ -43,12 +44,20 @@ if command -v systemctl >/dev/null 2>&1; then
     done
 fi
 
-for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui; do
+for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ -e "$bin_dir/$binary" ]; then
         rm -f -- "$bin_dir/$binary"
         printf '%s\n' "Removed $bin_dir/$binary"
     fi
 done
+if [ -e "$ibus_component_dir/wayexpand.xml" ]; then
+    rm -f -- "$ibus_component_dir/wayexpand.xml"
+    printf '%s\n' "Removed $ibus_component_dir/wayexpand.xml"
+fi
+if [ -e "$ibus_component_dir/wayexpand-ibus.xml" ]; then
+    rm -f -- "$ibus_component_dir/wayexpand-ibus.xml"
+    printf '%s\n' "Removed $ibus_component_dir/wayexpand-ibus.xml"
+fi
 
 for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
     if [ -e "$unit_dir/$unit" ]; then

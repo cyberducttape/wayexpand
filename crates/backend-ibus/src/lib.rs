@@ -110,9 +110,12 @@ impl IbusEngineAdapter {
         let results = self.engine.process(event);
         let mut actions = Vec::new();
         for result in results {
-            let trailing = u32::from(result.reinsert_after.is_some());
             actions.push(IbusAction::DeleteSurroundingText {
-                nchars: result.matched_text.chars().count() as u32 + trailing,
+                // IBus invokes the engine before forwarding the key to the
+                // client. The delimiter is not in the client's surrounding
+                // text yet; delete only the trigger and commit the delimiter
+                // together with the replacement.
+                nchars: result.matched_text.chars().count() as u32,
             });
             let mut replacement = result.insert;
             if let Some(character) = result.reinsert_after {
@@ -220,7 +223,7 @@ match_mode = "word-boundary"
                 assert_eq!(
                     result.actions,
                     vec![
-                        IbusAction::DeleteSurroundingText { nchars: 5 },
+                        IbusAction::DeleteSurroundingText { nchars: 4 },
                         IbusAction::CommitText("signature ".into())
                     ]
                 );

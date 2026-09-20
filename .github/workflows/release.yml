@@ -72,20 +72,22 @@ jobs:
           echo "  ✓ PKGBUILD: $pkgbuild_version"
           echo "  ✓ wayexpand.spec: $spec_version"
       - name: Build release binaries
-        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
+        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
       - name: Package release
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           root="wayexpand-${version}-linux-x86_64"
-          mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev"
+          mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev" "$root/ibus/component"
           install -m 0755 target/release/wayexpand "$root/bin/"
           install -m 0755 target/release/wayexpand-daemon "$root/bin/"
           install -m 0755 target/release/wayexpand-ui "$root/bin/"
           install -m 0755 target/release/wayexpand-gui "$root/bin/"
+          install -m 0755 target/release/wayexpand-ibus "$root/bin/"
           install -m 0644 systemd/*.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
+          install -m 0644 desktop/wayexpand-ibus.xml "$root/ibus/component/"
           install -m 0644 io.github.itchyitchy123.WayExpand.metainfo.xml "$root/"
           install -m 0644 docs/wayexpand.1 "$root/docs/"
           for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do

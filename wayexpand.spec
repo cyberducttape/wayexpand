@@ -36,7 +36,7 @@ Features:
 mkdir -p .cargo
 cargo vendor vendor/ > .cargo/config.toml
 export CARGO_NET_OFFLINE=true
-cargo build --release --locked --all
+cargo build --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
 %check
 cargo test --release --locked --workspace
@@ -46,8 +46,10 @@ install -Dm755 target/release/wayexpand %{buildroot}%{_bindir}/wayexpand
 install -Dm755 target/release/wayexpand-daemon %{buildroot}%{_bindir}/wayexpand-daemon
 install -Dm755 target/release/wayexpand-gui %{buildroot}%{_bindir}/wayexpand-gui
 install -Dm755 target/release/wayexpand-ui %{buildroot}%{_bindir}/wayexpand-ui
+install -Dm755 target/release/wayexpand-ibus %{buildroot}%{_bindir}/wayexpand-ibus
 
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
+install -Dm644 desktop/wayexpand-ibus.xml %{buildroot}%{_datadir}/ibus/component/wayexpand-ibus.xml
 install -Dm644 io.github.itchyitchy123.WayExpand.metainfo.xml \
     %{buildroot}%{_datadir}/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml
 install -Dm644 docs/wayexpand.1 %{buildroot}%{_mandir}/man1/wayexpand.1
@@ -78,6 +80,8 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_bindir}/wayexpand-daemon
 %{_bindir}/wayexpand-gui
 %{_bindir}/wayexpand-ui
+%{_bindir}/wayexpand-ibus
+%{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml
 %{_mandir}/man1/wayexpand.1

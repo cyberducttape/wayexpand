@@ -86,10 +86,10 @@ cp ~/wayexpand-backup-20260918.toml ~/.config/wayexpand/expansions.toml
 systemctl --user restart wayexpand-input-method.service
 ```
 
-### Manual Backup via GUI
+### Manual Backup
 
-In `wayexpand-gui`:
-- File → Export (creates a timestamped backup)
+The supported backup procedure is the command shown above. The GUI does not
+currently provide a File → Export action; do not rely on that menu path.
 
 ---
 
