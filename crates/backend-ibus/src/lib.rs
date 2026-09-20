@@ -72,6 +72,12 @@ impl IbusEngineAdapter {
         if !self.enabled {
             return IbusKeyResult::default();
         }
+        // When the core has disabled capture (password fields or an explicit
+        // pause), do not consume or commit anything on the client's behalf.
+        // The toolkit must receive the original key unchanged.
+        if self.engine.is_sensitive_focus() || self.engine.is_user_paused() {
+            return IbusKeyResult::default();
+        }
 
         // IBus modifier flags use the same low bits as X11. Do not consume
         // shortcuts or navigation keys: clearing the matcher state is safer

@@ -1143,12 +1143,16 @@ fn print_capabilities_diagnostics() {
     println!("\nBackend capabilities:");
     let all_caps = all_capabilities();
     for caps in all_caps {
-        let env_support = if caps.works_in_environment() {
-            "✓ available"
+        let env_support = if caps.environment_compatible() {
+            "yes"
         } else {
-            "✗ not available in this environment"
+            "no"
         };
-        println!("  {}: {}", caps.backend_name, env_support);
+        println!(
+            "  {}: environment compatible: {}",
+            caps.backend_name, env_support
+        );
+        println!("      live protocol probe: reported separately above (not inferred here)");
         println!("    Features: {}", caps.feature_summary);
         println!(
             "    Max replacement: {}",
@@ -1168,7 +1172,7 @@ fn print_capabilities_diagnostics_json() -> serde_json::Value {
         .map(|caps| {
             serde_json::json!({
                 "backend": caps.backend_name,
-                "available_in_environment": caps.works_in_environment(),
+                "environment_compatible": caps.environment_compatible(),
                 "multiline": caps.multiline,
                 "exclusive_capture": caps.exclusive_capture,
                 "text_method": caps.text_method.to_string(),

@@ -62,6 +62,13 @@ package() {
     install -Dm644 systemd/wayexpand.service "${pkgdir}/usr/lib/systemd/user/wayexpand.service"
     install -Dm644 systemd/wayexpand-input-method.service "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service"
     install -Dm644 systemd/wayexpand-evdev.service "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
+    # The source units target the user-local install layout used by the
+    # release scripts. Distro packages must bind them to the package-owned
+    # binaries so ~/.local/bin cannot shadow an installed update.
+    sed -i 's#%h/.local/bin/#/usr/bin/#g' \
+        "${pkgdir}/usr/lib/systemd/user/wayexpand.service" \
+        "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service" \
+        "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
 
     # Install udev rules for evdev backend
     install -Dm644 udev/71-wayexpand-evdev.rules "${pkgdir}/usr/lib/udev/rules.d/71-wayexpand-evdev.rules"

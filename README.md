@@ -266,10 +266,10 @@ Cons:
 - **Best-effort timing** — non-exclusive capture cannot make rapid trigger replacement atomic; see [P0_3_DECISION_REQUIRED.md](docs/P0_3_DECISION_REQUIRED.md)
 - Experimental — read [SECURITY.md](SECURITY.md) before enabling
 
-This unit does not auto-restart on failure by design. A portal session may
-need fresh user consent after revocation or an expired restoration token, and
-automatic restarts could create permission-dialog storms. Restart it yourself
-after a compositor restart or portal hiccup:
+This unit restarts on failure with a 2-second delay and a systemd rate limit of
+five starts per 60 seconds. A portal session may still need fresh user consent
+after revocation or an expired restoration token; after the rate limit is hit,
+restart it yourself after fixing the cause:
 `systemctl --user restart wayexpand-evdev.service`.
 
 **Which should I choose?**
@@ -304,10 +304,10 @@ Once `wayexpand doctor` reports capture readiness:
 systemctl --user enable --now wayexpand-evdev.service
 ```
 
-This unit does not auto-restart on failure by design. A portal session may
-need fresh user consent after revocation or an expired restoration token, and
-automatic restarts could create permission-dialog storms. Restart it yourself
-after a compositor restart or portal hiccup:
+This unit restarts on failure with a 2-second delay and a systemd rate limit of
+five starts per 60 seconds. A portal session may still need fresh user consent
+after revocation or an expired restoration token; after the rate limit is hit,
+restart it yourself after fixing the cause:
 `systemctl --user restart wayexpand-evdev.service`.
 
 Neither installer runs as root, enables a service automatically, or

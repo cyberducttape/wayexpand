@@ -168,10 +168,11 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
             );
         }
         let mode = metadata.mode() & 0o7777;
-        // Root-owned directories like /run/user are inherently safe even without
-        // sticky bit protection, since only root can modify the filesystem.
-        // Only non-root-owned directories require sticky bit if group/other-writable.
-        if metadata.uid() != 0 && mode & 0o022 != 0 && mode & 0o1000 == 0 {
+        // Trust is determined by writeability, not ownership. A root-owned
+        // directory with group/other write bits is still replaceable by an
+        // unprivileged user and must be rejected unless sticky protection is
+        // present. Normal system directories (/run and /run/user) are 0755.
+        if !socket_parent_mode_is_secure(mode) {
             bail!(
                 "control socket directory {} is writable by group or other users",
                 current.display()
@@ -203,6 +204,10 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
         .filter(|name| !name.is_empty())
         .ok_or_else(|| anyhow::anyhow!("control socket path has no file name"))?;
     Ok(resolved_parent.join(name))
+}
+
+fn socket_parent_mode_is_secure(mode: u32) -> bool {
+    mode & 0o022 == 0 || mode & 0o1000 != 0
 }
 
 fn is_original_socket(
@@ -427,6 +432,15 @@ mod tests {
         assert!(validate_socket_parent(&socket).is_err());
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
+    fn root_owned_world_writable_mode_is_rejected() {
+        // Keep this regression test independent of test-runner privileges:
+        // the validation rule is about mode bits, regardless of uid.
+        assert!(!socket_parent_mode_is_secure(0o0777));
+        assert!(socket_parent_mode_is_secure(0o1777));
+        assert!(socket_parent_mode_is_secure(0o0755));
     }
 
     #[test]

@@ -76,6 +76,7 @@ pub enum BackendSelectionError {
     UnknownSource(String),
     UnknownBackend(String),
     Incompatible { source: String, backend: String },
+    UnavailableSource { source: String, detail: String },
 }
 
 impl fmt::Display for BackendSelectionError {
@@ -93,6 +94,12 @@ impl fmt::Display for BackendSelectionError {
                 formatter,
                 "source {source:?} cannot be combined with output backend {backend:?}"
             ),
+            Self::UnavailableSource { source, detail } => {
+                write!(
+                    formatter,
+                    "requested source {source:?} is unavailable: {detail}"
+                )
+            }
         }
     }
 }
@@ -165,11 +172,11 @@ impl Compositor {
             }
         }
 
-        let is_wayland =
-            env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("WAYLAND_SOCKET").is_some();
-        if is_wayland && env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
-            return Self::Sway;
-        }
+        // A Wayland session identifies the display protocol, not the
+        // compositor or its implementation family. Do not turn an
+        // unrecognized compositor into Sway/wlroots based on environment
+        // variables alone; protocol probes and explicit desktop identifiers
+        // are the only evidence used for a concrete classification.
         if env::var_os("DISPLAY").is_some() {
             return Self::X11;
         }
@@ -224,7 +231,20 @@ pub fn select_backend(
                     backend: backend.to_string(),
                 })
             }
-            "evdev" => ResolvedBackendPair::Evdev(parse_backend(backend)?),
+            "evdev" => {
+                let backend = parse_backend(backend)?;
+                if capabilities.has_dev_input {
+                    return Ok(BackendSelection {
+                        pair: ResolvedBackendPair::Evdev(backend),
+                        reason: "explicit evdev source requested".into(),
+                        capabilities: capabilities.clone(),
+                    });
+                }
+                return Err(BackendSelectionError::UnavailableSource {
+                    source: "evdev".into(),
+                    detail: "/dev/input has no readable keyboard devices".into(),
+                });
+            }
             "stdin" => ResolvedBackendPair::Stdin(parse_backend(backend)?),
             other => return Err(BackendSelectionError::UnknownSource(other.to_string())),
         }
@@ -235,8 +255,10 @@ pub fn select_backend(
                 ResolvedBackendPair::Evdev(InjectorBackend::Libei)
             }
             "evdev" => {
-                warn!("evdev requested but /dev/input not readable - using stdin instead");
-                ResolvedBackendPair::Stdin(InjectorBackend::Libei)
+                return Err(BackendSelectionError::UnavailableSource {
+                    source: "evdev".into(),
+                    detail: "/dev/input has no readable keyboard devices".into(),
+                });
             }
             "stdin" => ResolvedBackendPair::Stdin(InjectorBackend::Libei),
             other => return Err(BackendSelectionError::UnknownSource(other.to_string())),
@@ -495,6 +517,24 @@ mod tests {
                 .pair,
             ResolvedBackendPair::Stdin(InjectorBackend::Wlroots)
         );
+    }
+
+    #[test]
+    fn explicit_evdev_fails_closed_when_devices_are_unreadable() {
+        let result = select_backend(&capabilities(false, false, false), Some("evdev"), None);
+        assert!(matches!(
+            result,
+            Err(BackendSelectionError::UnavailableSource { source, .. }) if source == "evdev"
+        ));
+        let result = select_backend(
+            &capabilities(false, false, false),
+            Some("evdev"),
+            Some("libei"),
+        );
+        assert!(matches!(
+            result,
+            Err(BackendSelectionError::UnavailableSource { source, .. }) if source == "evdev"
+        ));
     }
 
     #[test]
