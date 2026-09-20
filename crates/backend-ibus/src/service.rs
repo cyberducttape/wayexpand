@@ -1,6 +1,7 @@
 use super::{IbusAction, IbusEngineAdapter};
 use std::{
     collections::HashMap,
+    env,
     sync::{Arc, Mutex},
 };
 use wayexpand_core::{default_config_path, Config, ExpansionEngine};
@@ -128,7 +129,14 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         adapter: Mutex::new(adapter),
         connection: Arc::clone(&connection_slot),
     };
-    let connection = Builder::session()?
+    // IBus engines must connect to IBus' private bus, not the ordinary
+    // desktop session bus. The daemon supplies IBUS_ADDRESS when launching
+    // an engine; the command fallback also supports manual startup.
+    let builder = match env::var("IBUS_ADDRESS") {
+        Ok(address) => Builder::address(address.as_str())?,
+        Err(_) => Builder::ibus()?,
+    };
+    let connection = builder
         .name(BUS_NAME)?
         .serve_at(FACTORY_PATH, Factory)?
         .serve_at(ENGINE_PATH, engine)?
@@ -156,4 +164,32 @@ fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
         .add_field(Value::from(attrs))
         .build()
         .expect("valid IBus text structure")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbus::zvariant::DynamicType;
+
+    #[test]
+    fn ibus_text_has_the_serialized_object_signature() {
+        let text = ibus_text_value("hello");
+        assert_eq!(text.signature().to_string(), "(sa{sv}sv)");
+        let signal_body = (Value::from(text),);
+        assert_eq!(signal_body.signature().to_string(), "(v)");
+    }
+
+    #[test]
+    fn delete_signal_uses_signed_offset_and_unsigned_character_count() {
+        let body = (-4_i32, 4_u32);
+        assert_eq!(body.signature().to_string(), "(iu)");
+    }
+
+    #[test]
+    fn factory_accepts_the_advertised_engine_name() {
+        let factory = Factory;
+        assert_eq!(factory.create_engine("wayexpand").as_str(), ENGINE_PATH);
+        assert_eq!(factory.create_engine("WayExpand").as_str(), ENGINE_PATH);
+        assert_eq!(factory.create_engine("other").as_str(), "/");
+    }
 }
