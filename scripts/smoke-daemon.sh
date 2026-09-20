@@ -57,14 +57,14 @@ status=
 for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     if status=$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" status 2>/dev/null); then
         case "$status" in
-            *"source=stdin"*"backend=none"*"config_state=ok"*) break ;;
+            *"source=stdin"*"backend=libei"*"config_state=ok"*) break ;;
         esac
     fi
     sleep 0.1
 done
 
 case "$status" in
-    *"source=stdin"*"backend=none"*"config_state=ok"*) ;;
+    *"source=stdin"*"backend=libei"*"config_state=ok"*) ;;
     *)
         printf '%s\n' "unexpected status response:" "$status" >&2
         exit 1
@@ -109,7 +109,7 @@ for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 0.1
 done
 case "$status" in
-    *"source=stdin"*"backend=none"*) ;;
+    *"source=stdin"*"backend=libei"*) ;;
     *)
         printf '%s\n' "daemon did not become ready before SIGTERM test" >&2
         exit 1
