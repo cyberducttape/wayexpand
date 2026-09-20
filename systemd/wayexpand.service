@@ -2,6 +2,7 @@
 Description=WayExpand text expansion daemon (stdin test mode)
 After=graphical-session.target
 PartOf=graphical-session.target
+Conflicts=wayexpand-input-method.service wayexpand-evdev.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

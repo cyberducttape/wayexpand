@@ -761,13 +761,17 @@ impl GuiApp {
             candidate.expansion[index].app_filter = draft
                 .app_filter
                 .split(',')
-                .map(|s| s.trim().to_string())
+                .map(str::trim)
+                .filter(|filter| !filter.is_empty())
+                .map(str::to_owned)
                 .collect();
             candidate.expansion[index].description = draft.description.clone();
             candidate.expansion[index].tags = draft
                 .tags
                 .split(',')
-                .map(|s| s.trim().to_string())
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_owned)
                 .collect();
             candidate.expansion[index].category = draft.category.clone();
             candidate.expansion[index].command = draft.command_config().ok().flatten();

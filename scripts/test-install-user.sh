@@ -43,6 +43,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
+[ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
+[ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]

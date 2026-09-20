@@ -49,6 +49,8 @@ use xkbcommon_rs::{Context, Keymap, State};
 
 const SOURCE_NAME: &str = "evdev";
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
+// Allow the focused compositor/application to commit the non-exclusive
+// physical keystrokes before the replacement backspaces are injected.
 const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
 
 #[derive(Debug, Error)]

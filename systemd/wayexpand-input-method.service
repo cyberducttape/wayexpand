@@ -2,6 +2,7 @@
 Description=WayExpand Wayland input-method text expansion daemon (experimental; explicit opt-in)
 After=graphical-session.target
 PartOf=graphical-session.target
+Conflicts=wayexpand.service wayexpand-evdev.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

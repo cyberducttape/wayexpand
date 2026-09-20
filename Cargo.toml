@@ -13,6 +13,7 @@ members = [
     "crates/backend-clipboard",
     "crates/backend-kwin-window",
     "crates/backend-selection",
+    "crates/backend-ibus",
 ]
 
 [workspace.package]
