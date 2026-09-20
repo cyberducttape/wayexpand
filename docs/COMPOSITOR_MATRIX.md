@@ -19,3 +19,9 @@ raw evdev capture merely because `/dev/input` is readable. Explicit
 `doctor` probe is required before describing input-method-v2 as available on a
 particular compositor. Wlroots window tracking is not currently shipped or
 probeable.
+
+Certification evidence is collected with
+[`scripts/certify-compositor.sh`](../scripts/certify-compositor.sh). It records
+live probes and requires explicit results for capture, replacement, sensitive
+fields, focus changes, hotplug, and compositor restart; an unmarked scenario is
+never treated as certified.

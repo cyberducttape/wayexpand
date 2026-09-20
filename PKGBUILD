@@ -72,6 +72,7 @@ package() {
 
     # Install udev rules for evdev backend
     install -Dm644 udev/71-wayexpand-evdev.rules "${pkgdir}/usr/lib/udev/rules.d/71-wayexpand-evdev.rules"
+    install -Dm644 udev/69-wayexpand-evdev-uaccess.rules "${pkgdir}/usr/lib/udev/rules.d/69-wayexpand-evdev-uaccess.rules"
 
     # Install documentation
     install -Dm644 README.md "${pkgdir}/usr/share/doc/wayexpand/README.md"

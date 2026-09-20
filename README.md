@@ -167,7 +167,8 @@ documented alongside them.
 ## Features
 
 **Core engine**
-- Unicode-safe suffix matching via a trie; longest-match trigger families
+- UTF-8/Unicode-aware suffix matching for committed text via a trie;
+  longest-match trigger families
   (`:a` and `:address` coexist correctly)
 - Optional `word-boundary` matching for triggers that must not fire inside
   larger words — fails closed if its context window has been evicted rather

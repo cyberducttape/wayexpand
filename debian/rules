@@ -46,4 +46,5 @@ override_dh_install:
 		sed -i 's#%h/.local/bin/#/usr/bin/#g' debian/wayexpand/usr/lib/systemd/user/$$unit; \
 	done
 	dh_install --package=wayexpand udev/71-wayexpand-evdev.rules usr/lib/udev/rules.d/
+	dh_install --package=wayexpand udev/69-wayexpand-evdev-uaccess.rules usr/lib/udev/rules.d/
 	dh_install --package=wayexpand expansions.toml etc/wayexpand/expansions.toml.example

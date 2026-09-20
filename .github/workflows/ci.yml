@@ -172,6 +172,8 @@ jobs:
           grep -Fx 'Conflicts=wayexpand.service wayexpand-input-method.service' systemd/wayexpand-evdev.service
       - name: Security profile analysis
         run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service
+      - name: Enforce hardening contract
+        run: bash scripts/check-systemd-hardening.sh
 
   udev:
     name: udev Rules Validation

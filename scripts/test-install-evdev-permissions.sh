@@ -15,6 +15,9 @@ out=$("$script" --dry-run)
 printf '%s' "$out" | grep -F 'This will:' >/dev/null
 printf '%s' "$out" | grep -F '(dry run; no changes made)' >/dev/null
 printf '%s' "$out" | grep -F 'SECURITY.md' >/dev/null
+seat_out=$($script --access=active-seat --dry-run)
+printf '%s' "$seat_out" | grep -F 'active-seat' >/dev/null
+printf '%s' "$seat_out" | grep -F 'do not change input-group membership' >/dev/null
 
 if [ "$(id -u)" -eq 0 ]; then
     printf '%s\n' "skipping non-root-rejection checks: already running as root" >&2

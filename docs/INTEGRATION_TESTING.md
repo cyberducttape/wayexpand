@@ -43,6 +43,34 @@ captured reference run is in [`docs/BENCHMARKS.md`](BENCHMARKS.md).
 Record the compositor, desktop session, keyboard layout, and output of
 `wayexpand doctor` for every integration run.
 
+## Certification evidence
+
+Use the evidence collector on a real compositor session:
+
+```sh
+scripts/certify-compositor.sh --compositor kde --output kde-run.md
+```
+
+It captures the live doctor/status probes and writes every required scenario as
+`UNVERIFIED`; it never treats a probe as certification. A compositor-specific
+operator or self-hosted driver can provide a results file, for example:
+
+```text
+capture-replacement=pass
+unicode=pass
+navigation=pass
+password-field=pass
+focus-change=pass
+fast-typing=pass
+hotplug=pass
+compositor-restart=pass
+```
+
+Passing the script with `--results results.txt` requires an explicit result for
+every scenario. Keep the report with the exact compositor version, backend,
+keyboard layout, and target applications; `UNVERIFIED` is not a certification
+status.
+
 ## Input-method source
 
 In a session that advertises `zwp_input_method_manager_v2`:

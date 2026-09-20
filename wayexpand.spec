@@ -66,6 +66,7 @@ sed -i 's#%h/.local/bin/#/usr/bin/#g' \
     %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 
 install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_udevrulesdir}/71-wayexpand-evdev.rules
+install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_udevrulesdir}/69-wayexpand-evdev-uaccess.rules
 
 install -Dm644 expansions.toml %{buildroot}%{_sysconfdir}/wayexpand/expansions.toml.example
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
@@ -84,6 +85,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
 %{_udevrulesdir}/71-wayexpand-evdev.rules
+%{_udevrulesdir}/69-wayexpand-evdev-uaccess.rules
 %config(noreplace) %{_sysconfdir}/wayexpand/expansions.toml.example
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 

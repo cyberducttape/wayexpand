@@ -1,0 +1,4 @@
+# Optional seat-aware evdev access for WayExpand.
+# This rule runs before systemd's 70-uaccess.rules so logind can apply the
+# ACL for the active seat. It does not grant the broad `input` group.
+SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess", MODE="0600"
