@@ -87,7 +87,8 @@ consent prompts after a user denial.
 
 ## Input method
 
-Input-method protocols may provide a clean UTF-8 insertion path, but they are
+Input-method protocols may provide a clean UTF-8 insertion path for committed
+text, but they are
 not a universal global keyboard capture mechanism. Input-method-v2 is an
 experimental protocol and compositor support is uneven; a Wayland session or
 desktop name is not evidence that the protocol is available. Always use the
@@ -183,6 +184,10 @@ cargo run -p wayexpand-backend-wlroots --bin wlroots-type -- 'Hello 🙂'
 ```
 
 This is an output diagnostic, not the daemon's automatic expansion path.
+
+UTF-8/Unicode-aware matching describes committed text only. WayExpand does not
+support IME preedit/composition state; CJK, dead-key, Compose, Fcitx, and IBus
+composition workflows must complete before a trigger is expected to match.
 The backend caps each generated replacement at 8192 characters because every
 character becomes synthetic keyboard traffic; larger replacements are rejected
 before the trigger is erased. Registry discovery is deadline-bounded at startup

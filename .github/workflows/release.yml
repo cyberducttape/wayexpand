@@ -99,6 +99,7 @@ jobs:
           install -m 0755 scripts/uninstall-user.sh "$root/scripts/"
           install -m 0755 scripts/install-evdev-permissions.sh "$root/scripts/"
           install -m 0644 udev/71-wayexpand-evdev.rules "$root/udev/"
+          install -m 0644 udev/69-wayexpand-evdev-uaccess.rules "$root/udev/"
           cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"

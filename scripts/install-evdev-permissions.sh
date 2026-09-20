@@ -18,17 +18,24 @@
 # investigation. Read SECURITY.md before running this.
 #
 # Usage:
-#   sudo ./scripts/install-evdev-permissions.sh [--dry-run] [--uninstall]
+#   sudo ./scripts/install-evdev-permissions.sh [--access=input-group|active-seat]
+#       [--dry-run] [--uninstall]
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 rule_src="$project_dir/udev/71-wayexpand-evdev.rules"
 rule_dest="/etc/udev/rules.d/71-wayexpand-evdev.rules"
+uaccess_rule_src="$project_dir/udev/69-wayexpand-evdev-uaccess.rules"
+uaccess_rule_dest="/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules"
+access_mode=input-group
 dry_run=0
 do_uninstall=0
 
 for argument in "$@"; do
     case "$argument" in
+        --access=input-group|--access=active-seat)
+            access_mode=${argument#--access=}
+            ;;
         --dry-run)
             dry_run=1
             ;;
@@ -36,7 +43,9 @@ for argument in "$@"; do
             do_uninstall=1
             ;;
         --help|-h)
-            printf '%s\n' "usage: sudo $0 [--dry-run] [--uninstall]"
+            printf '%s\n' "usage: sudo $0 [--access=input-group|active-seat] [--dry-run] [--uninstall]"
+            printf '%s\n' "  --access=input-group  broad legacy input-group grant (default)"
+            printf '%s\n' "  --access=active-seat  logind/uaccess ACL; no group membership change"
             printf '%s\n' "  --dry-run    print what would change without changing anything"
             printf '%s\n' "  --uninstall  remove the udev rule and the input group grant instead"
             exit 0
@@ -50,6 +59,10 @@ done
 
 if [ ! -f "$rule_src" ]; then
     printf '%s\n' "error: $rule_src not found; run this from the project tree or a release tarball" >&2
+    exit 1
+fi
+if [ "$access_mode" = active-seat ] && [ ! -f "$uaccess_rule_src" ]; then
+    printf '%s\n' "error: $uaccess_rule_src not found" >&2
     exit 1
 fi
 
@@ -77,7 +90,7 @@ is_member() {
     id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx input
 }
 
-if [ "$dry_run" -eq 0 ] && ! getent group input >/dev/null 2>&1; then
+if [ "$access_mode" = input-group ] && [ "$dry_run" -eq 0 ] && ! getent group input >/dev/null 2>&1; then
     printf '%s\n' "error: the \`input\` group does not exist on this system; cannot continue" >&2
     exit 1
 fi
@@ -89,7 +102,12 @@ if [ "$do_uninstall" -eq 1 ]; then
     else
         printf '%s\n' "  - leave $rule_dest alone (not present)"
     fi
-    if is_member; then
+    if [ -e "$uaccess_rule_dest" ]; then
+        printf '%s\n' "  - remove $uaccess_rule_dest"
+    else
+        printf '%s\n' "  - leave $uaccess_rule_dest alone (not present)"
+    fi
+    if [ "$access_mode" = input-group ] && is_member; then
         printf '%s\n' "  - remove $target_user from the \`input\` group"
     else
         printf '%s\n' "  - leave $target_user out of the \`input\` group (already not a member)"
@@ -103,7 +121,12 @@ if [ "$do_uninstall" -eq 1 ]; then
         command -v udevadm >/dev/null 2>&1 && udevadm control --reload
         printf '%s\n' "Removed $rule_dest"
     fi
-    if is_member; then
+    if [ -e "$uaccess_rule_dest" ]; then
+        rm -f -- "$uaccess_rule_dest"
+        command -v udevadm >/dev/null 2>&1 && udevadm control --reload
+        printf '%s\n' "Removed $uaccess_rule_dest"
+    fi
+    if [ "$access_mode" = input-group ] && is_member; then
         if command -v gpasswd >/dev/null 2>&1; then
             gpasswd -d "$target_user" input >/dev/null
         else
@@ -120,31 +143,56 @@ if [ "$do_uninstall" -eq 1 ]; then
 fi
 
 rule_installed=0
-if [ -e "$rule_dest" ] && cmp -s "$rule_src" "$rule_dest"; then
+active_rule_installed=0
+if [ "$access_mode" = input-group ] && [ -e "$rule_dest" ] && cmp -s "$rule_src" "$rule_dest"; then
     rule_installed=1
+fi
+if [ "$access_mode" = active-seat ] && [ -e "$uaccess_rule_dest" ] && cmp -s "$uaccess_rule_src" "$uaccess_rule_dest"; then
+    active_rule_installed=1
 fi
 
 printf '%s\n' "This will:"
-if [ "$rule_installed" -eq 1 ]; then
-    printf '%s\n' "  - keep $rule_dest (already installed, unchanged)"
+if [ "$access_mode" = active-seat ]; then
+    if [ "$active_rule_installed" -eq 1 ]; then
+        printf '%s\n' "  - keep $uaccess_rule_dest (already installed, unchanged)"
+    else
+        printf '%s\n' "  - install $uaccess_rule_dest and reload udev rules"
+    fi
+    printf '%s\n' "  - do not change input-group membership (logind active-seat ACLs)"
 else
-    printf '%s\n' "  - install $rule_dest and reload udev rules"
+    if [ "$rule_installed" -eq 1 ]; then
+        printf '%s\n' "  - keep $rule_dest (already installed, unchanged)"
+    else
+        printf '%s\n' "  - install $rule_dest and reload udev rules"
+    fi
+    if is_member; then
+        printf '%s\n' "  - keep $target_user in the \`input\` group (already a member)"
+    else
+        printf '%s\n' "  - add $target_user to the \`input\` group"
+    fi
 fi
-if is_member; then
-    printf '%s\n' "  - keep $target_user in the \`input\` group (already a member)"
+if [ "$access_mode" = input-group ]; then
+    printf '\n%s\n' "The \`input\` group can read every keystroke typed on this system, in any"
+    printf '%s\n' "session -- not only keystrokes WayExpand matches against. See"
+    printf '%s\n' "SECURITY.md and docs/EVDEV_ACCESS_DESIGN.md before continuing."
 else
-    printf '%s\n' "  - add $target_user to the \`input\` group"
+    printf '\n%s\n' "Active-seat mode relies on systemd-logind uaccess ACLs. Verify the"
+    printf '%s\n' "ACL is present for the current seat before starting WayExpand."
 fi
-printf '\n%s\n' "The \`input\` group can read every keystroke typed on this system, in any"
-printf '%s\n' "session -- not only keystrokes WayExpand matches against. See"
-printf '%s\n' "SECURITY.md and docs/EVDEV_ACCESS_DESIGN.md before continuing."
 
 if [ "$dry_run" -eq 1 ]; then
     printf '\n%s\n' "(dry run; no changes made)"
     exit 0
 fi
 
-if [ "$rule_installed" -eq 0 ]; then
+if [ "$access_mode" = active-seat ] && [ "$active_rule_installed" -eq 0 ]; then
+    install -Dm644 "$uaccess_rule_src" "$uaccess_rule_dest"
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload
+        udevadm trigger --subsystem-match=input
+    fi
+    printf '%s\n' "Installed $uaccess_rule_dest"
+elif [ "$access_mode" = input-group ] && [ "$rule_installed" -eq 0 ]; then
     install -Dm644 "$rule_src" "$rule_dest"
     if command -v udevadm >/dev/null 2>&1; then
         udevadm control --reload
@@ -153,12 +201,16 @@ if [ "$rule_installed" -eq 0 ]; then
     printf '%s\n' "Installed $rule_dest"
 fi
 
-if ! is_member; then
+if [ "$access_mode" = input-group ] && ! is_member; then
     usermod -aG input "$target_user"
     printf '%s\n' "Added $target_user to the \`input\` group."
 fi
 
-printf '%s\n' "Log out and back in (or reboot) for group membership to take effect."
+if [ "$access_mode" = active-seat ]; then
+    printf '%s\n' "Active-seat ACLs apply after udev reload/trigger and seat activation."
+else
+    printf '%s\n' "Log out and back in (or reboot) for group membership to take effect."
+fi
 printf '%s\n' "If \`wayexpand doctor\` still reports a permission problem after that, your"
 printf '%s\n' "systemd --user manager likely did not restart and is still running with the"
 printf '%s\n' "old group list -- run \`loginctl terminate-user $target_user\` (ends all"

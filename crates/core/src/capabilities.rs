@@ -96,7 +96,7 @@ impl Capabilities {
                 x11: false,
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support must be probed",
+                feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support must be probed; non-text key pass-through is experimental",
             }),
             "evdev" => Some(Capabilities {
                 backend_name: "evdev",
@@ -120,7 +120,7 @@ impl Capabilities {
                 x11: false,
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking",
+                feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking; non-text key pass-through is experimental",
             }),
             _ => None,
         }

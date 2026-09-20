@@ -1,11 +1,16 @@
 mod colorpack;
+mod editor;
 mod lang;
+mod library;
+mod settings;
 mod theme;
 
 use anyhow::{Context, Result};
 use colorpack::ColorPack;
+use editor::Draft;
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
+use settings::{load_gui_prefs, save_gui_prefs};
 use std::{
     env, fs,
     io::{Read, Write},
@@ -19,9 +24,9 @@ use theme::Palette;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    default_config_path, discover_backends, import_espanso, BackendState, BackendStatus,
-    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, ExpansionEngine,
-    FleetConfig, FontScale, InputEvent, MatchMode, OrganizationPolicy, Settings,
+    default_config_path, discover_backends, import_espanso, BackendState, BackendStatus, Config,
+    ConfigError, ExpansionConfig, ExpansionEngine, FleetConfig, FontScale, InputEvent, MatchMode,
+    OrganizationPolicy, Settings,
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -45,23 +50,6 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{newline}}", "line break"),
     ("{{tab}}", "tab character"),
 ];
-
-struct Draft {
-    trigger: String,
-    description: String,
-    tags: String,
-    category: String,
-    app_filter: String,
-    replacement: String,
-    enabled: bool,
-    match_mode: MatchMode,
-    propagate_case: bool,
-    command_enabled: bool,
-    command_program: String,
-    command_args: String,
-    command_timeout_ms: String,
-    command_cache_ms: String,
-}
 
 enum PendingAction {
     Select(usize),
@@ -373,43 +361,13 @@ impl GuiApp {
     }
 
     fn visible_indices(&self) -> Vec<usize> {
-        let query = self.filter.to_lowercase();
-        self.config
-            .expansion
-            .iter()
-            .enumerate()
-            .filter(|(_, expansion)| {
-                self.category_filter
-                    .as_deref()
-                    .is_none_or(|category| expansion.category == category)
-            })
-            .filter(|(_, expansion)| {
-                query.is_empty()
-                    || format!(
-                        "{} {} {} {}",
-                        expansion.trigger,
-                        expansion.description,
-                        expansion.tags.join(" "),
-                        expansion.category
-                    )
-                    .to_lowercase()
-                    .contains(&query)
-            })
-            .map(|(index, _)| index)
-            .collect()
+        library::visible_indices(&self.config, &self.filter, self.category_filter.as_deref())
     }
 
     /// Distinct, sorted, non-empty categories currently in use — drives the
     /// sidebar filter chips and the editor's "pick existing" combo box.
     fn categories(&self) -> Vec<String> {
-        self.config
-            .expansion
-            .iter()
-            .map(|expansion| expansion.category.clone())
-            .filter(|category| !category.is_empty())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
+        library::categories(&self.config)
     }
 
     fn select(&mut self, index: usize) {
@@ -828,78 +786,6 @@ impl GuiApp {
             }
             Err(error) => self.message = format!("Control unavailable: {error}"),
         }
-    }
-}
-
-impl Draft {
-    fn from_expansion(expansion: &ExpansionConfig) -> Self {
-        let (command_enabled, command_program, command_args, command_timeout_ms, command_cache_ms) =
-            match &expansion.command {
-                Some(command) => (
-                    true,
-                    command.program.clone(),
-                    command.args.join("\n"),
-                    command.timeout_ms.to_string(),
-                    command.cache_ms.to_string(),
-                ),
-                None => (
-                    false,
-                    String::new(),
-                    String::new(),
-                    "500".into(),
-                    "0".into(),
-                ),
-            };
-        Self {
-            trigger: expansion.trigger.clone(),
-            description: expansion.description.clone(),
-            tags: expansion.tags.join(", "),
-            category: expansion.category.clone(),
-            app_filter: expansion.app_filter.join(", "),
-            replacement: expansion.replacement.clone(),
-            enabled: expansion.enabled,
-            match_mode: expansion.match_mode,
-            propagate_case: expansion.propagate_case,
-            command_enabled,
-            command_program,
-            command_args,
-            command_timeout_ms,
-            command_cache_ms,
-        }
-    }
-
-    fn command_config(&self) -> Result<Option<CommandConfig>> {
-        if !self.command_enabled {
-            return Ok(None);
-        }
-        let program = self.command_program.trim();
-        if program.is_empty() {
-            anyhow::bail!("program is required when command expansion is enabled");
-        }
-        let timeout_ms = self
-            .command_timeout_ms
-            .trim()
-            .parse::<u64>()
-            .context("timeout must be an integer in milliseconds")?;
-        let cache_ms = self
-            .command_cache_ms
-            .trim()
-            .parse::<u64>()
-            .context("cache duration must be an integer in milliseconds")?;
-        Ok(Some(CommandConfig {
-            program: program.to_owned(),
-            args: self
-                .command_args
-                .lines()
-                .map(str::trim)
-                .filter(|arg| !arg.is_empty())
-                .map(str::to_owned)
-                .collect(),
-            timeout_ms,
-            cache_ms,
-            environment: CommandEnvironment::default(),
-            pass_env: Vec::new(),
-        }))
     }
 }
 
@@ -2076,73 +1962,6 @@ fn expand_user_path(value: &str) -> PathBuf {
     } else {
         PathBuf::from(value)
     }
-}
-
-/// GUI-only display preferences (language, color pack, dark/light mode).
-/// Deliberately separate from `expansions.toml`: this file holds no
-/// expansion data and carries none of that file's stability guarantees, so a
-/// parse failure here should never block snippet editing -- callers fall
-/// back to defaults rather than surfacing an error.
-struct GuiPrefs {
-    language: Language,
-    colorpack: ColorPack,
-    /// `None` means no preference has ever been saved: the caller should
-    /// auto-detect from the desktop's theme instead of forcing one, so a
-    /// first run still matches the user's system light/dark setting.
-    dark_mode: Option<bool>,
-}
-
-fn gui_prefs_path() -> PathBuf {
-    default_config_path().with_file_name("gui-prefs.toml")
-}
-
-fn load_gui_prefs() -> GuiPrefs {
-    let mut prefs = GuiPrefs {
-        language: Language::from_env(),
-        colorpack: ColorPack::Default,
-        dark_mode: None,
-    };
-    let Ok(contents) = fs::read_to_string(gui_prefs_path()) else {
-        return prefs;
-    };
-    for line in contents.lines() {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches('"');
-        match key.trim() {
-            "language" => {
-                if let Some(language) = Language::from_code(value) {
-                    prefs.language = language;
-                }
-            }
-            "colorpack" => {
-                if let Some(colorpack) = ColorPack::from_code(value) {
-                    prefs.colorpack = colorpack;
-                }
-            }
-            "dark_mode" => prefs.dark_mode = Some(value == "true"),
-            _ => {}
-        }
-    }
-    prefs
-}
-
-/// Best-effort save: display preferences are not load-bearing, so a failure
-/// (read-only filesystem, missing directory permissions, ...) is silently
-/// ignored rather than surfaced as an error the user has to dismiss.
-fn save_gui_prefs(language: Language, colorpack: ColorPack, dark_mode: bool) {
-    let path = gui_prefs_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let contents = format!(
-        "language = \"{}\"\ncolorpack = \"{}\"\ndark_mode = {}\n",
-        language.code(),
-        colorpack.code(),
-        dark_mode
-    );
-    let _ = fs::write(path, contents);
 }
 
 fn main() -> Result<()> {
