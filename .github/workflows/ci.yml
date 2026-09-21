@@ -137,6 +137,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Generate vendored dependencies (offline builds)
         run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
+      - name: Build binaries
+        run: cargo build --locked --workspace
       - name: Daemon smoke test
         run: bash scripts/smoke-daemon.sh
       - name: Daemon E2E scenarios
