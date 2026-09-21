@@ -20,7 +20,7 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml" \
     "$project_dir/scripts/install-release.sh" "$project_dir/scripts/install-user.sh"; do
     for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
-        rg -q --fixed-strings "$binary" "$manifest" || {
+        grep -q -F "$binary" "$manifest" || {
             printf '%s\n' "manifest omits $binary: $manifest" >&2
             exit 1
         }
@@ -29,7 +29,7 @@ done
 
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml"; do
-    rg -q --fixed-strings 'wayexpand-ibus.xml' "$manifest" || {
+    grep -q -F 'wayexpand-ibus.xml' "$manifest" || {
         printf '%s\n' "manifest omits the IBus component: $manifest" >&2
         exit 1
     }
