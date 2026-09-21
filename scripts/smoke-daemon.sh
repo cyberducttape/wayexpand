@@ -103,6 +103,7 @@ daemon_pid=
 XDG_RUNTIME_DIR="$runtime_dir" \
 WAYEXPAND_CONFIG="$config_path" \
 "$project_dir/target/debug/wayexpand-daemon" \
+    --source=stdin --backend=none \
     </dev/null >"$runtime_dir/daemon-sigterm.log" 2>&1 &
 daemon_pid=$!
 
@@ -114,7 +115,7 @@ for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 0.1
 done
 case "$status" in
-    *"source=stdin"*"backend=libei"*) ;;
+    *"source=stdin"*"backend=none"*) ;;
     *)
         printf '%s\n' "daemon did not become ready before SIGTERM test" >&2
         exit 1
