@@ -59,6 +59,8 @@ for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
         case "$status" in
             *"source=stdin"*"backend=libei"*"config_state=ok"*) break ;;
         esac
+    else
+        status="(no response from status command)"
     fi
     sleep 0.1
 done
@@ -67,6 +69,8 @@ case "$status" in
     *"source=stdin"*"backend=libei"*"config_state=ok"*) ;;
     *)
         printf '%s\n' "unexpected status response:" "$status" >&2
+        printf '%s\n' "daemon log:" >&2
+        cat "$runtime_dir/daemon.log" >&2 || true
         exit 1
         ;;
 esac
