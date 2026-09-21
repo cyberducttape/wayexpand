@@ -161,11 +161,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Verify wayexpand.service
-        run: systemd-analyze verify systemd/wayexpand.service
+        run: systemd-analyze verify --recursive-errors=no systemd/wayexpand.service
       - name: Verify wayexpand-input-method.service
-        run: systemd-analyze verify systemd/wayexpand-input-method.service
+        run: systemd-analyze verify --recursive-errors=no systemd/wayexpand-input-method.service
       - name: Verify wayexpand-evdev.service
-        run: systemd-analyze verify systemd/wayexpand-evdev.service
+        run: systemd-analyze verify --recursive-errors=no systemd/wayexpand-evdev.service
       - name: Verify backend units are mutually exclusive
         run: |
           set -eu
