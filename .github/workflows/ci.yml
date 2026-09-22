@@ -19,6 +19,16 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  workflow:
+    name: GitHub Actions Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: rhysd/actionlint-action@9a1ac1d1c5c61a9eb1c45e6ad6f2eeeba8bb0c89 # v1.7.1
+        with:
+          fail-on-error: true
+
   supply-chain:
     name: Security Audit
     runs-on: ubuntu-latest
