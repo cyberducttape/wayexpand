@@ -3,14 +3,31 @@
 wayexpand \- validate and manage WayExpand text-expansion configuration
 .SH SYNOPSIS
 .B wayexpand
+.BR setup
+\&|\&
+.BR status
+\&|\&
+.BR edit
+\&|\&
 .BR doctor
 \&|\&
 .B validate
 .I CONFIG
 .SH DESCRIPTION
 WayExpand is a local Wayland text expander. The daemon performs expansion;
-this command provides diagnostics and configuration validation.
+this command provides setup, status, editing, diagnostics, and configuration
+validation.
 .SH COMMANDS
+.TP
+.B setup
+Inspect the session and backend safety tradeoffs. Input-method-v2 is only
+shown with the explicit --experimental-input-method-v2 flag.
+.TP
+.B edit [CONFIG]
+Open the graphical snippet editor.
+.TP
+.B status
+Show the active daemon status.
 .TP
 .B doctor
 Report available input and output backends and their compatibility.

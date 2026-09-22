@@ -6,7 +6,7 @@
 //! IBus signals. Keeping that boundary explicit makes the expansion behavior
 //! testable and prevents D-Bus threading details from entering the matcher.
 
-use wayexpand_core::{ExpansionEngine, InputEvent};
+use wayexpand_core::{Config, ExpansionEngine, InputEvent};
 
 mod service;
 
@@ -50,6 +50,21 @@ impl IbusEngineAdapter {
 
     pub fn engine_mut(&mut self) -> &mut ExpansionEngine {
         &mut self.engine
+    }
+
+    pub fn replace_config(&mut self, config: Config) -> Result<(), wayexpand_core::ConfigError> {
+        let mut engine = ExpansionEngine::new(config)?;
+        engine.set_user_paused(self.engine.is_user_paused());
+        engine.set_sensitive_focus(self.engine.is_sensitive_focus());
+        engine.set_current_window(self.engine.current_window().cloned());
+        engine.set_commands_disabled(self.engine.commands_disabled());
+        engine.set_title_matching_disabled(self.engine.title_matching_disabled());
+        engine.set_reinsert_terminators(self.engine.reinserts_terminators());
+        if self.engine.async_commands_enabled() {
+            engine.enable_async_commands();
+        }
+        self.engine = engine;
+        Ok(())
     }
 
     pub fn focus_in(&mut self) {

@@ -11,7 +11,6 @@ for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ib
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
 done
-install -m 0644 "$project_dir/systemd/wayexpand.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
@@ -56,9 +55,9 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
-[ -f "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 
 PATH="$stub_bin:$PATH" \
@@ -75,7 +74,6 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ ! -e "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
-[ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]

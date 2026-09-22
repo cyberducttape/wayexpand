@@ -39,12 +39,11 @@ override_dh_install:
 	dh_install --package=wayexpand assets/icon/hicolor/128x128/apps/wayexpand.png usr/share/icons/hicolor/128x128/apps/
 	dh_install --package=wayexpand assets/icon/hicolor/256x256/apps/wayexpand.png usr/share/icons/hicolor/256x256/apps/
 	dh_install --package=wayexpand assets/icon/hicolor/512x512/apps/wayexpand.png usr/share/icons/hicolor/512x512/apps/
-	dh_install --package=wayexpand systemd/wayexpand.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-input-method.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-evdev.service usr/lib/systemd/user/
 	# Bind packaged units to /usr/bin; never allow a stale ~/.local/bin binary
 	# to win through a user-service PATH.
-	for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do \
+	for unit in wayexpand-input-method.service wayexpand-evdev.service; do \
 		sed -i 's#%h/.local/bin/#/usr/bin/#g' debian/wayexpand/usr/lib/systemd/user/$$unit; \
 	done
 	dh_install --package=wayexpand udev/71-wayexpand-evdev.rules usr/lib/udev/rules.d/

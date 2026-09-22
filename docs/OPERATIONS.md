@@ -268,21 +268,22 @@ The shipped units automatically restart failures but stop trying after five
 starts within 60 seconds, preventing a compositor incompatibility from causing
 an unbounded restart loop.
 
-## Current limitation
+## Services
 
-The repository includes two example user services. Install them only after installing
-`wayexpand-daemon` into the user service manager's `PATH`, then run:
+Ordinary installers do not install the stdin harness as `wayexpand.service`.
+That unit remains in the source tree only for deterministic daemon lifecycle
+tests. The packaged services are expert-selected backend units; setup should
+be the first step for a new user:
 
 ```sh
 systemctl --user daemon-reload
-systemctl --user enable --now wayexpand.service
-systemctl --user status wayexpand.service
+wayexpand setup
+wayexpand status
+wayexpand edit
 ```
 
-`systemd/wayexpand.service` starts the stdin harness, so it is useful for
-lifecycle and configuration-reload testing but does not provide global desktop
-capture. The actual opt-in input-method service is
-`systemd/wayexpand-input-method.service`:
+For expert manual backend selection, the input-method and evdev services remain
+available:
 
 ```sh
 systemctl --user enable --now wayexpand-input-method.service
