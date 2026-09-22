@@ -1,5 +1,5 @@
 [Unit]
-Description=WayExpand text expansion daemon (stdin test mode)
+Description=WayExpand stdin test harness (not installed for ordinary users)
 After=graphical-session.target
 PartOf=graphical-session.target
 Conflicts=wayexpand-input-method.service wayexpand-evdev.service
@@ -64,8 +64,9 @@ TasksMax=16
 LimitNOFILE=64
 LimitCORE=0
 
-# The daemon reads the user's config and writes only its user runtime socket.
-ReadWritePaths=%t
+# The stdin harness can use the same libei output path during integration
+# tests, which persists a portal restoration token under this directory.
+ReadWritePaths=%t %h/.config/wayexpand
 
 [Install]
 WantedBy=graphical-session.target

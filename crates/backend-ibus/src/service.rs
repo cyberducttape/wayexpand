@@ -3,8 +3,9 @@ use std::{
     collections::HashMap,
     env,
     sync::{Arc, Mutex},
+    time::Duration,
 };
-use wayexpand_core::{default_config_path, Config, ExpansionEngine};
+use wayexpand_core::{default_config_path, ConfigStore, ExpansionEngine};
 use zbus::{
     blocking::{connection::Builder, Connection},
     interface,
@@ -21,6 +22,8 @@ pub enum IbusServiceError {
     Config(#[from] wayexpand_core::ConfigError),
     #[error("D-Bus service failed: {0}")]
     Dbus(#[from] zbus::Error),
+    #[error("could not start configuration watcher: {0}")]
+    Thread(String),
 }
 
 /// IBus factory object. IBus creates one engine instance for this process; the
@@ -39,7 +42,7 @@ impl Factory {
 }
 
 struct EngineObject {
-    adapter: Mutex<IbusEngineAdapter>,
+    adapter: Arc<Mutex<IbusEngineAdapter>>,
     connection: Arc<Mutex<Option<Connection>>>,
 }
 
@@ -143,13 +146,28 @@ impl EngineObject {
 /// zbus dispatches method calls on its internal async-io executor.
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
     let path = config_path.unwrap_or_else(default_config_path);
-    let config = Config::load(&path)?;
-    let adapter = IbusEngineAdapter::new(ExpansionEngine::new(config)?);
+    let store = ConfigStore::load(&path)?;
+    let adapter = IbusEngineAdapter::new(ExpansionEngine::new((*store.config()).clone())?);
     let connection_slot = Arc::new(Mutex::new(None));
     let engine = EngineObject {
-        adapter: Mutex::new(adapter),
+        adapter: Arc::new(Mutex::new(adapter)),
         connection: Arc::clone(&connection_slot),
     };
+    let reload_receiver = store.subscribe();
+    let reload_store = Arc::clone(&store);
+    let reload_engine = Arc::clone(&engine.adapter);
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-config".into())
+        .spawn(move || loop {
+            let _ = reload_store.reload_if_changed();
+            while reload_receiver.try_recv().is_ok() {
+                if let Ok(mut adapter) = reload_engine.lock() {
+                    let _ = adapter.replace_config((*reload_store.config()).clone());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        })
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     // IBus engines must connect to IBus' private bus, not the ordinary
     // desktop session bus. The daemon supplies IBUS_ADDRESS when launching
     // an engine; the command fallback also supports manual startup.
@@ -190,6 +208,7 @@ fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wayexpand_core::Config;
     use zbus::zvariant::DynamicType;
 
     #[test]
@@ -220,9 +239,9 @@ mod tests {
             toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"expanded\"\n")
                 .unwrap();
         let engine = EngineObject {
-            adapter: Mutex::new(IbusEngineAdapter::new(
+            adapter: Arc::new(Mutex::new(IbusEngineAdapter::new(
                 ExpansionEngine::new(config).unwrap(),
-            )),
+            ))),
             connection: Arc::new(Mutex::new(None)),
         };
         engine.set_content_type(8, 0);

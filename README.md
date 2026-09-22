@@ -83,6 +83,18 @@ stephan@example.com"""
 The GUI can create and preview snippets like this without editing TOML by
 hand.
 
+The compact user workflow is:
+
+```sh
+wayexpand setup
+wayexpand status
+wayexpand edit
+```
+
+Backend-specific services and binaries remain available for advanced users.
+The stdin daemon harness is intentionally not installed as a normal user
+service.
+
 ## Why WayExpand?
 
 - **Wayland-native design:** input-method-v2, libei/EIS, and wlroots
@@ -260,14 +272,17 @@ For backend failures, follow the [Troubleshooting Checklist](docs/TROUBLESHOOTIN
 
 WayExpand's deployment depends on your compositor and its Wayland protocol support. The valid backend combinations are:
 
-**Explicit option: input-method-v2 (single unified backend)**
+**Explicit option: input-method-v2 (single unified backend, experimental)**
 
-This backend is opt-in, not the automatic default. Use it only on a compositor
-where you have tested its key behavior and accept that unsupported non-text
-keys can be discarded:
+This backend is deliberately hidden from normal setup. It has exclusive
+keyboard capture and may discard unrelated navigation, function, Escape, or
+other unsupported keys. Inspect its warning only when you explicitly accept
+that risk:
 ```sh
-systemctl --user enable --now wayexpand-input-method.service
+wayexpand setup --experimental-input-method-v2
 ```
+Do not enable it on a production, shared, password-manager, or regulated
+machine unless you have tested the exact compositor and application set.
 
 Pros:
 - Simpler setup (one backend handles capture+output)
@@ -275,7 +290,7 @@ Pros:
 - Requires no special permissions
 
 Cons:
-- Experimental — unsupported key events (Escape, arrows, F-keys) may not pass through (see [support matrix](docs/SUPPORT_MATRIX.md))
+- Experimental — unsupported key events (Escape, arrows, F-keys) may not pass through; normal `wayexpand setup` intentionally hides this backend (see [support matrix](docs/SUPPORT_MATRIX.md))
 
 **Option 2: evdev + libei/wlroots (split capture/output)**
 
@@ -320,9 +335,10 @@ enabled automatically.
 
 If `wayexpand backend select --explain` reports readable evdev as disabled,
 choose `--source=evdev --backend=libei` only after acknowledging that WayExpand
-will see global keyboard input. Choose input-method-v2 explicitly only if
-password-field signals matter more to you than general key pass-through;
-Escape, arrows, and function keys may be lost while it is active.
+will see global keyboard input. Input-method-v2 is intentionally not offered by
+normal setup: choose it only in a disposable/test session where password-field
+signals matter more than general key pass-through and unrelated keys may be
+lost.
 
 **Granting evdev permission**
 

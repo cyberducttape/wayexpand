@@ -85,7 +85,7 @@ jobs:
           install -m 0755 target/release/wayexpand-ui "$root/bin/"
           install -m 0755 target/release/wayexpand-gui "$root/bin/"
           install -m 0755 target/release/wayexpand-ibus "$root/bin/"
-          install -m 0644 systemd/*.service "$root/systemd/"
+          install -m 0644 systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
           install -m 0644 desktop/wayexpand-ibus.xml "$root/ibus/component/"
           install -m 0644 io.github.itchyitchy123.WayExpand.metainfo.xml "$root/"

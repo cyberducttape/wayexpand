@@ -6,6 +6,21 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Add a shared generation-aware `ConfigStore` and live IBus configuration
+  reloads, preserving pause, sensitive-focus, window-context, and command
+  safety state across replacement.
+- Make input-method-v2 opt-in visibly experimental through
+  `wayexpand setup --experimental-input-method-v2`; document its exclusive
+  capture and unsupported-key limitations alongside evdev and IME/preedit
+  limitations.
+- Simplify onboarding with `wayexpand setup`, `wayexpand status`, and
+  `wayexpand edit`; stop packaging the stdin test harness as
+  `wayexpand.service` while retaining expert backend services.
+- Pin the CI cargo-audit version, validate GitHub Actions with actionlint, and
+  document real KDE, GNOME, Sway, and Hyprland certification requirements.
+- Fix portal-token persistence under systemd `ProtectHome=read-only` and make
+  the Launchpad sync workflow validate its SSH key and use strict host-key
+  handling.
 - Forward evdev kernel auto-repeat into matcher state without repeating global
   hotkeys or changing physical held-key state.
 - Track native Linux release archives for x86_64 and aarch64 as a packaging goal; only x86_64 is currently published by the release workflow.

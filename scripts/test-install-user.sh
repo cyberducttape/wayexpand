@@ -48,9 +48,9 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
-[ -f "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 
 config_path="$test_root/config/wayexpand/expansions.toml"
 custom_config=$(mktemp "$test_root/custom-config.XXXXXX")

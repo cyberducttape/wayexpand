@@ -109,8 +109,10 @@ silently interpreting them would be unsafe. The individual grabbed event may
 be lost; the source does not claim general non-text pass-through and does not
 restart the daemon for ordinary unsupported keys. Preedit handling, full
 non-text pass-through, and compositor coverage
-remain open integration work, so this source is opt-in with
-`--source=input-method`. Replacements larger than the protocol commit limit
+remain open integration work, so this source is opt-in and intentionally hidden
+behind `wayexpand setup --experimental-input-method-v2`. The daemon flag remains
+available for development and explicit automation, but normal setup does not
+recommend or enable it. Replacements larger than the protocol commit limit
 are rejected before any deletion is sent. Initial registry discovery is
 deadline-bounded so a connected but unresponsive compositor cannot hang one
 connection attempt indefinitely; retryable startup failures are retried with

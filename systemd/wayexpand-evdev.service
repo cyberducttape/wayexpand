@@ -66,6 +66,9 @@ LimitCORE=0
 # /dev/input (granted via scripts/install-evdev-permissions.sh, not by this
 # unit), writes its user runtime socket, and stores libei portal restoration
 # tokens under ~/.config/wayexpand/ for seamless reconnection after restart.
+# ProtectHome=read-only is intentionally narrowed by the matching
+# ReadWritePaths exception below; without it, portal restoration silently
+# fails after the first session.
 ReadWritePaths=%t %h/.config/wayexpand
 
 [Install]

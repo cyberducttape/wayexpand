@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: rhysd/actionlint-action@9a1ac1d1c5c61a9eb1c45e6ad6f2eeeba8bb0c89 # v1.7.1
+      - name: Validate GitHub Actions
+        uses: rhysd/actionlint-action@9a1ac1d1c5c61a9eb1c45e6ad6f2eeeba8bb0c89 # v1.7.1 (runs actionlint)
         with:
           fail-on-error: true
 
@@ -39,7 +40,7 @@ jobs:
         with:
           toolchain: 1.96.0
       - name: Run cargo audit
-        run: cargo install cargo-audit && cargo audit
+        run: cargo install cargo-audit --version 0.21.2 --locked && cargo audit
 
   rust:
     name: Rust Tests & Linting

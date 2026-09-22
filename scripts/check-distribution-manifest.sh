@@ -5,7 +5,6 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 for relative in \
     desktop/wayexpand-ibus.xml \
-    systemd/wayexpand.service \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
     udev/71-wayexpand-evdev.rules \

@@ -9,9 +9,6 @@ for argument in "$@"; do
         --enable)
             enable_service=1
             ;;
-        --service=wayexpand.service)
-            service_name=wayexpand.service
-            ;;
         --service=wayexpand-input-method.service)
             service_name=wayexpand-input-method.service
             ;;
@@ -19,7 +16,7 @@ for argument in "$@"; do
             service_name=wayexpand-evdev.service
             ;;
         --help|-h)
-            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand.service|wayexpand-input-method.service|wayexpand-evdev.service]"
+            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand-input-method.service|wayexpand-evdev.service]"
             printf '%s\n' "  --enable   daemon-reload and enable the selected user service"
             printf '%s\n' "  --service  select the service when --enable is used"
             exit 0
@@ -85,8 +82,6 @@ install -Dm755 "$target_dir/release/wayexpand-ibus" \
     "$bin_dir/wayexpand-ibus"
 install -Dm644 "$project_dir/desktop/wayexpand-ibus.xml" \
     "$ibus_component_dir/wayexpand.xml"
-install -Dm644 "$project_dir/systemd/wayexpand.service" \
-    "$unit_dir/wayexpand.service"
 install -Dm644 "$project_dir/systemd/wayexpand-input-method.service" \
     "$unit_dir/wayexpand-input-method.service"
 install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
@@ -128,7 +123,8 @@ printf '%s\n' ""
 printf '%s\n' "3. Check which backend your compositor supports:"
 printf '%s\n' "   wayexpand doctor"
 printf '%s\n' ""
-printf '%s\n' "4. Inspect automatic selection, then choose ONE service explicitly:"
+printf '%s\n' "4. Run setup, then choose ONE production backend explicitly:"
+printf '%s\n' "   wayexpand setup"
 printf '%s\n' "   wayexpand backend select --explain"
 printf '%s\n' ""
 printf '%s\n' "   EXPERIMENTAL input-method-v2 (may lose unsupported non-text keys):"
@@ -139,10 +135,10 @@ printf '%s\n' "   (1) sudo ./scripts/install-evdev-permissions.sh"
 printf '%s\n' "   (2) Log out and back in"
 printf '%s\n' "   (3) systemctl --user enable --now wayexpand-evdev.service"
 printf '%s\n' ""
-printf '%s\n' "5. Launch the GUI:"
-printf '%s\n' "   wayexpand-gui"
+printf '%s\n' "5. Edit snippets:"
+printf '%s\n' "   wayexpand edit"
 printf '%s\n' ""
-printf '%s\n' "⚠️  DO NOT use 'wayexpand.service' directly — it is a test harness."
+printf '%s\n' "The stdin test harness is not installed as a user service."
 
 if [ "$enable_service" -eq 1 ]; then
     if [ -z "$service_name" ]; then

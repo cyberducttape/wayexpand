@@ -7,6 +7,7 @@ use std::{
     os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -502,17 +503,38 @@ fn run() -> Result<()> {
             fs::set_permissions(&destination, fs::Permissions::from_mode(0o600))?;
             println!("created configuration backup {}", destination.display());
         }
-        Some("setup") => {
+        Some("edit") => {
+            let config = args.next();
             if args.next().is_some() {
-                bail!("usage: wayexpand setup");
+                bail!("usage: wayexpand edit [config]");
             }
+            let mut editor = Command::new("wayexpand-gui");
+            if let Some(config) = config {
+                editor.arg(config);
+            }
+            editor.spawn().context(
+                "could not start wayexpand-gui; install the GUI package or run wayexpand-ui",
+            )?;
+        }
+        Some("setup") => {
+            let experimental_input_method = match args.next().as_deref() {
+                None => false,
+                Some("--experimental-input-method-v2") => true,
+                Some(_) => bail!("usage: wayexpand setup [--experimental-input-method-v2]"),
+            };
             println!("WayExpand setup (read-only)");
             println!("Session: {}", session_description());
             println!("No permissions, services, or configuration will be changed.");
+            if experimental_input_method {
+                println!();
+                println!("!!! EXPERIMENTAL INPUT-METHOD-V2 ENABLED !!!");
+                println!("This backend has exclusive keyboard capture and does not guarantee pass-through for Escape, arrows, function keys, or other unsupported keys.");
+                println!("Use it only on a disposable/test session where lost unrelated input is acceptable.");
+            }
             println!();
             let has_wayland = env::var_os("WAYLAND_DISPLAY").is_some();
             let has_x11 = env::var_os("DISPLAY").is_some();
-            let diagnostics_ok = print_backend_diagnostics();
+            let diagnostics_ok = print_backend_diagnostics(experimental_input_method);
             let ready = has_wayland && diagnostics_ok;
             if has_x11 && !has_wayland {
                 println!("Setup note: native X11 capture is not implemented; use the explicit evdev route if its security tradeoff is acceptable.");
@@ -521,6 +543,9 @@ fn run() -> Result<()> {
             if ready {
                 println!("Next step: choose one listed backend and enable its user service.");
                 println!("Run `wayexpand doctor` after enabling it to verify the live daemon.");
+            } else if !experimental_input_method {
+                println!("Input-method-v2 is intentionally hidden from normal setup because it may drop unrelated keyboard input.");
+                println!("To inspect it explicitly, rerun: wayexpand setup --experimental-input-method-v2");
             } else {
                 println!("Next step: resolve the capability or permission warning above, then rerun setup.");
             }
@@ -547,7 +572,7 @@ fn run() -> Result<()> {
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
             let _policy_ok = print_policy_diagnostics();
-            let capture_ready = print_backend_diagnostics();
+            let capture_ready = print_backend_diagnostics(true);
             print_capabilities_diagnostics();
             if !config_ok || !control_socket_ok || !capture_ready {
                 bail!("doctor found configuration, runtime, or backend problems");
@@ -555,7 +580,7 @@ fn run() -> Result<()> {
         }
         Some("backend") => match args.next().as_deref() {
             None => {
-                print_backend_diagnostics();
+                print_backend_diagnostics(true);
             }
             Some("select") => {
                 if args.next().as_deref() != Some("--explain") || args.next().is_some() {
@@ -671,7 +696,10 @@ fn run() -> Result<()> {
                 print!("{response}");
             }
         }
-        Some("help") | Some("--help") | Some("-h") | None => println!(
+        Some("help") => println!(
+            "WayExpand commands: setup [--experimental-input-method-v2], status, edit [config], doctor, validate, list, search, backend, and expert control commands.\nRun `wayexpand --help` for the full command reference."
+        ),
+        Some("--help") | Some("-h") | None => println!(
             "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  test <text> [--json] [config]                Simulate input and print a match\n  test-hotkey <chord> [--json] [config]       Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions and hotkeys\n  search <query> [--json] [config]             Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  backup [config] [destination]                Create a non-overwriting config backup\n  doctor [--json] [config]                     Diagnose configuration and backends\n  backend                                      Show backend availability\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
             env!("CARGO_PKG_VERSION"),
             default_config_path().display()
@@ -692,7 +720,7 @@ fn session_description() -> &'static str {
     }
 }
 
-fn print_backend_diagnostics() -> bool {
+fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     let backends = discover_backends();
     for status in &backends {
         let detail = format!(
@@ -729,16 +757,18 @@ fn print_backend_diagnostics() -> bool {
             false
         }
     };
-    let input_method_available = match InputMethodSource::probe() {
-        Ok(_) => {
-            println!("input-method-v2 probe: manager and seat connection succeeded");
-            true
-        }
-        Err(error) => {
-            println!("input-method-v2 probe: unavailable ({error})");
-            false
-        }
-    };
+    let input_method_available =
+        match include_experimental_input_method.then(InputMethodSource::probe) {
+            None => false,
+            Some(Ok(_)) => {
+                println!("input-method-v2 probe: manager and seat connection succeeded");
+                true
+            }
+            Some(Err(error)) => {
+                println!("input-method-v2 probe: unavailable ({error})");
+                false
+            }
+        };
     let evdev_readable = backends.iter().any(|status| {
         status.kind == BackendKind::Evdev && status.state == BackendState::Implemented
     });

@@ -12,9 +12,6 @@ for argument in "$@"; do
         --enable)
             enable_service=1
             ;;
-        --service=wayexpand.service)
-            service_name=wayexpand.service
-            ;;
         --service=wayexpand-input-method.service)
             service_name=wayexpand-input-method.service
             ;;
@@ -22,7 +19,7 @@ for argument in "$@"; do
             service_name=wayexpand-evdev.service
             ;;
         --help|-h)
-            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand.service|wayexpand-input-method.service|wayexpand-evdev.service]"
+            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand-input-method.service|wayexpand-evdev.service]"
             printf '%s\n' "  --enable   daemon-reload and enable the selected user service"
             printf '%s\n' "  --service  select the service when --enable is used"
             exit 0
@@ -66,8 +63,6 @@ if [ -f "$release_dir/ibus/component/wayexpand-ibus.xml" ]; then
     install -Dm644 "$release_dir/ibus/component/wayexpand-ibus.xml" \
         "$HOME/.local/share/ibus/component/wayexpand.xml"
 fi
-install -Dm644 "$release_dir/systemd/wayexpand.service" \
-    "$unit_dir/wayexpand.service"
 install -Dm644 "$release_dir/systemd/wayexpand-input-method.service" \
     "$unit_dir/wayexpand-input-method.service"
 install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
@@ -111,7 +106,7 @@ printf '%s\n' "  wayexpand doctor"
 printf '%s\n' "  wayexpand backend select --explain"
 printf '%s\n' "  systemctl --user enable --now wayexpand-evdev.service (normal route, after evdev permissions)"
 printf '%s\n' "  systemctl --user enable --now wayexpand-input-method.service (explicit experimental opt-in; may lose non-text keys)"
-printf '%s\n' "  wayexpand-gui"
+printf '%s\n' "  wayexpand edit"
 printf '%s\n' "If \`doctor\` reports no input-method-v2/virtual-keyboard support (for"
 printf '%s\n' "example on KWin/KDE Plasma), read SECURITY.md and consider:"
 printf '%s\n' "  sudo ./scripts/install-evdev-permissions.sh --dry-run"

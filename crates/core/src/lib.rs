@@ -9,6 +9,7 @@ mod keys;
 mod matcher;
 mod migration;
 mod paths;
+mod store;
 mod template;
 
 pub use backend::{
@@ -29,4 +30,5 @@ pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{import_espanso, EspansoImport, MigrationError};
 pub use paths::default_config_path;
+pub use store::ConfigStore;
 pub use template::{render_template, render_template_with_cursor, TemplateContext, TemplateError};

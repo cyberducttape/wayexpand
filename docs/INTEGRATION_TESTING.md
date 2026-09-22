@@ -45,6 +45,23 @@ Record the compositor, desktop session, keyboard layout, and output of
 
 ## Certification evidence
 
+Compositor-independent CI cannot certify real keyboard behavior. Release
+certification must include separate runs on real, supported Wayland sessions:
+
+| Release certification target | Required session |
+| --- | --- |
+| KDE path | KDE Plasma / KWin |
+| GNOME path | GNOME Shell / Mutter |
+| wlroots path | Sway |
+| wlroots path | Hyprland |
+
+These runs should use dedicated physical or virtual-machine test clients and
+record the compositor version, Wayland protocol exposure, keyboard layout,
+selected backend, and target applications. They should be performed on
+self-hosted Wayland runners or by an operator before publishing a release;
+Ubuntu-hosted CI is not a substitute for them. A release is not compositor
+certified merely because the unit, smoke, doctor, or protocol tests pass.
+
 Use the evidence collector on a real compositor session:
 
 ```sh

@@ -59,11 +59,9 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
         %{buildroot}%{_datadir}/icons/hicolor/${size}/apps/wayexpand.png
 done
 
-install -Dm644 systemd/wayexpand.service %{buildroot}%{_userunitdir}/wayexpand.service
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 sed -i 's#%h/.local/bin/#/usr/bin/#g' \
-    %{buildroot}%{_userunitdir}/wayexpand.service \
     %{buildroot}%{_userunitdir}/wayexpand-input-method.service \
     %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 
@@ -85,7 +83,6 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml
 %{_mandir}/man1/wayexpand.1
-%{_userunitdir}/wayexpand.service
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
 %{_udevrulesdir}/71-wayexpand-evdev.rules
