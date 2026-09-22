@@ -1281,6 +1281,39 @@ mod tests {
     }
 
     #[test]
+    fn portal_token_survives_config_dir_writable_in_read_only_home() {
+        // Verify that libei can store and retrieve tokens in a writable config
+        // directory. This tests the systemd hardening scenario: ProtectHome=read-only
+        // with ReadWritePaths=%h/.config/wayexpand allows token persistence after
+        // restart. The security validation checks the entire parent chain; all
+        // intermediate directories must be owned by the current user and not
+        // writable by group/other (no 0o022 bits).
+        let parent = token_test_parent("systemd-hardening");
+        let config_base = parent.join(".config");
+        let config_dir = config_base.join("wayexpand");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::set_permissions(&config_base, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let token_path = config_dir.join(super::PORTAL_TOKEN_FILENAME);
+        let test_token = "test-restoration-token";
+
+        super::store_portal_token_at(&token_path, test_token).unwrap();
+        assert!(token_path.exists());
+        assert_eq!(
+            fs::metadata(&token_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        // Retrieve token and verify it matches
+        let retrieved = super::read_portal_token_at(&token_path).unwrap();
+        assert_eq!(retrieved.as_deref(), Some(test_token));
+
+        // Clean up
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
     fn text_size_is_bounded_before_injection() {
         assert!(super::validate_text(&"a".repeat(super::MAX_TEXT_BYTES)).is_ok());
         assert!(matches!(
