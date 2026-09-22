@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
@@ -124,8 +125,8 @@ fn run() -> Result<()> {
                     serde_json::json!({
                         "matched": !results.is_empty(),
                         "results": results.iter().map(|result| serde_json::json!({
-                            "trigger_characters": result.trigger.chars().count(),
-                            "erase_characters": result.matched_text.chars().count(),
+                            "trigger_characters": result.trigger.graphemes(true).count(),
+                            "erase_characters": result.matched_text.graphemes(true).count(),
                             "replacement_bytes": result.insert.len(),
                             "replacement": result.insert,
                             "cursor_offset": result.cursor_offset,
