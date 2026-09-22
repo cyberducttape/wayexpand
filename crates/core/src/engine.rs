@@ -3081,7 +3081,11 @@ match_mode = "word-boundary""#,
 
         // Now expansion should work again
         let result = engine.process(InputEvent::Text(":email ".into()));
-        assert_eq!(result.len(), 1, "expansion should resume after leaving sensitive field");
+        assert_eq!(
+            result.len(),
+            1,
+            "expansion should resume after leaving sensitive field"
+        );
     }
 
     #[test]
