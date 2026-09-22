@@ -5,69 +5,112 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](https://www.rust-lang.org/)
 
-**Text expansion built for Wayland, rather than adapted to it.**
+## Native text expansion for Linux Wayland
 
-Type a short trigger like `;;hello` and it becomes a saved snippet —
-signatures, runbook commands, ticket responses, boilerplate code, dates, or
-anything else you retype every day. Written in Rust, with the expansion
-engine kept entirely separate from input capture and text injection, which
-are pluggable, explicitly-selected backends per Wayland protocol
-(`input-method-v2`, `wlroots virtual-keyboard`, `libei`/EIS) rather than one
-X11-shaped implementation with Wayland support bolted on.
+Type a short trigger and get the text you use every day—locally, instantly,
+and without sending anything to the cloud.
 
-> **Compatibility is stated precisely, not optimistically.** The core
-> engine, TOML config format, and CLI/JSON contracts are stable (see
-> [COMPATIBILITY.md](docs/COMPATIBILITY.md)). Desktop backend support is
-> compositor-dependent and several capture/output paths are still
-> **experimental** — the [support matrix](docs/SUPPORT_MATRIX.md) states
-> exactly what's been verified versus implemented-but-untested, and
-> `wayexpand doctor` tells you what your own session can actually use
-> before you rely on it. **KDE Plasma (KWin 6.6+)** and 
-> Sway, Hyprland, and river do not currently ship a wlroots window-tracking
-> backend; that integration remains an experimental future project.
+```text
+;;email  →  Hi,
+            Stephan Loesevitz
+            Cyberdeck Labs
+            stephan@example.com
+```
+
+WayExpand is built for Wayland rather than adapted to it. It is written in
+Rust, has a GUI and CLI, and collects no telemetry.
 
 ![WayExpand snippet dashboard](docs/archive/wiki/assets/snippets-dashboard.png)
 
-## What's New (v1.2 in progress)
+> **Status:** the matching engine, configuration format, CLI, and GUI are
+> usable today. Desktop capture and injection are compositor-dependent, so
+> run `wayexpand doctor` on your session before enabling a backend. See the
+> [support matrix](docs/SUPPORT_MATRIX.md) for the exact distinction between
+> implemented, available, and certified.
 
-- ⚠️ **Wlroots window tracking:** Scaffolded for Sway, Hyprland, and river; active tracking and certification remain.
-- 🎯 **Conservative backend auto-selection:** Use `wayexpand backend select --explain` to inspect the decision and its tradeoffs.
-- 🔐 **Portal permission persistence:** One-time libei consent prompt with seamless reconnection. Token stored securely at `~/.config/wayexpand/libei-portal-token`.
-- 🧰 **Portal recovery controls:** Inspect or forget the stored restoration token with `wayexpand portal status` and `wayexpand portal reset`.
-- 🔒 **P0 security fixes:** Config reload preserves password-field protection and user-paused state. Evdev terminator re-insertion and quiet-period mitigations are bounded and best-effort.
-- 📚 **Clarity on compositor support:** [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) documents what's verified vs. in-progress. [GETTING_STARTED.md](docs/GETTING_STARTED.md) provides per-compositor quick starts.
-- 🧪 **Workspace test suite:** Run `cargo test --locked --workspace` for the current test set across the core engine, CLI, daemon, wlroots integration, and all backends.
+## Install in a minute
 
-**Get started:** See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for your desktop.
+On Ubuntu or Debian:
 
-### Release status
+```sh
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+wayexpand doctor
+```
 
-WayExpand v1.1.2 is a released build with stable core/configuration and CLI
-contracts. “Released” does not mean every compositor path is production-ready:
-input-method-v2, libei/EIS, evdev, and window tracking remain
-compositor-dependent, and several are experimental or awaiting independent
-certification. Check [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) and run
-`wayexpand doctor` before relying on a backend for daily or sensitive work.
+`doctor` checks your live Wayland session and explains which capture and
+injection paths are available. Then open the snippet manager:
 
-## Why not just use Espanso or AutoKey?
+```sh
+wayexpand-gui
+```
 
-|                          | **WayExpand**                                                        | Espanso                                        | AutoKey                             |
-| ------------------------ | --------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ |
-| Wayland input path       | Native per-protocol backends (`input-method-v2`, wlroots virtual-keyboard, libei/EIS), selected conservatively or explicitly | XTest via XWayland, or a Wayland mode with narrower compositor support | X11/XTest only — no native Wayland path |
-| Architecture             | Matching engine and injection backend are separate crates behind a trait; a backend gap never blocks the matcher | Single Rust binary, backend selection is internal | Python, GTK-bound |
-| Config safety            | Parse-then-swap: a malformed config is rejected before it ever replaces the live one | Reload replaces config; validation is more implicit | Reload replaces config |
-| Sensitive-field handling | Matching suspends automatically in password fields on backends that report focus (see [SECURITY.md](SECURITY.md)) | Not modeled explicitly | Not modeled |
-| GUI                      | Native egui app: search, live preview, diagnostics, Espanso import, atomic saves, bounded undo | None (YAML files) | Native GTK editor |
-| Diagnostics              | `wayexpand doctor` reports per-backend state (`Implemented` / `RequiresPermission` / `Unavailable`) with the *reason*, plus non-mutating protocol probes | Limited | Limited |
-| Telemetry                | None — no account, no cloud, no phone-home, ever | None | None |
+From source, use the same diagnostic-first workflow:
 
-This table is not a claim that WayExpand is strictly better in every
-dimension today — Espanso in particular has broader out-of-the-box
-compositor coverage right now. The distinction is architectural: WayExpand
-treats "which Wayland protocol does this compositor actually implement" as
-a first-class question the software can answer for you (`wayexpand doctor`),
-rather than something you find out by watching keystrokes silently fail to
-expand.
+```sh
+git clone https://github.com/itchyitchy123/wayexpand
+cd wayexpand
+./scripts/install-user.sh
+wayexpand doctor
+```
+
+## Migrating from Espanso?
+
+Import an existing Espanso YAML file without modifying the source:
+
+```sh
+wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+```
+
+Or use the GUI’s Espanso importer for a preview before saving. See
+[Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md) for the full guide.
+
+## Your first snippet
+
+Add this to `~/.config/wayexpand/expansions.toml`, then type `;;email` in any
+supported application:
+
+```toml
+[[expansion]]
+trigger = ";;email"
+replacement = """Hi,
+Stephan Loesevitz
+Cyberdeck Labs
+stephan@example.com"""
+```
+
+The GUI can create and preview snippets like this without editing TOML by
+hand.
+
+## Why WayExpand?
+
+- **Wayland-native design:** input-method-v2, libei/EIS, and wlroots
+  virtual-keyboard paths are separate, explicit backends—not an X11-shaped
+  implementation with Wayland support bolted on.
+- **Works offline:** no account, cloud service, or telemetry.
+- **Fast to live with:** define a trigger once and expand signatures,
+  support replies, commands, dates, and boilerplate everywhere you type.
+- **A GUI when you want one, a CLI when you need one:** search, preview,
+  diagnostics, scripting, and JSON output all use the same configuration.
+- **Honest diagnostics:** `wayexpand doctor` tells you what your compositor
+  can actually use instead of silently dropping keystrokes.
+
+## Supported desktop paths
+
+WayExpand currently has paths for KDE Plasma/KWin, Sway, Hyprland, river, and
+GNOME, but availability depends on the compositor version, protocols exposed,
+permissions, and the selected backend. No compositor is currently certified
+by automated end-to-end tests. Check your own session:
+
+```sh
+wayexpand doctor
+wayexpand backend select --explain
+```
+
+See [COMPOSITOR_MATRIX.md](docs/COMPOSITOR_MATRIX.md) for the current path and
+certification status, and [GETTING_STARTED.md](docs/GETTING_STARTED.md) for
+desktop-specific setup.
 
 ## Architecture
 
@@ -103,16 +146,7 @@ than matching everywhere when window tracking isn't available, the same
 philosophy the matcher applies to `word-boundary` mode when its rolling
 buffer has already evicted the context it needs.
 
-## Quick start
-
-**Ubuntu/Debian (PPA):**
-
-```sh
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update && sudo apt install wayexpand
-wayexpand doctor          # see what your compositor actually supports
-wayexpand-gui             # manage snippets graphically
-```
+## Other installation methods
 
 **Arch Linux (packaging preview):**
 
