@@ -64,8 +64,9 @@ LimitCORE=0
 
 # The daemon reads the user's config, reads keyboard event nodes under
 # /dev/input (granted via scripts/install-evdev-permissions.sh, not by this
-# unit), and writes only its user runtime socket.
-ReadWritePaths=%t
+# unit), writes its user runtime socket, and stores libei portal restoration
+# tokens under ~/.config/wayexpand/ for seamless reconnection after restart.
+ReadWritePaths=%t %h/.config/wayexpand
 
 [Install]
 WantedBy=graphical-session.target
