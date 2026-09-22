@@ -277,10 +277,22 @@ pub fn select_backend(
     } else {
         if capabilities.has_dev_input {
             warn!(
-                "readable evdev devices detected, but automatic mode leaves raw keyboard capture disabled"
+                "stdin-only mode: keyboard input is NOT being monitored. \
+                To capture keyboard, run with --source=evdev or --source=input-method. \
+                Readable evdev devices detected but not used without explicit request."
+            );
+        } else if capabilities.has_input_method_v2 {
+            warn!(
+                "stdin-only mode: keyboard input is NOT being monitored. \
+                To enable text expansion, run with --source=input-method. \
+                No /dev/input devices readable in this session."
             );
         } else {
-            warn!("no safe input sources available - falling back to stdin");
+            warn!(
+                "stdin-only mode: keyboard input is NOT being monitored. \
+                Text expansion must be triggered via stdin or --pipe. \
+                Run `wayexpand doctor` to see available input methods."
+            );
         }
         ResolvedBackendPair::Stdin(InjectorBackend::Libei)
     };
