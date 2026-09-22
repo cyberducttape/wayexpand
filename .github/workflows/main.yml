@@ -17,17 +17,18 @@
           with:
             fetch-depth: 0
 
-        - name: Configure SSH
-          env:
-            LAUNCHPAD_SSH_KEY: ${{ secrets.LAUNCHPAD_SSH_KEY }}
-            LAUNCHPAD_KNOWN_HOSTS: ${{ secrets.LAUNCHPAD_KNOWN_HOSTS }}
-          run: |
-            install -d -m 700 ~/.ssh
-            printf '%s\n' "$LAUNCHPAD_SSH_KEY" > ~/.ssh/launchpad_key
-            printf '%s\n' "$LAUNCHPAD_KNOWN_HOSTS" > ~/.ssh/known_hosts
-            chmod 600 ~/.ssh/launchpad_key ~/.ssh/known_hosts
-            eval "$(ssh-agent -s)"
-            ssh-add ~/.ssh/launchpad_key
+      - name: Configure SSH
+        env:
+          LAUNCHPAD_SSH_KEY_B64: ${{ secrets.LAUNCHPAD_SSH_KEY_B64 }}
+          LAUNCHPAD_KNOWN_HOSTS: ${{ secrets.LAUNCHPAD_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s' "$LAUNCHPAD_SSH_KEY_B64" | base64 --decode > ~/.ssh/launchpad_key
+          printf '%s\n' "$LAUNCHPAD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/launchpad_key ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/launchpad_key
+
 
         - name: Push GitHub main to Launchpad
           run: |
