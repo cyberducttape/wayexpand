@@ -24,6 +24,8 @@ for compositor in kde gnome sway hyprland; do
 done
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null
 grep -F -- 'scripts/certify-compositor.sh' "$workflow" >/dev/null
+grep -F -- 'schedule:' "$workflow" >/dev/null
+grep -F -- '30 3 * * 1' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
