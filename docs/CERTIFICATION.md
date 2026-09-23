@@ -18,6 +18,20 @@ check with a stable status, and the limitations of the selected backend. It is
 safe to attach to a support report and contains no typed text or expansion
 contents.
 
+For an operator evidence record after running the real-client scenarios, use
+the collector with `--format json` and a validated results file:
+
+```sh
+scripts/certify-compositor.sh --format json --compositor kde \
+  --version 6.6.2 --backend ibus --layout us \
+  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --results kde-results.txt --output kde-certification.json
+```
+
+That record is distinct from the CLI preflight: it includes the exact session
+metadata and one result for each required scenario, but remains
+`certified: false` unless every scenario is explicitly passed.
+
 JSON mode exits successfully when the report is produced; automation must
 inspect `.certified`. Human-readable mode exits nonzero while certification is
 incomplete.
