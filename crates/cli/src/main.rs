@@ -1745,9 +1745,46 @@ fn existing_control_socket_is_healthy(path: &Path) -> bool {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return false;
     };
-    metadata.file_type().is_socket()
+    control_socket_parent_is_healthy(path)
+        && metadata.file_type().is_socket()
         && metadata.uid() == rustix::process::geteuid().as_raw()
         && metadata.mode() & 0o077 == 0
+}
+
+fn control_socket_parent_is_healthy(path: &Path) -> bool {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return false;
+    };
+    let Ok(resolved_parent) = fs::canonicalize(parent) else {
+        return false;
+    };
+    let current_uid = rustix::process::geteuid().as_raw();
+    let mut current = resolved_parent.as_path();
+    let mut immediate = true;
+    loop {
+        let Ok(metadata) = fs::metadata(current) else {
+            return false;
+        };
+        if !metadata.is_dir() {
+            return false;
+        }
+        if metadata.uid() != current_uid && metadata.uid() != 0 {
+            return false;
+        }
+        let mode = metadata.mode() & 0o7777;
+        let root_sticky = metadata.uid() == 0 && mode & 0o1000 != 0;
+        if mode & 0o022 != 0 && (!root_sticky || immediate) {
+            return false;
+        }
+        if current == Path::new("/") {
+            return true;
+        }
+        current = current.parent().unwrap_or_else(|| Path::new("/"));
+        immediate = false;
+    }
 }
 
 fn automatic_selection_is_ready(source: &str, backend: &str, policy: &OrganizationPolicy) -> bool {
@@ -2458,12 +2495,10 @@ mod tests {
 
     #[test]
     fn control_socket_health_rejects_missing_regular_and_insecure_paths() {
-        let root = std::env::temp_dir().join(format!(
-            "wayexpand-control-socket-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
+        let root = std::env::temp_dir().join(format!("wx-sock-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
         let missing = root.join("missing.sock");
         assert!(!existing_control_socket_is_healthy(&missing));
 
@@ -2477,6 +2512,28 @@ mod tests {
             .unwrap();
         assert!(existing_control_socket_is_healthy(&socket));
         drop(listener);
+
+        let insecure_parent = root.join("insecure");
+        std::fs::create_dir(&insecure_parent).unwrap();
+        std::fs::set_permissions(
+            &insecure_parent,
+            std::os::unix::fs::PermissionsExt::from_mode(0o777),
+        )
+        .unwrap();
+        let insecure_socket = insecure_parent.join("wayexpand.sock");
+        let insecure_listener = std::os::unix::net::UnixListener::bind(&insecure_socket).unwrap();
+        std::fs::set_permissions(
+            &insecure_socket,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+        assert!(!existing_control_socket_is_healthy(&insecure_socket));
+        drop(insecure_listener);
+        std::fs::set_permissions(
+            &insecure_parent,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
 
