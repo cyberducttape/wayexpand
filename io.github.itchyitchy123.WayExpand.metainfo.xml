@@ -8,12 +8,12 @@
 
   <description>
     <p>WayExpand turns short triggers into reusable text snippets. Type a quick abbreviation and get back your saved signatures, templates, code blocks, or anything else you retype every day.</p>
-    <p>Built for Wayland from the ground up, WayExpand uses native Wayland protocols for keyboard input and text injection rather than adapting X11 tools. It supports multiple backends depending on your compositor:</p>
+    <p>Built for Wayland from the ground up, WayExpand uses native Wayland protocols for keyboard input and text injection rather than adapting X11 tools. It offers several backend paths, but availability and safety guarantees depend on the compositor, session permissions, and selected mode; no compositor is currently certified by automated end-to-end tests:</p>
     <ul>
-      <li>KDE Plasma (KWin 6.6+) with evdev capture</li>
-      <li>GNOME and other compositors with input-method-v2</li>
-      <li>Sway and Hyprland via wlroots virtual-keyboard</li>
-      <li>libei/EIS for portal-mediated text injection</li>
+      <li>KDE Plasma (KWin 6.6+) may provide compositor-specific and evdev paths</li>
+      <li>GNOME and other compositors may expose input-method-v2</li>
+      <li>Sway and Hyprland may provide wlroots virtual-keyboard output</li>
+      <li>libei/EIS may provide portal-mediated text injection</li>
     </ul>
     <p>Features:</p>
     <ul>
