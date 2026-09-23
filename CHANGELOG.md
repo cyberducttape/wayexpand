@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Make the headless capture-readiness regression test accept the documented
+  `not-probed` state used by CI runners without a graphical session.
 - Serialize CI test harnesses to avoid hosted-runner races in tests that
   exercise bounded worker resources and process-wide desktop state.
 - Remove process-wide `HOME` mutation from the GUI import-path test so CI

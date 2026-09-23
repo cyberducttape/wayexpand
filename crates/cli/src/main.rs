@@ -2513,8 +2513,11 @@ mod tests {
         };
         let (state, detail) =
             capture_readiness(&capabilities, false, &OrganizationPolicy::default());
-        assert_eq!(state, "unavailable");
-        assert!(detail.contains("no non-invasive source and output path"));
+        assert!(matches!(state, "unavailable" | "not-probed"));
+        assert!(
+            detail.contains("no non-invasive source and output path")
+                || detail.contains("no active Wayland session was detected")
+        );
     }
 
     #[test]
