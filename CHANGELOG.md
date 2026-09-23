@@ -43,6 +43,8 @@ Changes not yet released.
 - Increase the bounded systemd task budget to leave room for the daemon’s
   command and hotkey workers; the previous limit could crash-loop services with
   `EAGAIN` while starting the hotkey worker.
+- Make worker-thread startup fail closed to a synchronous fallback with a
+  warning instead of panicking when an external task limit is too restrictive.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
