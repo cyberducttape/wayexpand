@@ -16,6 +16,8 @@ Changes not yet released.
   presented as compositor certification.
 - Clarify setup’s Recommended label so detected availability is not described
   as end-to-end verification.
+- Add a validated JSON output format to the compositor evidence collector,
+  including session metadata, live probes, and per-scenario results.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
