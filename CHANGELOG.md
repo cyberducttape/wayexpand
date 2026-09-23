@@ -30,6 +30,8 @@ Changes not yet released.
   CLI, and diagnostics; doctor health now reflects policy and backend state.
 - Apply the same root-owned organization policy to IBus as to the daemon, and
   make setup/doctor refuse to recommend policy-disallowed input paths.
+- Make certification selection policy-aware so reports cannot claim a blocked
+  IBus or automatic output backend is the active safe mode.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end

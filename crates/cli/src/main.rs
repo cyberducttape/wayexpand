@@ -1206,8 +1206,19 @@ fn print_backend_selection_explain() {
 
 fn print_certification(json: bool) -> Result<bool> {
     let capabilities = probe_capabilities();
-    let selection = wayexpand_backend_selection::auto_select(None, None).ok();
-    let ibus = ibus_engine_available();
+    let policy_result = wayexpand_core::load_organization_policy();
+    let policy_allows_ibus = policy_result
+        .as_ref()
+        .is_ok_and(|policy| policy.backend_allowed("input-method-v2"));
+    let selection = wayexpand_backend_selection::auto_select(None, None)
+        .ok()
+        .filter(|selection| {
+            policy_result
+                .as_ref()
+                .is_ok_and(|policy| policy.backend_allowed(selection.pair.backend()))
+        });
+    let ibus_installed = ibus_engine_available();
+    let ibus = ibus_installed && policy_allows_ibus;
     let selected_label = if ibus {
         "IBus"
     } else {
@@ -1243,7 +1254,7 @@ fn print_certification(json: bool) -> Result<bool> {
             &format!("configuration is not usable: {}", error.safe_summary()),
         ),
     }
-    match wayexpand_core::load_organization_policy() {
+    match &policy_result {
         Ok(_) => add_check(
             "policy",
             "organization policy",
@@ -1279,6 +1290,13 @@ fn print_certification(json: bool) -> Result<bool> {
             "IBus engine installed",
             "available",
             "IBus is a candidate for Recommended mode",
+        );
+    } else if ibus_installed && !policy_allows_ibus {
+        add_check(
+            "input-path",
+            "IBus engine installed",
+            "unsupported",
+            "IBus is installed but input-method-v2 is disallowed by organization policy",
         );
     } else {
         add_check(
