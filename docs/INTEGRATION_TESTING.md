@@ -113,7 +113,9 @@ Passing the script with `--results results.txt` requires an explicit `pass`
 result for every scenario. Any `fail` or `UNVERIFIED` result keeps the report
 uncertified. `--layout` and `--target-apps` are required so the report records
 the exact keyboard layout and client set used by the run; list every tested
-client as a comma-separated value.
+client as a comma-separated value. The collector requires at least one GTK
+client, one Qt client, and one password/PIN-field client because those are
+mandatory coverage dimensions in the certification matrix.
 
 For repeatable automation, use `scripts/run-certification-driver.sh` with a
 compositor-specific driver. The driver receives the scenario name as its first

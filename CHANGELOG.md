@@ -13,6 +13,8 @@ Changes not yet released.
   path whose restart and engine-selection commands cannot run.
 - Synchronize CLI and man-page command discovery for fleet status and portal
   token operations.
+- Require certification evidence to identify GTK, Qt, and password/PIN-field
+  clients before any compositor report can be marked complete.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so

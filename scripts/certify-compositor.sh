@@ -70,6 +70,19 @@ fi
     printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
     exit 2
 }
+target_apps_lower=$(printf '%s' "$target_apps" | tr '[:upper:]' '[:lower:]')
+case "$target_apps_lower" in
+    *gtk*) : ;;
+    *) printf '%s\n' 'error: --target-apps must include a GTK client' >&2; exit 2 ;;
+esac
+case "$target_apps_lower" in
+    *qt*) : ;;
+    *) printf '%s\n' 'error: --target-apps must include a Qt client' >&2; exit 2 ;;
+esac
+case "$target_apps_lower" in
+    *password*|*pin*|*secret*) : ;;
+    *) printf '%s\n' 'error: --target-apps must include a password/PIN-field client' >&2; exit 2 ;;
+esac
 command -v "$cli" >/dev/null 2>&1 || {
     printf '%s\n' "error: certification CLI is not executable: $cli" >&2
     exit 2

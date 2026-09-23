@@ -18,13 +18,13 @@ run_certification() {
     PATH="$project_dir/target/debug:$PATH" \
         "$project_dir/scripts/certify-compositor.sh" \
         --compositor kde --version 6.6.2 --backend ibus --layout us \
-        --target-apps gtk4-demo,qt6-demo \
+        --target-apps gtk4-demo,qt6-demo,password-field \
         --cli "$project_dir/target/debug/wayexpand" "$@"
 }
 
 run_certification --results "$results" --output "$output"
 grep -F -- '- keyboard_layout: us' "$output" >/dev/null
-grep -F -- '- target_apps: gtk4-demo,qt6-demo' "$output" >/dev/null
+    grep -F -- '- target_apps: gtk4-demo,qt6-demo,password-field' "$output" >/dev/null
 
 json_output="$test_root/certification.json"
 run_certification --format json --results "$results" --output "$json_output"
@@ -33,7 +33,7 @@ jq -e '
     .compositor == "kde" and .backend == "ibus" and
     .keyboard_layout == "us" and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
-    .target_apps == ["gtk4-demo", "qt6-demo"] and
+    .target_apps == ["gtk4-demo", "qt6-demo", "password-field"] and
     ([.scenarios[] | select(.result == "pass")] | length == 12)
 ' "$json_output" >/dev/null
 
@@ -49,13 +49,22 @@ invalid_probe_json="$test_root/invalid-probe.json"
 if PATH="$invalid_probe_bin:$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus --layout us \
-    --target-apps gtk4-demo,qt6-demo --results "$results" \
+    --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$invalid_probe_bin/wayexpand" \
     --output "$invalid_probe_json"; then
     printf '%s\n' 'certification accepted an invalid doctor probe' >&2
     exit 1
 fi
 jq -e '.certified == false and .doctor_probe_valid == false' "$invalid_probe_json" >/dev/null
+
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --target-apps gtk4-demo,qt6-demo --results "$results" \
+    --cli "$project_dir/target/debug/wayexpand" \
+    --output "$test_root/missing-password-client.json"; then
+    printf '%s\n' 'certification accepted missing password-field coverage' >&2
+    exit 1
+fi
 
 missing="$test_root/missing.txt"
 sed '$d' "$results" >"$missing"
