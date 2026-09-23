@@ -1050,9 +1050,12 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         );
         println!("{:28} {:?} ({})", status.kind, status.state, detail);
     }
-    let ibus_policy_allowed = load_policy()
-        .map(|policy| policy.backend_allowed("input-method-v2"))
-        .unwrap_or(false);
+    let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
+        safe_mode: true,
+        allowed_backends: vec!["none".into()],
+        ..OrganizationPolicy::default()
+    });
+    let ibus_policy_allowed = policy.backend_allowed("input-method-v2");
     if ibus_engine_available() && ibus_policy_allowed {
         println!("IBus WayExpand engine: installed and discoverable (password/PIN awareness)");
     } else if ibus_engine_available() {
@@ -1121,16 +1124,16 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     // prove that a real GTK or Qt client will preserve every key event.
     let mut available_combinations = Vec::new();
     let mut trial_combinations = Vec::new();
-    if input_method_available {
+    if input_method_available && policy.backend_allowed("input-method-v2") {
         available_combinations
             .push("--source=input-method (protocol probe passed; live typing unverified)");
     }
-    if evdev_readable && wlroots_available {
+    if evdev_readable && wlroots_available && policy.backend_allowed("wlroots") {
         available_combinations.push(
             "--source=evdev --backend=wlroots (protocol probe passed; live insertion unverified)",
         );
     }
-    if evdev_readable && libei_plausible {
+    if evdev_readable && libei_plausible && policy.backend_allowed("libei") {
         trial_combinations.push(
             "--source=evdev --backend=libei (available to try; interactive authorization required)",
         );
@@ -1478,10 +1481,8 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         allowed_backends: vec!["none".into()],
         ..OrganizationPolicy::default()
     });
-    let (capture_state, capture_detail) = capture_readiness(
-        &live_capabilities,
-        ibus_installed && policy.backend_allowed("input-method-v2"),
-    );
+    let (capture_state, capture_detail) =
+        capture_readiness(&live_capabilities, ibus_installed, &policy);
     let recommendation = recommended_setup_backend(&live_capabilities, &policy);
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
@@ -1571,26 +1572,35 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
 fn capture_readiness(
     capabilities: &wayexpand_backend_selection::Capabilities,
     ibus_installed: bool,
+    policy: &OrganizationPolicy,
 ) -> (&'static str, &'static str) {
-    if ibus_installed || capabilities.has_input_method_v2 {
+    if (ibus_installed || capabilities.has_input_method_v2)
+        && policy.backend_allowed("input-method-v2")
+    {
         return (
             "available-to-try",
             "a protocol or IBus probe succeeded; live client typing is not verified",
         );
     }
-    if capabilities.has_dev_input && capabilities.has_virtual_keyboard {
+    if capabilities.has_dev_input
+        && capabilities.has_virtual_keyboard
+        && policy.backend_allowed("wlroots")
+    {
         return (
             "available-to-try",
             "evdev capture and a virtual-keyboard output probe succeeded; live typing is not verified",
         );
     }
-    if capabilities.has_dev_input && capabilities.has_direct_libei_socket {
+    if capabilities.has_dev_input
+        && capabilities.has_direct_libei_socket
+        && policy.backend_allowed("libei")
+    {
         return (
             "available-to-try",
             "evdev capture and a direct EIS socket were detected; live typing is not verified",
         );
     }
-    if capabilities.has_dev_input && libei_portal_candidate() {
+    if capabilities.has_dev_input && libei_portal_candidate() && policy.backend_allowed("libei") {
         return (
             "authorization-required",
             "evdev is readable and a libei portal candidate was detected; interactive authorization is required",
@@ -2204,7 +2214,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            capture_readiness(&capabilities, false),
+            capture_readiness(&capabilities, false, &OrganizationPolicy::default()),
             (
                 "available-to-try",
                 "a protocol or IBus probe succeeded; live client typing is not verified"
@@ -2214,9 +2224,27 @@ mod tests {
 
     #[test]
     fn installed_ibus_is_available_to_try_not_certified() {
-        let (state, detail) = capture_readiness(&Default::default(), true);
+        let (state, detail) =
+            capture_readiness(&Default::default(), true, &OrganizationPolicy::default());
         assert_eq!(state, "available-to-try");
         assert!(detail.contains("live client typing is not verified"));
+    }
+
+    #[test]
+    fn capture_readiness_hides_policy_disallowed_paths() {
+        let capabilities = wayexpand_backend_selection::Capabilities {
+            has_input_method_v2: true,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket: true,
+            has_dev_input: true,
+            ..Default::default()
+        };
+        let policy = OrganizationPolicy {
+            allowed_backends: vec!["none".into()],
+            ..Default::default()
+        };
+        let (state, _) = capture_readiness(&capabilities, true, &policy);
+        assert!(matches!(state, "unavailable" | "not-probed"));
     }
 
     #[test]
@@ -2225,7 +2253,8 @@ mod tests {
             has_virtual_keyboard: true,
             ..Default::default()
         };
-        let (state, detail) = capture_readiness(&capabilities, false);
+        let (state, detail) =
+            capture_readiness(&capabilities, false, &OrganizationPolicy::default());
         assert_eq!(state, "unavailable");
         assert!(detail.contains("no non-invasive source and output path"));
     }
