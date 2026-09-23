@@ -21,13 +21,13 @@
       <li>Template variables (date, time, username, custom programs)</li>
       <li>Application-scoped snippets (KDE Plasma)</li>
       <li>Undo last expansion with hotkey</li>
-      <li>Automatic sensitive-field detection (password fields)</li>
+      <li>Sensitive-field detection on backends that expose password purpose signals</li>
       <li>Import from Espanso</li>
       <li>No cloud, no telemetry, config stored locally</li>
       <li>8 color packs including retro terminal themes</li>
       <li>Language support: English, German</li>
     </ul>
-    <p>Privacy-first and security-focused: WayExpand never logs your triggers or replacements, validates configurations before applying them, and detects password fields to prevent accidental expansion in sensitive inputs.</p>
+    <p>Privacy-first and security-focused: WayExpand never logs your triggers or replacements, validates configurations before applying them, and uses password-field signals where the selected backend and toolkit expose them.</p>
   </description>
 
   <project_license>MIT</project_license>
