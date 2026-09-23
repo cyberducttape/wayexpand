@@ -52,6 +52,8 @@ Changes not yet released.
   is active, including when the IBus component is installed.
 - Scope release workflow write, OIDC, and attestation permissions to the
   publishing job; reusable verification CI remains read-only.
+- Update the CI dependency audit tool to cargo-audit 0.22.2, which parses the
+  current RustSec advisory database including CVSS 4.0 records.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
