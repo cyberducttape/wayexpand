@@ -882,8 +882,9 @@ impl eframe::App for GuiApp {
                     ui.add_space(4.0);
                     for status in &self.backend_status {
                         let color = match status.state {
-                            BackendState::Available | BackendState::Implemented => palette.success,
+                            BackendState::Available => palette.success,
                             BackendState::RequiresPermission => palette.warning,
+                            BackendState::Implemented => palette.warning,
                             BackendState::Unavailable | BackendState::NotImplemented => {
                                 palette.muted
                             }

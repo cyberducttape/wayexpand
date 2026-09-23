@@ -3981,6 +3981,7 @@ dependencies = [
  "serde_json",
  "toml",
  "unicode-segmentation",
+ "wayexpand-backend-ibus",
  "wayexpand-backend-input-method",
  "wayexpand-backend-libei",
  "wayexpand-backend-selection",
@@ -4130,6 +4131,7 @@ version = "1.1.2"
 dependencies = [
  "anyhow",
  "eframe",
+ "wayexpand-backend-ibus",
  "wayexpand-backend-input-method",
  "wayexpand-backend-kwin-window",
  "wayexpand-backend-wlroots",

@@ -15,6 +15,7 @@ categories.workspace = true
 anyhow.workspace = true
 eframe = { version = "0.35", default-features = false, features = ["wayland", "default_fonts", "glow"] }
 wayexpand-core = { path = "../core" }
+wayexpand-backend-ibus = { path = "../backend-ibus" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }

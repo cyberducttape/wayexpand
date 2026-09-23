@@ -311,6 +311,12 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
+The graphical diagnostics view uses the same IBus installation probe as the
+CLI and labels protocol implementations as warnings until their runtime
+availability is detected; an implemented backend is not displayed as a
+certified or ready path. It also uses the shared secure organization-policy
+loader and explicitly reports an invalid policy as a daemon-startup blocker.
+
 **Stability:** 🔒 **Stable** — guaranteed to include `healthy`, `config`, `control_socket`, `backends`; new backend states may be added
 
 **Usage example (systemd health check):**
