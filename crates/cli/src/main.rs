@@ -1179,6 +1179,35 @@ fn print_certification(json: bool) -> Result<bool> {
         }));
     };
 
+    match Config::load(default_config_path()) {
+        Ok(_) => add_check(
+            "configuration",
+            "active configuration",
+            "verified",
+            "the default configuration parses and passes security validation",
+        ),
+        Err(error) => add_check(
+            "configuration",
+            "active configuration",
+            "failed",
+            &format!("configuration is not usable: {}", error.safe_summary()),
+        ),
+    }
+    match wayexpand_core::load_organization_policy() {
+        Ok(_) => add_check(
+            "policy",
+            "organization policy",
+            "verified",
+            "the shared secure organization-policy loader accepted the policy state",
+        ),
+        Err(error) => add_check(
+            "policy",
+            "organization policy",
+            "failed",
+            &format!("organization policy blocks startup: {error}"),
+        ),
+    }
+
     if capabilities.compositor != wayexpand_backend_selection::Compositor::Unknown {
         add_check(
             "environment",
