@@ -44,6 +44,8 @@ Changes not yet released.
   and otherwise unverified paths remain visible but are not reported healthy.
 - Clarify that `AVAILABLE TO TRY` is not a successful doctor result and does not
   authorize starting a backend service without reviewing its requirements.
+- Quote CI workspace paths so actionlint's ShellCheck pass protects the workflow
+  itself instead of failing on avoidable word-splitting warnings.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
