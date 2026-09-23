@@ -265,10 +265,10 @@ Diagnostic output suitable for health checks and monitoring systems.
     }
   ],
   "automatic_selection": {
-    "source": "evdev",
+    "source": "stdin",
     "backend": "libei",
-    "reason": "explicitly selected by setup",
-    "ready": true
+    "reason": "conservative default: stdin + libei (readable evdev is available but disabled by default)",
+    "ready": false
   },
   "setup_recommendation": {
     "mode": "recommended",

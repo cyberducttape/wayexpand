@@ -48,6 +48,9 @@ Changes not yet released.
   another duplicated trust-boundary value.
 - Add CI coverage for certification evidence acceptance and rejection rules,
   including missing scenarios, explicit failures, and missing metadata.
+- Correct the doctor JSON example so its automatic-selection contract matches
+  the conservative resolver rather than implying setup persisted a daemon
+  backend selection.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad
