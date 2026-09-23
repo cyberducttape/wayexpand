@@ -1,10 +1,11 @@
 use super::{IbusAction, IbusEngineAdapter};
+use notify::{RecursiveMode, Watcher};
 use std::{
     collections::HashMap,
     env,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, Weak,
+        mpsc, Arc, Mutex, Weak,
     },
     time::Duration,
 };
@@ -212,12 +213,38 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let reload_receiver = store.subscribe();
     let reload_store = Arc::clone(&store);
     let reload_config = Arc::clone(&factory_config);
+    let config_watch_path = path.clone();
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
         .spawn(move || {
+            let (watch_sender, watch_receiver) = mpsc::channel();
+            let mut watcher = notify::recommended_watcher(move |event| {
+                let _ = watch_sender.send(event);
+            })
+            .ok();
+            if let Some(active_watcher) = watcher.as_mut() {
+                let watch_path = config_watch_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                if let Err(error) = active_watcher.watch(watch_path, RecursiveMode::NonRecursive) {
+                    warn!(
+                        error = %error,
+                        path = %watch_path.display(),
+                        "IBus configuration watch unavailable; using fallback polling"
+                    );
+                    watcher = None;
+                }
+            } else {
+                warn!("IBus configuration watch unavailable; using fallback polling");
+            }
             let mut reload_error = None;
             let mut adapter_error = None;
             loop {
+                if watcher.is_some() {
+                    let _ = watch_receiver.recv_timeout(Duration::from_secs(30));
+                } else {
+                    std::thread::sleep(Duration::from_millis(250));
+                }
                 match reload_store.reload_if_changed() {
                     Ok(true) => {
                         let status = reload_store.status();
@@ -275,7 +302,6 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                         });
                     }
                 }
-                std::thread::sleep(Duration::from_millis(250));
             }
         })
         .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
