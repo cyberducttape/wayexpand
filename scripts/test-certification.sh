@@ -31,9 +31,29 @@ jq -e '
     .schema == 1 and .certified == true and
     .compositor == "kde" and .backend == "ibus" and
     .keyboard_layout == "us" and
+    .doctor_probe_valid == true and (.doctor_exit | type == "number") and
     .target_apps == ["gtk4-demo", "qt6-demo"] and
     ([.scenarios[] | select(.result == "pass")] | length == 12)
 ' "$json_output" >/dev/null
+
+invalid_probe_bin="$test_root/invalid-probe-bin"
+mkdir -p "$invalid_probe_bin"
+cat >"$invalid_probe_bin/wayexpand" <<'EOF'
+#!/bin/sh
+printf '%s\n' 'not-json'
+exit 1
+EOF
+chmod 0755 "$invalid_probe_bin/wayexpand"
+invalid_probe_json="$test_root/invalid-probe.json"
+if PATH="$invalid_probe_bin:$project_dir/target/debug:$PATH" \
+    "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --target-apps gtk4-demo,qt6-demo --results "$results" \
+    --output "$invalid_probe_json"; then
+    printf '%s\n' 'certification accepted an invalid doctor probe' >&2
+    exit 1
+fi
+jq -e '.certified == false and .doctor_probe_valid == false' "$invalid_probe_json" >/dev/null
 
 missing="$test_root/missing.txt"
 sed '$d' "$results" >"$missing"

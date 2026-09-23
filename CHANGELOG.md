@@ -22,6 +22,9 @@ Changes not yet released.
   are outside the current four-desktop certification matrix.
 - Document the JSON evidence workflow alongside the human-readable
   certification instructions.
+- Require a valid doctor JSON snapshot before compositor evidence can claim
+  certification, while preserving explicit backend health details in the
+  record.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.

@@ -118,8 +118,10 @@ else
     status_json=null
 fi
 doctor_json=$(cat "$tmp/doctor.json")
+doctor_probe_valid=1
 if ! printf '%s' "$doctor_json" | jq -e . >/dev/null 2>&1; then
     doctor_json=null
+    doctor_probe_valid=0
 fi
 if ! printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
     status_json=null
@@ -141,7 +143,8 @@ for scenario in $scenarios; do
     fi
 done
 certified=false
-[ "$complete" -eq 1 ] && certified=true
+[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && certified=true
+[ "$doctor_probe_valid" -eq 1 ] || complete=0
 
 date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "$format" = json ]; then
@@ -159,10 +162,13 @@ if [ "$format" = json ]; then
         --argjson status "$status_json" \
         --argjson scenarios "$scenario_json" \
         --argjson certified "$certified" \
+        --argjson doctor_exit "$doctor_status" \
+        --argjson doctor_probe_valid "$doctor_probe_valid" \
         '{schema: 1, certified: $certified, compositor: $compositor,
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
+          doctor_exit: $doctor_exit, doctor_probe_valid: ($doctor_probe_valid == 1),
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"
 else
 {
@@ -199,6 +205,8 @@ printf '%s\n' "wrote $output"
 if [ "$complete" -eq 0 ]; then
     if [ "$failed" -eq 1 ]; then
         printf '%s\n' "certification failed: one or more scenarios were explicitly marked fail" >&2
+    elif [ "$doctor_probe_valid" -eq 0 ]; then
+        printf '%s\n' "certification remains incomplete: doctor did not produce valid JSON evidence" >&2
     else
         printf '%s\n' "certification remains incomplete: provide pass results for every scenario" >&2
     fi
