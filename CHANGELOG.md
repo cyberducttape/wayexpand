@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Make workflow validation shellcheck-safe while checking every GitHub Actions
+  workflow, and keep clean-build archive extraction explicitly quoted.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
