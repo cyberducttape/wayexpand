@@ -2016,6 +2016,29 @@ mod tests {
             "../../../tests/contracts/cli-json-shapes.json"
         ))
         .expect("CLI contract fixture must be valid JSON");
+        let doctor_fields = contract["doctor"]
+            .as_array()
+            .expect("doctor contract must be an array")
+            .iter()
+            .map(|field| field.as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            doctor_fields,
+            [
+                "healthy",
+                "wayland",
+                "config",
+                "control_socket",
+                "policy",
+                "backends",
+                "capabilities",
+                "automatic_selection",
+                "setup_recommendation",
+                "capture_readiness",
+            ]
+            .into_iter()
+            .collect()
+        );
         let status_fields = contract["status"]
             .as_array()
             .expect("status contract must be an array")

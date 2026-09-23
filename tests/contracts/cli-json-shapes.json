@@ -2,6 +2,6 @@
   "test": ["matched", "results"],
   "preview": ["matched"],
   "list": ["config", "count", "hotkey_count", "expansions", "hotkeys"],
-  "doctor": ["healthy", "wayland", "config", "control_socket", "policy", "backends", "capabilities"],
+  "doctor": ["healthy", "wayland", "config", "control_socket", "policy", "backends", "capabilities", "automatic_selection", "setup_recommendation", "capture_readiness"],
   "status": ["response", "source", "backend", "state", "paused", "config", "config_state", "command_queue_depth", "command_queue_rejected_total", "command_timeout_total", "command_failure_total"]
 }
