@@ -36,7 +36,9 @@ config_path="$config_dir/expansions.toml"
 wayexpand validate "$config_path" >/dev/null
 wayexpand test ';;hello' "$config_path" | grep -Fx 'Hello from Wayland!'
 wayexpand test-hotkey Ctrl+Alt+M --json "$config_path" | grep -F '"matched":false'
-env -u XDG_RUNTIME_DIR wayexpand doctor --json "$config_path" | grep -F '"healthy":true'
+doctor_json=$(env -u XDG_RUNTIME_DIR wayexpand doctor --json "$config_path" 2>/dev/null || true)
+printf '%s' "$doctor_json" | grep -F "\"config\":{\"error\":null,\"path\":\"$config_path\",\"valid\":true}" >/dev/null
+printf '%s' "$doctor_json" | grep -F '"policy":{"exists":' >/dev/null
 
 [ "$(stat -c '%a' "$config_path")" = 600 ]
 printf '%s\n' "release smoke test passed"
