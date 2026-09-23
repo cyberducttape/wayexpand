@@ -101,6 +101,12 @@ fn main() -> Result<()> {
     // is fatal so a management update cannot silently disable restrictions.
     let policy = policy::load_policy()
         .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
+    let policy_backend = policy_backend_name(source_name, backend_name);
+    if !policy.backend_allowed(policy_backend) {
+        anyhow::bail!(
+            "backend '{policy_backend}' is disallowed by organization policy; refusing startup"
+        );
+    }
 
     let mut config = if use_fleet {
         ReloadableConfig::load_with_fleet_and_policy(&path, policy.clone())
@@ -1044,6 +1050,14 @@ fn connect_evdev_with_retry(
     }
 }
 
+fn policy_backend_name<'a>(source: &str, backend: &'a str) -> &'a str {
+    if source == "input-method" {
+        "input-method-v2"
+    } else {
+        backend
+    }
+}
+
 fn wait_for_retry(stop: &std::sync::atomic::AtomicBool, delay: Duration) -> bool {
     let deadline = Instant::now() + delay;
     while !stop.load(std::sync::atomic::Ordering::Acquire) {
@@ -1404,6 +1418,16 @@ mod tests {
         };
         assert!(!error.retryable);
         assert!(error.message.contains("unknown output backend"));
+    }
+
+    #[test]
+    fn policy_backend_name_matches_runtime_backend_identity() {
+        assert_eq!(
+            policy_backend_name("input-method", "none"),
+            "input-method-v2"
+        );
+        assert_eq!(policy_backend_name("evdev", "libei"), "libei");
+        assert_eq!(policy_backend_name("stdin", "wlroots"), "wlroots");
     }
 
     #[test]

@@ -65,6 +65,8 @@ Changes not yet released.
   scenarios or a false `certified` claim while checks remain unverified.
 - Prevent setup from activating the libei service under a wlroots-only
   organization policy.
+- Enforce organization backend policy at daemon startup so explicit and
+  automatic selections cannot bypass the shared policy decision.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
