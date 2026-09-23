@@ -51,6 +51,8 @@ Changes not yet released.
   path, not only IBus.
 - Reconcile developer and roadmap documentation with the current automatic
   resolver, typed CLI exit categories, and uncertified compositor status.
+- Make compositor certification paths and required scenarios derive from the
+  checked-in matrix, preventing backend, scenario, and documentation drift.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
