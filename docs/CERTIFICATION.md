@@ -41,8 +41,9 @@ Normal setup uses compatibility modes instead of exposing protocol names:
 
 - **Recommended** chooses IBus when the installed component is discoverable,
   then the safest verified local alternative.
-- **Maximum compatibility** uses evdev with a detected output path and warns
-  that password-field awareness is unavailable.
+- **Maximum compatibility** uses evdev with a detected libei/EIS path (or a
+  KDE/GNOME portal candidate after explicit authorization) and warns that
+  password-field awareness is unavailable.
 - **Experimental** opts into input-method-v2 and clearly identifies its
   unsupported non-text-key and IME/preedit behavior.
 
