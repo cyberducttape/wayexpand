@@ -25,6 +25,9 @@ Changes not yet released.
   for unhealthy probes.
 - Require the status snapshot to explicitly report a running daemon rather than
   accepting an arbitrary JSON object.
+- Make certification backend-aware: IBus uses the healthy doctor/IBus probe,
+  while daemon-backed paths require a matching running source/backend pair.
+- Add certification coverage for matching daemon-backed source/backend metadata.
 - Document the healthy-doctor and running-daemon prerequisites for certification
   evidence.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions

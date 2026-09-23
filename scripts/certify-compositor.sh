@@ -146,6 +146,34 @@ if ! printf '%s' "$status_json" | jq -e 'type == "object" and .response == "runn
     status_json=null
     status_probe_valid=0
 fi
+status_required=true
+backend_probe_valid=1
+case "$backend" in
+    ibus)
+        status_required=false
+        if ! printf '%s' "$doctor_json" | jq -e '.ibus.installed == true' >/dev/null 2>&1; then
+            backend_probe_valid=0
+        fi
+        ;;
+    evdev+libei)
+        if ! printf '%s' "$status_json" | jq -e '.source == "evdev" and .backend == "libei"' >/dev/null 2>&1; then
+            backend_probe_valid=0
+        fi
+        ;;
+    evdev+wlroots)
+        if ! printf '%s' "$status_json" | jq -e '.source == "evdev" and .backend == "wlroots"' >/dev/null 2>&1; then
+            backend_probe_valid=0
+        fi
+        ;;
+    input-method-v2)
+        if ! printf '%s' "$status_json" | jq -e '.source == "input-method" and .backend == "none"' >/dev/null 2>&1; then
+            backend_probe_valid=0
+        fi
+        ;;
+    *)
+        backend_probe_valid=0
+        ;;
+esac
 
 complete=1
 failed=0
@@ -163,7 +191,8 @@ for scenario in $scenarios; do
     fi
 done
 certified=false
-[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && [ "$status_probe_valid" -eq 1 ] && certified=true
+[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
+    && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
 [ "$status_probe_valid" -eq 1 ] || complete=0
 certification_status=incomplete
@@ -192,6 +221,8 @@ if [ "$format" = json ]; then
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
         --argjson status_probe_valid "$status_probe_valid" \
+        --argjson status_required "$status_required" \
+        --argjson backend_probe_valid "$backend_probe_valid" \
         --arg certification_status "$certification_status" \
         '{schema: 1, certified: $certified, compositor: $compositor,
           status: $certification_status,
@@ -202,6 +233,8 @@ if [ "$format" = json ]; then
           doctor_exit: $doctor_exit,
           doctor_probe_valid: ($doctor_probe_valid == 1),
           status_probe_valid: ($status_probe_valid == 1),
+          status_required: $status_required,
+          backend_probe_valid: ($backend_probe_valid == 1),
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"
 else
 {

@@ -18,7 +18,7 @@ certification_cli="$test_root/certification-cli"
 cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
-    "doctor --json") printf '%s\\n' '{"healthy":true,"capture_readiness":{"end_to_end_verified":true}}' ;;
+    "doctor --json") printf '%s\\n' '{"healthy":true,"ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
     "status --json") printf '%s\\n' '{"response":"running"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
@@ -46,6 +46,7 @@ jq -e '
     .required_client_markers == ["gtk", "qt", "password"] and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
     .status_probe_valid == true and
+    .status_required == false and .backend_probe_valid == true and
     .target_apps == ["gtk4-demo", "qt6-demo", "password-field"] and
     ([.scenarios[] | select(.result == "pass")] | length == 12)
 ' "$json_output" >/dev/null
@@ -60,6 +61,22 @@ spaced_json="$test_root/spaced-cli.json"
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null
 jq -e '.certified == true and .doctor_probe_valid == true' "$spaced_json" >/dev/null
+
+daemon_cli="$test_root/daemon-cli"
+cat >"$daemon_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","source":"evdev","backend":"libei"}' ;;
+esac
+EOF
+chmod 0755 "$daemon_cli"
+daemon_json="$test_root/daemon-certification.json"
+"$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend evdev+libei --layout us \
+    --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
+    --cli "$daemon_cli" --output "$daemon_json" >/dev/null
+jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
 
 invalid_probe_bin="$test_root/invalid-probe-bin"
 mkdir -p "$invalid_probe_bin"
