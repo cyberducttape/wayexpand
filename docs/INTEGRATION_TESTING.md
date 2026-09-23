@@ -66,7 +66,9 @@ Use the evidence collector on a real compositor session:
 
 ```sh
 scripts/certify-compositor.sh --compositor kde --version 6.6.2 \
-  --backend ibus --output kde-run.md
+  --backend ibus --layout us \
+  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --output kde-run.md
 ```
 
 It captures the live doctor/status probes and writes every required scenario as
@@ -90,8 +92,9 @@ ime-preedit=fail
 
 Passing the script with `--results results.txt` requires an explicit `pass`
 result for every scenario. Any `fail` or `UNVERIFIED` result keeps the report
-uncertified. Keep the report with the exact compositor version, backend,
-keyboard layout, and target applications.
+uncertified. `--layout` and `--target-apps` are required so the report records
+the exact keyboard layout and client set used by the run; list every tested
+client as a comma-separated value.
 
 ## Input-method source
 
