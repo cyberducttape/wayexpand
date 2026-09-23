@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Clean up a partially started async command worker when the hotkey worker
+  cannot spawn, preventing thread leaks during bounded-resource fallback.
 - Align human doctor output with JSON by labeling heuristic libei-only paths
   `AUTHORIZATION REQUIRED` instead of implying they are already available.
 - Run the compositor certification matrix weekly as well as on manual

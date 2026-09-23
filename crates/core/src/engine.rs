@@ -399,9 +399,10 @@ impl ExpansionEngine {
                     }
                 }
             });
-        if command_worker.is_err() {
-            return false;
-        }
+        let command_worker = match command_worker {
+            Ok(worker) => worker,
+            Err(_) => return false,
+        };
         let hotkey_metrics = Arc::clone(&metrics);
         let hotkey_worker = thread::Builder::new()
             .name("wayexpand-hotkey-worker".into())
@@ -421,6 +422,13 @@ impl ExpansionEngine {
                 }
             });
         if hotkey_worker.is_err() {
+            // The command worker has already started, but async mode is not
+            // usable without both workers. Close its queue and join it before
+            // falling back, otherwise every partial startup leaks a thread
+            // until the process exits (especially harmful during reloads or
+            // under a tight systemd TasksMax).
+            drop(command_sender);
+            let _ = command_worker.join();
             return false;
         }
         self.async_commands = Some(AsyncCommandRuntime {
