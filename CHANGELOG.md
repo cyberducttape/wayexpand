@@ -28,6 +28,8 @@ Changes not yet released.
 - Make certification backend-aware: IBus uses the healthy doctor/IBus probe,
   while daemon-backed paths require a matching running source/backend pair.
 - Add certification coverage for matching daemon-backed source/backend metadata.
+- Align input-method-v2 certification with the daemon’s actual status backend
+  label and cover that status shape in the regression suite.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification

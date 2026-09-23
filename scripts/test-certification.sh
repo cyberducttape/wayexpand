@@ -78,6 +78,22 @@ daemon_json="$test_root/daemon-certification.json"
     --cli "$daemon_cli" --output "$daemon_json" >/dev/null
 jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
 
+input_method_cli="$test_root/input-method-cli"
+cat >"$input_method_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","source":"input-method","backend":"input-method-v2"}' ;;
+esac
+EOF
+chmod 0755 "$input_method_cli"
+input_method_json="$test_root/input-method-certification.json"
+"$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend input-method-v2 --layout us \
+    --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
+    --cli "$input_method_cli" --output "$input_method_json" >/dev/null
+jq -e '.certified == true and .backend_probe_valid == true' "$input_method_json" >/dev/null
+
 invalid_probe_bin="$test_root/invalid-probe-bin"
 mkdir -p "$invalid_probe_bin"
 cat >"$invalid_probe_bin/wayexpand" <<'EOF'

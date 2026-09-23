@@ -166,7 +166,7 @@ case "$backend" in
         fi
         ;;
     input-method-v2)
-        if ! printf '%s' "$status_json" | jq -e '.source == "input-method" and .backend == "none"' >/dev/null 2>&1; then
+        if ! printf '%s' "$status_json" | jq -e '.source == "input-method" and .backend == "input-method-v2"' >/dev/null 2>&1; then
             backend_probe_valid=0
         fi
         ;;
