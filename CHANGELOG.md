@@ -64,6 +64,8 @@ Changes not yet released.
   GUI from coloring merely implemented-but-unverified backends as ready.
 - Show shared organization-policy validity in GUI diagnostics so policy failures
   cannot be hidden behind backend availability rows.
+- Bound IBus registry probing and prefer the installed component manifest so a
+  broken IBus daemon cannot freeze GUI or CLI diagnostics.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
