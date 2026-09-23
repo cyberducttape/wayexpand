@@ -852,7 +852,7 @@ fn print_help() {
 }
 
 fn ibus_engine_available() -> bool {
-    if !executable_in_path("wayexpand-ibus") {
+    if !executable_in_path("ibus") || !executable_in_path("wayexpand-ibus") {
         return false;
     }
 
