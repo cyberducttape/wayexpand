@@ -128,7 +128,7 @@ fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM
 doctor_status=0
-$cli doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_status=$?
+"$cli" doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_status=$?
 status_json='unavailable'
 if "$cli" status --json >"$tmp/status.json" 2>/dev/null; then
     status_json=$(cat "$tmp/status.json")

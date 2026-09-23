@@ -38,6 +38,17 @@ jq -e '
     ([.scenarios[] | select(.result == "pass")] | length == 12)
 ' "$json_output" >/dev/null
 
+spaced_cli_dir="$test_root/cli with spaces"
+mkdir -p "$spaced_cli_dir"
+cp "$project_dir/target/debug/wayexpand" "$spaced_cli_dir/wayexpand"
+chmod 0755 "$spaced_cli_dir/wayexpand"
+spaced_json="$test_root/spaced-cli.json"
+"$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
+    --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null
+jq -e '.certified == true and .doctor_probe_valid == true' "$spaced_json" >/dev/null
+
 invalid_probe_bin="$test_root/invalid-probe-bin"
 mkdir -p "$invalid_probe_bin"
 cat >"$invalid_probe_bin/wayexpand" <<'EOF'
