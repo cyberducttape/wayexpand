@@ -43,11 +43,12 @@ jobs:
           response="$(ssh -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key \
             -T cyberducttape@git.launchpad.net 2>&1)"
-          status=$?
           set -e
           printf '%s\n' "$response"
-          if { [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; } \
-            || ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
+          # Launchpad may return different SSH statuses for its intentional
+          # no-shell response; the authenticated server text is the stable
+          # success signal. Permission and host-key failures do not emit it.
+          if ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
             echo 'Launchpad SSH authorization did not succeed.' >&2
             exit 1
           fi
