@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Serialize CI test harnesses to avoid hosted-runner races in tests that
+  exercise bounded worker resources and process-wide desktop state.
 - Remove process-wide `HOME` mutation from the GUI import-path test so CI
   tests remain isolated under parallel execution and older Rust toolchains.
 - Ensure explicit installer service enablement restarts the selected daemon,
