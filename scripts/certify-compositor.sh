@@ -6,15 +6,19 @@
 set -eu
 
 compositor=
+compositor_version=
+backend=
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
 results_file=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --compositor) compositor=${2:?missing value for --compositor}; shift 2 ;;
+        --version) compositor_version=${2:?missing value for --version}; shift 2 ;;
+        --backend) backend=${2:?missing value for --backend}; shift 2 ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND [--output FILE] [--results FILE]"
             printf '%s\n' "results format: one SCENARIO=pass|fail entry per line"
             exit 0
             ;;
@@ -27,6 +31,17 @@ case "$compositor" in
     sway|hyprland|river|kde|gnome) ;;
     *) printf '%s\n' "error: unsupported compositor name $compositor" >&2; exit 2 ;;
 esac
+
+case "$backend" in
+    ibus|libei|evdev+libei|input-method-v2|wlroots|evdev) ;;
+    '') printf '%s\n' "error: --backend is required" >&2; exit 2 ;;
+    *) printf '%s\n' "error: unsupported backend name $backend" >&2; exit 2 ;;
+esac
+
+[ -n "$compositor_version" ] || {
+    printf '%s\n' "error: --version is required for reproducible evidence" >&2
+    exit 2
+}
 
 scenarios='printable-press-release held-keys-repeat modifier-navigation unicode-combining multiline-rapid password-field focus-cross-window config-reload daemon-restart compositor-restart failed-insertion ime-preedit'
 
@@ -42,6 +57,8 @@ fi
 date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 {
     printf '%s\n\n' "# WayExpand compositor certification evidence"
+    printf '%s\n' "- compositor_version: $compositor_version"
+    printf '%s\n' "- backend: $backend"
     printf '%s\n' '- compositor: `'"$compositor"'`'
     printf '%s\n' '- recorded_at_utc: `'"$date_utc"'`'
     printf '%s\n' '- desktop: `'"${XDG_CURRENT_DESKTOP:-unknown}"'`'
@@ -67,14 +84,22 @@ date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '%s\n' "wrote $output"
 
 complete=1
+failed=0
 if [ -z "$results_file" ]; then
     complete=0
 else
     for scenario in $scenarios; do
-        grep -Eq "^${scenario}=(pass|fail)$" "$results_file" 2>/dev/null || complete=0
+        if ! grep -Eq "^$scenario=pass$" "$results_file" 2>/dev/null; then
+            complete=0
+            grep -Eq "^$scenario=fail$" "$results_file" 2>/dev/null && failed=1
+        fi
     done
 fi
 if [ "$complete" -eq 0 ]; then
-    printf '%s\n' "certification remains incomplete: provide one valid result for every scenario" >&2
+    if [ "$failed" -eq 1 ]; then
+        printf '%s\n' "certification failed: one or more scenarios were explicitly marked fail" >&2
+    else
+        printf '%s\n' "certification remains incomplete: provide pass results for every scenario" >&2
+    fi
     exit 1
 fi
