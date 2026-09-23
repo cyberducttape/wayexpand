@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Make Launchpad synchronization use its decoded SSH key explicitly in the
+  push step; GitHub Actions does not preserve an ssh-agent environment between
+  steps.
 - Make the headless capture-readiness regression test accept the documented
   `not-probed` state used by CI runners without a graphical session.
 - Serialize CI test harnesses to avoid hosted-runner races in tests that

@@ -25,10 +25,18 @@ jobs:
           printf '%s' "$LAUNCHPAD_SSH_KEY_B64" | base64 --decode > ~/.ssh/launchpad_key
           printf '%s\n' "$LAUNCHPAD_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/launchpad_key ~/.ssh/known_hosts
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/launchpad_key
+          cat > ~/.ssh/config <<'EOF'
+          Host git.launchpad.net
+            User cyberducttape
+            IdentityFile ~/.ssh/launchpad_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
 
       - name: Push GitHub main to Launchpad
+        env:
+          GIT_SSH_COMMAND: ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key
         run: |
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
