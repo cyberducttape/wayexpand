@@ -119,11 +119,11 @@ else
 fi
 doctor_json=$(cat "$tmp/doctor.json")
 doctor_probe_valid=1
-if ! printf '%s' "$doctor_json" | jq -e . >/dev/null 2>&1; then
+if ! printf '%s' "$doctor_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     doctor_json=null
     doctor_probe_valid=0
 fi
-if ! printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
+if ! printf '%s' "$status_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     status_json=null
 fi
 
