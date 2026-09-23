@@ -42,6 +42,14 @@ case "$backend" in
     *) printf '%s\n' "error: unsupported backend name $backend" >&2; exit 2 ;;
 esac
 
+case "$compositor:$backend" in
+    kde:ibus|kde:libei|kde:evdev+libei|kde:input-method-v2|gnome:ibus|gnome:libei|gnome:evdev+libei|gnome:input-method-v2|sway:evdev+wlroots|hyprland:evdev+wlroots|river:evdev+wlroots) ;;
+    *)
+        printf '%s\n' "error: backend '$backend' is not a declared certification path for $compositor" >&2
+        exit 2
+        ;;
+esac
+
 [ -n "$compositor_version" ] || {
     printf '%s\n' "error: --version is required for reproducible evidence" >&2
     exit 2
