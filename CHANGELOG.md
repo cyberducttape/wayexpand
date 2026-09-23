@@ -27,6 +27,8 @@ Changes not yet released.
   record.
 - Allow certification runs to bind doctor/status probes to an explicit
   WayExpand binary instead of an unrelated installation in `PATH`.
+- Reject unknown IBus factory engine names instead of returning the root object
+  path as if it were an engine instance.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.

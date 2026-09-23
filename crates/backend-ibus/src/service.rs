@@ -47,7 +47,9 @@ struct Factory {
 impl Factory {
     fn create_engine(&self, name: &str) -> zbus::fdo::Result<OwnedObjectPath> {
         if name != "wayexpand" && name != "WayExpand" {
-            return Ok(OwnedObjectPath::try_from("/").expect("root object path"));
+            return Err(zbus::fdo::Error::InvalidArgs(format!(
+                "unsupported WayExpand engine name: {name}"
+            )));
         }
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -375,6 +377,23 @@ mod tests {
         assert_eq!(first.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/1");
         assert_eq!(second.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/2");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn factory_rejects_unknown_engine_names() {
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"x\"\n").unwrap();
+        let factory = Factory {
+            connection: Arc::new(Mutex::new(None)),
+            config: Arc::new(Mutex::new(config)),
+            policy: Arc::new(OrganizationPolicy::default()),
+            instances: Arc::new(Mutex::new(Vec::new())),
+            next_id: AtomicU64::new(1),
+        };
+        assert!(matches!(
+            factory.create_engine("not-wayexpand"),
+            Err(zbus::fdo::Error::InvalidArgs(_))
+        ));
     }
 
     #[test]
