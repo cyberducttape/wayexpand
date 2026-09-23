@@ -1459,15 +1459,17 @@ fn print_certification(json: bool) -> Result<bool> {
     }
 
     let selected_capture = if ibus { "ibus" } else { selected_label };
+    let selection_status = certification_selection_status(selected_capture);
+    let selection_detail = if selected_capture == "stdin" {
+        "automatic selection is the conservative stdin-only fallback; no keyboard capture path is configured".to_owned()
+    } else {
+        format!("automatic selection currently resolves to {selected_capture}")
+    };
     add_check(
         "selection",
         "automatic mode selection",
-        if selected_capture == "none" {
-            "failed"
-        } else {
-            "available"
-        },
-        &format!("automatic selection currently resolves to {selected_capture}"),
+        selection_status,
+        &selection_detail,
     );
 
     // These checks intentionally remain NOT RUN until a compositor-specific
@@ -1540,6 +1542,14 @@ fn print_certification(json: bool) -> Result<bool> {
         println!("Run the compositor harness before treating this record as a support claim.");
     }
     Ok(certified)
+}
+
+fn certification_selection_status(selected_capture: &str) -> &'static str {
+    match selected_capture {
+        "none" => "failed",
+        "stdin" => "unsupported",
+        _ => "available",
+    }
 }
 
 fn certification_scenarios() -> Result<Vec<String>> {
@@ -2409,6 +2419,13 @@ mod tests {
                 "a protocol or IBus probe succeeded; live client typing is not verified"
             )
         );
+    }
+
+    #[test]
+    fn certification_does_not_call_stdin_only_selection_available() {
+        assert_eq!(certification_selection_status("stdin"), "unsupported");
+        assert_eq!(certification_selection_status("ibus"), "available");
+        assert_eq!(certification_selection_status("none"), "failed");
     }
 
     #[test]
