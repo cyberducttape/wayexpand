@@ -48,6 +48,8 @@ Changes not yet released.
   itself instead of failing on avoidable word-splitting warnings.
 - Preserve per-scenario compositor-driver logs in certification artifacts so a
   passing result remains reviewable evidence rather than only an exit status.
+- Keep human and JSON doctor health consistent when no graphical display session
+  is active, including when the IBus component is installed.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
