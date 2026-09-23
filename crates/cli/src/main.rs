@@ -1118,7 +1118,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     // Doctor is also used in CI and for validating a config outside a desktop
     // session. Explain the session limitation; the caller still reports an
     // unhealthy result when no usable path can be established.
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    if !display_session_available() {
         if std::env::var_os("DISPLAY").is_some() {
             println!(
                 "X11 session: no native X11 global-capture backend is implemented; evdev + libei "
@@ -1673,6 +1673,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         .unwrap_or(false);
     let healthy = config_ok
         && policy_ok
+        && display_session_available()
         && (selection_ok || setup_ibus_ready)
         && (socket_path.is_none() || socket_exists);
     println!(
@@ -1707,6 +1708,18 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+fn display_session_available() -> bool {
+    display_session_flags(
+        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        std::env::var_os("WAYLAND_SOCKET").is_some(),
+        std::env::var_os("DISPLAY").is_some(),
+    )
+}
+
+fn display_session_flags(wayland_display: bool, wayland_socket: bool, x11_display: bool) -> bool {
+    wayland_display || wayland_socket || x11_display
 }
 
 fn backend_policy_allowed(kind: BackendKind, policy: &OrganizationPolicy) -> Option<bool> {
@@ -2402,6 +2415,14 @@ mod tests {
     fn human_capture_readiness_accepts_ibus_as_the_only_path() {
         assert!(capture_path_available(true, 0, 0));
         assert!(!capture_path_available(false, 0, 0));
+    }
+
+    #[test]
+    fn doctor_health_requires_a_graphical_session() {
+        assert!(!display_session_flags(false, false, false));
+        assert!(display_session_flags(true, false, false));
+        assert!(display_session_flags(false, true, false));
+        assert!(display_session_flags(false, false, true));
     }
 
     #[test]

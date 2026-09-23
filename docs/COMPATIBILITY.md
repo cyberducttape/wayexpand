@@ -286,7 +286,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 ```
 
 **Field stability:**
-- `healthy` (bool): Overall health (config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
+- `healthy` (bool): Overall health (an active display session, config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
 - `wayland` (bool): Wayland session detected
 - `config.path` (string): Configuration file path
 - `config.valid` (bool): Configuration syntax valid
