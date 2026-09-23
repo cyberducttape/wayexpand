@@ -15,6 +15,9 @@ Changes not yet released.
   exercised typing, focus, password, restart, and reload scenarios.
 - Expose backend limitations in human and JSON diagnostics and document the
   KDE, GNOME, Sway, and Hyprland certification matrix.
+- Require compositor version/backend metadata and all scenarios to pass in
+  certification evidence; explicit failures can no longer produce a passing
+  evidence record.
 
 - Harden IBus integration: ignore key-release events, isolate engine instances
   per input context, and surface live configuration reload failures.
