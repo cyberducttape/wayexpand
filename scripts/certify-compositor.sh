@@ -5,6 +5,13 @@
 # scenario as pass/fail.
 set -eu
 
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+matrix="$project_dir/tests/certification/compositor-matrix.json"
+command -v jq >/dev/null 2>&1 || {
+    printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
+    exit 2
+}
+
 compositor=
 compositor_version=
 backend=
@@ -31,24 +38,17 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$compositor" ] || { printf '%s\n' "error: --compositor is required" >&2; exit 2; }
 
-case "$compositor" in
-    sway|hyprland|river|kde|gnome) ;;
-    *) printf '%s\n' "error: unsupported compositor name $compositor" >&2; exit 2 ;;
-esac
+[ -n "$backend" ] || {
+    printf '%s\n' "error: --backend is required" >&2
+    exit 2
+}
 
-case "$backend" in
-    ibus|libei|evdev+libei|input-method-v2|wlroots|evdev) ;;
-    '') printf '%s\n' "error: --backend is required" >&2; exit 2 ;;
-    *) printf '%s\n' "error: unsupported backend name $backend" >&2; exit 2 ;;
-esac
-
-case "$compositor:$backend" in
-    kde:ibus|kde:libei|kde:evdev+libei|kde:input-method-v2|gnome:ibus|gnome:libei|gnome:evdev+libei|gnome:input-method-v2|sway:evdev+wlroots|hyprland:evdev+wlroots|river:evdev+wlroots) ;;
-    *)
-        printf '%s\n' "error: backend '$backend' is not a declared certification path for $compositor" >&2
-        exit 2
-        ;;
-esac
+if ! jq -e --arg compositor "$compositor" --arg backend "$backend" \
+    'any(.targets[]; .id == $compositor and (.input_paths | index($backend) != null))' \
+    "$matrix" >/dev/null; then
+    printf '%s\n' "error: backend '$backend' is not a declared certification path for $compositor" >&2
+    exit 2
+fi
 
 [ -n "$compositor_version" ] || {
     printf '%s\n' "error: --version is required for reproducible evidence" >&2
@@ -63,7 +63,11 @@ esac
     exit 2
 }
 
-scenarios='printable-press-release held-keys-repeat modifier-navigation unicode-combining multiline-rapid password-field focus-cross-window config-reload daemon-restart compositor-restart failed-insertion ime-preedit'
+scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
+[ -n "$scenarios" ] || {
+    printf '%s\n' 'error: certification matrix declares no required scenarios' >&2
+    exit 2
+}
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM

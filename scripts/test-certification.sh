@@ -4,13 +4,13 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
+command -v jq >/dev/null 2>&1
+matrix="$project_dir/tests/certification/compositor-matrix.json"
+scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
 
 results="$test_root/results.txt"
 output="$test_root/certification.md"
-for scenario in \
-    printable-press-release held-keys-repeat modifier-navigation \
-    unicode-combining multiline-rapid password-field focus-cross-window \
-    config-reload daemon-restart compositor-restart failed-insertion ime-preedit; do
+for scenario in $scenarios; do
     printf '%s\n' "$scenario=pass"
 done >"$results"
 

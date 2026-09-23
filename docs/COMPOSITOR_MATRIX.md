@@ -6,11 +6,10 @@ common GTK, Qt, browser, terminal, and password-field targets.
 
 | Session | Daemon automatic choice | Available paths | Window tracking | Status |
 |---|---|---|---|---|
-| KDE Plasma / KWin | stdin + libei; evdev only with explicit opt-in | input-method-v2 only when `doctor` confirms it; evdev + libei | KWin tracker | Implemented, awaiting broader independent certification |
-| Sway | stdin + libei; evdev only with explicit opt-in | evdev + libei; input-method-v2 only when probed | Not shipped; wlroots tracking is experimental future work | Implemented, awaiting compositor certification |
-| Hyprland | stdin + libei; evdev only with explicit opt-in | evdev + libei; input-method-v2 only when probed | Not shipped; wlroots tracking is experimental future work | Implemented, awaiting compositor certification |
-| river | stdin + libei; evdev only with explicit opt-in | evdev + libei; input-method-v2 only when probed | Not shipped; wlroots tracking is experimental future work | Implemented, awaiting compositor certification |
-| GNOME | stdin + libei; evdev only with explicit opt-in | input-method-v2 (explicit opt-in) or evdev + libei | No supported app tracker | Limited; runtime probing required |
+| KDE Plasma / KWin | stdin + libei; evdev only with explicit opt-in | IBus, input-method-v2, or evdev + libei when independently verified | KWin tracker | Implemented, awaiting broader independent certification |
+| Sway | stdin + libei; evdev only with explicit opt-in | evdev + wlroots virtual keyboard | Not shipped; wlroots tracking is experimental future work | Implemented, awaiting compositor certification |
+| Hyprland | stdin + libei; evdev only with explicit opt-in | evdev + wlroots virtual keyboard | Not shipped; wlroots tracking is experimental future work | Implemented, awaiting compositor certification |
+| GNOME | stdin + libei; evdev only with explicit opt-in | IBus, input-method-v2, or evdev + libei when independently verified | No supported app tracker | Limited; runtime probing required |
 | X11 / XWayland | explicit evdev route | evdev + compatible output backend | No native tracker | Capture/output compatibility must be verified |
 
 The daemon’s automatic choice is deliberately conservative: it never enables
