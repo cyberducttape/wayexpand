@@ -19,7 +19,7 @@ use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    all_capabilities, default_config_path, discover_backends, import_espanso, Config,
+    all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind, Config,
     ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
 };
 
@@ -1515,6 +1515,11 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
         });
     let socket_exists = socket_path.as_ref().is_some_and(|socket| socket.exists());
+    let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
+        safe_mode: true,
+        allowed_backends: vec!["none".into()],
+        ..OrganizationPolicy::default()
+    });
     let backends: Vec<_> = discover_backends()
         .into_iter()
         .map(|status| {
@@ -1524,6 +1529,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "implementation": status.implementation(),
                 "availability": status.availability(),
                 "permission": status.permission(),
+                "policy_allowed": backend_policy_allowed(status.kind, &policy),
                 "detail": status.detail,
             })
         })
@@ -1532,11 +1538,6 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let policy_json = print_policy_diagnostics_json();
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
-    let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
-        safe_mode: true,
-        allowed_backends: vec!["none".into()],
-        ..OrganizationPolicy::default()
-    });
     let (capture_state, capture_detail) =
         capture_readiness(&live_capabilities, ibus_installed, &policy);
     let recommendation = recommended_setup_backend(&live_capabilities, &policy);
@@ -1630,6 +1631,11 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+fn backend_policy_allowed(kind: BackendKind, policy: &OrganizationPolicy) -> Option<bool> {
+    kind.policy_name()
+        .map(|backend| policy.backend_allowed(backend))
 }
 
 fn automatic_selection_is_ready(source: &str, backend: &str, policy: &OrganizationPolicy) -> bool {

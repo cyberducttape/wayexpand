@@ -171,6 +171,20 @@ impl fmt::Display for BackendKind {
     }
 }
 
+impl BackendKind {
+    /// Canonical organization-policy identity for selectable output
+    /// backends. Input sources and non-selectable diagnostic entries return
+    /// `None` because they do not independently determine daemon behavior.
+    pub fn policy_name(self) -> Option<&'static str> {
+        match self {
+            Self::InputMethodV2 => Some("input-method-v2"),
+            Self::Libei => Some("libei"),
+            Self::WlrootsVirtualKeyboard => Some("wlroots"),
+            Self::Evdev | Self::Uinput | Self::Clipboard | Self::WindowTracker => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendStatus {
     pub kind: BackendKind,

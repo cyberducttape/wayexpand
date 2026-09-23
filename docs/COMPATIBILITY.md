@@ -301,6 +301,9 @@ Diagnostic output suitable for health checks and monitoring systems.
   - `implementation` (string): One of "Implemented" or "NotImplemented".
   - `availability` (string): One of "Detected", "Unavailable", or "Unknown".
   - `permission` (string): One of "Granted", "Required", or "NotApplicable".
+  - `policy_allowed` (bool|null): Whether the shared organization policy
+    permits this selectable backend; null for input sources, trackers, and
+    unshipped entries that are not directly governed as output backends.
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The setup mode selected from current capabilities; it never turns an experimental path into Recommended mode.
