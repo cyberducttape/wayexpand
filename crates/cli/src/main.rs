@@ -1215,9 +1215,12 @@ fn print_backend_selection_explain() {
 fn print_certification(json: bool) -> Result<bool> {
     let capabilities = probe_capabilities();
     let policy_result = wayexpand_core::load_organization_policy();
-    let policy_allows_ibus = policy_result
-        .as_ref()
-        .is_ok_and(|policy| policy.backend_allowed("input-method-v2"));
+    let policy_allows = |backend: &str| {
+        policy_result
+            .as_ref()
+            .is_ok_and(|policy| policy.backend_allowed(backend))
+    };
+    let policy_allows_ibus = policy_allows("input-method-v2");
     let selection = wayexpand_backend_selection::auto_select(None, None)
         .ok()
         .filter(|selection| {
@@ -1314,12 +1317,19 @@ fn print_certification(json: bool) -> Result<bool> {
             "the WayExpand IBus component is not discoverable",
         );
     }
-    if capabilities.has_input_method_v2 {
+    if capabilities.has_input_method_v2 && policy_allows("input-method-v2") {
         add_check(
             "input-path",
             "input-method-v2 protocol",
             "available",
             "protocol manager and seat probe succeeded; live key pass-through remains untested",
+        );
+    } else if capabilities.has_input_method_v2 {
+        add_check(
+            "input-path",
+            "input-method-v2 protocol",
+            "unsupported",
+            "the compositor exposed the protocol, but organization policy disallows this backend",
         );
     } else {
         add_check(
@@ -1329,12 +1339,19 @@ fn print_certification(json: bool) -> Result<bool> {
             "the compositor did not expose a usable input-method-v2 interface",
         );
     }
-    if capabilities.has_virtual_keyboard {
+    if capabilities.has_virtual_keyboard && policy_allows("wlroots") {
         add_check(
             "output-path",
             "wlroots virtual keyboard",
             "available",
             "virtual keyboard globals were found; end-to-end insertion remains untested",
+        );
+    } else if capabilities.has_virtual_keyboard {
+        add_check(
+            "output-path",
+            "wlroots virtual keyboard",
+            "unsupported",
+            "the compositor exposed the protocol, but organization policy disallows this backend",
         );
     } else {
         add_check(
@@ -1344,12 +1361,19 @@ fn print_certification(json: bool) -> Result<bool> {
             "the compositor did not expose zwp_virtual_keyboard_v1",
         );
     }
-    if capabilities.has_direct_libei_socket {
+    if capabilities.has_direct_libei_socket && policy_allows("libei") {
         add_check(
             "output-path",
             "libei/EIS transport",
             "available",
             "an explicit LIBEI_SOCKET is present; portal authorization was not re-requested",
+        );
+    } else if capabilities.has_direct_libei_socket {
+        add_check(
+            "output-path",
+            "libei/EIS transport",
+            "unsupported",
+            "an EIS socket was detected, but organization policy disallows this backend",
         );
     } else {
         add_check("output-path", "libei/EIS transport", "authorization-required", "portal probing is intentionally non-interactive; run the selected mode to authorize it");
