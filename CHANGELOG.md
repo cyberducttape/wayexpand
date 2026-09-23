@@ -18,6 +18,9 @@ Changes not yet released.
 - Require compositor version/backend metadata and all scenarios to pass in
   certification evidence; explicit failures can no longer produce a passing
   evidence record.
+- Use a named IBus release-mask constant shared by the adapter and regression
+  tests; the official ibus-rs binding was evaluated but rejected because it
+  adds a mandatory native libdbus build dependency.
 
 - Harden IBus integration: ignore key-release events, isolate engine instances
   per input context, and surface live configuration reload failures.
