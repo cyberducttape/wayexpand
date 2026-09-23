@@ -67,6 +67,8 @@ Changes not yet released.
   organization policy.
 - Enforce organization backend policy at daemon startup so explicit and
   automatic selections cannot bypass the shared policy decision.
+- Centralize resolved-source backend identity mapping in the core policy API so
+  daemon, CLI, and diagnostics use the same canonical names.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit

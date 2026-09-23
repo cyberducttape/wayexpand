@@ -1228,9 +1228,12 @@ fn print_certification(json: bool) -> Result<bool> {
     let selection = wayexpand_backend_selection::auto_select(None, None)
         .ok()
         .filter(|selection| {
-            policy_result
-                .as_ref()
-                .is_ok_and(|policy| policy.backend_allowed(selection.pair.backend()))
+            policy_result.as_ref().is_ok_and(|policy| {
+                policy.backend_allowed(wayexpand_core::policy_backend_name(
+                    selection.pair.source(),
+                    selection.pair.backend(),
+                ))
+            })
         });
     let ibus_installed = ibus_engine_available();
     let ibus = ibus_installed && policy_allows_ibus;
@@ -1546,7 +1549,10 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     });
     let automatic_selection = wayexpand_backend_selection::auto_select(None, None)
         .map(|selection| {
-            let policy_allowed = policy.backend_allowed(selection.pair.backend());
+            let policy_allowed = policy.backend_allowed(wayexpand_core::policy_backend_name(
+                selection.pair.source(),
+                selection.pair.backend(),
+            ));
             serde_json::json!({
                 "source": selection.pair.source(),
                 "backend": selection.pair.backend(),
@@ -1627,7 +1633,8 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
 }
 
 fn automatic_selection_is_ready(source: &str, backend: &str, policy: &OrganizationPolicy) -> bool {
-    source != "stdin" && policy.backend_allowed(backend)
+    source != "stdin"
+        && policy.backend_allowed(wayexpand_core::policy_backend_name(source, backend))
 }
 
 /// Classify non-invasive session probes without calling them an end-to-end

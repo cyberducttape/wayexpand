@@ -33,7 +33,7 @@ pub use migration::{import_espanso, EspansoImport, MigrationError};
 pub use paths::default_config_path;
 pub use policy::{
     load_organization_policy, load_organization_policy_from_paths, parse_organization_policy,
-    validate_organization_policy_directory, validate_organization_policy_file,
+    policy_backend_name, validate_organization_policy_directory, validate_organization_policy_file,
     MAX_ORGANIZATION_POLICY_BYTES, ORGANIZATION_POLICY_DIR, ORGANIZATION_POLICY_PATH,
 };
 pub use store::{ConfigStore, ConfigStoreStatus};
