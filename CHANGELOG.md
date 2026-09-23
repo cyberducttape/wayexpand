@@ -50,6 +50,8 @@ Changes not yet released.
   passing result remains reviewable evidence rather than only an exit status.
 - Keep human and JSON doctor health consistent when no graphical display session
   is active, including when the IBus component is installed.
+- Scope release workflow write, OIDC, and attestation permissions to the
+  publishing job; reusable verification CI remains read-only.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
