@@ -30,7 +30,8 @@ scripts/certify-compositor.sh --format json --compositor kde \
 
 That record is distinct from the CLI preflight: it includes the exact session
 metadata and one result for each required scenario, but remains
-`certified: false` unless every scenario is explicitly passed.
+`certified: false` unless every scenario is explicitly passed. Its stable
+`status` field is `certified`, `incomplete`, or `failed`.
 
 JSON mode exits successfully when the report is produced; automation must
 inspect `.certified`. Human-readable mode exits nonzero while certification is

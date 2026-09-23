@@ -29,6 +29,8 @@ Changes not yet released.
   WayExpand binary instead of an unrelated installation in `PATH`.
 - Reject unknown IBus factory engine names instead of returning the root object
   path as if it were an engine instance.
+- Add an explicit certification evidence status so automation can distinguish
+  incomplete runs from runs with observed failures.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
