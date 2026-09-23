@@ -18,7 +18,7 @@ chmod 0755 "$driver"
 results="$test_root/results.txt"
 if "$project_dir/scripts/run-certification-driver.sh" \
     --driver "$driver" --compositor kde --version 6.6.2 \
-    --backend ibus --layout us --target-apps gtk4-demo,qt6-demo \
+    --backend ibus --layout us --target-apps gtk4-demo,qt6-demo,password-field \
     --output "$results"; then
     printf '%s\n' 'driver accepted failed scenarios' >&2
     exit 1
