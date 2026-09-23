@@ -1860,7 +1860,11 @@ fn status_tone(message: &str, palette: &Palette) -> (Color32, Color32) {
 }
 
 fn expand_user_path(value: &str) -> PathBuf {
-    let Some(home) = env::var_os("HOME") else {
+    expand_user_path_with_home(value, env::var_os("HOME").as_deref())
+}
+
+fn expand_user_path_with_home(value: &str, home: Option<&std::ffi::OsStr>) -> PathBuf {
+    let Some(home) = home else {
         return PathBuf::from(value);
     };
     if value == "~" {
@@ -2047,14 +2051,23 @@ mod tests {
 
     #[test]
     fn import_path_expands_home_prefix_without_shell_evaluation() {
-        std::env::set_var("HOME", "/tmp/wayexpand-home");
         assert_eq!(
-            expand_user_path("~/matches.yml"),
+            expand_user_path_with_home(
+                "~/matches.yml",
+                Some(std::ffi::OsStr::new("/tmp/wayexpand-home")),
+            ),
             PathBuf::from("/tmp/wayexpand-home/matches.yml")
         );
         assert_eq!(
-            expand_user_path("/tmp/matches.yml"),
+            expand_user_path_with_home(
+                "/tmp/matches.yml",
+                Some(std::ffi::OsStr::new("/tmp/wayexpand-home")),
+            ),
             PathBuf::from("/tmp/matches.yml")
+        );
+        assert_eq!(
+            expand_user_path_with_home("~/matches.yml", None),
+            PathBuf::from("~/matches.yml")
         );
     }
 
