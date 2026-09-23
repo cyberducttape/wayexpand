@@ -581,7 +581,8 @@ fn run() -> Result<()> {
             println!("Session: {}", session_description());
             println!();
             let capabilities = probe_capabilities();
-            let automatic = recommended_setup_backend(&capabilities);
+            let policy = load_policy()?;
+            let automatic = recommended_setup_backend(&capabilities, &policy);
             println!();
             println!("Compatibility modes");
             println!("  Recommended         safest verified path available in this session");
@@ -597,7 +598,7 @@ fn run() -> Result<()> {
             let backend = if let Some(backend) = requested_backend {
                 backend
             } else if let Some(mode) = requested_mode {
-                setup_backend_for_mode(&mode, &capabilities)?
+                setup_backend_for_mode(&mode, &capabilities, &policy)?
             } else if assume_yes {
                 automatic.backend.to_owned()
             } else {
@@ -605,13 +606,16 @@ fn run() -> Result<()> {
                 if prompt_yes_no(&prompt, true)? {
                     automatic.backend.to_owned()
                 } else {
-                    prompt_mode_choice(&capabilities)?
+                    prompt_mode_choice(&capabilities, &policy)?
                 }
             };
             if backend == "unavailable" {
                 bail!(
                     "Recommended mode found no safe automatic path; use --mode experimental or configure permissions and rerun setup"
                 );
+            }
+            if !setup_backend_allowed(&policy, &backend) {
+                bail!("setup backend '{backend}' is disallowed by organization policy")
             }
             configure_setup_backend(&backend)?;
         }
@@ -878,8 +882,9 @@ struct SetupRecommendation {
 
 fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
+    policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    if ibus_engine_available() {
+    if ibus_engine_available() && setup_backend_allowed(policy, "ibus") {
         return SetupRecommendation {
             backend: "ibus",
             label: "IBus",
@@ -889,7 +894,10 @@ fn recommended_setup_backend(
     // The packaged maximum-compatibility service is evdev + libei. A
     // wlroots virtual-keyboard probe alone is not enough to claim that the
     // service it will enable can start.
-    if capabilities.has_dev_input && capabilities.has_direct_libei_socket {
+    if capabilities.has_dev_input
+        && capabilities.has_direct_libei_socket
+        && setup_backend_allowed(policy, "evdev")
+    {
         return SetupRecommendation {
             backend: "evdev",
             label: "Maximum compatibility",
@@ -907,9 +915,12 @@ fn recommended_setup_backend(
 fn setup_backend_for_mode(
     mode: &str,
     capabilities: &wayexpand_backend_selection::Capabilities,
+    policy: &OrganizationPolicy,
 ) -> Result<String> {
     match mode {
-        "recommended" => Ok(recommended_setup_backend(capabilities).backend.to_owned()),
+        "recommended" => Ok(recommended_setup_backend(capabilities, policy)
+            .backend
+            .to_owned()),
         "maximum" => {
             if !capabilities.has_dev_input {
                 bail!("Maximum compatibility requires a readable /dev/input keyboard")
@@ -919,6 +930,9 @@ fn setup_backend_for_mode(
                     "Maximum compatibility requires a detected libei/EIS path or a KDE/GNOME portal candidate"
                 )
             }
+            if !setup_backend_allowed(policy, "evdev") {
+                bail!("Maximum compatibility is disallowed by organization policy")
+            }
             Ok("evdev".into())
         }
         "experimental" => {
@@ -927,11 +941,22 @@ fn setup_backend_for_mode(
                     "Experimental mode requires an available input-method-v2 compositor interface"
                 )
             }
+            if !setup_backend_allowed(policy, "input-method") {
+                bail!("Experimental input-method-v2 mode is disallowed by organization policy")
+            }
             Ok("input-method".into())
         }
         other => bail!(
             "unknown compatibility mode {other:?}; choose recommended, maximum, or experimental"
         ),
+    }
+}
+
+fn setup_backend_allowed(policy: &OrganizationPolicy, backend: &str) -> bool {
+    match backend {
+        "ibus" | "input-method" => policy.backend_allowed("input-method-v2"),
+        "evdev" => policy.backend_allowed("libei") || policy.backend_allowed("wlroots"),
+        _ => false,
     }
 }
 
@@ -946,7 +971,10 @@ fn libei_portal_candidate() -> bool {
         .any(|desktop| desktop.contains("kde") || desktop.contains("gnome"))
 }
 
-fn prompt_mode_choice(capabilities: &wayexpand_backend_selection::Capabilities) -> Result<String> {
+fn prompt_mode_choice(
+    capabilities: &wayexpand_backend_selection::Capabilities,
+    policy: &OrganizationPolicy,
+) -> Result<String> {
     print!("Choose a mode [recommended/maximum/experimental/q]: ");
     io::stdout().flush()?;
     let mut choice = String::new();
@@ -954,7 +982,7 @@ fn prompt_mode_choice(capabilities: &wayexpand_backend_selection::Capabilities) 
     let choice = choice.trim().to_ascii_lowercase();
     match choice.as_str() {
         "recommended" | "maximum" | "experimental" => {
-            setup_backend_for_mode(choice.as_str(), capabilities)
+            setup_backend_for_mode(choice.as_str(), capabilities, policy)
         }
         _ => bail!("setup cancelled; choose recommended, maximum, or experimental"),
     }
@@ -1419,11 +1447,16 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
         .collect();
     let ibus_installed = ibus_engine_available();
-    let policy = print_policy_diagnostics_json();
+    let policy_json = print_policy_diagnostics_json();
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
     let (capture_state, capture_detail) = capture_readiness(&live_capabilities, ibus_installed);
-    let recommendation = recommended_setup_backend(&live_capabilities);
+    let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
+        safe_mode: true,
+        allowed_backends: vec!["none".into()],
+        ..OrganizationPolicy::default()
+    });
+    let recommendation = recommended_setup_backend(&live_capabilities, &policy);
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
         "backend": recommendation.backend,
@@ -1463,7 +1496,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let selection_ok = automatic_selection["reason"].is_string()
         && automatic_selection["source"].is_string()
         && automatic_selection["ready"].as_bool().unwrap_or(false);
-    let policy_ok = policy
+    let policy_ok = policy_json
         .get("policy")
         .and_then(|policy| policy.get("valid"))
         .and_then(serde_json::Value::as_bool)
@@ -1491,7 +1524,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },
             },
-            "policy": policy,
+            "policy": policy_json,
             "backends": backends,
             "capabilities": capabilities,
             "automatic_selection": automatic_selection,
@@ -2095,16 +2128,46 @@ mod tests {
             has_window_tracker: false,
             compositor: wayexpand_backend_selection::Compositor::Gnome,
         };
-        assert!(setup_backend_for_mode("maximum", &no_devices).is_err());
-        assert!(setup_backend_for_mode("experimental", &no_devices).is_err());
+        let policy = OrganizationPolicy::default();
+        assert!(setup_backend_for_mode("maximum", &no_devices, &policy).is_err());
+        assert!(setup_backend_for_mode("experimental", &no_devices, &policy).is_err());
 
         let experimental = wayexpand_backend_selection::Capabilities {
             has_input_method_v2: true,
             ..no_devices
         };
         assert_eq!(
-            setup_backend_for_mode("experimental", &experimental).unwrap(),
+            setup_backend_for_mode("experimental", &experimental, &policy).unwrap(),
             "input-method"
+        );
+    }
+
+    #[test]
+    fn setup_modes_respect_runtime_backend_policy_names() {
+        let capabilities = wayexpand_backend_selection::Capabilities {
+            has_input_method_v2: true,
+            has_direct_libei_socket: true,
+            has_dev_input: true,
+            ..Default::default()
+        };
+        let ibus_only = OrganizationPolicy {
+            allowed_backends: vec!["input-method-v2".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            setup_backend_for_mode("experimental", &capabilities, &ibus_only).unwrap(),
+            "input-method"
+        );
+        assert!(setup_backend_for_mode("maximum", &capabilities, &ibus_only).is_err());
+
+        let raw_only = OrganizationPolicy {
+            allowed_backends: vec!["libei".into()],
+            ..Default::default()
+        };
+        assert!(setup_backend_for_mode("experimental", &capabilities, &raw_only).is_err());
+        assert_eq!(
+            setup_backend_for_mode("maximum", &capabilities, &raw_only).unwrap(),
+            "evdev"
         );
     }
 

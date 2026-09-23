@@ -10,7 +10,9 @@ Organization policies enforce administrator-defined constraints on text expansio
 
 ## Policy File Location
 
-Policies are loaded from `/etc/wayexpand/policy.toml` (root-owned, strictly validated).
+Policies are loaded from `/etc/wayexpand/policy.toml` (root-owned, strictly validated)
+by the daemon, CLI diagnostics, and the IBus service. An invalid or insecure
+policy is a startup/diagnostic failure rather than a silent fallback.
 
 ## Security Validation
 

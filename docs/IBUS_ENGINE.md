@@ -22,5 +22,11 @@ portable focused-window identity. IBus content-purpose values for password and
 PIN fields disable matching; other toolkit-specific sensitivity hints are not
 currently interpreted.
 
+The IBus service loads the same root-owned `/etc/wayexpand/policy.toml` as the
+daemon. Invalid or insecure policy files prevent startup, and active policy
+limits (including command execution, replacement size, and allowed backend)
+are enforced for IBus expansions. The backend is identified as
+`input-method-v2` for `allowed_backends` policy checks.
+
 After installing, make sure `~/.local/bin` is on `PATH`, then restart IBus and
 select `WayExpand` (`wayexpand` engine) in the desktop input-method settings.

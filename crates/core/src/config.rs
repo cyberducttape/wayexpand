@@ -162,7 +162,7 @@ pub struct OrganizationPolicy {
     pub max_replacement_size: usize,
 
     /// Allowed output backends. If non-empty, only these backends are allowed.
-    /// Examples: "libei", "input-method", "wlroots", "none"
+    /// Examples: "libei", "input-method-v2", "wlroots", "none"
     pub allowed_backends: Vec<String>,
 
     /// Allowed curated packs. If non-empty, only these packs are allowed
@@ -226,6 +226,34 @@ impl OrganizationPolicy {
         } else {
             size <= self.max_replacement_size
         }
+    }
+
+    /// Return the complete, content-free explanation for an expansion policy
+    /// violation. All input paths use this method so the daemon and IBus do
+    /// not drift into different enforcement behavior.
+    pub fn expansion_policy_violation(
+        &self,
+        replacement_size: usize,
+        has_command: bool,
+        backend: &str,
+    ) -> Option<String> {
+        let mut violations = Vec::new();
+        if has_command && self.disable_commands {
+            violations.push("command execution is disabled by organization policy".to_string());
+        }
+        if !self.replacement_size_allowed(replacement_size) {
+            violations.push(format!(
+                "replacement size {} bytes exceeds policy limit of {} bytes",
+                replacement_size, self.max_replacement_size
+            ));
+        }
+        if !self.backend_allowed(backend) {
+            violations.push(format!(
+                "backend '{}' is not in allowed list: {:?}",
+                backend, self.allowed_backends
+            ));
+        }
+        (!violations.is_empty()).then(|| violations.join("; "))
     }
 }
 

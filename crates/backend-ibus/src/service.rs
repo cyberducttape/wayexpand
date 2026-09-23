@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tracing::{info, warn};
-use wayexpand_core::{default_config_path, ConfigStore, ExpansionEngine};
+use wayexpand_core::{default_config_path, ConfigStore, ExpansionEngine, OrganizationPolicy};
 use zbus::{
     blocking::{connection::Builder, Connection},
     interface,
@@ -29,6 +29,8 @@ pub enum IbusServiceError {
     Dbus(#[from] zbus::Error),
     #[error("could not start configuration watcher: {0}")]
     Thread(String),
+    #[error("organization policy is invalid: {0}")]
+    Policy(String),
 }
 
 /// IBus factory state. Each CreateEngine call gets its own adapter and object
@@ -36,6 +38,7 @@ pub enum IbusServiceError {
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     config: Arc<Mutex<wayexpand_core::Config>>,
+    policy: Arc<OrganizationPolicy>,
     instances: Arc<Mutex<Vec<Weak<Mutex<IbusEngineAdapter>>>>>,
     next_id: AtomicU64,
 }
@@ -54,10 +57,11 @@ impl Factory {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
             .clone();
-        let adapter = Arc::new(Mutex::new(IbusEngineAdapter::new(
+        let adapter = Arc::new(Mutex::new(IbusEngineAdapter::with_policy(
             ExpansionEngine::new(config).map_err(|error| {
                 zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
             })?,
+            (*self.policy).clone(),
         )));
         let engine = EngineObject {
             adapter: Arc::clone(&adapter),
@@ -194,6 +198,8 @@ impl EngineObject {
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
     let path = config_path.unwrap_or_else(default_config_path);
     let store = ConfigStore::load(&path)?;
+    let policy =
+        Arc::new(wayexpand_core::load_organization_policy().map_err(IbusServiceError::Policy)?);
     let initial_status = store.status();
     info!(
         config_state = initial_status.state,
@@ -207,6 +213,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         config: Arc::clone(&factory_config),
+        policy,
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
     };
