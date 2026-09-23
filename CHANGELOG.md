@@ -49,6 +49,8 @@ Changes not yet released.
   errors instead of panicking on thread or entropy resource failures.
 - Apply organization-policy filtering to every doctor capture/output readiness
   path, not only IBus.
+- Reconcile developer and roadmap documentation with the current automatic
+  resolver, typed CLI exit categories, and uncertified compositor status.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end

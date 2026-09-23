@@ -29,8 +29,8 @@ jobs:
         run: |
           test -n "$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
           find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -exec \
-            docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" \
-            rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 {} +
+            docker run --rm --workdir /repo --volume="${GITHUB_WORKSPACE}:/repo" \
+            rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 "{}" +
 
   supply-chain:
     name: Security Audit
@@ -107,7 +107,7 @@ jobs:
       - name: Create git archive (simulate release tarball)
         run: git archive HEAD --output=wayexpand.tar.gz
       - name: Extract to clean directory
-        run: mkdir -p /tmp/clean-build && cd /tmp/clean-build && tar -xzf "$GITHUB_WORKSPACE/wayexpand.tar.gz"
+        run: mkdir -p /tmp/clean-build && cd /tmp/clean-build && tar -xzf "${GITHUB_WORKSPACE}/wayexpand.tar.gz"
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean

@@ -149,9 +149,13 @@ Before submitting a PR, verify:
 
 ### CLI exit codes
 
-Exit codes come from error message text. The function `exit_code_for` in `crates/cli/src/main.rs` pattern-matches messages like "usage:", "configuration invalid:", etc.
+Exit codes come from the typed `CliErrorKind` carried by `CliError` in
+`crates/cli/src/main.rs`. The `exit_code_for` function maps those stable
+categories to exit codes independently of human-facing error wording.
 
-**Important:** Changing error message text changes exit codes. This is a documented contract in `docs/COMPATIBILITY.md` with contract tests in the CLI module.
+**Important:** Changing a category or its numeric mapping is a compatibility
+change. The mapping is documented in `docs/COMPATIBILITY.md` with contract
+tests in the CLI module; changing an error sentence alone must not alter it.
 
 **If you change an error message:** Update the corresponding exit code test.
 
