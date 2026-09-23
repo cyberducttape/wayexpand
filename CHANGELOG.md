@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Ensure explicit installer service enablement restarts the selected daemon,
+  and warn when an ordinary upgrade leaves an existing service process running.
 - Clean up a partially started async command worker when the hotkey worker
   cannot spawn, preventing thread leaks during bounded-resource fallback.
 - Align human doctor output with JSON by labeling heuristic libei-only paths

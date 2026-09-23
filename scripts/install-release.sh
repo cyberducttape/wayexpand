@@ -111,6 +111,15 @@ printf '%s\n' "Setup never grants raw-input permissions or portal consent. If it
 printf '%s\n' "no safe automatic path, review doctor and the documented explicit modes."
 printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
 
+if command -v systemctl >/dev/null 2>&1; then
+    for active_service in wayexpand-input-method.service wayexpand-evdev.service; do
+        if systemctl --user is-active --quiet "$active_service" 2>/dev/null; then
+            printf '%s\n' "Active service $active_service still uses its current process; restart it after this upgrade:"
+            printf '%s\n' "  systemctl --user restart $active_service"
+        fi
+    done
+fi
+
 if [ "$enable_service" -eq 1 ]; then
     if [ -z "$service_name" ]; then
         printf '%s\n' "error: --enable requires an explicit --service selection" >&2
@@ -124,6 +133,7 @@ if [ "$enable_service" -eq 1 ]; then
     fi
     printf '%s\n' "Enabling user service: $service_name"
     systemctl --user daemon-reload
-    systemctl --user enable --now "$service_name"
+    systemctl --user enable "$service_name"
+    systemctl --user restart "$service_name"
     printf '%s\n' "Enabled $service_name"
 fi
