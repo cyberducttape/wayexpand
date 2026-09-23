@@ -1,0 +1,78 @@
+name: Compositor Certification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: "${{ matrix.compositor }} certification"
+    runs-on: [self-hosted, wayexpand-certification, "${{ matrix.compositor }}"]
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compositor: kde
+            backend: ibus
+          - compositor: gnome
+            backend: ibus
+          - compositor: sway
+            backend: evdev+wlroots
+          - compositor: hyprland
+            backend: evdev+wlroots
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.96.0
+      - name: Build certification binaries
+        run: cargo build --locked -p wayexpand -p wayexpand-daemon -p wayexpand-backend-ibus
+      - name: Require runner-provided compositor driver
+        env:
+          EXPECTED_COMPOSITOR: ${{ matrix.compositor }}
+        run: |
+          set -eu
+          test -x "${WAYEXPAND_CERTIFICATION_DRIVER:?WAYEXPAND_CERTIFICATION_DRIVER is not configured on this runner}"
+          test "${WAYEXPAND_CERTIFICATION_COMPOSITOR:?WAYEXPAND_CERTIFICATION_COMPOSITOR is not configured on this runner}" = "$EXPECTED_COMPOSITOR"
+          test -n "${WAYEXPAND_CERTIFICATION_VERSION:?WAYEXPAND_CERTIFICATION_VERSION is not configured on this runner}"
+          test -n "${WAYEXPAND_CERTIFICATION_LAYOUT:?WAYEXPAND_CERTIFICATION_LAYOUT is not configured on this runner}"
+          test -n "${WAYEXPAND_CERTIFICATION_TARGET_APPS:?WAYEXPAND_CERTIFICATION_TARGET_APPS is not configured on this runner}"
+      - name: Run every matrix scenario
+        env:
+          COMPOSITOR: ${{ matrix.compositor }}
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/wayexpand-certification"
+          scripts/run-certification-driver.sh \
+            --driver "$WAYEXPAND_CERTIFICATION_DRIVER" \
+            --compositor "$COMPOSITOR" \
+            --version "$WAYEXPAND_CERTIFICATION_VERSION" \
+            --backend "$BACKEND" \
+            --layout "$WAYEXPAND_CERTIFICATION_LAYOUT" \
+            --target-apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" \
+            --output "$RUNNER_TEMP/wayexpand-certification/results.txt"
+      - name: Collect machine-readable evidence
+        env:
+          COMPOSITOR: ${{ matrix.compositor }}
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          set -eu
+          scripts/certify-compositor.sh --format json \
+            --compositor "$COMPOSITOR" \
+            --version "$WAYEXPAND_CERTIFICATION_VERSION" \
+            --backend "$BACKEND" \
+            --layout "$WAYEXPAND_CERTIFICATION_LAYOUT" \
+            --target-apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" \
+            --cli "$GITHUB_WORKSPACE/target/debug/wayexpand" \
+            --results "$RUNNER_TEMP/wayexpand-certification/results.txt" \
+            --output "$RUNNER_TEMP/wayexpand-certification/$COMPOSITOR.json"
+      - name: Upload certification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wayexpand-certification-${{ matrix.compositor }}
+          path: ${{ runner.temp }}/wayexpand-certification
+          if-no-files-found: error

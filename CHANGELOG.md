@@ -30,6 +30,10 @@ Changes not yet released.
 - Add certification coverage for matching daemon-backed source/backend metadata.
 - Align input-method-v2 certification with the daemon’s actual status backend
   label and cover that status shape in the regression suite.
+- Add a manual self-hosted certification workflow covering KDE, GNOME, Sway,
+  and Hyprland without treating missing runner drivers as certification.
+- Declare the certification runner labels for actionlint so the workflow’s
+  self-hosted matrix is linted rather than silently skipped.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification
