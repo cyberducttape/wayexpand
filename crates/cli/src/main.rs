@@ -914,8 +914,10 @@ fn setup_backend_for_mode(
             if !capabilities.has_dev_input {
                 bail!("Maximum compatibility requires a readable /dev/input keyboard")
             }
-            if !capabilities.has_direct_libei_socket {
-                bail!("Maximum compatibility requires a detected libei/EIS output path")
+            if !capabilities.has_direct_libei_socket && !libei_portal_candidate() {
+                bail!(
+                    "Maximum compatibility requires a detected libei/EIS path or a KDE/GNOME portal candidate"
+                )
             }
             Ok("evdev".into())
         }
@@ -931,6 +933,17 @@ fn setup_backend_for_mode(
             "unknown compatibility mode {other:?}; choose recommended, maximum, or experimental"
         ),
     }
+}
+
+fn libei_portal_candidate() -> bool {
+    if std::env::var_os("LIBEI_SOCKET").is_some() {
+        return true;
+    }
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .split(':')
+        .any(|desktop| desktop.contains("kde") || desktop.contains("gnome"))
 }
 
 fn prompt_mode_choice(capabilities: &wayexpand_backend_selection::Capabilities) -> Result<String> {
@@ -1057,12 +1070,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     // libei needs a RemoteDesktop portal with EIS support (or an explicit
     // LIBEI_SOCKET); probing the portal would pop a consent dialog, so this
     // only recognizes desktops known to ship one.
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_lowercase();
-    let libei_plausible = std::env::var_os("LIBEI_SOCKET").is_some()
-        || desktop.contains("kde")
-        || desktop.contains("gnome");
+    let libei_plausible = libei_portal_candidate();
 
     let mut verified_combinations = Vec::new();
     let mut trial_combinations = Vec::new();
@@ -1931,6 +1939,29 @@ mod tests {
         let mut args = vec!["expansions.toml".to_string()];
         assert!(!take_json_flag(&mut args));
         assert_eq!(args, vec!["expansions.toml".to_string()]);
+    }
+
+    #[test]
+    fn setup_modes_do_not_promote_unavailable_paths() {
+        let no_devices = wayexpand_backend_selection::Capabilities {
+            has_input_method_v2: false,
+            has_virtual_keyboard: true,
+            has_direct_libei_socket: false,
+            has_dev_input: false,
+            has_window_tracker: false,
+            compositor: wayexpand_backend_selection::Compositor::Gnome,
+        };
+        assert!(setup_backend_for_mode("maximum", &no_devices).is_err());
+        assert!(setup_backend_for_mode("experimental", &no_devices).is_err());
+
+        let experimental = wayexpand_backend_selection::Capabilities {
+            has_input_method_v2: true,
+            ..no_devices
+        };
+        assert_eq!(
+            setup_backend_for_mode("experimental", &experimental).unwrap(),
+            "input-method"
+        );
     }
 
     #[test]
