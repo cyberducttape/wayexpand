@@ -63,6 +63,8 @@ Changes not yet released.
   checked-in compositor certification matrix.
 - Add a CI contract test that rejects certification reports with missing
   scenarios or a false `certified` claim while checks remain unverified.
+- Prevent setup from activating the libei service under a wlroots-only
+  organization policy.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit

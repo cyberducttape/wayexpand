@@ -955,7 +955,10 @@ fn setup_backend_for_mode(
 fn setup_backend_allowed(policy: &OrganizationPolicy, backend: &str) -> bool {
     match backend {
         "ibus" | "input-method" => policy.backend_allowed("input-method-v2"),
-        "evdev" => policy.backend_allowed("libei") || policy.backend_allowed("wlroots"),
+        // The packaged setup path enables wayexpand-evdev.service, whose
+        // declared output is evdev + libei. Do not treat a wlroots-only
+        // policy as permission to activate that different service.
+        "evdev" => policy.backend_allowed("libei"),
         _ => false,
     }
 }
@@ -2266,6 +2269,12 @@ mod tests {
             setup_backend_for_mode("maximum", &capabilities, &raw_only).unwrap(),
             "evdev"
         );
+
+        let wlroots_only = OrganizationPolicy {
+            allowed_backends: vec!["wlroots".into()],
+            ..Default::default()
+        };
+        assert!(setup_backend_for_mode("maximum", &capabilities, &wlroots_only).is_err());
     }
 
     #[test]
