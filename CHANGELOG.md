@@ -73,6 +73,8 @@ Changes not yet released.
   conflating detected protocol state with a selectable backend.
 - Keep backend diagnostic policy names in the core backend contract rather than
   duplicating them in the CLI.
+- Make JSON doctor derive policy reporting and backend filtering from one
+  policy load, avoiding inconsistent snapshots during policy replacement.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
