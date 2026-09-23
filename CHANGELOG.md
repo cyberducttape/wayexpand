@@ -25,6 +25,8 @@ Changes not yet released.
 - Require a valid doctor JSON snapshot before compositor evidence can claim
   certification, while preserving explicit backend health details in the
   record.
+- Allow certification runs to bind doctor/status probes to an explicit
+  WayExpand binary instead of an unrelated installation in `PATH`.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.

@@ -80,6 +80,10 @@ scripts/certify-compositor.sh --format json --compositor kde \
   --results kde-results.txt --output kde-run.json
 ```
 
+Pass `--cli /path/to/wayexpand` (or set `WAYEXPAND_CLI`) when certifying a
+source build, so the doctor and status probes are taken from the exact binary
+under test rather than whichever installation happens to be in `PATH`.
+
 The JSON record includes the exact session metadata, live doctor/status
 snapshots, and one result object for every matrix scenario. It reports
 `certified: false` for missing or failed evidence; it does not replace the

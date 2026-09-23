@@ -18,7 +18,8 @@ run_certification() {
     PATH="$project_dir/target/debug:$PATH" \
         "$project_dir/scripts/certify-compositor.sh" \
         --compositor kde --version 6.6.2 --backend ibus --layout us \
-        --target-apps gtk4-demo,qt6-demo "$@"
+        --target-apps gtk4-demo,qt6-demo \
+        --cli "$project_dir/target/debug/wayexpand" "$@"
 }
 
 run_certification --results "$results" --output "$output"
@@ -49,6 +50,7 @@ if PATH="$invalid_probe_bin:$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus --layout us \
     --target-apps gtk4-demo,qt6-demo --results "$results" \
+    --cli "$invalid_probe_bin/wayexpand" \
     --output "$invalid_probe_json"; then
     printf '%s\n' 'certification accepted an invalid doctor probe' >&2
     exit 1
