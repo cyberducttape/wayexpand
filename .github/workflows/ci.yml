@@ -30,7 +30,7 @@ jobs:
           test -n "$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
           find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -exec \
             docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" \
-            rhysd/actionlint:1.7.7 {} +
+            rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 {} +
 
   supply-chain:
     name: Security Audit
