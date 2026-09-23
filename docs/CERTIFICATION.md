@@ -31,9 +31,12 @@ scripts/certify-compositor.sh --format json --compositor kde \
 That record is distinct from the CLI preflight: it includes the exact session
 metadata and one result for each required scenario, but remains
 `certified: false` unless every scenario is explicitly passed, the doctor
-snapshot reports `healthy: true`, and the daemon status snapshot reports
-`response: "running"`. Its stable `status` field is `certified`, `incomplete`,
-or `failed`.
+snapshot reports `healthy: true`, and the selected backend probe is consistent
+with the evidence metadata. Daemon-backed paths additionally require a status
+snapshot with `response: "running"` and the matching source/backend pair; IBus
+uses the doctor IBus-installation probe because it is not the daemon control
+socket path. Its stable `status` field is `certified`, `incomplete`, or
+`failed`.
 
 JSON mode exits successfully when the report is produced; automation must
 inspect `.certified`. Human-readable mode exits nonzero while certification is

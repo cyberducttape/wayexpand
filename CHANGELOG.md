@@ -28,6 +28,8 @@ Changes not yet released.
 - Make certification backend-aware: IBus uses the healthy doctor/IBus probe,
   while daemon-backed paths require a matching running source/backend pair.
 - Add certification coverage for matching daemon-backed source/backend metadata.
+- Document the backend-specific certification probe rules, including the IBus
+  exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification
   evidence.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
