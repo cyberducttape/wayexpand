@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Align human doctor output with JSON by labeling heuristic libei-only paths
+  `AUTHORIZATION REQUIRED` instead of implying they are already available.
 - Run the compositor certification matrix weekly as well as on manual
   dispatch; runner-provided GTK/Qt drivers remain mandatory and fail closed.
 - Make explicit input-method-v2 selection fail closed when its live protocol
