@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "targets": [
+    {
+      "id": "kde",
+      "display": "KDE Plasma / KWin",
+      "input_paths": ["ibus", "evdev+libei"],
+      "toolkits": ["GTK", "Qt"],
+      "requires_password_field_check": true
+    },
+    {
+      "id": "gnome",
+      "display": "GNOME Shell / Mutter",
+      "input_paths": ["ibus", "evdev+libei"],
+      "toolkits": ["GTK", "Qt"],
+      "requires_password_field_check": true
+    },
+    {
+      "id": "sway",
+      "display": "Sway / wlroots",
+      "input_paths": ["evdev+wlroots"],
+      "toolkits": ["GTK", "Qt"],
+      "requires_password_field_check": true
+    },
+    {
+      "id": "hyprland",
+      "display": "Hyprland / wlroots",
+      "input_paths": ["evdev+wlroots"],
+      "toolkits": ["GTK", "Qt"],
+      "requires_password_field_check": true
+    }
+  ],
+  "required_scenarios": [
+    "printable-press-release",
+    "held-keys-repeat",
+    "modifier-navigation",
+    "unicode-combining",
+    "multiline-rapid",
+    "password-field",
+    "focus-cross-window",
+    "config-reload",
+    "daemon-restart",
+    "compositor-restart",
+    "failed-insertion",
+    "ime-preedit"
+  ]
+}

@@ -164,6 +164,7 @@ jobs:
         run: |
           target/debug/wayexpand certify --json > certification.json
           jq -e '.schema == 1 and (.certified | type == "boolean") and ([.checks[] | select(.status == "not-run")] | length > 0)' certification.json
+          jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | length == 12)' tests/certification/compositor-matrix.json
           bash scripts/certify-compositor.sh --help
       - name: TUI smoke test
         run: bash scripts/test-ui.sh

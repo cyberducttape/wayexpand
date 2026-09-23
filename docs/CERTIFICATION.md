@@ -25,6 +25,11 @@ incomplete.
 The intended compositor harness will exercise the same checks against real
 clients:
 
+The checked-in target and scenario contract is
+[`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
+CI validates that all four required desktop targets and all twelve scenarios
+remain present.
+
 | Environment | Required coverage |
 | --- | --- |
 | KDE Plasma / KWin | IBus, libei portal, Qt and GTK clients |
