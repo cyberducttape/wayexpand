@@ -29,7 +29,7 @@ jobs:
         run: |
           test -n "$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
           while IFS= read -r workflow_file; do
-            docker run --rm --workdir /repo --volume="${GITHUB_WORKSPACE}:/repo" \
+            docker run --rm --workdir /repo --volume="$GITHUB_WORKSPACE:/repo" \
               rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
               "$workflow_file"
           done < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
@@ -112,7 +112,7 @@ jobs:
         run: |
           mkdir -p /tmp/clean-build
           cd /tmp/clean-build
-          tar -xzf "$GITHUB_WORKSPACE/wayexpand.tar.gz"
+          tar -xzf "${GITHUB_WORKSPACE}/wayexpand.tar.gz"
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean
