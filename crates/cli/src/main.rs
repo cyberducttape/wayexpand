@@ -1773,8 +1773,6 @@ fn print_control_socket_diagnostics() -> bool {
     valid
 }
 
-const POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
-
 fn load_policy() -> Result<OrganizationPolicy> {
     wayexpand_core::load_organization_policy().map_err(|error| anyhow::anyhow!(error))
 }
@@ -1806,8 +1804,8 @@ fn print_policy_diagnostics_json() -> serde_json::Value {
     };
 
     serde_json::json!({
-        "path": POLICY_PATH,
-        "exists": Path::new(POLICY_PATH).exists(),
+        "path": wayexpand_core::ORGANIZATION_POLICY_PATH,
+        "exists": Path::new(wayexpand_core::ORGANIZATION_POLICY_PATH).exists(),
         "policy": policy_json,
     })
 }
@@ -1862,17 +1860,20 @@ fn print_capabilities_diagnostics_json() -> serde_json::Value {
 }
 
 fn print_policy_diagnostics() -> bool {
-    if !Path::new(POLICY_PATH).exists() {
+    if !Path::new(wayexpand_core::ORGANIZATION_POLICY_PATH).exists() {
         println!(
             "Organization policy: {} (not found, using default permissive policy)",
-            POLICY_PATH
+            wayexpand_core::ORGANIZATION_POLICY_PATH
         );
         return true;
     }
 
     match load_policy() {
         Ok(policy) => {
-            println!("Organization policy: {} (valid)", POLICY_PATH);
+            println!(
+                "Organization policy: {} (valid)",
+                wayexpand_core::ORGANIZATION_POLICY_PATH
+            );
             if policy.is_active() {
                 println!(
                     "  Safe mode: {}",
@@ -1912,7 +1913,11 @@ fn print_policy_diagnostics() -> bool {
             true
         }
         Err(error) => {
-            println!("Organization policy: {} (invalid: {})", POLICY_PATH, error);
+            println!(
+                "Organization policy: {} (invalid: {})",
+                wayexpand_core::ORGANIZATION_POLICY_PATH,
+                error
+            );
             false
         }
     }
