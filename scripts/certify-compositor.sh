@@ -8,6 +8,8 @@ set -eu
 compositor=
 compositor_version=
 backend=
+keyboard_layout=
+target_apps=
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
 results_file=
 while [ "$#" -gt 0 ]; do
@@ -15,10 +17,12 @@ while [ "$#" -gt 0 ]; do
         --compositor) compositor=${2:?missing value for --compositor}; shift 2 ;;
         --version) compositor_version=${2:?missing value for --version}; shift 2 ;;
         --backend) backend=${2:?missing value for --backend}; shift 2 ;;
+        --layout) keyboard_layout=${2:?missing value for --layout}; shift 2 ;;
+        --target-apps) target_apps=${2:?missing value for --target-apps}; shift 2 ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--output FILE] [--results FILE]"
             printf '%s\n' "results format: one SCENARIO=pass|fail entry per line"
             exit 0
             ;;
@@ -42,6 +46,14 @@ esac
     printf '%s\n' "error: --version is required for reproducible evidence" >&2
     exit 2
 }
+[ -n "$keyboard_layout" ] || {
+    printf '%s\n' "error: --layout is required for reproducible evidence" >&2
+    exit 2
+}
+[ -n "$target_apps" ] || {
+    printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
+    exit 2
+}
 
 scenarios='printable-press-release held-keys-repeat modifier-navigation unicode-combining multiline-rapid password-field focus-cross-window config-reload daemon-restart compositor-restart failed-insertion ime-preedit'
 
@@ -59,6 +71,8 @@ date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     printf '%s\n\n' "# WayExpand compositor certification evidence"
     printf '%s\n' "- compositor_version: $compositor_version"
     printf '%s\n' "- backend: $backend"
+    printf '%s\n' "- keyboard_layout: $keyboard_layout"
+    printf '%s\n' "- target_apps: $target_apps"
     printf '%s\n' '- compositor: `'"$compositor"'`'
     printf '%s\n' '- recorded_at_utc: `'"$date_utc"'`'
     printf '%s\n' '- desktop: `'"${XDG_CURRENT_DESKTOP:-unknown}"'`'
