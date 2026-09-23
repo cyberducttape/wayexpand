@@ -25,6 +25,8 @@ Changes not yet released.
   for unhealthy probes.
 - Require the status snapshot to explicitly report a running daemon rather than
   accepting an arbitrary JSON object.
+- Document the healthy-doctor and running-daemon prerequisites for certification
+  evidence.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
