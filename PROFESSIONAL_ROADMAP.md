@@ -137,11 +137,13 @@ certification and explicit readiness evidence.
 - ✅ Daemon integration (Phase 4 UX improvement)
 
 **Selection Strategy:**
-- KDE Plasma → input-method-v2
-- Sway/Hyprland/river → evdev + libei (libei-first)
-- GNOME → input-method-v2
-- X11 → evdev
-- Unknown → stdin + libei
+- Daemon automatic selection → conservative stdin + libei; raw evdev and
+  input-method-v2 are never enabled implicitly.
+- `wayexpand setup` → IBus when the installed component is discoverable and
+  policy-permitted; otherwise maximum mode may select evdev + a verified
+  libei/wlroots output path.
+- Experimental input-method-v2 → explicit opt-in only, with unsupported
+  non-text key pass-through visible to the operator.
 
 **Commits:**
 - e340be2c: Phase 4 daemon integration
