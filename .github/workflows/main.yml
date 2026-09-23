@@ -31,8 +31,8 @@ jobs:
       - name: Push GitHub main to Launchpad
         run: |
           git remote add launchpad \
-            git+ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
-          git push --force launchpad \
+            ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
+          git push launchpad \
             refs/heads/main:refs/heads/main
-          git push --force launchpad \
+          git push launchpad \
             'refs/tags/*:refs/tags/*'

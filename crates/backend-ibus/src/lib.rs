@@ -308,4 +308,24 @@ match_mode = "word-boundary"
             .actions
             .contains(&IbusAction::CommitText("signature".into())));
     }
+
+    #[test]
+    fn engine_instances_do_not_share_matcher_state() {
+        let mut first = adapter();
+        let mut second = adapter();
+
+        for character in ":si".chars() {
+            first.process_key_event(character as u32, 0, 0);
+        }
+
+        // A second input context must not inherit the first context's partial
+        // trigger. Its ordinary key is committed unchanged.
+        let isolated = second.process_key_event('g' as u32, 0, 0);
+        assert_eq!(isolated.actions, vec![IbusAction::CommitText("g".into())]);
+
+        let completed = first.process_key_event('g' as u32, 0, 0);
+        assert!(completed
+            .actions
+            .contains(&IbusAction::CommitText("signature".into())));
+    }
 }
