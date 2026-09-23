@@ -8,16 +8,18 @@ match all package metadata:
 - the version in `debian/changelog`
 - `PKGBUILD`
 - `wayexpand.spec`
+- the AppStream release metadata
+- the IBus component metadata
 
 The second check exists because Launchpad's PPA builds key off
 `debian/changelog`, not the git tag or `Cargo.toml` — a tag that only
 bumped `Cargo.toml` shipped a stale Launchpad build more than once before
 this check was added. Bump both in the same commit you tag.
 
-Release builds use the exact Rust toolchain declared in
-[`rust-toolchain.toml`](../rust-toolchain.toml), currently Rust 1.87.0. CI may
-also exercise newer compilers, but a release must not depend on whichever
-`stable` toolchain happens to be installed on the runner.
+The release workflow uses the pinned Rust 1.96.0 toolchain and separately
+checks the declared Rust 1.87 MSRV in CI. A release must not depend on
+whichever `stable` toolchain happens to be installed on the runner; update the
+workflow pin deliberately when changing the release compiler.
 
 ## Preparation
 
