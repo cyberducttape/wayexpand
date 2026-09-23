@@ -26,7 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Validate GitHub Actions
-        run: docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" rhysd/actionlint:1.7.7
+        run: |
+          workflow_files="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)"
+          test -n "$workflow_files"
+          docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" \
+            rhysd/actionlint:1.7.7 $workflow_files
 
   supply-chain:
     name: Security Audit
@@ -73,14 +77,14 @@ jobs:
         run: cargo run --locked -q -p wayexpand-gui -- --help
 
   msrv:
-    name: MSRV (Rust 1.88)
+    name: MSRV (Rust 1.87)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
-          toolchain: 1.88.0
+          toolchain: 1.87.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config

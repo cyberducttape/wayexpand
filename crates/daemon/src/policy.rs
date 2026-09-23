@@ -2,21 +2,15 @@
 ///
 /// Loads policies from /etc/wayexpand/policy.toml and enforces them
 /// at runtime, blocking unsafe operations and logging violations to journald.
-use serde::Deserialize;
-use std::{os::unix::fs::MetadataExt, path::Path};
 use tracing::{error, warn};
 use wayexpand_core::OrganizationPolicy;
-
-const POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
-const POLICY_DIR: &str = "/etc/wayexpand";
-const MAX_POLICY_FILE_SIZE: u64 = 1024 * 100; // 100 KB max for policies
 
 /// Load organization policy from /etc/wayexpand/policy.toml
 ///
 /// Returns the policy if it exists, or a default (permissive) policy if not.
 /// An existing policy that cannot be securely read or parsed is fatal.
 pub fn load_policy() -> Result<OrganizationPolicy, String> {
-    match load_policy_internal() {
+    match wayexpand_core::load_organization_policy() {
         Ok(policy) => {
             if policy.is_active() {
                 tracing::info!(
@@ -32,130 +26,6 @@ pub fn load_policy() -> Result<OrganizationPolicy, String> {
             Ok(policy)
         }
         Err(e) => Err(e),
-    }
-}
-
-fn load_policy_internal() -> Result<OrganizationPolicy, String> {
-    load_policy_from_path(Path::new(POLICY_PATH), Path::new(POLICY_DIR))
-}
-
-fn load_policy_from_path(path: &Path, policy_dir: &Path) -> Result<OrganizationPolicy, String> {
-    // Use symlink_metadata to not follow symlinks (critical for security)
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            // Policy file is optional; no file = default policy.
-            return Ok(OrganizationPolicy::default());
-        }
-        Err(error) => {
-            return Err(format!("could not inspect {}: {}", path.display(), error));
-        }
-    };
-
-    // Validate parent directory: must be /etc/wayexpand with strict permissions
-    validate_policy_directory(policy_dir)?;
-
-    // Strict validation of policy file
-    validate_policy_file_metadata(path, &metadata)?;
-
-    // Check file size (prevent DoS via huge files)
-    if metadata.size() > MAX_POLICY_FILE_SIZE {
-        return Err(format!(
-            "{} is too large ({} bytes, max {})",
-            path.display(),
-            metadata.size(),
-            MAX_POLICY_FILE_SIZE
-        ));
-    }
-
-    // Read and parse policy file
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("could not read {}: {}", path.display(), e))?;
-
-    parse_policy_content(&content)
-}
-
-/// Validate that /etc/wayexpand directory is trusted
-fn validate_policy_directory(dir_path: &Path) -> Result<(), String> {
-    let metadata = std::fs::symlink_metadata(dir_path)
-        .map_err(|e| format!("could not inspect {}: {}", dir_path.display(), e))?;
-
-    // Must be a directory, not a symlink
-    if !metadata.is_dir() {
-        return Err(format!("{} is not a directory", dir_path.display()));
-    }
-
-    // Must be owned by root
-    if metadata.uid() != 0 {
-        return Err(format!("{} must be owned by root", dir_path.display()));
-    }
-
-    // Must not be group- or world-writable
-    if metadata.mode() & 0o022 != 0 {
-        return Err(format!(
-            "{} must not be group- or world-writable",
-            dir_path.display()
-        ));
-    }
-
-    Ok(())
-}
-
-/// Strict validation of policy file metadata
-fn validate_policy_file_metadata(path: &Path, metadata: &std::fs::Metadata) -> Result<(), String> {
-    // Must be a regular file (not symlink, directory, etc.)
-    if !metadata.is_file() {
-        return Err(format!("{} must be a regular file", path.display()));
-    }
-
-    // Explicitly reject symlinks (redundant with is_file, but be explicit)
-    // is_file() returns false for symlinks because we use symlink_metadata
-    if metadata.file_type().is_symlink() {
-        return Err(format!("{} must not be a symlink", path.display()));
-    }
-
-    // Must be owned by root (critical: prevent user tampering)
-    if metadata.uid() != 0 {
-        return Err(format!("{} must be owned by root", path.display()));
-    }
-
-    // Owner must be able to read, strict permissions recommended (0600 or 0400)
-    // Allow 0600 (rw-------), 0400 (r--------), or 0440 (r--r-----)
-    let mode = metadata.mode() & 0o777;
-    match mode {
-        0o600 | 0o400 | 0o440 => {} // Acceptable: owner-only or root-only
-        _ => {
-            // Reject any group or world-readable/writable bits
-            if metadata.mode() & 0o077 != 0 {
-                return Err(format!(
-                    "{} must not be group- or world-accessible (mode: {:o})",
-                    path.display(),
-                    mode
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_policy_content(content: &str) -> Result<OrganizationPolicy, String> {
-    let file: PolicyFile =
-        toml::from_str(content).map_err(|e| format!("invalid policy TOML: {}", e))?;
-
-    // Check for [organization] table first (documented enterprise format)
-    if let Some(policy) = file.organization {
-        return Ok(policy);
-    }
-
-    // Fall back to flat format for backward compatibility
-    // Try to deserialize entire file as OrganizationPolicy
-    match toml::from_str::<OrganizationPolicy>(content) {
-        Ok(policy) => Ok(policy),
-        Err(e) => Err(format!(
-            "policy file must contain either [organization] table or flat policy fields: {}",
-            e
-        )),
     }
 }
 
@@ -268,18 +138,32 @@ pub fn log_violation(policy: &OrganizationPolicy, violation: &str) {
     }
 }
 
-// Internal wrapper for parsing policy files with [organization] table
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[allow(dead_code)]
-struct PolicyFile {
-    #[serde(default)]
-    organization: Option<OrganizationPolicy>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    const POLICY_DIR: &str = wayexpand_core::ORGANIZATION_POLICY_DIR;
+    const MAX_POLICY_FILE_SIZE: u64 = wayexpand_core::MAX_ORGANIZATION_POLICY_BYTES;
+
+    fn parse_policy_content(content: &str) -> Result<OrganizationPolicy, String> {
+        wayexpand_core::parse_organization_policy(content)
+    }
+
+    fn load_policy_from_path(path: &Path, policy_dir: &Path) -> Result<OrganizationPolicy, String> {
+        wayexpand_core::load_organization_policy_from_paths(path, policy_dir)
+    }
+
+    fn validate_policy_directory(path: &Path) -> Result<(), String> {
+        wayexpand_core::validate_organization_policy_directory(path)
+    }
+
+    fn validate_policy_file_metadata(
+        path: &Path,
+        metadata: &std::fs::Metadata,
+    ) -> Result<(), String> {
+        wayexpand_core::validate_organization_policy_file(path, metadata)
+    }
 
     #[test]
     fn check_expansion_allows_normal_case() {

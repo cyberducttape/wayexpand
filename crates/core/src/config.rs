@@ -152,8 +152,9 @@ pub struct OrganizationPolicy {
     /// Disable hotkey execution. Hotkeys still parse but refuse to run.
     pub disable_hotkeys: bool,
 
-    /// Disable title-based app filtering. Expansions with app_filter still
-    /// match, but the filter is ignored (all apps match).
+    /// Disable title fallback for app-filtered expansions. When no compositor
+    /// app ID is available, matching fails closed instead of using the
+    /// user-editable window title. App IDs remain eligible for matching.
     pub disable_title_matching: bool,
 
     /// Maximum replacement size in bytes. Replacements larger than this

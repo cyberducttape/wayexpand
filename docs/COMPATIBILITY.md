@@ -247,6 +247,11 @@ Diagnostic output suitable for health checks and monitoring systems.
     "configured": true,
     "exists": true
   },
+  "policy": {
+    "path": "/etc/wayexpand/policy.toml",
+    "exists": false,
+    "policy": { "valid": true, "is_active": false }
+  },
   "backends": [
     {
       "kind": "input-method-v2",
@@ -263,7 +268,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 ```
 
 **Field stability:**
-- `healthy` (bool): Overall health (config valid AND socket operational if configured)
+- `healthy` (bool): Overall health (config and organization policy valid, and socket operational if configured)
 - `wayland` (bool): Wayland session detected
 - `config.path` (string): Configuration file path
 - `config.valid` (bool): Configuration syntax valid
@@ -271,6 +276,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.path` (string|null): Socket path (null if WAYEXPAND_SOCKET and XDG_RUNTIME_DIR both unset)
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
+- `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
   - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.

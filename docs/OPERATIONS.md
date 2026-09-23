@@ -276,11 +276,17 @@ tests. The packaged services are expert-selected backend units; setup should
 be the first step for a new user:
 
 ```sh
-systemctl --user daemon-reload
 wayexpand setup
 wayexpand status
 wayexpand edit
 ```
+
+`wayexpand setup` is an interactive onboarding command. It presents IBus,
+input-method-v2, and evdev + libei tradeoffs, recommends a detected path, and
+after confirmation selects the IBus engine or enables and starts the matching
+user service. `--yes` and `--backend ibus|input-method|evdev` support reviewed
+automation. It never changes raw-input permissions or grants portal consent;
+those remain explicit security decisions.
 
 For expert manual backend selection, the input-method and evdev services remain
 available:
@@ -365,6 +371,12 @@ rename and on the containing directory). Save or validation failures are
 reported as portal connection errors rather than silently discarding the token.
 On subsequent daemon starts, the stored token is passed to the portal to restore
 the previous session, skipping the user consent dialog if the token is still valid.
+
+The service units explicitly set `WAYEXPAND_PORTAL_TOKEN_PATH` to
+`%h/.config/wayexpand/libei-portal-token`, so their systemd writable-path grant
+remains correct even when `XDG_CONFIG_HOME` is customized. Standalone daemon
+invocations may set this variable to an explicitly trusted location; the CLI
+uses the same variable for portal status and reset operations.
 
 If the token expires or the user revokes permissions, the portal will display the
 authorization dialog on the next connection attempt. To manually reset permissions,

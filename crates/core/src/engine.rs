@@ -437,6 +437,11 @@ impl ExpansionEngine {
         self.command_metrics.snapshot()
     }
 
+    /// Whether libei portal restoration tokens may be read and persisted.
+    pub fn libei_token_persistence(&self) -> bool {
+        self.config.settings.libei_token_persistence
+    }
+
     /// Applies the administrator's command-execution decision before command
     /// jobs are queued. This is separate from the config-owned organization
     /// policy because the daemon also loads `/etc/wayexpand/policy.toml`.

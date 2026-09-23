@@ -34,6 +34,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ release tags must use SemVer vX.Y.Z (got $GITHUB_REF_NAME)" >&2
+            exit 1
+          fi
           expected="${GITHUB_REF_NAME#v}"
 
           # Check Cargo.toml
@@ -63,6 +67,18 @@ jobs:
           spec_version=$(sed -n 's/^Version: *\([^ ]*\)/\1/p' wayexpand.spec)
           test "$spec_version" = "$expected" || {
             echo "❌ wayexpand.spec Version ($spec_version) does not match tag ($expected)" >&2
+            exit 1
+          }
+
+          # Desktop integration metadata must ship the same release.
+          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)
+          test "$appstream_version" = "$expected" || {
+            echo "❌ AppStream release version ($appstream_version) does not match tag ($expected)" >&2
+            exit 1
+          }
+          ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
+          test "$ibus_version" = "$expected" || {
+            echo "❌ IBus component version ($ibus_version) does not match tag ($expected)" >&2
             exit 1
           }
 
@@ -108,22 +124,34 @@ jobs:
           cargo metadata --locked --format-version 1 > "${root}.cargo-metadata.json"
       - name: Generate SBOM (Software Bill of Materials)
         run: |
-          # Install syft for SBOM generation
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          set -euo pipefail
+          # Syft is fetched from an immutable release asset and verified against
+          # Anchore's published SHA-256 before execution. Do not replace this
+          # with the mutable install.sh on main.
+          syft_version=1.52.0
+          syft_sha256=caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+          syft_archive="$RUNNER_TEMP/syft_${syft_version}_linux_amd64.tar.gz"
+          syft_bin="$RUNNER_TEMP/syft"
+          curl --fail --silent --show-error --location \
+            --output "$syft_archive" \
+            "https://github.com/anchore/syft/releases/download/v${syft_version}/syft_${syft_version}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$syft_sha256" "$syft_archive" | sha256sum --check --status
+          tar --extract --gzip --file="$syft_archive" --directory="$RUNNER_TEMP"
+          test -x "$syft_bin"
           version="${GITHUB_REF_NAME#v}"
 
           # Generate SBOM for source tarball (SPDX format)
-          /usr/local/bin/syft "dir:." \
+          "$syft_bin" "dir:." \
             --output=spdx-json \
             --file="wayexpand-${version}.sbom.spdx.json"
 
           # Generate SBOM for binary artifacts (CycloneDX JSON format, for tool compatibility)
-          /usr/local/bin/syft "dir:." \
+          "$syft_bin" "dir:." \
             --output=cyclonedx-json \
             --file="wayexpand-${version}.sbom.cyclonedx.json"
 
           # Generate SBOM for vendored dependencies
-          /usr/local/bin/syft "dir:vendor" \
+          "$syft_bin" "dir:vendor" \
             --output=spdx-json \
             --file="wayexpand-${version}-vendored.sbom.spdx.json"
 

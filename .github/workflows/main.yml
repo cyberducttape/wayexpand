@@ -1,21 +1,20 @@
+name: Sync Launchpad
 
-  name: Sync Launchpad
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
 
-  on:
-    push:
-      branches: [main]
-      tags: ["v*"]
+permissions:
+  contents: read
 
-  permissions:
-    contents: read
-
-  jobs:
-    sync:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - name: Configure SSH
         env:
@@ -29,13 +28,11 @@
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/launchpad_key
 
-
-        - name: Push GitHub main to Launchpad
-          run: |
-            git remote add launchpad \
-              git+ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
-            git push --force launchpad \
-              refs/heads/main:refs/heads/main
-            git push --force launchpad \
-              'refs/tags/*:refs/tags/*'
-
+      - name: Push GitHub main to Launchpad
+        run: |
+          git remote add launchpad \
+            git+ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
+          git push --force launchpad \
+            refs/heads/main:refs/heads/main
+          git push --force launchpad \
+            'refs/tags/*:refs/tags/*'

@@ -105,7 +105,7 @@
           <li>Stable CLI exit codes and JSON output schema</li>
           <li>Stable TOML configuration format</li>
           <li>Security audit and formal threat model</li>
-          <li>Production-ready for Wayland desktops</li>
+          <li>Initial Wayland release; compositor support varies and is not universally certified</li>
         </ul>
       </description>
     </release>

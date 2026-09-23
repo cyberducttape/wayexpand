@@ -8,6 +8,7 @@ Conflicts=wayexpand.service wayexpand-input-method.service
 
 [Service]
 Type=simple
+Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
 ExecStartPre=%h/.local/bin/wayexpand validate
 # --backend=libei is the default pairing: it goes through the desktop portal,
 # which is broadly available even on compositors (e.g. KWin) that do not
