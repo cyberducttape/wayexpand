@@ -1179,7 +1179,10 @@ fn print_certification(json: bool) -> Result<bool> {
         }));
     };
 
-    match Config::load(default_config_path()) {
+    let certification_config = env::var_os("WAYEXPAND_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_config_path);
+    match Config::load(&certification_config) {
         Ok(_) => add_check(
             "configuration",
             "active configuration",
@@ -1321,6 +1324,7 @@ fn print_certification(json: bool) -> Result<bool> {
         "schema": 1,
         "certified": certified,
         "desktop": capabilities.compositor.name(),
+        "config_path": certification_config,
         "selected_mode": selected_capture,
         "checks": checks,
         "limitations": wayexpand_core::all_capabilities()
