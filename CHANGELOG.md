@@ -34,6 +34,8 @@ Changes not yet released.
   and Hyprland without treating missing runner drivers as certification.
 - Declare the certification runner labels for actionlint so the workflow’s
   self-hosted matrix is linted rather than silently skipped.
+- Bind the self-hosted certification job to the exact debug binaries it builds
+  before collecting doctor and evidence probes.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification

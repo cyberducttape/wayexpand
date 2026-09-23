@@ -35,6 +35,7 @@ jobs:
           EXPECTED_COMPOSITOR: ${{ matrix.compositor }}
         run: |
           set -eu
+          export PATH="$GITHUB_WORKSPACE/target/debug:$PATH"
           test -x "${WAYEXPAND_CERTIFICATION_DRIVER:?WAYEXPAND_CERTIFICATION_DRIVER is not configured on this runner}"
           test "${WAYEXPAND_CERTIFICATION_COMPOSITOR:?WAYEXPAND_CERTIFICATION_COMPOSITOR is not configured on this runner}" = "$EXPECTED_COMPOSITOR"
           test -n "${WAYEXPAND_CERTIFICATION_VERSION:?WAYEXPAND_CERTIFICATION_VERSION is not configured on this runner}"
@@ -46,6 +47,7 @@ jobs:
           BACKEND: ${{ matrix.backend }}
         run: |
           set -eu
+          export PATH="$GITHUB_WORKSPACE/target/debug:$PATH"
           mkdir -p "$RUNNER_TEMP/wayexpand-certification"
           scripts/run-certification-driver.sh \
             --driver "$WAYEXPAND_CERTIFICATION_DRIVER" \
@@ -61,6 +63,7 @@ jobs:
           BACKEND: ${{ matrix.backend }}
         run: |
           set -eu
+          export PATH="$GITHUB_WORKSPACE/target/debug:$PATH"
           scripts/certify-compositor.sh --format json \
             --compositor "$COMPOSITOR" \
             --version "$WAYEXPAND_CERTIFICATION_VERSION" \
