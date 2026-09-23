@@ -9,6 +9,8 @@ Changes not yet released.
 - Make setup recognize an installed IBus component before the IBus daemon has
   reloaded its engine registry, while still requiring the WayExpand IBus
   executable to be present.
+- Require the IBus runtime client as well, so automatic setup never selects a
+  path whose restart and engine-selection commands cannot run.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
