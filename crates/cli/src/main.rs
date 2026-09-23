@@ -849,6 +849,9 @@ fn print_help() {
         env!("CARGO_PKG_VERSION"),
         default_config_path().display()
     );
+    println!(
+        "\nOperational commands:\n  fleet status [--json]                                    Show merged fleet configuration status\n  portal status|reset                                      Inspect or remove the libei portal token"
+    );
 }
 
 fn ibus_engine_available() -> bool {

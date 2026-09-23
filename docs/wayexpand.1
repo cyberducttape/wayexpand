@@ -29,6 +29,14 @@ Report available input and output backends and their compatibility.
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
+.B fleet status [--json]
+Show the merged fleet configuration layers and their provenance.
+.TP
+.B portal status|reset
+Inspect or forget the stored libei portal restoration token. Resetting the
+local token may cause the portal to ask for access again; it does not revoke a
+portal grant already held by another session.
+.TP
 .B test TEXT [--json] [CONFIG]
 Simulate input and report matching expansions without starting the daemon.
 .TP
