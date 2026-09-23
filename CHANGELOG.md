@@ -32,6 +32,8 @@ Changes not yet released.
 - Add an explicit certification evidence status so automation can distinguish
   incomplete runs from runs with observed failures.
 - Synchronize the installed man page with the complete CLI command surface.
+- Align installer onboarding with compatibility-mode setup instead of telling
+  users to choose an unverified production backend manually.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
