@@ -15,6 +15,8 @@ Changes not yet released.
   `No shells on this server.` response.
 - Treat Launchpad's authenticated no-shell response as the stable SSH
   preflight signal regardless of the runner's transport exit status.
+- Make Launchpad tag synchronization idempotent and fail closed on divergent
+  existing tags instead of force-overwriting release history.
 - Make the headless capture-readiness regression test accept the documented
   `not-probed` state used by CI runners without a graphical session.
 - Serialize CI test harnesses to avoid hosted-runner races in tests that
