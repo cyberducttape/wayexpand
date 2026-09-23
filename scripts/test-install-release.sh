@@ -37,9 +37,14 @@ stub_bin="$test_root/stub-bin"
 mkdir -p "$stub_bin"
 cat >"$stub_bin/systemctl" <<'EOF'
 #!/bin/sh
+if [ -n "${SYSTEMCTL_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
+fi
 exit 0
 EOF
 chmod 0755 "$stub_bin/systemctl"
+systemctl_log="$test_root/systemctl.log"
+: >"$systemctl_log"
 
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
@@ -59,6 +64,16 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
+
+PATH="$stub_bin:$PATH" \
+SYSTEMCTL_LOG="$systemctl_log" \
+HOME="$test_root/home" \
+XDG_CONFIG_HOME="$test_root/config" \
+"$release_dir/scripts/install-release.sh" \
+    --enable --service=wayexpand-evdev.service
+grep -F -- '--user daemon-reload' "$systemctl_log" >/dev/null
+grep -F -- '--user enable wayexpand-evdev.service' "$systemctl_log" >/dev/null
+grep -F -- '--user restart wayexpand-evdev.service' "$systemctl_log" >/dev/null
 
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
