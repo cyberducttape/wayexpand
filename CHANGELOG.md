@@ -60,6 +60,10 @@ Changes not yet released.
   instead of presenting it as an available automatic keyboard path.
 - Unify human and JSON doctor control-socket validation, including socket type,
   ownership, parent-directory trust, permissions, and missing configured sockets.
+- Share the IBus installation probe with CLI and GUI diagnostics, and stop the
+  GUI from coloring merely implemented-but-unverified backends as ready.
+- Show shared organization-policy validity in GUI diagnostics so policy failures
+  cannot be hidden behind backend availability rows.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus

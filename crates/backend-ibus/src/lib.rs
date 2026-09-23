@@ -6,6 +6,8 @@
 //! IBus signals. Keeping that boundary explicit makes the expansion behavior
 //! testable and prevents D-Bus threading details from entering the matcher.
 
+use std::{env, fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
+
 use tracing::{error, warn};
 use wayexpand_core::{Config, ExpansionEngine, InputEvent, OrganizationPolicy};
 
@@ -13,6 +15,59 @@ use wayexpand_core::{Config, ExpansionEngine, InputEvent, OrganizationPolicy};
 // crate is not used because it adds a mandatory libdbus system dependency.
 const IBUS_RELEASE_MASK: u32 = 1 << 30;
 const IBUS_BACKEND_NAME: &str = "input-method-v2";
+
+/// Return whether the installed IBus component can be discovered by setup.
+/// This is intentionally an installation/provisioning probe, not an
+/// end-to-end typing guarantee.
+pub fn engine_available() -> bool {
+    if !executable_in_path("ibus") || !executable_in_path("wayexpand-ibus") {
+        return false;
+    }
+
+    let discoverable = Command::new("ibus")
+        .args(["list-engine"])
+        .output()
+        .map(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|line| line.contains("wayexpand"))
+        })
+        .unwrap_or(false);
+
+    discoverable || component_file_present_in(&ibus_component_directories())
+}
+
+fn executable_in_path(name: &str) -> bool {
+    let Some(path) = env::var_os("PATH") else {
+        return false;
+    };
+    env::split_paths(&path).any(|directory| {
+        let candidate = directory.join(name);
+        fs::metadata(candidate)
+            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    })
+}
+
+fn component_file_present_in(directories: &[PathBuf]) -> bool {
+    directories
+        .iter()
+        .map(|directory| directory.join("wayexpand.xml"))
+        .any(|path| path.is_file())
+}
+
+fn ibus_component_directories() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
+        directories.push(PathBuf::from(data_home).join("ibus/component"));
+    } else if let Some(home) = env::var_os("HOME") {
+        directories.push(PathBuf::from(home).join(".local/share/ibus/component"));
+    }
+    directories.push(PathBuf::from("/usr/local/share/ibus/component"));
+    directories.push(PathBuf::from("/usr/share/ibus/component"));
+    directories
+}
 
 mod service;
 
@@ -248,6 +303,22 @@ replacement = "signature"
         )
         .unwrap();
         IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
+    }
+
+    #[test]
+    fn component_file_detection_is_independent_of_ibus_registry_refresh() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-ibus-component-{}", std::process::id()));
+        let component_dir = root.join("ibus/component");
+        std::fs::create_dir_all(&component_dir).unwrap();
+        assert!(!component_file_present_in(std::slice::from_ref(
+            &component_dir
+        )));
+        std::fs::write(component_dir.join("wayexpand.xml"), "<component/>").unwrap();
+        assert!(component_file_present_in(std::slice::from_ref(
+            &component_dir
+        )));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn boundary_adapter() -> IbusEngineAdapter {

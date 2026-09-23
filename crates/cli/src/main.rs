@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Error, Result};
 use std::{
     env, fs,
     io::{self, Read, Write},
-    os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::Command,
@@ -14,6 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
+use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
@@ -852,60 +853,6 @@ fn print_help() {
     println!(
         "\nOperational commands:\n  fleet status [--json]                                    Show merged fleet configuration status\n  portal status|reset                                      Inspect or remove the libei portal token"
     );
-}
-
-fn ibus_engine_available() -> bool {
-    if !executable_in_path("ibus") || !executable_in_path("wayexpand-ibus") {
-        return false;
-    }
-
-    let discoverable = Command::new("ibus")
-        .args(["list-engine"])
-        .output()
-        .map(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .any(|line| line.contains("wayexpand"))
-        })
-        .unwrap_or(false);
-
-    discoverable || ibus_component_file_present()
-}
-
-fn executable_in_path(name: &str) -> bool {
-    let Some(path) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&path).any(|directory| {
-        let candidate = directory.join(name);
-        fs::metadata(candidate)
-            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    })
-}
-
-fn ibus_component_file_present() -> bool {
-    component_file_present_in(&ibus_component_directories())
-}
-
-fn component_file_present_in(directories: &[PathBuf]) -> bool {
-    directories
-        .iter()
-        .map(|directory| directory.join("wayexpand.xml"))
-        .any(|path| path.is_file())
-}
-
-fn ibus_component_directories() -> Vec<PathBuf> {
-    let mut directories = Vec::new();
-    if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
-        directories.push(PathBuf::from(data_home).join("ibus/component"));
-    } else if let Some(home) = env::var_os("HOME") {
-        directories.push(PathBuf::from(home).join(".local/share/ibus/component"));
-    }
-    directories.push(PathBuf::from("/usr/local/share/ibus/component"));
-    directories.push(PathBuf::from("/usr/share/ibus/component"));
-    directories
 }
 
 fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
@@ -2401,25 +2348,6 @@ mod tests {
             setup_backend_for_mode("experimental", &experimental, &policy).unwrap(),
             "input-method"
         );
-    }
-
-    #[test]
-    fn ibus_component_file_is_detected_before_ibus_restarts() {
-        let root = std::env::temp_dir().join(format!(
-            "wayexpand-ibus-component-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        let component_dir = root.join("ibus/component");
-        std::fs::create_dir_all(&component_dir).unwrap();
-        assert!(!component_file_present_in(std::slice::from_ref(
-            &component_dir
-        )));
-        std::fs::write(component_dir.join("wayexpand.xml"), "<component/>").unwrap();
-        assert!(component_file_present_in(std::slice::from_ref(
-            &component_dir
-        )));
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
