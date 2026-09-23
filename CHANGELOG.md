@@ -10,6 +10,8 @@ Changes not yet released.
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
   evidence cannot pass because of a typo or conflicting entry.
+- Mark the archived desktop-status snapshot as historical so superseded
+  verification claims cannot be mistaken for current certification evidence.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
