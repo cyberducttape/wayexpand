@@ -1105,11 +1105,12 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         ..OrganizationPolicy::default()
     });
     let ibus_policy_allowed = policy.backend_allowed("input-method-v2");
-    if ibus_engine_available() && ibus_policy_allowed {
+    let ibus_installed = ibus_engine_available();
+    if ibus_installed && ibus_policy_allowed {
         println!(
             "IBus WayExpand engine: installed and ready to configure (password/PIN awareness)"
         );
-    } else if ibus_engine_available() {
+    } else if ibus_installed {
         println!("IBus WayExpand engine: installed but disallowed by organization policy");
     } else {
         println!("IBus WayExpand engine: not installed or discoverable (install the IBus component to use it)");
@@ -1175,6 +1176,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     // prove that a real GTK or Qt client will preserve every key event.
     let mut available_combinations = Vec::new();
     let mut trial_combinations = Vec::new();
+    let ibus_available = ibus_installed && ibus_policy_allowed;
     if input_method_available && policy.backend_allowed("input-method-v2") {
         available_combinations
             .push("--source=input-method (protocol probe passed; live typing unverified)");
@@ -1190,7 +1192,11 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         );
     }
 
-    if available_combinations.is_empty() && trial_combinations.is_empty() {
+    if !capture_path_available(
+        ibus_available,
+        available_combinations.len(),
+        trial_combinations.len(),
+    ) {
         println!("Capture readiness: NOT READY (no source+backend combination detected)");
         if evdev_readable && !libei_plausible {
             println!(
@@ -1206,13 +1212,22 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         }
         return false;
     }
-    if available_combinations.is_empty() {
+    if ibus_available && available_combinations.is_empty() && trial_combinations.is_empty() {
+        println!(
+            "Capture readiness: AVAILABLE TO TRY (IBus is installed; live client typing is not verified)"
+        );
+    } else if available_combinations.is_empty() {
         println!(
             "Capture readiness: AVAILABLE TO TRY (no backend was verified; interactive authorization required)"
         );
     } else {
         println!(
             "Capture readiness: AVAILABLE TO TRY (protocol probe passed; end-to-end typing is not verified)"
+        );
+    }
+    if ibus_available {
+        println!(
+            "  available to try: IBus committed-text path (password/PIN awareness; live typing unverified)"
         );
     }
     println!(
@@ -1261,6 +1276,14 @@ fn print_backend_selection_explain() {
         Ok(explanation) => print!("{explanation}"),
         Err(error) => eprintln!("backend selection failed: {error}"),
     }
+}
+
+fn capture_path_available(
+    ibus_available: bool,
+    available_count: usize,
+    trial_count: usize,
+) -> bool {
+    ibus_available || available_count > 0 || trial_count > 0
 }
 
 fn print_certification(json: bool) -> Result<bool> {
@@ -2372,6 +2395,12 @@ mod tests {
                 "a protocol or IBus probe succeeded; live client typing is not verified"
             )
         );
+    }
+
+    #[test]
+    fn human_capture_readiness_accepts_ibus_as_the_only_path() {
+        assert!(capture_path_available(true, 0, 0));
+        assert!(!capture_path_available(false, 0, 0));
     }
 
     #[test]
