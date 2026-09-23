@@ -355,9 +355,9 @@ impl ExpansionEngine {
     /// worker queues. A slow expansion command cannot delay an urgent hotkey.
     /// This is enabled by the daemon; CLI and GUI previews remain synchronous
     /// so an explicit preview call can return its result directly.
-    pub fn enable_async_commands(&mut self) {
+    pub fn enable_async_commands(&mut self) -> bool {
         if self.async_commands.is_some() {
-            return;
+            return true;
         }
         let (command_sender, command_receiver) =
             mpsc::sync_channel::<AsyncCommandJob>(ASYNC_COMMAND_QUEUE_CAPACITY);
@@ -369,7 +369,7 @@ impl ExpansionEngine {
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let metrics = Arc::clone(&self.command_metrics);
         let worker_metrics = Arc::clone(&metrics);
-        thread::Builder::new()
+        let command_worker = thread::Builder::new()
             .name("wayexpand-expansion-worker".into())
             .spawn(move || {
                 while let Ok(job) = command_receiver.recv() {
@@ -398,10 +398,12 @@ impl ExpansionEngine {
                         break;
                     }
                 }
-            })
-            .expect("command worker thread should start");
+            });
+        if command_worker.is_err() {
+            return false;
+        }
         let hotkey_metrics = Arc::clone(&metrics);
-        thread::Builder::new()
+        let hotkey_worker = thread::Builder::new()
             .name("wayexpand-hotkey-worker".into())
             .spawn(move || {
                 while let Ok(action) = hotkey_receiver.recv() {
@@ -417,8 +419,10 @@ impl ExpansionEngine {
                         break;
                     }
                 }
-            })
-            .expect("hotkey worker thread should start");
+            });
+        if hotkey_worker.is_err() {
+            return false;
+        }
         self.async_commands = Some(AsyncCommandRuntime {
             command_sender,
             hotkey_sender,
@@ -426,6 +430,7 @@ impl ExpansionEngine {
             hotkey_receiver: hotkey_completion_receiver,
             metrics,
         });
+        true
     }
 
     pub fn async_commands_enabled(&self) -> bool {

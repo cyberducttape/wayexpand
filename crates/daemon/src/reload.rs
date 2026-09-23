@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use wayexpand_core::{
     Config, ConfigError, ExpansionEngine, FleetConfig, Layer, OrganizationPolicy,
 };
@@ -207,8 +207,10 @@ impl ReloadableConfig {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
                     Ok(mut engine) => {
-                        if self.engine.async_commands_enabled() {
-                            engine.enable_async_commands();
+                        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+                            warn!(
+                                "asynchronous workers could not restart after configuration reload; using synchronous fallback"
+                            );
                         }
                         engine.set_commands_disabled(self.engine.commands_disabled());
                         engine.set_title_matching_disabled(self.engine.title_matching_disabled());

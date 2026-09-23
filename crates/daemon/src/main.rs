@@ -113,7 +113,11 @@ fn main() -> Result<()> {
             path.display()
         )
     })?;
-    config.engine.enable_async_commands();
+    if !config.engine.enable_async_commands() {
+        warn!(
+            "asynchronous command/hotkey workers could not start; using bounded synchronous command fallback"
+        );
+    }
 
     // Respect safe_mode semantics: only disable commands in the engine when in enforcement mode.
     // In audit mode (safe_mode=false), commands are allowed but violations are logged by check_and_log_expansion_violations().
