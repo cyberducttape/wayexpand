@@ -44,6 +44,8 @@ Changes not yet released.
   output-only protocol globals no longer imply a usable backend.
 - Add the doctor JSON readiness and selection fields to the checked-in CLI
   contract fixture so integrations receive an explicit stability guard.
+- Source CLI policy diagnostics from the core policy-path constant, removing
+  another duplicated trust-boundary value.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad
