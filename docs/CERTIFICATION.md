@@ -49,7 +49,9 @@ a pass.
 Normal setup uses compatibility modes instead of exposing protocol names:
 
 - **Recommended** chooses IBus when the installed component is discoverable,
-  then the safest verified local alternative.
+  then the safest available local alternative. Availability is not an
+  end-to-end guarantee; `wayexpand certify` remains the authority for that
+  distinction.
 - **Maximum compatibility** uses evdev with a detected libei/EIS path (or a
   KDE/GNOME portal candidate after explicit authorization) and warns that
   password-field awareness is unavailable.
