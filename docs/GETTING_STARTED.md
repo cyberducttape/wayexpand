@@ -99,9 +99,11 @@ Fedora users should build from source or the RPM spec for now.
 
 ## Which Desktop Are You Using?
 
-### KDE Plasma Wayland (KWin 6.6+) ✅
+### KDE Plasma Wayland (KWin 6.6+) — implementation candidate
 
-You have the best support. Start here:
+This is the most complete implementation path, but it still requires live
+session testing and is not certified by the current support matrix. Start
+here only after reviewing the backend tradeoffs:
 
 ```bash
 # Install
@@ -124,13 +126,14 @@ verified.
 
 ---
 
-### Sway / Hyprland / river ⚠️
+### Sway / Hyprland / river — experimental
 
 Wlroots-based compositor support has active development in progress. Window
 tracking is not currently shipped.
 
 **Current status:**
-- ✅ Text capture and injection work (via input-method-v2 or evdev)
+- Text capture and injection paths are implemented (via input-method-v2 or
+  evdev), but have not been certified on these compositors
 - ⏳ Window tracking (app_filter) is not shipped on wlroots; the integration remains future experimental work
 - ⚠️ Password field detection requires input-method-v2
 
@@ -153,13 +156,13 @@ wayexpand doctor  # Shows what your session can use
 
 ---
 
-### GNOME Shell Wayland ❌
+### GNOME Shell Wayland — limited/uncertified
 
 Limited support due to GNOME's design (no window tracking protocol).
 
 **What works:**
-- ✅ Global hotkeys (text expansion via custom keyboard shortcuts)
-- ⚠️ Text capture via input-method-v2 when explicitly enabled (but no window tracking)
+- Text capture via input-method-v2 when explicitly enabled (but no window
+  tracking); this path remains uncertified
 
 **What doesn't work:**
 - ❌ Window-specific snippets (app_filter)

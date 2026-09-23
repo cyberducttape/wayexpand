@@ -12,6 +12,8 @@ Changes not yet released.
   evidence cannot pass because of a typo or conflicting entry.
 - Mark the archived desktop-status snapshot as historical so superseded
   verification claims cannot be mistaken for current certification evidence.
+- Clarify getting-started desktop labels so implementation status is not
+  presented as compositor certification.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
