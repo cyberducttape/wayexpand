@@ -11,6 +11,7 @@ jq -e '
   ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and
   ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.requires_password_field_check == true))] | length == 4) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
+  ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 2) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
   ([.required_scenarios | length] | all(. == 12)) and
   ([.required_scenarios[]] | unique | length == 12)
