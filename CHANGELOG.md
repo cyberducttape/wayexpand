@@ -42,6 +42,8 @@ Changes not yet released.
   only available, policy-allowed input path.
 - Align human doctor exit status with JSON health: authorization-only, headless,
   and otherwise unverified paths remain visible but are not reported healthy.
+- Clarify that `AVAILABLE TO TRY` is not a successful doctor result and does not
+  authorize starting a backend service without reviewing its requirements.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
