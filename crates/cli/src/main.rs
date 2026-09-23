@@ -585,7 +585,9 @@ fn run() -> Result<()> {
             let automatic = recommended_setup_backend(&capabilities, &policy);
             println!();
             println!("Compatibility modes");
-            println!("  Recommended         safest verified path available in this session");
+            println!(
+                "  Recommended         safest detected path; run doctor/certify for verification"
+            );
             println!(
                 "  Maximum compatibility broad application coverage; may observe global input"
             );
@@ -907,7 +909,7 @@ fn recommended_setup_backend(
     }
     SetupRecommendation {
         backend: "unavailable",
-        label: "No verified automatic path",
+        label: "No safe automatic path",
         detail: "setup will not enable an experimental or globally observing path automatically",
     }
 }

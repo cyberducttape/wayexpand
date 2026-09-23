@@ -14,6 +14,8 @@ Changes not yet released.
   verification claims cannot be mistaken for current certification evidence.
 - Clarify getting-started desktop labels so implementation status is not
   presented as compositor certification.
+- Clarify setup’s Recommended label so detected availability is not described
+  as end-to-end verification.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
