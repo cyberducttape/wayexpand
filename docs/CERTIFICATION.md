@@ -85,8 +85,8 @@ daemon source/backend arguments in service configuration.
 
 ## Self-hosted workflow
 
-The manual `.github/workflows/certification.yml` workflow runs the four target
-desktops as a matrix on self-hosted runners. Each runner must provide an
+The `.github/workflows/certification.yml` workflow runs the four target
+desktops as a matrix on manual dispatch and weekly schedule. Each runner must provide an
 executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.

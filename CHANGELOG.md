@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Run the compositor certification matrix weekly as well as on manual
+  dispatch; runner-provided GTK/Qt drivers remain mandatory and fail closed.
 - Make explicit input-method-v2 selection fail closed when its live protocol
   probe is unavailable, keeping daemon startup aligned with shared capability
   diagnostics.
