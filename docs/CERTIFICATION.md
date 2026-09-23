@@ -33,8 +33,8 @@ outside its declared certification paths.
 
 | Environment | Required coverage |
 | --- | --- |
-| KDE Plasma / KWin | IBus, libei portal, Qt and GTK clients |
-| GNOME | IBus, libei portal, GTK and Qt clients |
+| KDE Plasma / KWin | IBus, libei portal, input-method-v2 when exposed, Qt and GTK clients |
+| GNOME | IBus, libei portal, input-method-v2 when exposed, GTK and Qt clients |
 | Sway | evdev plus wlroots virtual keyboard, GTK and Qt clients |
 | Hyprland | evdev plus wlroots virtual keyboard, GTK and Qt clients |
 
