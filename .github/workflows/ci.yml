@@ -27,10 +27,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Validate GitHub Actions
         run: |
-          workflow_files="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)"
-          test -n "$workflow_files"
-          docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" \
-            rhysd/actionlint:1.7.7 $workflow_files
+          test -n "$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
+          find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -exec \
+            docker run --rm --workdir /repo -v "$GITHUB_WORKSPACE:/repo" \
+            rhysd/actionlint:1.7.7 {} +
 
   supply-chain:
     name: Security Audit
@@ -107,7 +107,7 @@ jobs:
       - name: Create git archive (simulate release tarball)
         run: git archive HEAD --output=wayexpand.tar.gz
       - name: Extract to clean directory
-        run: mkdir -p /tmp/clean-build && cd /tmp/clean-build && tar -xzf $GITHUB_WORKSPACE/wayexpand.tar.gz
+        run: mkdir -p /tmp/clean-build && cd /tmp/clean-build && tar -xzf "$GITHUB_WORKSPACE/wayexpand.tar.gz"
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean
