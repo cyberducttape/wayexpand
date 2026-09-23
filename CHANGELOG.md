@@ -55,6 +55,8 @@ Changes not yet released.
   checked-in matrix, preventing backend, scenario, and documentation drift.
 - Make JSON doctor health reject automatic backend selections disallowed by
   organization policy.
+- Reject relative XDG and portal-token paths so daemon file locations cannot
+  depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end

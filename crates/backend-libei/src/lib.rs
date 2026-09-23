@@ -730,13 +730,19 @@ fn split_text_chunks(text: &str) -> Vec<&str> {
 /// Returns None if XDG_CONFIG_HOME is not set and home directory cannot be determined.
 pub fn portal_token_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("WAYEXPAND_PORTAL_TOKEN_PATH") {
-        return Some(PathBuf::from(path));
+        let path = PathBuf::from(path);
+        // An explicit service override must not become relative to an
+        // attacker-controlled or unit-specific working directory.
+        return path.is_absolute().then_some(path);
     }
     if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
-        let mut path = PathBuf::from(config_home);
-        path.push("wayexpand");
-        path.push(PORTAL_TOKEN_FILENAME);
-        return Some(path);
+        let config_home = PathBuf::from(config_home);
+        if config_home.is_absolute() {
+            let mut path = config_home;
+            path.push("wayexpand");
+            path.push(PORTAL_TOKEN_FILENAME);
+            return Some(path);
+        }
     }
     if let Ok(home) = std::env::var("HOME") {
         let mut path = PathBuf::from(home);

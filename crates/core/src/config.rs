@@ -75,6 +75,9 @@ pub struct Settings {
     /// showing consent dialogs on every reconnect. Tokens are stored in
     /// ~/.config/wayexpand/ with mode 0600 (user-only read/write).
     /// Defaults to true. Set to false to request fresh consent every time.
+    /// Standalone processes use `$XDG_CONFIG_HOME/wayexpand` (or
+    /// `$HOME/.config/wayexpand`); packaged systemd units provide the
+    /// absolute `WAYEXPAND_PORTAL_TOKEN_PATH` override explicitly.
     #[serde(default = "default_libei_persistence")]
     pub libei_token_persistence: bool,
 }

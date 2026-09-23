@@ -8,7 +8,10 @@ pub fn default_config_path() -> PathBuf {
         return PathBuf::from(path);
     }
     if let Some(config_home) = env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(config_home).join("wayexpand/expansions.toml");
+        let config_home = PathBuf::from(config_home);
+        if config_home.is_absolute() {
+            return config_home.join("wayexpand/expansions.toml");
+        }
     }
     if let Some(user_home) = env::var_os("HOME") {
         return PathBuf::from(user_home).join(".config/wayexpand/expansions.toml");
