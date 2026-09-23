@@ -1320,6 +1320,19 @@ fn print_certification(json: bool) -> Result<bool> {
         .iter()
         .all(|check| check["status"] == "verified" || check["status"] == "available")
         && !checks.is_empty();
+    let limitations = if ibus {
+        vec![
+            "GTK and Qt client behavior still requires live certification",
+            "IME/preedit composition is not supported",
+            "surrounding-text behavior depends on the client toolkit",
+        ]
+    } else {
+        wayexpand_core::all_capabilities()
+            .into_iter()
+            .filter(|caps| caps.backend_name == selected_capture)
+            .flat_map(|caps| caps.limitations.iter().copied())
+            .collect::<Vec<_>>()
+    };
     let report = serde_json::json!({
         "schema": 1,
         "certified": certified,
@@ -1327,11 +1340,7 @@ fn print_certification(json: bool) -> Result<bool> {
         "config_path": certification_config,
         "selected_mode": selected_capture,
         "checks": checks,
-        "limitations": wayexpand_core::all_capabilities()
-            .into_iter()
-            .filter(|caps| caps.backend_name == selected_capture || (selected_capture == "ibus" && caps.backend_name == "input-method"))
-            .flat_map(|caps| caps.limitations.iter().copied())
-            .collect::<Vec<_>>(),
+        "limitations": limitations,
     });
     if json {
         println!("{report}");
