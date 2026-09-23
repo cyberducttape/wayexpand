@@ -37,8 +37,9 @@ Changes not yet released.
   non-keyboard event nodes cannot be presented as usable capture devices.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
-  synchronization YAML. Launchpad synchronization now uses the canonical SSH
-  URL and refuses non-fast-forward branch or tag overwrites.
+  synchronization YAML. The actionlint image is digest-pinned, and Launchpad
+  synchronization uses the canonical SSH URL and refuses non-fast-forward
+  branch or tag overwrites.
 - Reconcile compatibility, setup, operations, and policy documentation with
   the currently implemented backend and certification boundaries.
 
