@@ -164,7 +164,11 @@ can restore authorization on reconnect. Setting
 - Multi-monitor, workspace, focus-stealing scenarios not yet exercised at scale
 
 **Action Items:**
-- [ ] Set up E2E test harness for each compositor (could use virtual displays)
+- [x] Add the matrix-driven scenario runner and evidence contract in
+  `scripts/run-certification-driver.sh`; it invokes every required scenario
+  and normalizes compositor-specific driver results.
+- [ ] Provision and execute compositor-specific GTK/Qt drivers on KDE, GNOME,
+  Sway, and Hyprland sessions; the runner contract alone is not certification.
 - [ ] Run and publish results for v1.2+ release
 - [ ] Add to CI or scheduled job (weekly/monthly)
 

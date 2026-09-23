@@ -36,6 +36,8 @@ Changes not yet released.
   users to choose an unverified production backend manually.
 - Add a matrix-driven compositor certification driver contract so real GTK/Qt
   runners can execute every KDE, GNOME, Sway, and Hyprland scenario uniformly.
+- Mark the audit checklist accurately: the runner contract is complete, while
+  provisioning and executing real compositor drivers remains open.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
