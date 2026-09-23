@@ -1164,6 +1164,10 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         println!(
             "Capture readiness: AVAILABLE TO TRY (IBus is installed; live client typing is not verified)"
         );
+    } else if available_combinations.is_empty() && !trial_combinations.is_empty() {
+        println!(
+            "Capture readiness: AUTHORIZATION REQUIRED (libei was detected heuristically; interactive portal consent is required)"
+        );
     } else if available_combinations.is_empty() {
         println!(
             "Capture readiness: AVAILABLE TO TRY (no backend was verified; interactive authorization required)"

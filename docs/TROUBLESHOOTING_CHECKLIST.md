@@ -79,7 +79,8 @@ has advertised the protocol. The probe lines are the decision:
 | `RequiresPermission` / `permission=Required` | The device or portal needs explicit access | Apply the evdev or portal remediation below; raw evdev is never automatic |
 | `Unavailable` / `NotImplemented` | The path cannot be used in this session | Choose another path or compositor |
 | `Capture readiness: NOT READY` | No complete source + output pair was found | Resolve the first unavailable probe; do not keep restarting the daemon |
-| `Capture readiness: AVAILABLE TO TRY` | A backend such as libei was detected heuristically but not live-verified; doctor remains unhealthy | Start it deliberately only after reviewing the authorization requirements; treat connection failure as unresolved |
+| `Capture readiness: AUTHORIZATION REQUIRED` | A backend such as libei was detected heuristically but requires interactive portal consent; doctor remains unhealthy | Start it deliberately only after reviewing the authorization requirements; treat connection failure as unresolved |
+| `Capture readiness: AVAILABLE TO TRY` | A non-invasive protocol or component probe succeeded, but client typing is not end-to-end verified | Start it deliberately only after reviewing the backend limitations; run certification before treating it as supported |
 
 Inspect the conservative selection explanation before choosing a backend:
 
