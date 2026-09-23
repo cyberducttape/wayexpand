@@ -56,7 +56,8 @@ jobs:
             --backend "$BACKEND" \
             --layout "$WAYEXPAND_CERTIFICATION_LAYOUT" \
             --target-apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" \
-            --output "$RUNNER_TEMP/wayexpand-certification/results.txt"
+            --output "$RUNNER_TEMP/wayexpand-certification/results.txt" \
+            --log-dir "$RUNNER_TEMP/wayexpand-certification/driver-logs"
       - name: Collect machine-readable evidence
         env:
           COMPOSITOR: ${{ matrix.compositor }}

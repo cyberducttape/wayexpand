@@ -122,7 +122,9 @@ compositor-specific driver. The driver receives the scenario name as its first
 argument and the exact session metadata through `WAYEXPAND_CERTIFICATION_*`
 environment variables. Exit `0` for pass, `1` for an observed failure, and
 `2` when the scenario cannot be verified. The wrapper runs every matrix
-scenario and produces the results file consumed by the evidence collector.
+scenario, preserves each driver's stdout/stderr log beside the results file,
+and produces the results file consumed by the evidence collector. Those logs
+are reviewable evidence and must not contain typed secrets or replacement text.
 
 ## Input-method source
 

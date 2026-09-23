@@ -13,6 +13,7 @@ backend=
 keyboard_layout=
 target_apps=
 output=
+log_dir=
 
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
@@ -28,8 +29,9 @@ while [ "$#" -gt 0 ]; do
         --layout) keyboard_layout=${2:?missing value for --layout}; shift 2 ;;
         --target-apps) target_apps=${2:?missing value for --target-apps}; shift 2 ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
+        --log-dir) log_dir=${2:?missing value for --log-dir}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --driver PATH --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --output RESULTS"
+            printf '%s\n' "usage: $0 --driver PATH --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --output RESULTS [--log-dir DIR]"
             printf '%s\n' 'driver contract: argv[1] is the scenario; exit 0=pass, 1=fail, 2=unverified'
             exit 0
             ;;
@@ -67,6 +69,10 @@ jq -e --arg compositor "$compositor" --arg backend "$backend" \
 
 scenarios=$(jq -r '.required_scenarios[]' "$matrix")
 mkdir -p "$(dirname -- "$output")"
+if [ -z "$log_dir" ]; then
+    log_dir="$(dirname -- "$output")/driver-logs"
+fi
+mkdir -p "$log_dir"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-driver.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
@@ -74,7 +80,7 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 driver_status=0
 while IFS= read -r scenario; do
     [ -n "$scenario" ] || continue
-    log="$tmp/$scenario.log"
+    log="$log_dir/$scenario.log"
     if WAYEXPAND_CERTIFICATION_COMPOSITOR="$compositor" \
         WAYEXPAND_CERTIFICATION_VERSION="$compositor_version" \
         WAYEXPAND_CERTIFICATION_BACKEND="$backend" \
