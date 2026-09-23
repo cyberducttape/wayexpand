@@ -6,6 +6,7 @@
       "display": "KDE Plasma / KWin",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
       "requires_password_field_check": true
     },
     {
@@ -13,6 +14,7 @@
       "display": "GNOME Shell / Mutter",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
       "requires_password_field_check": true
     },
     {
@@ -20,6 +22,7 @@
       "display": "Sway / wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
       "requires_password_field_check": true
     },
     {
@@ -27,6 +30,7 @@
       "display": "Hyprland / wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
       "requires_password_field_check": true
     }
   ],
