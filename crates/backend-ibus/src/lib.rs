@@ -84,6 +84,14 @@ impl IbusEngineAdapter {
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
     /// `org.freedesktop.IBus.Engine.ProcessKeyEvent`.
     pub fn process_key_event(&mut self, keyval: u32, _keycode: u32, state: u32) -> IbusKeyResult {
+        // IBus delivers both press and release events through this method.
+        // Releases carry IBUS_RELEASE_MASK and must not be interpreted as a
+        // second printable character or delimiter.
+        const RELEASE_MASK: u32 = 1 << 30;
+        if state & RELEASE_MASK != 0 {
+            return IbusKeyResult::default();
+        }
+
         if !self.enabled {
             return IbusKeyResult::default();
         }
@@ -244,5 +252,59 @@ match_mode = "word-boundary"
                 );
             }
         }
+    }
+
+    #[test]
+    fn printable_key_release_is_not_committed() {
+        const RELEASE_MASK: u32 = 1 << 30;
+        let mut adapter = adapter();
+
+        assert_eq!(
+            adapter.process_key_event('a' as u32, 0, RELEASE_MASK),
+            IbusKeyResult::default()
+        );
+    }
+
+    #[test]
+    fn trigger_key_release_does_not_advance_matcher() {
+        const RELEASE_MASK: u32 = 1 << 30;
+        let mut adapter = adapter();
+
+        for character in ":si".chars() {
+            adapter.process_key_event(character as u32, 0, 0);
+        }
+        assert_eq!(
+            adapter.process_key_event('i' as u32, 0, RELEASE_MASK),
+            IbusKeyResult::default()
+        );
+
+        let result = adapter.process_key_event('g' as u32, 0, 0);
+        assert_eq!(
+            result.actions,
+            vec![
+                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::CommitText("signature".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn modifier_key_release_does_not_reset_valid_buffer() {
+        const CONTROL_MASK: u32 = 1 << 2;
+        const RELEASE_MASK: u32 = 1 << 30;
+        let mut adapter = adapter();
+
+        for character in ":si".chars() {
+            adapter.process_key_event(character as u32, 0, 0);
+        }
+        assert_eq!(
+            adapter.process_key_event(xkeysym::key::Control_L, 0, CONTROL_MASK | RELEASE_MASK),
+            IbusKeyResult::default()
+        );
+
+        let result = adapter.process_key_event('g' as u32, 0, 0);
+        assert!(result
+            .actions
+            .contains(&IbusAction::CommitText("signature".into())));
     }
 }

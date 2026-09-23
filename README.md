@@ -91,6 +91,12 @@ wayexpand status
 wayexpand edit
 ```
 
+`setup` is interactive: it detects the installed IBus engine and verified
+backend paths, recommends the safest available option, and—with confirmation—
+selects IBus or enables the matching per-user systemd service. It never grants
+raw-input permissions or silently accepts portal consent; use `--yes` or
+`--backend ibus|input-method|evdev` for reviewed automation.
+
 Backend-specific services and binaries remain available for advanced users.
 The stdin daemon harness is intentionally not installed as a normal user
 service.
@@ -105,8 +111,8 @@ service.
   support replies, commands, dates, and boilerplate everywhere you type.
 - **A GUI when you want one, a CLI when you need one:** search, preview,
   diagnostics, scripting, and JSON output all use the same configuration.
-- **Honest diagnostics:** `wayexpand doctor` tells you what your compositor
-  can actually use instead of silently dropping keystrokes.
+- **Honest diagnostics:** `wayexpand doctor` distinguishes verified backends
+  from backends that are merely available to try and may require authorization.
 
 ## Supported desktop paths
 
@@ -274,10 +280,10 @@ WayExpand's deployment depends on your compositor and its Wayland protocol suppo
 
 **Explicit option: input-method-v2 (single unified backend, experimental)**
 
-This backend is deliberately hidden from normal setup. It has exclusive
-keyboard capture and may discard unrelated navigation, function, Escape, or
-other unsupported keys. Inspect its warning only when you explicitly accept
-that risk:
+This backend has exclusive keyboard capture and may discard unrelated
+navigation, function, Escape, or other unsupported keys. Setup displays its
+warning and requires explicit confirmation before enabling it. Inspect it
+directly with:
 ```sh
 wayexpand setup --experimental-input-method-v2
 ```
@@ -290,7 +296,7 @@ Pros:
 - Requires no special permissions
 
 Cons:
-- Experimental — unsupported key events (Escape, arrows, F-keys) may not pass through; normal `wayexpand setup` intentionally hides this backend (see [support matrix](docs/SUPPORT_MATRIX.md))
+- Experimental — unsupported key events (Escape, arrows, F-keys) may not pass through (see [support matrix](docs/SUPPORT_MATRIX.md))
 
 **Option 2: evdev + libei/wlroots (split capture/output)**
 

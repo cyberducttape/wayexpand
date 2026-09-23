@@ -131,7 +131,7 @@ sudo chmod 0600 /etc/wayexpand/policy.toml
 sudo chown root:root /etc/wayexpand/policy.toml
 
 # 3. Verify
-wayexpand doctor --json | jq '.organization'
+wayexpand doctor --json | jq '.policy.policy'
 ```
 
 ## Audit Logging

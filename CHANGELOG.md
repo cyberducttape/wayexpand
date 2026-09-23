@@ -6,6 +6,20 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Harden IBus integration: ignore key-release events, isolate engine instances
+  per input context, and surface live configuration reload failures.
+- Make libei portal-token persistence and token location explicit, including
+  systemd/XDG-safe paths and tests for disabled persistence.
+- Unify organization-policy parsing and trust validation across the daemon,
+  CLI, and diagnostics; doctor health now reflects policy and backend state.
+- Correct backend readiness reporting, CLI help, atomic backups, stable exit
+  categories, and the `disable_title_matching` fail-closed contract.
+- Harden CI and release workflows with complete actionlint coverage, pinned
+  Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
+  synchronization YAML.
+- Reconcile compatibility, setup, operations, and policy documentation with
+  the currently implemented backend and certification boundaries.
+
 - Add a shared generation-aware `ConfigStore` and live IBus configuration
   reloads, preserving pause, sensitive-focus, window-context, and command
   safety state across replacement.

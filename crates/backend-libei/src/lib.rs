@@ -139,6 +139,24 @@ pub struct LibeiInjector {
     _portal: Option<PortalKeepalive>,
 }
 
+/// Controls how the RemoteDesktop portal session is restored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibeiOptions {
+    pub persist_portal_token: bool,
+    /// Token path selected by the service. `None` keeps the standalone XDG
+    /// default used by CLI/library callers.
+    pub portal_token_path: Option<PathBuf>,
+}
+
+impl Default for LibeiOptions {
+    fn default() -> Self {
+        Self {
+            persist_portal_token: true,
+            portal_token_path: None,
+        }
+    }
+}
+
 enum TextMode {
     /// Direct UTF-8 insertion. Layout-independent; used whenever the EIS
     /// server offers it.
@@ -367,7 +385,7 @@ impl LibeiInjector {
     ///
     /// Portal use is deliberately explicit because it may display a consent
     /// dialog and grants desktop input-control capability for the session.
-    pub fn connect() -> Result<Self, LibeiError> {
+    pub fn connect(options: LibeiOptions) -> Result<Self, LibeiError> {
         let (stream, portal) = if let Some(socket) = std::env::var_os("LIBEI_SOCKET") {
             let socket = PathBuf::from(socket);
             let socket = if socket.is_relative() {
@@ -379,7 +397,7 @@ impl LibeiInjector {
             };
             (UnixStream::connect(socket)?, None)
         } else {
-            connect_portal()?
+            connect_portal(options)?
         };
         // Handshake and event polling use explicit deadlines. Keep later
         // protocol flushes from blocking indefinitely when an EIS server
@@ -711,6 +729,9 @@ fn split_text_chunks(text: &str) -> Vec<&str> {
 /// Get the path where portal session tokens are stored.
 /// Returns None if XDG_CONFIG_HOME is not set and home directory cannot be determined.
 pub fn portal_token_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("WAYEXPAND_PORTAL_TOKEN_PATH") {
+        return Some(PathBuf::from(path));
+    }
     if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
         let mut path = PathBuf::from(config_home);
         path.push("wayexpand");
@@ -758,11 +779,16 @@ fn reset_portal_token_at(path: &Path) -> std::io::Result<bool> {
 /// Read a stored portal session token after validating both its parent and
 /// the opened file descriptor. Invalid or unsafe token state is reported to
 /// the caller instead of being silently treated as an absent token.
-fn read_portal_token() -> std::io::Result<Option<String>> {
-    let path = match secure_portal_token_path(false) {
-        Ok(path) => path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+fn read_portal_token_if_enabled(
+    persist: bool,
+    explicit_path: Option<&Path>,
+) -> std::io::Result<Option<String>> {
+    if !persist {
+        return Ok(None);
+    }
+    let path = match explicit_path {
+        Some(path) => secure_portal_token_path_for(path, false)?,
+        None => secure_portal_token_path(false)?,
     };
     read_portal_token_at(&path)
 }
@@ -817,6 +843,21 @@ fn read_portal_token_at(path: &Path) -> std::io::Result<Option<String>> {
 
 /// Store a portal session token with restricted permissions (0600), using an
 /// atomic durable replacement. The target is never truncated in place.
+fn store_portal_token_if_enabled(
+    persist: bool,
+    explicit_path: Option<&Path>,
+    token: &str,
+) -> std::io::Result<()> {
+    if !persist {
+        return Ok(());
+    }
+    if let Some(path) = explicit_path {
+        let path = secure_portal_token_path_for(path, true)?;
+        return store_portal_token_at(&path, token);
+    }
+    store_portal_token(token)
+}
+
 fn store_portal_token(token: &str) -> std::io::Result<()> {
     if token.is_empty() || token.len() > MAX_PORTAL_TOKEN_BYTES {
         return Err(std::io::Error::new(
@@ -901,6 +942,10 @@ fn secure_portal_token_path(create_parent: bool) -> std::io::Result<PathBuf> {
             "cannot determine config directory for portal token",
         )
     })?;
+    secure_portal_token_path_for(&raw_path, create_parent)
+}
+
+fn secure_portal_token_path_for(raw_path: &Path, create_parent: bool) -> std::io::Result<PathBuf> {
     let raw_parent = raw_path.parent().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -1004,7 +1049,9 @@ fn validate_token_metadata(path: &Path, metadata: &fs::Metadata) -> std::io::Res
     Ok(())
 }
 
-fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError> {
+fn connect_portal(
+    options: LibeiOptions,
+) -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError> {
     use ashpd::desktop::{
         remote_desktop::{DeviceType, RemoteDesktop},
         PersistMode,
@@ -1026,10 +1073,14 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
-            // Request explicitly-revoked persistent mode to enable session restoration tokens.
-            // If we have a stored token, pass it to skip the consent dialog on reconnect.
-            // The portal will restore permissions from the token if it's valid.
-            let stored_token = read_portal_token().map_err(|error| {
+            // Restore and persist portal authorization only when the user has
+            // enabled the setting. The non-persistent path must neither read
+            // nor write the local restoration token.
+            let stored_token = read_portal_token_if_enabled(
+                options.persist_portal_token,
+                options.portal_token_path.as_deref(),
+            )
+            .map_err(|error| {
                 LibeiError::Portal(format!(
                     "could not securely read portal restoration token: {error}"
                 ))
@@ -1039,7 +1090,11 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
                     &session,
                     DeviceType::Keyboard.into(),
                     stored_token.as_deref(),
-                    PersistMode::ExplicitlyRevoked,
+                    if options.persist_portal_token {
+                        PersistMode::ExplicitlyRevoked
+                    } else {
+                        PersistMode::DoNot
+                    },
                 )
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
@@ -1053,7 +1108,12 @@ fn connect_portal() -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError>
 
             // Extract and store restoration token for next connection
             if let Some(token) = start_response.restore_token() {
-                store_portal_token(token).map_err(|error| {
+                store_portal_token_if_enabled(
+                    options.persist_portal_token,
+                    options.portal_token_path.as_deref(),
+                    token,
+                )
+                .map_err(|error| {
                     LibeiError::Portal(format!(
                         "could not securely store portal restoration token: {error}"
                     ))
@@ -1277,6 +1337,42 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         fs::write(&path, "x".repeat(super::MAX_PORTAL_TOKEN_BYTES + 1)).unwrap();
         assert!(super::read_portal_token_at(&path).is_err());
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn disabled_portal_token_persistence_neither_reads_nor_writes() {
+        let parent = token_test_parent("disabled");
+        let path = parent.join(super::PORTAL_TOKEN_FILENAME);
+        fs::write(&path, "existing-token").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(
+            super::read_portal_token_if_enabled(false, Some(&path)).unwrap(),
+            None,
+            "disabled persistence must not read the existing token"
+        );
+        super::store_portal_token_if_enabled(false, Some(&path), "replacement-token").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "existing-token");
+
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn explicit_portal_token_path_is_used_for_persistence() {
+        let parent = token_test_parent("explicit-path");
+        let path = parent
+            .join("custom-config")
+            .join(super::PORTAL_TOKEN_FILENAME);
+
+        super::store_portal_token_if_enabled(true, Some(&path), "custom-token").unwrap();
+        assert_eq!(
+            super::read_portal_token_if_enabled(true, Some(&path))
+                .unwrap()
+                .as_deref(),
+            Some("custom-token")
+        );
+
         let _ = fs::remove_dir_all(parent);
     }
 

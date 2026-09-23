@@ -64,18 +64,10 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       window, or reload changes so it cannot erase unrelated text.
 - [x] **#27 Command timeouts kill only the direct child.** Spawn commands in
       their own process group and kill the group on timeout.
-- [ ] **Opt-in portal persistence (#28).** Offer an explicit, revocable persistence
-      flow for libei/EIS restoration tokens, stored with strict permissions;
-      keep the current non-persistent consent behavior as the default.
-      **Implementation guide:**
-      - Current: `select_devices()` uses `PersistMode::DoNot` (line 731)
-      - Proposed: Change to `PersistMode::Persistent` and extract restoration token from session
-      - Storage: `~/.config/wayexpand/libei-portal-token` (mode 0600, user-only)
-      - Config: Add `settings.libei_token_persistence` (bool, default: true) in config.rs
-      - Restoration: On next connection, call `proxy.restore_session(token)` instead of `create_session()`
-      - Error recovery: If restoration fails (expired/invalid), fall back to fresh `create_session()`
-      - Testing: Verify consent dialog appears once on first run, disappears on reconnect if token valid
-      - Note: ashpd version in vendor/ may need API verification; check Session type in ashpd::desktop
+- [x] **Opt-in portal persistence (#28).** The libei/EIS restoration-token
+      flow is implemented with strict local permissions, configurable read/write
+      behavior, explicit reset support, and fresh-consent fallback when tokens
+      are disabled or invalid. Remaining work is compositor-specific validation.
 
 ### Capture Path Improvements (v1.2.1+)
 
@@ -288,7 +280,8 @@ See [docs/AUDIT_FINDINGS.md](docs/AUDIT_FINDINGS.md) for detailed findings and r
 - [ ] Optional hotkey for expanding after composition
 - [ ] Accessibility audit for RTL input
 
-**Future:** Research IBus/Fcitx integration and coordinate with input-method-v2 improvements
+**Current:** The IBus engine is implemented and integrated into setup; preedit
+and composition support remain future work. Fcitx integration is still research.
 
 ---
 
@@ -302,11 +295,11 @@ Community contributions welcome — see CONTRIBUTING.md
 
 ### IME & Preedit Support
 
-**Status:** Known limitation, not supported  
+**Status:** IBus key-event integration exists, but preedit/composition is not supported
 **Scope:** Native toolkit integration for composition sequences (ä, é, etc.)  
 **Tracker:** INTEGRATION_TESTING.md §Preedit/IME composition
 
-Research ongoing; requires compositor-specific testing.
+Further work requires compositor- and toolkit-specific testing.
 
 ### Performance Optimization
 

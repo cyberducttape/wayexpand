@@ -15,7 +15,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 **Impact:** Every new user must run `doctor` and hope; deployment on unfamiliar compositors is a gamble.
 
 **Current Status:**
-- Window tracking: solid on KDE via KWin scripting; wlroots path (Sway, Hyprland, river) is implemented but needs real-world certification; GNOME has no usable protocol path
+- Window tracking: solid on KDE via KWin scripting; wlroots tracking is not shipped for Sway, Hyprland, or river; GNOME has no usable protocol path
 - Capture/inject: tested at unit level; system-level behavior varies by compositor, kernel version, and display server implementation
 
 **What's needed:**
@@ -40,17 +40,20 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 **Research Directions:**
 - Compositor-provided focused-window input filtering (systemd secure input, input ACLs)
 - Improved input-method protocol support in compositors (GNOME, wlroots)
-- Better portal/ACL integration for libei (portal token persistence is partially open; see PROFESSIONAL_ROADMAP.md #28)
+- Better portal/ACL integration for libei (the local restoration-token flow exists, but still needs compositor-specific validation)
 - Constrained privileged helper (extreme complexity; not recommended without research first)
 
 ### 3. IME / Preedit / Composition Unsupported
 
 **Impact:** CJK (Chinese, Japanese, Korean), many European composition workflows (ä, é, ç via dead keys or Compose), and IME-dependent input methods are second-class experiences or non-functional.
 
-**Current Status:** Explicitly documented as unsupported; no platform-specific integration exists
+**Current Status:** The native IBus engine is implemented and installable, but
+preedit/composition remains unsupported; Fcitx and compositor text-input
+integration are not implemented.
 
 **What's Needed:**
-- Research toolkit integration (e.g., IBus, Fcitx on Linux; Wayland preedit if it materializes)
+- Validate the IBus engine with real GTK and Qt clients; investigate Fcitx and
+  Wayland preedit support separately
 - Interim: clear documentation + "finish composition, then expand" workflow with optional hotkey
 - Accessibility audit for RTL input
 
@@ -58,12 +61,15 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 
 **Status:**
 - KDE: ✅ Solid (KWin D-Bus scripting)
-- Sway/Hyprland/river: ✅ Implemented (wlroots `wlr-foreign-toplevel-management-v1`), needs real-world certification
+- Sway/Hyprland/river: ❌ Not shipped (wlroots `wlr-foreign-toplevel-management-v1` remains future work)
 - GNOME/Mutter: ❌ No usable protocol path exists (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
 
 ### 5. Portal Token Persistence (libei)
 
-**Status:** Scaffolded; explicit consent dialog appears on each connection. User-initiated restore token persistence is the v1.2.1 roadmap item; see PROFESSIONAL_ROADMAP.md #28.
+**Status:** Implemented with strict local token validation and configurable
+persistence. A fresh authorization may require consent; valid saved tokens
+can restore authorization on reconnect. Setting
+`libei_token_persistence = false` disables both token reads and writes.
 
 ### 6. ARM64 Packaging
 
@@ -151,7 +157,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 - CI matrix or scheduled job to catch compositor regressions
 
 **Current gaps:**
-- wlroots support (Sway, Hyprland, river) is implemented; real-world testing pending
+- wlroots window tracking (Sway, Hyprland, river) is not shipped; compositor capture/output paths still need real-world testing
 - GNOME window tracking has no protocol path; fallback to app-id-only matching is the ceiling
 - Multi-monitor, workspace, focus-stealing scenarios not yet exercised at scale
 
@@ -166,8 +172,8 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 
 **Research Avenues:**
 1. **Compositor-provided filtering:** Systemd secure input, input ACLs, or wlroots protocol extension to filter keystrokes by focused window
-2. **Better portal/ACL integration:** Improve libei support in compositors; finalize portal token persistence
-3. **Input method improvements:** Push for better IME support in GNOME/wlroots so input-method-v2 becomes viable for everyone
+2. **Better portal/ACL integration:** Validate libei restoration behavior across compositor portal implementations
+3. **Input method improvements:** Validate the IBus engine with real GTK/Qt clients and push for better IME support in GNOME/wlroots
 4. **Constrained privileged helper:** Not recommended without significant research; complexity and security review burden are high
 
 **Roadmap Impact:** This is a P0 blocker for universal recommendation to desktop Linux users, but does not prevent adoption in controlled environments (sysadmins, trusted machines, single-user sessions).
@@ -178,7 +184,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 
 **Options:**
 1. **Minimal:** Document "finish composition, then expand" workflow clearly; provide hotkey alternative if user can script it
-2. **Medium:** Research IBus/Fcitx integration on Linux; coordinate with input-method-v2 work
+2. **Medium:** Validate the implemented IBus engine with GTK/Qt and investigate Fcitx integration; coordinate with input-method-v2 work
 3. **Ambitious:** Native preedit support in UI (complex; requires toolkit-specific work)
 
 **Action:** Start with documentation and user feedback; only invest in code if demand justifies it.
@@ -225,8 +231,8 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 ## Recommended Priority Order
 
 ### Immediate (v1.2, current release)
-1. Real-world testing of wlroots window tracking (Sway, Hyprland, river)
-2. Portal token persistence (libei) — v1.2.1 roadmap item
+1. Real-world testing of the shipped KDE window tracker and compositor capture paths
+2. Real-world validation of libei portal token persistence
 3. Certification matrix and first-run detection
 
 ### Near-term (v1.2+)

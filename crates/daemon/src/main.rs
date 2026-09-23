@@ -21,7 +21,7 @@ use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
-use wayexpand_backend_libei::LibeiInjector;
+use wayexpand_backend_libei::{portal_token_path, LibeiInjector, LibeiOptions};
 use wayexpand_backend_selection::auto_select;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
@@ -175,6 +175,7 @@ fn main() -> Result<()> {
     let evdev_mode = source_name == "evdev";
     let active_source = source_name;
     let mut reconnect_delay = Duration::from_millis(250);
+    let portal_token_path = portal_token_path();
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
@@ -187,6 +188,8 @@ fn main() -> Result<()> {
                     backend,
                     &path,
                     config.healthy(),
+                    config.engine.libei_token_persistence(),
+                    portal_token_path.as_deref(),
                 )?
                 else {
                     anyhow::bail!("output backend startup cancelled while stopping")
@@ -612,6 +615,8 @@ fn main() -> Result<()> {
                                 backend_name,
                                 &path,
                                 config.healthy(),
+                                config.engine.libei_token_persistence(),
+                                portal_token_path.as_deref(),
                             )?
                             else {
                                 break;
@@ -722,6 +727,8 @@ fn main() -> Result<()> {
                                 backend_name,
                                 &path,
                                 config.healthy(),
+                                config.engine.libei_token_persistence(),
+                                portal_token_path.as_deref(),
                             )?
                             else {
                                 break;
@@ -1047,6 +1054,8 @@ fn wait_for_retry(stop: &std::sync::atomic::AtomicBool, delay: Duration) -> bool
 
 fn connect_output_backend(
     name: &str,
+    persist_portal_token: bool,
+    portal_token_path: Option<&Path>,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
     match name {
         "wlroots" => WlrootsInjector::connect()
@@ -1055,12 +1064,15 @@ fn connect_output_backend(
                 retryable: error.is_retryable(),
                 message: format!("connecting wlroots output backend: {error}"),
             }),
-        "libei" => LibeiInjector::connect()
-            .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
-            .map_err(|error| OutputConnectError {
-                retryable: error.is_retryable(),
-                message: format!("connecting libei output backend: {error}"),
-            }),
+        "libei" => LibeiInjector::connect(LibeiOptions {
+            persist_portal_token,
+            portal_token_path: portal_token_path.map(Path::to_path_buf),
+        })
+        .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
+        .map_err(|error| OutputConnectError {
+            retryable: error.is_retryable(),
+            message: format!("connecting libei output backend: {error}"),
+        }),
         other => Err(OutputConnectError {
             retryable: false,
             message: format!("unknown output backend {other:?}"),
@@ -1074,10 +1086,12 @@ fn connect_output_with_retry(
     backend: &str,
     config_path: &Path,
     config_healthy: bool,
+    persist_portal_token: bool,
+    portal_token_path: Option<&Path>,
 ) -> Result<Option<Box<dyn TextInjector>>> {
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        match connect_output_backend(backend) {
+        match connect_output_backend(backend, persist_portal_token, portal_token_path) {
             Ok(injector) => {
                 set_daemon_status(
                     control,
@@ -1380,7 +1394,7 @@ mod tests {
 
     #[test]
     fn unsupported_output_backend_fails_without_retry() {
-        let error = match connect_output_backend("unknown") {
+        let error = match connect_output_backend("unknown", true, None) {
             Ok(_) => panic!("unknown backend unexpectedly connected"),
             Err(error) => error,
         };

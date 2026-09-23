@@ -2,9 +2,13 @@ use super::{IbusAction, IbusEngineAdapter};
 use std::{
     collections::HashMap,
     env,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
+use tracing::{info, warn};
 use wayexpand_core::{default_config_path, ConfigStore, ExpansionEngine};
 use zbus::{
     blocking::{connection::Builder, Connection},
@@ -26,24 +30,66 @@ pub enum IbusServiceError {
     Thread(String),
 }
 
-/// IBus factory object. IBus creates one engine instance for this process; the
-/// object path is stable and registered before the factory is advertised.
-struct Factory;
+/// IBus factory state. Each CreateEngine call gets its own adapter and object
+/// path; IBus may create multiple engines for separate input contexts.
+struct Factory {
+    connection: Arc<Mutex<Option<Connection>>>,
+    config: Arc<Mutex<wayexpand_core::Config>>,
+    instances: Arc<Mutex<Vec<Arc<Mutex<IbusEngineAdapter>>>>>,
+    next_id: AtomicU64,
+}
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
 impl Factory {
-    fn create_engine(&self, name: &str) -> OwnedObjectPath {
-        if name == "wayexpand" || name == "WayExpand" {
-            OwnedObjectPath::try_from(ENGINE_PATH).expect("static object path")
-        } else {
-            OwnedObjectPath::try_from("/").expect("root object path")
+    fn create_engine(&self, name: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+        if name != "wayexpand" && name != "WayExpand" {
+            return Ok(OwnedObjectPath::try_from("/").expect("root object path"));
         }
+
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let path = engine_path(id);
+        let config = self
+            .config
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
+            .clone();
+        let adapter = Arc::new(Mutex::new(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).map_err(|error| {
+                zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
+            })?,
+        )));
+        let engine = EngineObject {
+            adapter: Arc::clone(&adapter),
+            connection: Arc::clone(&self.connection),
+            path: path.clone(),
+        };
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus connection lock poisoned".into()))?
+            .clone()
+            .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
+        connection
+            .object_server()
+            .at(path.as_str(), engine)
+            .map_err(zbus::fdo::Error::ZBus)?;
+        self.instances
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
+            .push(adapter);
+        Ok(path)
     }
+}
+
+fn engine_path(id: u64) -> OwnedObjectPath {
+    OwnedObjectPath::try_from(format!("{ENGINE_PATH}/{id}"))
+        .expect("generated IBus engine path must be valid")
 }
 
 struct EngineObject {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
     connection: Arc<Mutex<Option<Connection>>>,
+    path: OwnedObjectPath,
 }
 
 impl EngineObject {
@@ -62,7 +108,7 @@ impl EngineObject {
             let result = match action {
                 IbusAction::DeleteSurroundingText { nchars } => connection.emit_signal(
                     None::<&str>,
-                    ENGINE_PATH,
+                    self.path.as_str(),
                     "org.freedesktop.IBus.Engine",
                     "DeleteSurroundingText",
                     &(-(*nchars as i32), *nchars),
@@ -71,7 +117,7 @@ impl EngineObject {
                     let ibus_text = ibus_text_value(text);
                     connection.emit_signal(
                         None::<&str>,
-                        ENGINE_PATH,
+                        self.path.as_str(),
                         "org.freedesktop.IBus.Engine",
                         "CommitText",
                         &(Value::from(ibus_text),),
@@ -142,30 +188,91 @@ impl EngineObject {
 }
 
 /// Build and run the IBus engine process. The process owns a private bus name,
-/// registers a factory and one engine object, and then remains alive while
-/// zbus dispatches method calls on its internal async-io executor.
+/// registers a factory, and creates one isolated engine object per request
+/// while zbus dispatches method calls on its internal async-io executor.
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
     let path = config_path.unwrap_or_else(default_config_path);
     let store = ConfigStore::load(&path)?;
-    let adapter = IbusEngineAdapter::new(ExpansionEngine::new((*store.config()).clone())?);
+    let initial_status = store.status();
+    info!(
+        config_state = initial_status.state,
+        config_generation = initial_status.generation,
+        "IBus configuration loaded"
+    );
     let connection_slot = Arc::new(Mutex::new(None));
-    let engine = EngineObject {
-        adapter: Arc::new(Mutex::new(adapter)),
+    let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
+    let instances: Arc<Mutex<Vec<Arc<Mutex<IbusEngineAdapter>>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let factory = Factory {
         connection: Arc::clone(&connection_slot),
+        config: Arc::clone(&factory_config),
+        instances: Arc::clone(&instances),
+        next_id: AtomicU64::new(1),
     };
     let reload_receiver = store.subscribe();
     let reload_store = Arc::clone(&store);
-    let reload_engine = Arc::clone(&engine.adapter);
+    let reload_config = Arc::clone(&factory_config);
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
-        .spawn(move || loop {
-            let _ = reload_store.reload_if_changed();
-            while reload_receiver.try_recv().is_ok() {
-                if let Ok(mut adapter) = reload_engine.lock() {
-                    let _ = adapter.replace_config((*reload_store.config()).clone());
+        .spawn(move || {
+            let mut reload_error = None;
+            let mut adapter_error = None;
+            loop {
+                match reload_store.reload_if_changed() {
+                    Ok(true) => {
+                        let status = reload_store.status();
+                        if reload_error.take().is_some() {
+                            info!(
+                                config_state = status.state,
+                                config_generation = status.generation,
+                                "IBus configuration reload recovered"
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        let summary = error.safe_summary();
+                        if reload_error.as_deref() != Some(summary.as_str()) {
+                            let status = reload_store.status();
+                            warn!(
+                                config_state = status.state,
+                                config_error = %summary,
+                                config_generation = status.generation,
+                                "IBus configuration reload rejected; keeping previous configuration"
+                            );
+                            reload_error = Some(summary);
+                        }
+                    }
                 }
+                while reload_receiver.try_recv().is_ok() {
+                    let config = (*reload_store.config()).clone();
+                    if let Ok(mut current) = reload_config.lock() {
+                        *current = config.clone();
+                    }
+                    if let Ok(instances) = instances.lock() {
+                        for adapter in instances.iter() {
+                            if let Ok(mut adapter) = adapter.lock() {
+                                if let Err(error) = adapter.replace_config(config.clone()) {
+                                    let summary = error.safe_summary();
+                                    if adapter_error.as_deref() != Some(summary.as_str()) {
+                                        let status = reload_store.status();
+                                        warn!(
+                                            config_state = status.state,
+                                            adapter_error = %summary,
+                                            config_generation = status.generation,
+                                            "IBus configuration could not be applied to an engine"
+                                        );
+                                        adapter_error = Some(summary);
+                                    }
+                                } else {
+                                    adapter_error = None;
+                                }
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(250));
             }
-            std::thread::sleep(Duration::from_millis(250));
         })
         .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     // IBus engines must connect to IBus' private bus, not the ordinary
@@ -177,8 +284,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     };
     let connection = builder
         .name(BUS_NAME)?
-        .serve_at(FACTORY_PATH, Factory)?
-        .serve_at(ENGINE_PATH, engine)?
+        .serve_at(FACTORY_PATH, factory)?
         .build()?;
     *connection_slot.lock().expect("connection slot") = Some(connection.clone());
     loop {
@@ -226,11 +332,12 @@ mod tests {
     }
 
     #[test]
-    fn factory_accepts_the_advertised_engine_name() {
-        let factory = Factory;
-        assert_eq!(factory.create_engine("wayexpand").as_str(), ENGINE_PATH);
-        assert_eq!(factory.create_engine("WayExpand").as_str(), ENGINE_PATH);
-        assert_eq!(factory.create_engine("other").as_str(), "/");
+    fn factory_allocates_distinct_engine_paths() {
+        let first = engine_path(1);
+        let second = engine_path(2);
+        assert_eq!(first.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/1");
+        assert_eq!(second.as_str(), "/org/freedesktop/IBus/Engine/WayExpand/2");
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -243,6 +350,7 @@ mod tests {
                 ExpansionEngine::new(config).unwrap(),
             ))),
             connection: Arc::new(Mutex::new(None)),
+            path: engine_path(1),
         };
         engine.set_content_type(8, 0);
         assert!(!engine.process_key_event('a' as u32, 0, 0).unwrap());
