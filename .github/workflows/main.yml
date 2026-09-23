@@ -61,5 +61,21 @@ jobs:
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
           git push launchpad \
             refs/heads/main:refs/heads/main
-          git push launchpad \
-            'refs/tags/*:refs/tags/*'
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            local_commit="$(git rev-list -1 "${tag}^{commit}")"
+            remote_commit="$(git ls-remote --tags launchpad "refs/tags/${tag}*" \
+              | awk -v ref="refs/tags/${tag}" '$2 == ref "^{}" { print $1 }')"
+            remote_commit="${remote_commit:-$(git ls-remote --refs launchpad "refs/tags/$tag" \
+              | awk 'NR == 1 { print $1 }')}"
+            if [ -n "$remote_commit" ]; then
+              if [ "$remote_commit" != "$local_commit" ]; then
+                echo "Launchpad tag $tag points to $remote_commit; GitHub points to $local_commit." >&2
+                echo 'Refusing to overwrite a divergent existing tag.' >&2
+                exit 1
+              fi
+              echo "Launchpad tag $tag already matches; skipping."
+            else
+              git push launchpad "refs/tags/$tag:refs/tags/$tag"
+            fi
+          done < <(git for-each-ref --format='%(refname:strip=2)' refs/tags)
