@@ -1116,7 +1116,8 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         println!("IBus WayExpand engine: not installed or discoverable (install the IBus component to use it)");
     }
     // Doctor is also used in CI and for validating a config outside a desktop
-    // session. Keep those checks non-failing, but explain the X11 limitation.
+    // session. Explain the session limitation; the caller still reports an
+    // unhealthy result when no usable path can be established.
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
         if std::env::var_os("DISPLAY").is_some() {
             println!(

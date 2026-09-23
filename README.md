@@ -359,7 +359,7 @@ sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
 sudo ./scripts/install-evdev-permissions.sh             # then apply
 ```
 
-Once `wayexpand doctor` reports capture readiness:
+Once `wayexpand doctor` reports a usable path (not merely `AVAILABLE TO TRY`):
 
 ```sh
 systemctl --user enable --now wayexpand-evdev.service
