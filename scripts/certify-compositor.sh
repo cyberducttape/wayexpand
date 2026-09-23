@@ -142,7 +142,7 @@ if ! printf '%s' "$doctor_json" | jq -e 'type == "object" and (.healthy == true)
     doctor_probe_valid=0
 fi
 status_probe_valid=1
-if ! printf '%s' "$status_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+if ! printf '%s' "$status_json" | jq -e 'type == "object" and .response == "running"' >/dev/null 2>&1; then
     status_json=null
     status_probe_valid=0
 fi

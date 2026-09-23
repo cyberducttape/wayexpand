@@ -23,6 +23,8 @@ Changes not yet released.
 - Require compositor evidence to include a healthy doctor result and a valid
   daemon-status snapshot before it can be certified, with regression coverage
   for unhealthy probes.
+- Require the status snapshot to explicitly report a running daemon rather than
+  accepting an arbitrary JSON object.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
