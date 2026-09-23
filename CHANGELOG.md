@@ -13,6 +13,8 @@ Changes not yet released.
   fingerprint and distinguishes authentication failure from push failure.
 - Accept both SSH client exit statuses used for Launchpad's authenticated
   `No shells on this server.` response.
+- Treat Launchpad's authenticated no-shell response as the stable SSH
+  preflight signal regardless of the runner's transport exit status.
 - Make the headless capture-readiness regression test accept the documented
   `not-probed` state used by CI runners without a graphical session.
 - Serialize CI test harnesses to avoid hosted-runner races in tests that
