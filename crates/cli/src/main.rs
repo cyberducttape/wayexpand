@@ -1011,7 +1011,7 @@ fn setup_backend_allowed(policy: &OrganizationPolicy, backend: &str) -> bool {
 
 fn libei_portal_candidate() -> bool {
     if std::env::var_os("LIBEI_SOCKET").is_some() {
-        return true;
+        return false;
     }
     std::env::var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
@@ -1128,7 +1128,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         } else {
             println!("No active Wayland or X11 display detected; backend probes were skipped.");
         }
-        return true;
+        return false;
     }
     let live_capabilities = probe_capabilities();
     let wlroots_available = if live_capabilities.has_virtual_keyboard {
@@ -1268,7 +1268,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
             );
         }
     }
-    !available_combinations.is_empty() || !trial_combinations.is_empty()
+    ibus_available || !available_combinations.is_empty()
 }
 
 fn print_backend_selection_explain() {

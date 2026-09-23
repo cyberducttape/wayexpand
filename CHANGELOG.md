@@ -40,6 +40,10 @@ Changes not yet released.
   that checks its driver, evidence, and runner-metadata requirements.
 - Align human doctor capture readiness with JSON diagnostics when IBus is the
   only available, policy-allowed input path.
+- Align human doctor exit status with JSON health: authorization-only, headless,
+  and otherwise unverified paths remain visible but are not reported healthy.
+- Update doctor’s configuration test to distinguish valid configuration from
+  unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification
