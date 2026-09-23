@@ -61,6 +61,8 @@ Changes not yet released.
   setup compatibility modes.
 - Make `wayexpand certify --json` enumerate the same required scenarios as the
   checked-in compositor certification matrix.
+- Add a CI contract test that rejects certification reports with missing
+  scenarios or a false `certified` claim while checks remain unverified.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
