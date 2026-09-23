@@ -73,14 +73,18 @@ It captures the live doctor/status probes and writes every required scenario as
 operator or self-hosted driver can provide a results file, for example:
 
 ```text
-capture-replacement=pass
-unicode=pass
-navigation=pass
+printable-press-release=pass
+held-keys-repeat=pass
+modifier-navigation=pass
+unicode-combining=pass
+multiline-rapid=pass
 password-field=pass
-focus-change=pass
-fast-typing=pass
-hotplug=pass
+focus-cross-window=pass
+config-reload=pass
+daemon-restart=pass
 compositor-restart=pass
+failed-insertion=pass
+ime-preedit=fail
 ```
 
 Passing the script with `--results results.txt` requires an explicit result for

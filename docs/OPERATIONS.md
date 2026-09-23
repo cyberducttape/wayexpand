@@ -281,12 +281,11 @@ wayexpand status
 wayexpand edit
 ```
 
-`wayexpand setup` is an interactive onboarding command. It presents IBus,
-input-method-v2, and evdev + libei tradeoffs, recommends a detected path, and
-after confirmation selects the IBus engine or enables and starts the matching
-user service. `--yes` and `--backend ibus|input-method|evdev` support reviewed
-automation. It never changes raw-input permissions or grants portal consent;
-those remain explicit security decisions.
+`wayexpand setup` is an interactive onboarding command. It presents the
+Recommended, Maximum compatibility, and Experimental modes, then selects the
+safest detected path. `--yes` supports reviewed automation. It never changes
+raw-input permissions or grants portal consent; those remain explicit security
+decisions. Use `wayexpand explain-backend` for protocol-level diagnostics.
 
 For expert manual backend selection, the input-method and evdev services remain
 available:

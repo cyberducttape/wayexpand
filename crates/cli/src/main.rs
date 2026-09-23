@@ -16,7 +16,7 @@ const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
-use wayexpand_backend_selection::explain_auto_selection;
+use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind,
@@ -543,6 +543,7 @@ fn run() -> Result<()> {
         }
         Some("setup") => {
             let mut requested_backend: Option<String> = None;
+            let mut requested_mode: Option<String> = None;
             let mut assume_yes = false;
             while let Some(argument) = args.next() {
                 match argument.as_str() {
@@ -555,46 +556,63 @@ fn run() -> Result<()> {
                             usage_error("--backend requires ibus, input-method, or evdev")
                         })?);
                     }
+                    "--mode" => {
+                        requested_mode = Some(args.next().ok_or_else(|| {
+                            usage_error("--mode requires recommended, maximum, or experimental")
+                        })?);
+                    }
                     value if value.starts_with("--backend=") => {
                         requested_backend = Some(value.trim_start_matches("--backend=").to_owned());
                     }
+                    value if value.starts_with("--mode=") => {
+                        requested_mode = Some(value.trim_start_matches("--mode=").to_owned());
+                    }
                     _ => {
                         usage_bail!(
-                            "usage: wayexpand setup [--backend ibus|input-method|evdev] [--yes]"
+                            "usage: wayexpand setup [--mode recommended|maximum|experimental] [--yes]"
                         )
                     }
                 }
             }
+            if requested_backend.is_some() && requested_mode.is_some() {
+                usage_bail!("setup accepts either --mode or expert --backend, not both");
+            }
             println!("WayExpand setup");
             println!("Session: {}", session_description());
             println!();
-            print_backend_diagnostics(true);
-            let recommended = requested_backend.as_deref().unwrap_or_else(|| {
-                if ibus_engine_available() {
-                    "ibus"
-                } else {
-                    "input-method"
-                }
-            });
+            let capabilities = probe_capabilities();
+            let automatic = recommended_setup_backend(&capabilities);
             println!();
-            println!("Available setup paths");
-            println!("  IBus          password-field awareness: yes; raw keyboard access: no");
-            println!("  input-method  password-field awareness: compositor-dependent; raw keyboard access: no");
-            println!("  evdev + libei password-field awareness: no; raw keyboard access: yes");
+            println!("Compatibility modes");
+            println!("  Recommended         safest verified path available in this session");
+            println!(
+                "  Maximum compatibility broad application coverage; may observe global input"
+            );
+            println!(
+                "  Experimental         protocol paths whose key pass-through is not certified"
+            );
             println!();
-            println!("Recommended: {recommended}");
-            let backend = if assume_yes {
-                recommended.to_owned()
-            } else if requested_backend.is_none() {
-                let prompt = format!("Configure {recommended} integration? [Y/n] ");
-                if prompt_yes_no(&prompt, true)? {
-                    recommended.to_owned()
-                } else {
-                    prompt_backend_choice()?
-                }
+            println!("Automatic recommendation: {}", automatic.label);
+            println!("  {}", automatic.detail);
+            let backend = if let Some(backend) = requested_backend {
+                backend
+            } else if let Some(mode) = requested_mode {
+                setup_backend_for_mode(&mode, &capabilities)?
+            } else if assume_yes {
+                automatic.backend.to_owned()
             } else {
-                recommended.to_owned()
+                let prompt = format!("Configure Recommended mode ({})? [Y/n] ", automatic.label);
+                if prompt_yes_no(&prompt, true)? {
+                    automatic.backend.to_owned()
+                } else {
+                    prompt_mode_choice(&capabilities)?
+                }
             };
+            if backend == "unavailable" {
+                bail!(
+                    "Recommended mode found no safe automatic path; use --mode experimental or configure permissions and rerun setup"
+                );
+            }
             configure_setup_backend(&backend)?;
         }
         Some("doctor") => {
@@ -625,6 +643,19 @@ fn run() -> Result<()> {
                 bail!("doctor found configuration, runtime, or backend problems");
             }
         }
+        Some("certify") => {
+            let mut rest: Vec<String> = args.collect();
+            let requested_json = take_json_flag(&mut rest);
+            if !rest.is_empty() {
+                usage_bail!("usage: wayexpand certify [--json]");
+            }
+            let certified = print_certification(requested_json)?;
+            if !certified && !requested_json {
+                bail!(
+                    "certification is incomplete; see the reported unsupported or untested checks"
+                );
+            }
+        }
         Some("backend") => match args.next().as_deref() {
             None => {
                 print_backend_diagnostics(true);
@@ -637,6 +668,12 @@ fn run() -> Result<()> {
             }
             _ => usage_bail!("usage: wayexpand backend [select --explain]"),
         },
+        Some("explain-backend") => {
+            if args.next().is_some() {
+                usage_bail!("usage: wayexpand explain-backend");
+            }
+            print_backend_selection_explain();
+        }
         Some("fleet") => match args.next().as_deref() {
             Some("status") => {
                 let mut rest: Vec<String> = args.collect();
@@ -802,7 +839,7 @@ fn create_backup(source: &Path, destination: &Path) -> Result<()> {
 
 fn print_help() {
     println!(
-        "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  setup [--backend ibus|input-method|evdev] [--yes] Configure and activate a backend\n  status|reload|pause|resume|stop [--json]     Control a running daemon\n  edit [config]                                Open the graphical snippet editor\n  doctor [--json] [config]                     Diagnose configuration and backends\n  test <text> [--json] [config]                Simulate input and print a match\n  test-hotkey <chord> [--json] [config]       Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]          Preview a replacement\n  list [--json] [config]                       List configured expansions and hotkeys\n  search <query> [--json] [config]             Search triggers, descriptions, and tags\n  validate [config]                            Validate configuration\n  import espanso <file>                        Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]     Enable or disable an expansion\n  set-mode <trigger> <mode> [config]           Set immediate or word-boundary matching\n  backup [config] [destination]                Create a non-overwriting config backup\n  backend                                      Show backend availability\n  help                                         Show this help\n  version                                      Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
+        "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  setup [--mode recommended|maximum|experimental] [--yes] Configure a safe compatibility mode\n  status|reload|pause|resume|stop [--json]                 Control a running daemon\n  edit [config]                                            Open the graphical snippet editor\n  doctor [--json] [config]                                 Diagnose configuration and backends\n  certify [--json]                                         Run local compatibility certification\n  test <text> [--json] [config]                            Simulate input and print a match\n  test-hotkey <chord> [--json] [config]                   Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]                      Preview a replacement\n  list [--json] [config]                                   List configured expansions and hotkeys\n  search <query> [--json] [config]                         Search triggers, descriptions, and tags\n  validate [config]                                        Validate configuration\n  import espanso <file>                                    Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]                 Enable or disable an expansion\n  set-mode <trigger> <mode> [config]                       Set immediate or word-boundary matching\n  backup [config] [destination]                            Create a non-overwriting config backup\n  backend                                                  Show backend availability\n  explain-backend                                          Explain expert backend selection\n  help                                                     Show this help\n  version                                                  Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
         env!("CARGO_PKG_VERSION"),
         default_config_path().display()
     );
@@ -833,16 +870,80 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     Ok(matches!(answer.as_str(), "y" | "yes"))
 }
 
-fn prompt_backend_choice() -> Result<String> {
-    print!("Choose a path [ibus/input-method/evdev/q]: ");
+struct SetupRecommendation {
+    backend: &'static str,
+    label: &'static str,
+    detail: &'static str,
+}
+
+fn recommended_setup_backend(
+    capabilities: &wayexpand_backend_selection::Capabilities,
+) -> SetupRecommendation {
+    if ibus_engine_available() {
+        return SetupRecommendation {
+            backend: "ibus",
+            label: "IBus",
+            detail: "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access",
+        };
+    }
+    // The packaged maximum-compatibility service is evdev + libei. A
+    // wlroots virtual-keyboard probe alone is not enough to claim that the
+    // service it will enable can start.
+    if capabilities.has_dev_input && capabilities.has_direct_libei_socket {
+        return SetupRecommendation {
+            backend: "evdev",
+            label: "Maximum compatibility",
+            detail:
+                "evdev capture with a detected output path; password-field awareness is unavailable",
+        };
+    }
+    SetupRecommendation {
+        backend: "unavailable",
+        label: "No verified automatic path",
+        detail: "setup will not enable an experimental or globally observing path automatically",
+    }
+}
+
+fn setup_backend_for_mode(
+    mode: &str,
+    capabilities: &wayexpand_backend_selection::Capabilities,
+) -> Result<String> {
+    match mode {
+        "recommended" => Ok(recommended_setup_backend(capabilities).backend.to_owned()),
+        "maximum" => {
+            if !capabilities.has_dev_input {
+                bail!("Maximum compatibility requires a readable /dev/input keyboard")
+            }
+            if !capabilities.has_direct_libei_socket {
+                bail!("Maximum compatibility requires a detected libei/EIS output path")
+            }
+            Ok("evdev".into())
+        }
+        "experimental" => {
+            if !capabilities.has_input_method_v2 {
+                bail!(
+                    "Experimental mode requires an available input-method-v2 compositor interface"
+                )
+            }
+            Ok("input-method".into())
+        }
+        other => bail!(
+            "unknown compatibility mode {other:?}; choose recommended, maximum, or experimental"
+        ),
+    }
+}
+
+fn prompt_mode_choice(capabilities: &wayexpand_backend_selection::Capabilities) -> Result<String> {
+    print!("Choose a mode [recommended/maximum/experimental/q]: ");
     io::stdout().flush()?;
     let mut choice = String::new();
     io::stdin().read_line(&mut choice)?;
     let choice = choice.trim().to_ascii_lowercase();
-    if matches!(choice.as_str(), "ibus" | "input-method" | "evdev") {
-        Ok(choice)
-    } else {
-        bail!("setup cancelled; choose ibus, input-method, or evdev")
+    match choice.as_str() {
+        "recommended" | "maximum" | "experimental" => {
+            setup_backend_for_mode(choice.as_str(), capabilities)
+        }
+        _ => bail!("setup cancelled; choose recommended, maximum, or experimental"),
     }
 }
 
@@ -1048,6 +1149,176 @@ fn print_backend_selection_explain() {
     }
 }
 
+fn print_certification(json: bool) -> Result<bool> {
+    let capabilities = probe_capabilities();
+    let selection = wayexpand_backend_selection::auto_select(None, None).ok();
+    let ibus = ibus_engine_available();
+    let selected_label = if ibus {
+        "IBus"
+    } else {
+        selection
+            .as_ref()
+            .map(|selection| selection.pair.source())
+            .unwrap_or("none")
+    };
+    let mut checks = Vec::new();
+    let mut add_check = |category: &str, name: &str, status: &str, detail: &str| {
+        checks.push(serde_json::json!({
+            "category": category,
+            "name": name,
+            "status": status,
+            "detail": detail,
+        }));
+    };
+
+    if capabilities.compositor != wayexpand_backend_selection::Compositor::Unknown {
+        add_check(
+            "environment",
+            "desktop identified",
+            "verified",
+            capabilities.compositor.name(),
+        );
+    } else {
+        add_check(
+            "environment",
+            "desktop identified",
+            "unknown",
+            "XDG_CURRENT_DESKTOP is not a recognized compositor",
+        );
+    }
+    if ibus {
+        add_check(
+            "input-path",
+            "IBus engine installed",
+            "available",
+            "IBus is a candidate for Recommended mode",
+        );
+    } else {
+        add_check(
+            "input-path",
+            "IBus engine installed",
+            "unsupported",
+            "the WayExpand IBus component is not discoverable",
+        );
+    }
+    if capabilities.has_input_method_v2 {
+        add_check(
+            "input-path",
+            "input-method-v2 protocol",
+            "available",
+            "protocol manager and seat probe succeeded; live key pass-through remains untested",
+        );
+    } else {
+        add_check(
+            "input-path",
+            "input-method-v2 protocol",
+            "unsupported",
+            "the compositor did not expose a usable input-method-v2 interface",
+        );
+    }
+    if capabilities.has_virtual_keyboard {
+        add_check(
+            "output-path",
+            "wlroots virtual keyboard",
+            "available",
+            "virtual keyboard globals were found; end-to-end insertion remains untested",
+        );
+    } else {
+        add_check(
+            "output-path",
+            "wlroots virtual keyboard",
+            "unsupported",
+            "the compositor did not expose zwp_virtual_keyboard_v1",
+        );
+    }
+    if capabilities.has_direct_libei_socket {
+        add_check(
+            "output-path",
+            "libei/EIS transport",
+            "available",
+            "an explicit LIBEI_SOCKET is present; portal authorization was not re-requested",
+        );
+    } else {
+        add_check("output-path", "libei/EIS transport", "authorization-required", "portal probing is intentionally non-interactive; run the selected mode to authorize it");
+    }
+
+    let selected_capture = if ibus { "ibus" } else { selected_label };
+    add_check(
+        "selection",
+        "automatic mode selection",
+        if selected_capture == "none" {
+            "failed"
+        } else {
+            "available"
+        },
+        &format!("automatic selection currently resolves to {selected_capture}"),
+    );
+
+    // These checks intentionally remain NOT RUN until a compositor-specific
+    // harness drives real GTK/Qt/Wayland clients. A preflight must never turn
+    // protocol availability into a false CERTIFIED claim.
+    for (category, name) in [
+        ("typing-integrity", "printable press/release"),
+        ("typing-integrity", "held keys and auto-repeat"),
+        ("typing-integrity", "modifier and navigation keys"),
+        ("text-integrity", "Unicode and combining characters"),
+        ("text-integrity", "rapid typing and multiline replacement"),
+        ("safety", "password-field suppression"),
+        ("safety", "focus transition and cross-window isolation"),
+        ("recovery", "daemon and compositor restart"),
+        ("recovery", "failed insertion and config reload"),
+    ] {
+        add_check(
+            category,
+            name,
+            "not-run",
+            "requires the compositor certification harness; no claim is made from a static probe",
+        );
+    }
+
+    let certified = checks
+        .iter()
+        .all(|check| check["status"] == "verified" || check["status"] == "available")
+        && !checks.is_empty();
+    let report = serde_json::json!({
+        "schema": 1,
+        "certified": certified,
+        "desktop": capabilities.compositor.name(),
+        "selected_mode": selected_capture,
+        "checks": checks,
+        "limitations": wayexpand_core::all_capabilities()
+            .into_iter()
+            .filter(|caps| caps.backend_name == selected_capture || (selected_capture == "ibus" && caps.backend_name == "input-method"))
+            .flat_map(|caps| caps.limitations.iter().copied())
+            .collect::<Vec<_>>(),
+    });
+    if json {
+        println!("{report}");
+    } else {
+        println!("WayExpand Desktop Certification");
+        println!("  Desktop: {}", report["desktop"]);
+        println!("  Selected mode: {}", report["selected_mode"]);
+        for check in report["checks"].as_array().into_iter().flatten() {
+            println!(
+                "  [{:18}] {:32} {}",
+                check["status"].as_str().unwrap_or("unknown"),
+                check["name"].as_str().unwrap_or("unknown"),
+                check["detail"].as_str().unwrap_or("")
+            );
+        }
+        println!(
+            "\nResult: {}",
+            if certified {
+                "CERTIFIED"
+            } else {
+                "NOT CERTIFIED"
+            }
+        );
+        println!("Run the compositor harness before treating this record as a support claim.");
+    }
+    Ok(certified)
+}
+
 /// Stable, automation-friendly diagnostic output for service managers and
 /// fleet health checks. It deliberately avoids compositor probes that can
 /// block or mutate session state; those remain in the human doctor output.
@@ -1076,12 +1347,56 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let ibus_installed = ibus_engine_available();
     let policy = print_policy_diagnostics_json();
     let capabilities = print_capabilities_diagnostics_json();
+    let live_capabilities = probe_capabilities();
+    let recommendation = recommended_setup_backend(&live_capabilities);
+    let setup_recommendation = serde_json::json!({
+        "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
+        "backend": recommendation.backend,
+        "label": recommendation.label,
+        "detail": recommendation.detail,
+        "ready": recommendation.backend != "unavailable",
+    });
+    let automatic_selection = wayexpand_backend_selection::auto_select(None, None)
+        .map(|selection| {
+            serde_json::json!({
+                "source": selection.pair.source(),
+                "backend": selection.pair.backend(),
+                "reason": selection.reason,
+                "ready": selection.pair.source() != "stdin",
+            })
+        })
+        .unwrap_or_else(|error| {
+            serde_json::json!({
+                "source": serde_json::Value::Null,
+                "backend": serde_json::Value::Null,
+                "reason": error.to_string(),
+                "ready": false,
+            })
+        });
+    let setup_ibus_ready = recommendation.backend == "ibus" && ibus_installed;
+    let setup_recommendation = if setup_ibus_ready {
+        serde_json::json!({
+            "mode": "recommended",
+            "backend": "ibus",
+            "label": "IBus",
+            "detail": "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access",
+            "ready": true,
+        })
+    } else {
+        setup_recommendation
+    };
+    let selection_ok = automatic_selection["reason"].is_string()
+        && automatic_selection["source"].is_string()
+        && automatic_selection["ready"].as_bool().unwrap_or(false);
     let policy_ok = policy
         .get("policy")
         .and_then(|policy| policy.get("valid"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let healthy = config_ok && policy_ok && (socket_path.is_none() || socket_exists);
+    let healthy = config_ok
+        && policy_ok
+        && (selection_ok || setup_ibus_ready)
+        && (socket_path.is_none() || socket_exists);
     println!(
         "{}",
         serde_json::json!({
@@ -1104,6 +1419,8 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "policy": policy,
             "backends": backends,
             "capabilities": capabilities,
+            "automatic_selection": automatic_selection,
+            "setup_recommendation": setup_recommendation,
         })
     );
     Ok(healthy)
@@ -1386,6 +1703,9 @@ fn print_capabilities_diagnostics() {
         );
         println!("      live protocol probe: reported separately above (not inferred here)");
         println!("    Features: {}", caps.feature_summary);
+        for limitation in caps.limitations {
+            println!("    Limitation: {limitation}");
+        }
         println!(
             "    Max replacement: {}",
             if caps.max_replacement_size == 0 {
@@ -1410,6 +1730,7 @@ fn print_capabilities_diagnostics_json() -> serde_json::Value {
                 "text_method": caps.text_method.to_string(),
                 "max_replacement_size": caps.max_replacement_size,
                 "feature_summary": caps.feature_summary,
+                "limitations": caps.limitations,
             })
         })
         .collect();

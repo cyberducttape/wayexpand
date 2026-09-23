@@ -22,6 +22,8 @@ probeable.
 
 Certification evidence is collected with
 [`scripts/certify-compositor.sh`](../scripts/certify-compositor.sh). It records
-live probes and requires explicit results for capture, replacement, sensitive
-fields, focus changes, hotplug, and compositor restart; an unmarked scenario is
+live probes and requires explicit results for printable press/release, held
+keys and repeat, modifiers/navigation, Unicode, multiline/rapid typing,
+password fields, focus/cross-window isolation, reload, daemon/compositor
+restart, failed insertion, and IME/preedit behavior; an unmarked scenario is
 never treated as certified.

@@ -92,10 +92,11 @@ wayexpand edit
 ```
 
 `setup` is interactive: it detects the installed IBus engine and verified
-backend paths, recommends the safest available option, and—with confirmation—
-selects IBus or enables the matching per-user systemd service. It never grants
-raw-input permissions or silently accepts portal consent; use `--yes` or
-`--backend ibus|input-method|evdev` for reviewed automation.
+paths, then selects a compatibility mode rather than requiring protocol
+knowledge. Recommended chooses the safest available option; Maximum
+compatibility and Experimental are explicit opt-ins. It never grants raw-input
+permissions or silently accepts portal consent; use `--yes` for reviewed
+automation. Experts can use `wayexpand explain-backend` for protocol detail.
 
 Backend-specific services and binaries remain available for advanced users.
 The stdin daemon harness is intentionally not installed as a normal user
@@ -123,7 +124,7 @@ by automated end-to-end tests. Check your own session:
 
 ```sh
 wayexpand doctor
-wayexpand backend select --explain
+wayexpand explain-backend
 ```
 
 See [COMPOSITOR_MATRIX.md](docs/COMPOSITOR_MATRIX.md) for the current path and
@@ -157,7 +158,7 @@ desktop-specific setup.
 Every backend implements a small trait (`InputSource` for capture,
 `TextInjector` for output) and is selected conservatively or explicitly at
 daemon startup (`--source=`, `--backend=`). Use
-`wayexpand backend select --explain` to inspect automatic selection. A backend that
+`wayexpand explain-backend` to inspect automatic selection. A backend that
 doesn't exist for your compositor is a documented gap, not a runtime
 surprise: `app_filter`-scoped snippets **fail closed** (never match) rather
 than matching everywhere when window tracking isn't available, the same
@@ -339,7 +340,7 @@ If you're on KDE Plasma, use **Option 2** (evdev) after reviewing the raw
 keyboard visibility tradeoff. It has better keyboard fidelity, but it is not
 enabled automatically.
 
-If `wayexpand backend select --explain` reports readable evdev as disabled,
+If `wayexpand explain-backend` reports readable evdev as disabled,
 choose `--source=evdev --backend=libei` only after acknowledging that WayExpand
 will see global keyboard input. Input-method-v2 is intentionally not offered by
 normal setup: choose it only in a disposable/test session where password-field
@@ -388,7 +389,7 @@ wayexpand set-mode ':sig' word-boundary expansions.toml
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 wayexpand doctor                                   # human-readable backend/session report
 wayexpand doctor --json                            # stable schema for health checks
-wayexpand backend select --explain                 # explain automatic backend selection
+wayexpand explain-backend                          # explain automatic backend selection
 wayexpand fleet status                              # inspect merged fleet layers
 wayexpand fleet status --json                        # inspect provenance as JSON
 ```
