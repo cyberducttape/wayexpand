@@ -15,6 +15,8 @@ Changes not yet released.
   token operations.
 - Require certification evidence to identify GTK, Qt, and password/PIN-field
   clients before any compositor report can be marked complete.
+- Make required certification client coverage declarative in the compositor
+  matrix so the evidence tools share one source of truth.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so

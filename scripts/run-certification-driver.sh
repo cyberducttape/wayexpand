@@ -46,18 +46,17 @@ done
 [ -n "$target_apps" ] || { printf '%s\n' 'error: --target-apps is required' >&2; exit 2; }
 [ -n "$output" ] || { printf '%s\n' 'error: --output is required' >&2; exit 2; }
 target_apps_lower=$(printf '%s' "$target_apps" | tr '[:upper:]' '[:lower:]')
-case "$target_apps_lower" in
-    *gtk*) : ;;
-    *) printf '%s\n' 'error: --target-apps must include a GTK client' >&2; exit 2 ;;
-esac
-case "$target_apps_lower" in
-    *qt*) : ;;
-    *) printf '%s\n' 'error: --target-apps must include a Qt client' >&2; exit 2 ;;
-esac
-case "$target_apps_lower" in
-    *password*|*pin*|*secret*) : ;;
-    *) printf '%s\n' 'error: --target-apps must include a password/PIN-field client' >&2; exit 2 ;;
-esac
+required_client_markers=$(jq -r --arg compositor "$compositor" \
+    '.targets[] | select(.id == $compositor) | .required_client_markers[]' "$matrix")
+while IFS= read -r marker; do
+    [ -n "$marker" ] || continue
+    case "$target_apps_lower" in
+        *"$marker"*) ;;
+        *) printf '%s\n' "error: --target-apps must include a client matching '$marker'" >&2; exit 2 ;;
+    esac
+done <<EOF
+$required_client_markers
+EOF
 
 jq -e --arg compositor "$compositor" --arg backend "$backend" \
     'any(.targets[]; .id == $compositor and (.input_paths | index($backend) != null))' \
