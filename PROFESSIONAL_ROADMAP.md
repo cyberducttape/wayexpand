@@ -115,14 +115,16 @@ desktop Linux users but does not prevent use in controlled environments
 - 97b49438: Phase 3 daemon integration
 
 **Status by compositor:**
-- Sway: ✅ Ready (Phase 3 complete, needs real-world testing)
-- Hyprland: ✅ Ready (Phase 3 complete, needs real-world testing)
-- river: ✅ Ready (Phase 3 complete, needs real-world testing)
+- Sway: 🟡 Implemented, awaiting real-world certification
+- Hyprland: 🟡 Implemented, awaiting real-world certification
+- river: 🟡 Implemented, awaiting real-world certification
 - GNOME: ❌ No usable protocol path (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
 
 ### Libei-First Backend Auto-Selection (Phase 4)
 
-**Status:** Complete (2026-09-19). Ready for production use.
+**Status:** Implemented (2026-09-19). Conservative automatic selection is
+available, but production promotion remains gated on compositor/client
+certification and explicit readiness evidence.
 **Why:** Reduce user friction by auto-detecting optimal backend
 **Scope:** Intelligent backend selection based on compositor detection
 
