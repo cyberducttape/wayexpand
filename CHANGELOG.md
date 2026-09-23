@@ -18,6 +18,8 @@ Changes not yet released.
   as end-to-end verification.
 - Add a validated JSON output format to the compositor evidence collector,
   including session metadata, live probes, and per-scenario results.
+- Clarify that river and other wlroots sessions have implementation paths but
+  are outside the current four-desktop certification matrix.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.

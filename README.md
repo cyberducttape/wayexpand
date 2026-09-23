@@ -117,10 +117,12 @@ service.
 
 ## Supported desktop paths
 
-WayExpand currently has paths for KDE Plasma/KWin, Sway, Hyprland, river, and
-GNOME, but availability depends on the compositor version, protocols exposed,
-permissions, and the selected backend. No compositor is currently certified
-by automated end-to-end tests. Check your own session:
+WayExpand currently has implementation paths for KDE Plasma/KWin, GNOME,
+Sway, Hyprland, and other wlroots compositors such as river. Availability
+depends on the compositor version, protocols exposed, permissions, and the
+selected backend. The current certification matrix covers KDE, GNOME, Sway,
+and Hyprland; no compositor is currently certified by automated end-to-end
+tests. Check your own session:
 
 ```sh
 wayexpand doctor
