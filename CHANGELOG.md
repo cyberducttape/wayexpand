@@ -56,6 +56,8 @@ Changes not yet released.
   current RustSec advisory database including CVSS 4.0 records.
 - Align release documentation with the pinned release compiler and the
   AppStream/IBus metadata checks enforced by the workflow.
+- Mark the daemon’s stdin-only fallback as unsupported in certification reports
+  instead of presenting it as an available automatic keyboard path.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
