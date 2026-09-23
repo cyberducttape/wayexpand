@@ -234,6 +234,63 @@ Daemon (capture/match/inject)
 
 ---
 
+### Path to Legendary Status: Certification and Distribution
+
+**Why:** Current gaps (zero GitHub stars, unverified compositor support, limited packaging reach)
+are not due to code quality but execution: certification, distribution, and proof points.
+
+**Scope:** Close the gap between a strong engineering foundation and a product users trust and recommend.
+
+See [docs/AUDIT_FINDINGS.md](docs/AUDIT_FINDINGS.md) for detailed findings and recommended priority order.
+
+#### Compositor Certification (Sway, Hyprland, KDE Plasma, GNOME)
+
+**Status:** Window tracking and backend support are implemented; real-world validation pending
+
+**What's needed:**
+- [ ] Automated end-to-end tests for each compositor covering normal typing, Unicode (emoji, RTL), password fields, focus changes, rapid triggers, undo, and shortcut conflicts
+- [ ] Published certified matrix: "wayexpand v1.2 certified on KDE Plasma 6.1.2, Sway 1.9, Hyprland 0.40" with test date
+- [ ] First-run experience detects compositor and recommends optimal backend with explicit trade-offs
+- [ ] CI matrix or scheduled job to catch regressions on new versions
+
+**Depends on:** wlroots window-tracking real-world testing; GNOME constraints documented in `docs/GNOME_WINDOW_TRACKING.md`
+
+#### Distribution & Discoverability
+
+**Current:** Ubuntu PPA, Arch AUR; Fedora Copr not yet published
+
+**What's needed:**
+- [ ] Publish Fedora Copr repository (see `docs/PACKAGING.md`)
+- [ ] Flatpak/Snap builds with portal support
+- [ ] Simple landing/demo site (GitHub README is good; visual proof points help)
+- [ ] 2-3 short demo videos: first-run, snippet creation, real-world use
+- [ ] README badges for certified compositor + packaging status
+
+#### Resolve Secure-vs-Fidelity Capture Trade-off
+
+**Current:** Documented but forces users to choose between security and usability.
+
+**Research needed:**
+- Compositor-provided focused-window input filtering (systemd secure input, input ACLs)
+- Improved input-method protocol in GNOME/wlroots
+- Portal/ACL improvements for libei
+- (Not recommended: constrained privileged helper — security review burden is high)
+
+**Blocker for:** Universal recommendation to desktop Linux users; does not prevent adoption in controlled environments (sysadmins, trusted machines)
+
+#### IME / Preedit Support
+
+**Current:** Explicitly unsupported; documented limitation
+
+**Interim approach:**
+- [ ] Clear documentation of "finish composition, then expand" workflow
+- [ ] Optional hotkey for expanding after composition
+- [ ] Accessibility audit for RTL input
+
+**Future:** Research IBus/Fcitx integration and coordinate with input-method-v2 improvements
+
+---
+
 ## Future Considerations (v1.2+)
 
 ### Localization Expansion
@@ -275,20 +332,22 @@ distribution-maintainer verification tasks.
 
 ## Success Metrics for Professional Status
 
-Achieved at v1.0.0:
-- Available via Ubuntu PPA and Arch AUR (Fedora Copr not yet published —
-  see [docs/PACKAGING.md](docs/PACKAGING.md))
-- Documented security policy with vulnerability disclosure process
-- Stability guarantees (COMPATIBILITY.md)
-- No known critical bugs
-- Public changelog for releases
-- GitHub repository with active CI
+### Professional Tier (Achieved v1.0.0)
+- ✅ Available via Ubuntu PPA and Arch AUR
+- ✅ Documented security policy with vulnerability disclosure process
+- ✅ Stability guarantees (COMPATIBILITY.md)
+- ✅ No known critical bugs
+- ✅ Public changelog for releases
+- ✅ GitHub repository with active CI
 
-Ongoing:
-- 1000+ GitHub stars (community adoption)
-- 5+ active contributors (beyond original author)
-- Corporate/organization deployments (documented)
-- Accessibility audit results (WCAG AA target)
+### Legendary Tier (In Progress)
+Requires all of the above, plus:
+- **Certification:** Documented end-to-end test results for Sway, Hyprland, KDE Plasma, and GNOME (exact versions, test dates, known limitations)
+- **Distribution:** Fedora Copr, Flatpak/Snap with portal support, and simple landing page with demo video
+- **Proof:** 1000+ GitHub stars, 5+ active contributors (beyond original author), documented corporate/organization deployments
+- **Capture clarity:** Resolved or well-researched path to secure-vs-fidelity trade-off (research direction published, if not yet solved)
+- **Accessibility:** WCAG 2.1 AA audit results; localization to 3+ languages
+- **IME story:** Either native support or clear interim workflow with documentation
 
 ---
 
