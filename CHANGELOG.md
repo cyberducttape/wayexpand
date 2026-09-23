@@ -31,6 +31,7 @@ Changes not yet released.
   path as if it were an engine instance.
 - Add an explicit certification evidence status so automation can distinguish
   incomplete runs from runs with observed failures.
+- Synchronize the installed man page with the complete CLI command surface.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
