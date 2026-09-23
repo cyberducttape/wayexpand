@@ -46,6 +46,8 @@ Changes not yet released.
   authorize starting a backend service without reviewing its requirements.
 - Quote CI workspace paths so actionlint's ShellCheck pass protects the workflow
   itself instead of failing on avoidable word-splitting warnings.
+- Preserve per-scenario compositor-driver logs in certification artifacts so a
+  passing result remains reviewable evidence rather than only an exit status.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
