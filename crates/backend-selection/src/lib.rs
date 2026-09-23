@@ -216,7 +216,15 @@ pub fn select_backend(
 ) -> Result<BackendSelection, BackendSelectionError> {
     let pair = if let (Some(source), Some(backend)) = (explicit_source, explicit_backend) {
         match source {
-            "input-method" if backend == "none" => ResolvedBackendPair::InputMethod,
+            "input-method" if backend == "none" && capabilities.has_input_method_v2 => {
+                ResolvedBackendPair::InputMethod
+            }
+            "input-method" if backend == "none" => {
+                return Err(BackendSelectionError::UnavailableSource {
+                    source: "input-method".into(),
+                    detail: "input-method-v2 manager and seat probe failed".into(),
+                })
+            }
             "input-method" => {
                 return Err(BackendSelectionError::Incompatible {
                     source: source.to_string(),
@@ -242,7 +250,13 @@ pub fn select_backend(
         }
     } else if let Some(source) = explicit_source {
         match source {
-            "input-method" => ResolvedBackendPair::InputMethod,
+            "input-method" if capabilities.has_input_method_v2 => ResolvedBackendPair::InputMethod,
+            "input-method" => {
+                return Err(BackendSelectionError::UnavailableSource {
+                    source: "input-method".into(),
+                    detail: "input-method-v2 manager and seat probe failed".into(),
+                });
+            }
             "evdev" if capabilities.has_dev_input => {
                 ResolvedBackendPair::Evdev(InjectorBackend::Libei)
             }
@@ -472,6 +486,31 @@ mod tests {
             select_backend(&capabilities(true, true, false), Some("input-method"), None).unwrap();
         assert_eq!(selection.pair, ResolvedBackendPair::InputMethod);
         assert!(selection.explanation().contains("experimental opt-in only"));
+    }
+
+    #[test]
+    fn explicit_input_method_fails_closed_when_probe_is_unavailable() {
+        let result = select_backend(
+            &capabilities(false, true, false),
+            Some("input-method"),
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(BackendSelectionError::UnavailableSource { source, .. })
+                if source == "input-method"
+        ));
+
+        let result = select_backend(
+            &capabilities(false, true, false),
+            Some("input-method"),
+            Some("none"),
+        );
+        assert!(matches!(
+            result,
+            Err(BackendSelectionError::UnavailableSource { source, .. })
+                if source == "input-method"
+        ));
     }
 
     #[test]

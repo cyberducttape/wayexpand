@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Make explicit input-method-v2 selection fail closed when its live protocol
+  probe is unavailable, keeping daemon startup aligned with shared capability
+  diagnostics.
 - Make setup recognize an installed IBus component before the IBus daemon has
   reloaded its engine registry, while still requiring the WayExpand IBus
   executable to be present.
