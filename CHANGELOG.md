@@ -8,6 +8,8 @@ Changes not yet released.
 
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
+- Reject malformed, unknown, or duplicate compositor-certification results so
+  evidence cannot pass because of a typo or conflicting entry.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.

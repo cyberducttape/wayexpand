@@ -39,6 +39,30 @@ if run_certification --results "$failed" --output "$test_root/failed.md"; then
     exit 1
 fi
 
+unknown="$test_root/unknown.txt"
+cp "$results" "$unknown"
+printf '%s\n' 'not-a-scenario=pass' >>"$unknown"
+if run_certification --results "$unknown" --output "$test_root/unknown.md"; then
+    printf '%s\n' 'certification accepted an unknown scenario' >&2
+    exit 1
+fi
+
+duplicate="$test_root/duplicate.txt"
+cp "$results" "$duplicate"
+printf '%s\n' 'ime-preedit=fail' >>"$duplicate"
+if run_certification --results "$duplicate" --output "$test_root/duplicate.md"; then
+    printf '%s\n' 'certification accepted a duplicate scenario' >&2
+    exit 1
+fi
+
+malformed="$test_root/malformed.txt"
+cp "$results" "$malformed"
+printf '%s\n' 'ime-preedit=maybe' >>"$malformed"
+if run_certification --results "$malformed" --output "$test_root/malformed.md"; then
+    printf '%s\n' 'certification accepted a malformed result' >&2
+    exit 1
+fi
+
 if "$project_dir/scripts/certify-compositor.sh" \
     --compositor kde --version 6.6.2 --backend ibus \
     --results "$results" --output "$test_root/no-metadata.md"; then

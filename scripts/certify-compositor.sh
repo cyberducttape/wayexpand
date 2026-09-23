@@ -69,6 +69,38 @@ scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
     exit 2
 }
 
+# Results are evidence, not free-form annotations. Reject malformed, unknown,
+# or duplicate entries before collecting probes so an accidental typo cannot
+# leave one required scenario looking covered.
+if [ -n "$results_file" ]; then
+    [ -f "$results_file" ] || {
+        printf '%s\n' "error: results file does not exist: $results_file" >&2
+        exit 2
+    }
+    awk -F= -v allowed="$scenarios" '
+        BEGIN {
+            count = split(allowed, names, " ")
+            for (i = 1; i <= count; i++) valid[names[i]] = 1
+        }
+        NF == 0 { next }
+        NF != 2 || $2 !~ /^(pass|fail)$/ {
+            printf "error: malformed certification result: %s\n", $0 > "/dev/stderr"
+            invalid = 1
+            next
+        }
+        !($1 in valid) {
+            printf "error: unknown certification scenario: %s\n", $1 > "/dev/stderr"
+            invalid = 1
+            next
+        }
+        ++seen[$1] > 1 {
+            printf "error: certification scenario appears more than once: %s\n", $1 > "/dev/stderr"
+            invalid = 1
+        }
+        END { exit invalid }
+    ' "$results_file" || exit 2
+fi
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM
 doctor_status=0
