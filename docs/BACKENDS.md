@@ -255,26 +255,26 @@ this is not an issue. For multi-layout switchers, consider:
 - Using input-method-v2 instead, which learns layout changes from the compositor
 - Using only ASCII triggers and replacements (no layout-dependent characters)
 
-**Probe detection doesn't verify keyboards:**
-The evdev backend's `doctor` probe counts any readable `/dev/input/event*` device
-as potentially valid. It does NOT verify that a readable device is actually a
-keyboard (has EV_KEY capability bits). This can produce a false-positive
-diagnostic result:
+**Probe detection is deliberately conservative about device identity:**
+The evdev backend's `doctor` probe counts readable `/dev/input/event*` devices
+as a permission signal, while the evdev connection performs the authoritative
+keyboard-capability check. A readable event node is therefore not itself a
+claim that a usable keyboard was found:
 
-- `doctor` reports "evdev capture ready" ✓
+- `doctor` reports an evdev permission/device candidate
 - Daemon starts and tries to use the device
 - Device is a mouse, touchpad, or other input device
 - Daemon finds no keyboard and fails to capture text
 
-**Workaround:** If `wayexpand doctor` says evdev is ready but typing doesn't
+**Workaround:** If `wayexpand doctor` shows an evdev candidate but typing doesn't
 expand:
 1. List input devices: `ls -la /dev/input/event*`
 2. Check which ones are keyboards: `cat /proc/bus/input/devices`
 3. Verify at least one is readable: `ls -l /dev/input/event* | grep $USER` (for input group membership)
 4. Restart daemon: `systemctl --user restart wayexpand-evdev.service`
 
-**Future improvement:** The probe should inspect EV_KEY/key capability bits and
-report actual candidate keyboards specifically.
+The authoritative `EvdevSource::connect` path does inspect keyboard key
+capabilities before starting capture, so a failed connection remains fail-closed.
 
 **Hotplug and device tracking:**
 The evdev source refreshes its keyboard-device discovery on every bounded poll.

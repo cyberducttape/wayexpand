@@ -1072,13 +1072,19 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     // only recognizes desktops known to ship one.
     let libei_plausible = libei_portal_candidate();
 
-    let mut verified_combinations = Vec::new();
+    // These are non-invasive protocol probes, not end-to-end typing tests.
+    // Keep that distinction visible: a successful globals/seat probe cannot
+    // prove that a real GTK or Qt client will preserve every key event.
+    let mut available_combinations = Vec::new();
     let mut trial_combinations = Vec::new();
     if input_method_available {
-        verified_combinations.push("--source=input-method (capture and output)");
+        available_combinations
+            .push("--source=input-method (protocol probe passed; live typing unverified)");
     }
     if evdev_readable && wlroots_available {
-        verified_combinations.push("--source=evdev --backend=wlroots");
+        available_combinations.push(
+            "--source=evdev --backend=wlroots (protocol probe passed; live insertion unverified)",
+        );
     }
     if evdev_readable && libei_plausible {
         trial_combinations.push(
@@ -1086,7 +1092,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         );
     }
 
-    if verified_combinations.is_empty() && trial_combinations.is_empty() {
+    if available_combinations.is_empty() && trial_combinations.is_empty() {
         println!("Capture readiness: NOT READY (no source+backend combination detected)");
         if evdev_readable && !libei_plausible {
             println!(
@@ -1102,12 +1108,14 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         }
         return false;
     }
-    if verified_combinations.is_empty() {
+    if available_combinations.is_empty() {
         println!(
             "Capture readiness: AVAILABLE TO TRY (no backend was verified; interactive authorization required)"
         );
     } else {
-        println!("Capture readiness: READY (at least one backend verified)");
+        println!(
+            "Capture readiness: AVAILABLE TO TRY (protocol probe passed; end-to-end typing is not verified)"
+        );
     }
     println!(
         "Automatic selection: stdin + libei (raw evdev capture is disabled unless `--source=evdev` is explicitly selected)"
@@ -1117,8 +1125,8 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
             "evdev probe: readable, but not enabled automatically; explicit `--source=evdev` acknowledges global keyboard visibility"
         );
     }
-    for combination in &verified_combinations {
-        println!("  verified: wayexpand-daemon {combination}");
+    for combination in &available_combinations {
+        println!("  available to try: wayexpand-daemon {combination}");
     }
     for combination in &trial_combinations {
         println!("  available to try: wayexpand-daemon {combination}");
@@ -1147,7 +1155,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
             );
         }
     }
-    !verified_combinations.is_empty()
+    !available_combinations.is_empty() || !trial_combinations.is_empty()
 }
 
 fn print_backend_selection_explain() {
@@ -1403,6 +1411,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let policy = print_policy_diagnostics_json();
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
+    let (capture_state, capture_detail) = capture_readiness(&live_capabilities, ibus_installed);
     let recommendation = recommended_setup_backend(&live_capabilities);
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
@@ -1476,9 +1485,46 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "capabilities": capabilities,
             "automatic_selection": automatic_selection,
             "setup_recommendation": setup_recommendation,
+            "capture_readiness": {
+                "state": capture_state,
+                "detail": capture_detail,
+                "end_to_end_verified": false,
+            },
         })
     );
     Ok(healthy)
+}
+
+/// Classify non-invasive session probes without calling them an end-to-end
+/// guarantee. A protocol/global probe can establish that a path is worth
+/// trying, but only a compositor/client harness can verify typing integrity.
+fn capture_readiness(
+    capabilities: &wayexpand_backend_selection::Capabilities,
+    ibus_installed: bool,
+) -> (&'static str, &'static str) {
+    if ibus_installed || capabilities.has_input_method_v2 || capabilities.has_virtual_keyboard {
+        return (
+            "available-to-try",
+            "a protocol or IBus probe succeeded; live client typing is not verified",
+        );
+    }
+    if capabilities.has_dev_input && libei_portal_candidate() {
+        return (
+            "authorization-required",
+            "evdev is readable and a libei portal candidate was detected; interactive authorization is required",
+        );
+    }
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("WAYLAND_SOCKET").is_none()
+    {
+        return (
+            "not-probed",
+            "no active Wayland session was detected; backend probes were skipped",
+        );
+    }
+    (
+        "unavailable",
+        "no non-invasive source and output path was detected",
+    )
 }
 
 fn status_as_json(response: &str) -> Result<serde_json::Value> {
@@ -2009,6 +2055,28 @@ mod tests {
             setup_backend_for_mode("experimental", &experimental).unwrap(),
             "input-method"
         );
+    }
+
+    #[test]
+    fn capture_readiness_never_promotes_a_probe_to_verified() {
+        let capabilities = wayexpand_backend_selection::Capabilities {
+            has_input_method_v2: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            capture_readiness(&capabilities, false),
+            (
+                "available-to-try",
+                "a protocol or IBus probe succeeded; live client typing is not verified"
+            )
+        );
+    }
+
+    #[test]
+    fn installed_ibus_is_available_to_try_not_certified() {
+        let (state, detail) = capture_readiness(&Default::default(), true);
+        assert_eq!(state, "available-to-try");
+        assert!(detail.contains("live client typing is not verified"));
     }
 
     #[test]
