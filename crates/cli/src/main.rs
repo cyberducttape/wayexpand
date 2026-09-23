@@ -1050,8 +1050,13 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         );
         println!("{:28} {:?} ({})", status.kind, status.state, detail);
     }
-    if ibus_engine_available() {
+    let ibus_policy_allowed = load_policy()
+        .map(|policy| policy.backend_allowed("input-method-v2"))
+        .unwrap_or(false);
+    if ibus_engine_available() && ibus_policy_allowed {
         println!("IBus WayExpand engine: installed and discoverable (password/PIN awareness)");
+    } else if ibus_engine_available() {
+        println!("IBus WayExpand engine: installed but disallowed by organization policy");
     } else {
         println!("IBus WayExpand engine: not discoverable (install the IBus component to use it)");
     }
@@ -1468,12 +1473,15 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let policy_json = print_policy_diagnostics_json();
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
-    let (capture_state, capture_detail) = capture_readiness(&live_capabilities, ibus_installed);
     let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
         safe_mode: true,
         allowed_backends: vec!["none".into()],
         ..OrganizationPolicy::default()
     });
+    let (capture_state, capture_detail) = capture_readiness(
+        &live_capabilities,
+        ibus_installed && policy.backend_allowed("input-method-v2"),
+    );
     let recommendation = recommended_setup_backend(&live_capabilities, &policy);
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
