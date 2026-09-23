@@ -304,7 +304,7 @@ Diagnostic output suitable for health checks and monitoring systems.
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The setup mode selected from current capabilities; it never turns an experimental path into Recommended mode.
-- `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
+- `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 **Stability:** 🔒 **Stable** — guaranteed to include `healthy`, `config`, `control_socket`, `backends`; new backend states may be added
