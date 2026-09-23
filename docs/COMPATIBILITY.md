@@ -294,6 +294,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.path` (string|null): Socket path (null if WAYEXPAND_SOCKET and XDG_RUNTIME_DIR both unset)
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
+- `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"

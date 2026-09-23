@@ -1597,6 +1597,9 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
         });
     let socket_exists = socket_path.as_ref().is_some_and(|socket| socket.exists());
+    let socket_valid = socket_path
+        .as_deref()
+        .is_none_or(existing_control_socket_is_healthy);
     let policy_result = load_policy();
     let policy = match &policy_result {
         Ok(policy) => policy.clone(),
@@ -1685,7 +1688,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && policy_ok
         && display_session_available()
         && (selection_ok || setup_ibus_ready)
-        && (socket_path.is_none() || socket_exists);
+        && socket_valid;
     println!(
         "{}",
         serde_json::json!({
@@ -1700,6 +1703,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "path": socket_path,
                 "configured": socket_path.is_some(),
                 "exists": socket_exists,
+                "valid": socket_valid,
             },
             "ibus": {
                 "installed": ibus_installed,
@@ -1735,6 +1739,15 @@ fn display_session_flags(wayland_display: bool, wayland_socket: bool, x11_displa
 fn backend_policy_allowed(kind: BackendKind, policy: &OrganizationPolicy) -> Option<bool> {
     kind.policy_name()
         .map(|backend| policy.backend_allowed(backend))
+}
+
+fn existing_control_socket_is_healthy(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    metadata.file_type().is_socket()
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.mode() & 0o077 == 0
 }
 
 fn automatic_selection_is_ready(source: &str, backend: &str, policy: &OrganizationPolicy) -> bool {
@@ -2009,6 +2022,7 @@ fn print_control_socket_diagnostics() -> bool {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             println!("Control socket existing path: not present (will be created)");
+            valid = false;
         }
         Err(error) => {
             println!("Control socket existing path: unreadable ({error})");
@@ -2440,6 +2454,30 @@ mod tests {
         assert!(display_session_flags(true, false, false));
         assert!(display_session_flags(false, true, false));
         assert!(display_session_flags(false, false, true));
+    }
+
+    #[test]
+    fn control_socket_health_rejects_missing_regular_and_insecure_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-control-socket-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let missing = root.join("missing.sock");
+        assert!(!existing_control_socket_is_healthy(&missing));
+
+        let regular = root.join("regular.sock");
+        std::fs::write(&regular, b"not a socket").unwrap();
+        assert!(!existing_control_socket_is_healthy(&regular));
+
+        let socket = root.join("wayexpand.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
+        assert!(existing_control_socket_is_healthy(&socket));
+        drop(listener);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

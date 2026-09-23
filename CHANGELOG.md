@@ -58,6 +58,8 @@ Changes not yet released.
   AppStream/IBus metadata checks enforced by the workflow.
 - Mark the daemon’s stdin-only fallback as unsupported in certification reports
   instead of presenting it as an available automatic keyboard path.
+- Unify human and JSON doctor control-socket validation, including socket type,
+  ownership, permissions, and missing configured sockets.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
