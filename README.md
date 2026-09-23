@@ -287,7 +287,7 @@ navigation, function, Escape, or other unsupported keys. Setup displays its
 warning and requires explicit confirmation before enabling it. Inspect it
 directly with:
 ```sh
-wayexpand setup --experimental-input-method-v2
+wayexpand setup --mode experimental
 ```
 Do not enable it on a production, shared, password-manager, or regulated
 machine unless you have tested the exact compositor and application set.
