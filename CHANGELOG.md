@@ -59,6 +59,8 @@ Changes not yet released.
   instead of reporting their session probes as available.
 - Align the roadmap’s backend-selection strategy with the shared resolver and
   setup compatibility modes.
+- Make `wayexpand certify --json` enumerate the same required scenarios as the
+  checked-in compositor certification matrix.
 - Reject relative XDG and portal-token paths so daemon file locations cannot
   depend on a working directory.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
