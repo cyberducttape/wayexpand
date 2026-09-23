@@ -40,6 +40,9 @@ Changes not yet released.
   authoritative `input-method-v2` backend name.
 - Make release preparation update and verify AppStream and IBus component
   versions so SemVer tags satisfy the release workflow.
+- Increase the bounded systemd task budget to leave room for the daemon’s
+  command and hotkey workers; the previous limit could crash-loop services with
+  `EAGAIN` while starting the hotkey worker.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
