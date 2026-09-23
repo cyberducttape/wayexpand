@@ -42,6 +42,8 @@ Changes not yet released.
   certification records are reproducible rather than merely version-labeled.
 - Require doctor JSON readiness to observe a complete capture/output pair;
   output-only protocol globals no longer imply a usable backend.
+- Add the doctor JSON readiness and selection fields to the checked-in CLI
+  contract fixture so integrations receive an explicit stability guard.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad
