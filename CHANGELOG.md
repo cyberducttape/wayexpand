@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Remove process-wide `HOME` mutation from the GUI import-path test so CI
+  tests remain isolated under parallel execution and older Rust toolchains.
 - Ensure explicit installer service enablement restarts the selected daemon,
   and warn when an ordinary upgrade leaves an existing service process running.
 - Clean up a partially started async command worker when the hotkey worker
