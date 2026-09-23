@@ -6,7 +6,14 @@
 //! IBus signals. Keeping that boundary explicit makes the expansion behavior
 //! testable and prevents D-Bus threading details from entering the matcher.
 
-use std::{env, fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 
 use tracing::{error, warn};
 use wayexpand_core::{Config, ExpansionEngine, InputEvent, OrganizationPolicy};
@@ -24,18 +31,44 @@ pub fn engine_available() -> bool {
         return false;
     }
 
-    let discoverable = Command::new("ibus")
-        .args(["list-engine"])
-        .output()
-        .map(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .any(|line| line.contains("wayexpand"))
-        })
-        .unwrap_or(false);
+    if component_file_present_in(&ibus_component_directories()) {
+        return true;
+    }
 
-    discoverable || component_file_present_in(&ibus_component_directories())
+    ibus_registry_contains_engine()
+}
+
+fn ibus_registry_contains_engine() -> bool {
+    let Ok(mut child) = Command::new("ibus")
+        .args(["list-engine"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map(|output| {
+                        output.status.success()
+                            && String::from_utf8_lossy(&output.stdout)
+                                .lines()
+                                .any(|line| line.contains("wayexpand"))
+                    })
+                    .unwrap_or(false);
+            }
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 fn executable_in_path(name: &str) -> bool {
