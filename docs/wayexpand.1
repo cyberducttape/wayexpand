@@ -11,6 +11,8 @@ wayexpand \- validate and manage WayExpand text-expansion configuration
 \&|\&
 .BR doctor
 \&|\&
+.BR certify
+\&|\&
 .B validate
 .I CONFIG
 .SH DESCRIPTION
@@ -20,9 +22,9 @@ validation.
 .SH COMMANDS
 .TP
 .B setup
-Interactively choose and activate an IBus engine or supported per-user
-backend service after displaying session capabilities and safety tradeoffs.
-Use --backend ibus|input-method|evdev and --yes for reviewed automation.
+Interactively choose a compatibility mode and activate the safest available
+path after displaying session capabilities and safety tradeoffs. Use
+--mode recommended|maximum|experimental and --yes for reviewed automation.
 .TP
 .B edit [CONFIG]
 Open the graphical snippet editor.
@@ -32,6 +34,10 @@ Show the active daemon status.
 .TP
 .B doctor
 Report available input and output backends and their compatibility.
+.TP
+.B certify [--json]
+Produce a machine-readable local certification report. Protocol availability
+is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
 .B validate CONFIG
 Parse and validate a configuration file without starting the daemon.

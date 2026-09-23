@@ -263,12 +263,25 @@ Diagnostic output suitable for health checks and monitoring systems.
       "state": "Implemented",
       "detail": "virtual keyboard globals available"
     }
-  ]
+  ],
+  "automatic_selection": {
+    "source": "evdev",
+    "backend": "libei",
+    "reason": "explicitly selected by setup",
+    "ready": true
+  },
+  "setup_recommendation": {
+    "mode": "recommended",
+    "backend": "ibus",
+    "label": "IBus",
+    "detail": "toolkit-aware committed text",
+    "ready": true
+  }
 }
 ```
 
 **Field stability:**
-- `healthy` (bool): Overall health (config and organization policy valid, and socket operational if configured)
+- `healthy` (bool): Overall health (config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
 - `wayland` (bool): Wayland session detected
 - `config.path` (string): Configuration file path
 - `config.valid` (bool): Configuration syntax valid
@@ -284,6 +297,9 @@ Diagnostic output suitable for health checks and monitoring systems.
   - `availability` (string): One of "Detected", "Unavailable", or "Unknown".
   - `permission` (string): One of "Granted", "Required", or "NotApplicable".
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
+- `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
+- `setup_recommendation` (object): The setup mode selected from current capabilities; it never turns an experimental path into Recommended mode.
+- `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 **Stability:** 🔒 **Stable** — guaranteed to include `healthy`, `config`, `control_socket`, `backends`; new backend states may be added
 

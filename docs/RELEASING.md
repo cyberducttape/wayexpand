@@ -118,7 +118,7 @@ doctor --json` and a real expansion test.
 tar -xzf wayexpand-<version>-linux-x86_64.tar.gz
 cd wayexpand-<version>-linux-x86_64
 ./scripts/install-release.sh
-wayexpand backend select --explain
+wayexpand explain-backend
 # Enable the selected service explicitly; do not implicitly enable
 # input-method-v2 because unsupported non-text keys may be lost.
 ```

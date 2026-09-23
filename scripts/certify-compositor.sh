@@ -28,6 +28,8 @@ case "$compositor" in
     *) printf '%s\n' "error: unsupported compositor name $compositor" >&2; exit 2 ;;
 esac
 
+scenarios='printable-press-release held-keys-repeat modifier-navigation unicode-combining multiline-rapid password-field focus-cross-window config-reload daemon-restart compositor-restart failed-insertion ime-preedit'
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM
 doctor_status=0
@@ -52,7 +54,7 @@ date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     printf '%s\n' '```'
     printf '%s\n\n' 'Daemon status: `'"$status_json"'`'
     printf '%s\n' '## Required scenarios'
-    for scenario in capture-replacement unicode navigation password-field focus-change fast-typing hotplug compositor-restart; do
+    for scenario in $scenarios; do
         result=UNVERIFIED
         if [ -n "$results_file" ] && [ -f "$results_file" ]; then
             result=$(awk -F= -v key="$scenario" '$1 == key {print $2; found=1} END {if (!found) print "UNVERIFIED"}' "$results_file")
@@ -68,7 +70,7 @@ complete=1
 if [ -z "$results_file" ]; then
     complete=0
 else
-    for scenario in capture-replacement unicode navigation password-field focus-change fast-typing hotplug compositor-restart; do
+    for scenario in $scenarios; do
         grep -Eq "^${scenario}=(pass|fail)$" "$results_file" 2>/dev/null || complete=0
     done
 fi

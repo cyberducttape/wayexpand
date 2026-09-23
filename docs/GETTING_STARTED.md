@@ -14,7 +14,7 @@ This is the shortest path from an installed binary to a working snippet.
 
 ```sh
 wayexpand doctor
-wayexpand backend select --explain
+wayexpand explain-backend
 ```
 
 Use the backend combination that `doctor` prints as usable. Backend support is

@@ -68,7 +68,7 @@ bash scripts/test-install-user.sh  # Test installer
   - `backend-wlroots` — wlroots virtual-keyboard (output only)
   - `backend-kwin-window` — KWin window tracking (D-Bus)
 
-**Key principle:** Backend auto-selection is conservative and explainable; use `wayexpand backend select --explain` or explicit `--source`/`--backend` flags.
+**Key principle:** Backend auto-selection is conservative and explainable; use `wayexpand explain-backend` or explicit `--source`/`--backend` flags.
 
 ## Testing Requirements
 

@@ -35,6 +35,11 @@ pub struct Capabilities {
 
     /// Human-readable feature list for diagnostics
     pub feature_summary: &'static str,
+
+    /// Limitations that must be visible to setup, doctor, and certification.
+    /// These are deliberately explicit rather than inferred from a positive
+    /// capability claim.
+    pub limitations: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +77,11 @@ impl Capabilities {
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
                 feature_summary: "UTF-8 direct insertion, multiline, portal-based, layout-independent",
+                limitations: &[
+                    "portal authorization is interactive unless a valid restoration token exists",
+                    "password-field awareness depends on the capture source",
+                    "compositor and portal support require live probing",
+                ],
             }),
             "wlroots" => Some(Capabilities {
                 backend_name: "wlroots",
@@ -85,6 +95,11 @@ impl Capabilities {
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
                 feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard output; no native window tracker",
+                limitations: &[
+                    "no native app_filter window tracker is shipped",
+                    "requires a compositor exposing zwp_virtual_keyboard_v1",
+                    "password-field awareness depends on the capture source",
+                ],
             }),
             "input-method" => Some(Capabilities {
                 backend_name: "input-method",
@@ -97,6 +112,11 @@ impl Capabilities {
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
                 feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support must be probed; non-text key pass-through is experimental",
+                limitations: &[
+                    "exclusive capture can affect unsupported non-text keys",
+                    "IME/preedit behavior is not certified",
+                    "compositor support requires a live protocol probe",
+                ],
             }),
             "evdev" => Some(Capabilities {
                 backend_name: "evdev",
@@ -109,6 +129,11 @@ impl Capabilities {
                 app_filter_native: false,
                 max_replacement_size: 65536, // larger replacements get dropped during key buffering
                 feature_summary: "Input capture only (pairs with libei/wlroots output), no exclusive grab",
+                limitations: &[
+                    "cannot identify password fields",
+                    "global keyboard visibility requires explicit input permissions",
+                    "app_filter is unavailable without a native window tracker",
+                ],
             }),
             "input-method-v2" => Some(Capabilities {
                 backend_name: "input-method-v2",
@@ -121,6 +146,11 @@ impl Capabilities {
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
                 feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking; non-text key pass-through is experimental",
+                limitations: &[
+                    "exclusive capture can affect unsupported non-text keys",
+                    "IME/preedit behavior is not certified",
+                    "compositor support requires a live protocol probe",
+                ],
             }),
             _ => None,
         }

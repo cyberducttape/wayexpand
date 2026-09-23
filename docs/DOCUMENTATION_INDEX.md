@@ -47,6 +47,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 - Feature status per desktop
 - Known limitations
 - Promotion policy
+- Run `wayexpand certify --json` and see [CERTIFICATION.md](CERTIFICATION.md) for evidence requirements
 
 ### I'm contributing code
 → Start with [DEVELOPMENT.md](DEVELOPMENT.md)
@@ -109,6 +110,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 | [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md) | Advanced users | Password field protection details |
 | [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) | Security-conscious administrators | Raw-input permission model and tighter-access investigation |
 | [COMPOSITOR_MATRIX.md](COMPOSITOR_MATRIX.md) | System integrators | Desktop/protocol combinations |
+| [CERTIFICATION.md](CERTIFICATION.md) | QA and system integrators | Machine-readable certification and compositor test requirements |
 
 ### Development & Contribution
 

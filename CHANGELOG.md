@@ -6,6 +6,16 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
+  so routine onboarding chooses a safe path without requiring protocol
+  knowledge; retain `explain-backend` for expert diagnostics.
+- Add `wayexpand certify [--json]` with explicit verified, available,
+  unsupported, authorization-required, and not-run states. Certification
+  refuses to claim desktop support until a real compositor/client harness has
+  exercised typing, focus, password, restart, and reload scenarios.
+- Expose backend limitations in human and JSON diagnostics and document the
+  KDE, GNOME, Sway, and Hyprland certification matrix.
+
 - Harden IBus integration: ignore key-release events, isolate engine instances
   per input context, and surface live configuration reload failures.
 - Make libei portal-token persistence and token location explicit, including

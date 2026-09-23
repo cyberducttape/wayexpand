@@ -84,7 +84,7 @@ has advertised the protocol. The probe lines are the decision:
 Inspect the conservative selection explanation before choosing a backend:
 
 ```sh
-wayexpand backend select --explain
+wayexpand explain-backend
 ```
 
 For an explicit input-method-v2 setup, first acknowledge the intentionally

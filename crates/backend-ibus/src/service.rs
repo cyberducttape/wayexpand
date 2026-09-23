@@ -4,7 +4,7 @@ use std::{
     env,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, Weak,
     },
     time::Duration,
 };
@@ -35,7 +35,7 @@ pub enum IbusServiceError {
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     config: Arc<Mutex<wayexpand_core::Config>>,
-    instances: Arc<Mutex<Vec<Arc<Mutex<IbusEngineAdapter>>>>>,
+    instances: Arc<Mutex<Vec<Weak<Mutex<IbusEngineAdapter>>>>>,
     next_id: AtomicU64,
 }
 
@@ -76,7 +76,7 @@ impl Factory {
         self.instances
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
-            .push(adapter);
+            .push(Arc::downgrade(&adapter));
         Ok(path)
     }
 }
@@ -201,7 +201,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
-    let instances: Arc<Mutex<Vec<Arc<Mutex<IbusEngineAdapter>>>>> =
+    let instances: Arc<Mutex<Vec<Weak<Mutex<IbusEngineAdapter>>>>> =
         Arc::new(Mutex::new(Vec::new()));
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
@@ -249,8 +249,11 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                     if let Ok(mut current) = reload_config.lock() {
                         *current = config.clone();
                     }
-                    if let Ok(instances) = instances.lock() {
-                        for adapter in instances.iter() {
+                    if let Ok(mut instances) = instances.lock() {
+                        instances.retain(|weak| {
+                            let Some(adapter) = weak.upgrade() else {
+                                return false;
+                            };
                             if let Ok(mut adapter) = adapter.lock() {
                                 if let Err(error) = adapter.replace_config(config.clone()) {
                                     let summary = error.safe_summary();
@@ -268,7 +271,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                                     adapter_error = None;
                                 }
                             }
-                        }
+                            true
+                        });
                     }
                 }
                 std::thread::sleep(Duration::from_millis(250));
