@@ -18,6 +18,7 @@ backend=
 keyboard_layout=
 target_apps=
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
+format=markdown
 results_file=
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -27,15 +28,20 @@ while [ "$#" -gt 0 ]; do
         --layout) keyboard_layout=${2:?missing value for --layout}; shift 2 ;;
         --target-apps) target_apps=${2:?missing value for --target-apps}; shift 2 ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
+        --format) format=${2:?missing value for --format}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--format markdown|json] [--output FILE] [--results FILE]"
             printf '%s\n' "results format: one SCENARIO=pass|fail entry per line"
             exit 0
             ;;
         *) printf '%s\n' "error: unknown option $1" >&2; exit 2 ;;
     esac
 done
+[ "$format" = markdown ] || [ "$format" = json ] || {
+    printf '%s\n' "error: --format must be markdown or json" >&2
+    exit 2
+}
 [ -n "$compositor" ] || { printf '%s\n' "error: --compositor is required" >&2; exit 2; }
 
 [ -n "$backend" ] || {
@@ -108,9 +114,57 @@ wayexpand doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_sta
 status_json='unavailable'
 if wayexpand status --json >"$tmp/status.json" 2>/dev/null; then
     status_json=$(cat "$tmp/status.json")
+else
+    status_json=null
+fi
+doctor_json=$(cat "$tmp/doctor.json")
+if ! printf '%s' "$doctor_json" | jq -e . >/dev/null 2>&1; then
+    doctor_json=null
+fi
+if ! printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
+    status_json=null
 fi
 
+complete=1
+failed=0
+scenario_json='[]'
+for scenario in $scenarios; do
+    result=UNVERIFIED
+    if [ -n "$results_file" ] && [ -f "$results_file" ]; then
+        result=$(awk -F= -v key="$scenario" '$1 == key {print $2; found=1} END {if (!found) print "UNVERIFIED"}' "$results_file")
+    fi
+    case "$result" in pass|fail|UNVERIFIED) ;; *) result=INVALID ;; esac
+    scenario_json=$(printf '%s' "$scenario_json" | jq -c --arg name "$scenario" --arg result "$result" '. + [{name: $name, result: $result}]')
+    if [ "$result" != pass ]; then
+        complete=0
+        [ "$result" = fail ] && failed=1
+    fi
+done
+certified=false
+[ "$complete" -eq 1 ] && certified=true
+
 date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [ "$format" = json ]; then
+    target_apps_json=$(printf '%s' "$target_apps" | jq -Rsc 'split(",") | map(select(length > 0))')
+    jq -n \
+        --arg compositor "$compositor" \
+        --arg compositor_version "$compositor_version" \
+        --arg backend "$backend" \
+        --arg keyboard_layout "$keyboard_layout" \
+        --arg desktop "${XDG_CURRENT_DESKTOP:-unknown}" \
+        --arg session "${XDG_SESSION_TYPE:-unknown}" \
+        --arg recorded_at_utc "$date_utc" \
+        --argjson target_apps "$target_apps_json" \
+        --argjson doctor "$doctor_json" \
+        --argjson status "$status_json" \
+        --argjson scenarios "$scenario_json" \
+        --argjson certified "$certified" \
+        '{schema: 1, certified: $certified, compositor: $compositor,
+          compositor_version: $compositor_version, backend: $backend,
+          keyboard_layout: $keyboard_layout, target_apps: $target_apps,
+          desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
+          doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"
+else
 {
     printf '%s\n\n' "# WayExpand compositor certification evidence"
     printf '%s\n' "- compositor_version: $compositor_version"
@@ -139,20 +193,9 @@ date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     done
     printf '\n%s\n' 'A PASS result is valid only when the operator records the exact compositor version, backend, layout, target application, and observed behavior. **UNVERIFIED is not certified.**'
 } >"$output"
+fi
 printf '%s\n' "wrote $output"
 
-complete=1
-failed=0
-if [ -z "$results_file" ]; then
-    complete=0
-else
-    for scenario in $scenarios; do
-        if ! grep -Eq "^$scenario=pass$" "$results_file" 2>/dev/null; then
-            complete=0
-            grep -Eq "^$scenario=fail$" "$results_file" 2>/dev/null && failed=1
-        fi
-    done
-fi
 if [ "$complete" -eq 0 ]; then
     if [ "$failed" -eq 1 ]; then
         printf '%s\n' "certification failed: one or more scenarios were explicitly marked fail" >&2

@@ -71,6 +71,20 @@ scripts/certify-compositor.sh --compositor kde --version 6.6.2 \
   --output kde-run.md
 ```
 
+Use `--format json` when a machine-readable evidence record is required:
+
+```sh
+scripts/certify-compositor.sh --format json --compositor kde \
+  --version 6.6.2 --backend ibus --layout us \
+  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --results kde-results.txt --output kde-run.json
+```
+
+The JSON record includes the exact session metadata, live doctor/status
+snapshots, and one result object for every matrix scenario. It reports
+`certified: false` for missing or failed evidence; it does not replace the
+CLI preflight report or turn protocol availability into a certification.
+
 It captures the live doctor/status probes and writes every required scenario as
 `UNVERIFIED`; it never treats a probe as certification. A compositor-specific
 operator or self-hosted driver can provide a results file, for example:

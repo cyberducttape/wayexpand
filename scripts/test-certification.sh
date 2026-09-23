@@ -25,12 +25,28 @@ run_certification --results "$results" --output "$output"
 grep -F -- '- keyboard_layout: us' "$output" >/dev/null
 grep -F -- '- target_apps: gtk4-demo,qt6-demo' "$output" >/dev/null
 
+json_output="$test_root/certification.json"
+run_certification --format json --results "$results" --output "$json_output"
+jq -e '
+    .schema == 1 and .certified == true and
+    .compositor == "kde" and .backend == "ibus" and
+    .keyboard_layout == "us" and
+    .target_apps == ["gtk4-demo", "qt6-demo"] and
+    ([.scenarios[] | select(.result == "pass")] | length == 12)
+' "$json_output" >/dev/null
+
 missing="$test_root/missing.txt"
 sed '$d' "$results" >"$missing"
 if run_certification --results "$missing" --output "$test_root/missing.md"; then
     printf '%s\n' 'certification accepted an incomplete results file' >&2
     exit 1
 fi
+missing_json="$test_root/missing.json"
+if run_certification --format json --results "$missing" --output "$missing_json"; then
+    printf '%s\n' 'JSON certification accepted an incomplete results file' >&2
+    exit 1
+fi
+jq -e '.schema == 1 and .certified == false and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1)' "$missing_json" >/dev/null
 
 failed="$test_root/failed.txt"
 sed '1s/=pass$/=fail/' "$results" >"$failed"
