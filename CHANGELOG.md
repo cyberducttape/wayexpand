@@ -54,6 +54,8 @@ Changes not yet released.
   publishing job; reusable verification CI remains read-only.
 - Update the CI dependency audit tool to cargo-audit 0.22.2, which parses the
   current RustSec advisory database including CVSS 4.0 records.
+- Align release documentation with the pinned release compiler and the
+  AppStream/IBus metadata checks enforced by the workflow.
 - Update doctor’s configuration test to distinguish valid configuration from
   unavailable desktop backends.
 - Document the backend-specific certification probe rules, including the IBus
