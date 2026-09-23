@@ -123,17 +123,11 @@ printf '%s\n' ""
 printf '%s\n' "3. Check which backend your compositor supports:"
 printf '%s\n' "   wayexpand doctor"
 printf '%s\n' ""
-printf '%s\n' "4. Run setup, then choose ONE production backend explicitly:"
+printf '%s\n' "4. Run guided setup (it selects a safe detected compatibility mode):"
 printf '%s\n' "   wayexpand setup"
-printf '%s\n' "   wayexpand explain-backend"
-printf '%s\n' ""
-printf '%s\n' "   EXPERIMENTAL input-method-v2 (may lose unsupported non-text keys):"
-printf '%s\n' "   systemctl --user enable --now wayexpand-input-method.service"
-printf '%s\n' ""
-printf '%s\n' "   FOR KDE PLASMA / SWAY / HYPRLAND (evdev):"
-printf '%s\n' "   (1) sudo ./scripts/install-evdev-permissions.sh"
-printf '%s\n' "   (2) Log out and back in"
-printf '%s\n' "   (3) systemctl --user enable --now wayexpand-evdev.service"
+printf '%s\n' "   wayexpand status"
+printf '%s\n' "   wayexpand doctor"
+printf '%s\n' "   (setup never grants raw-input permissions or portal consent)"
 printf '%s\n' ""
 printf '%s\n' "5. Edit snippets:"
 printf '%s\n' "   wayexpand edit"
@@ -143,7 +137,7 @@ printf '%s\n' "The stdin test harness is not installed as a user service."
 if [ "$enable_service" -eq 1 ]; then
     if [ -z "$service_name" ]; then
         printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-        printf '%s\n' "choose wayexpand-input-method.service only after accepting its key pass-through limitation, or wayexpand-evdev.service for the normal route" >&2
+        printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
         exit 2
     fi
     "$bin_dir/wayexpand" validate "$config_path"
