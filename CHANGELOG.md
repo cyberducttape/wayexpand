@@ -20,6 +20,9 @@ Changes not yet released.
 - Record the matrix-derived client markers in each JSON certification report.
 - Quote explicit certification CLI paths so binaries in directories containing
   spaces are probed exactly as requested.
+- Require compositor evidence to include a healthy doctor result and a valid
+  daemon-status snapshot before it can be certified, with regression coverage
+  for unhealthy probes.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
