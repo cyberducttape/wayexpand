@@ -59,7 +59,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 **Status:**
 - KDE: ✅ Solid (KWin D-Bus scripting)
 - Sway/Hyprland/river: ✅ Implemented (wlroots `wlr-foreign-toplevel-management-v1`), needs real-world certification
-- GNOME/Mutter: ❌ No usable protocol path exists (see `docs/GNOME_WINDOW_TRACKING.md`)
+- GNOME/Mutter: ❌ No usable protocol path exists (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
 
 ### 5. Portal Token Persistence (libei)
 
@@ -249,7 +249,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 
 ## References
 
-- [PROFESSIONAL_ROADMAP.md](PROFESSIONAL_ROADMAP.md) — Detailed feature roadmap
+- [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md) — Detailed feature roadmap
 - [SECURITY.md](../SECURITY.md) — Threat model and vulnerability disclosure
 - [COMPATIBILITY.md](COMPATIBILITY.md) — Stability guarantees
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — Current backend/compositor status

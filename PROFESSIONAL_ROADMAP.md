@@ -126,6 +126,7 @@ desktop Linux users but does not prevent use in controlled environments
 - Sway: ✅ Ready (Phase 3 complete, needs real-world testing)
 - Hyprland: ✅ Ready (Phase 3 complete, needs real-world testing)
 - river: ✅ Ready (Phase 3 complete, needs real-world testing)
+- GNOME: ❌ No usable protocol path (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
 
 ### Libei-First Backend Auto-Selection (Phase 4)
 
