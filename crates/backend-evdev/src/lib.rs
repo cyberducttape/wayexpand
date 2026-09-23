@@ -35,6 +35,14 @@
 
 mod device;
 
+/// Return whether at least one actual keyboard event device is readable.
+/// This is the same capability test used by [`EvdevSource::connect`], exposed
+/// so setup and doctor do not mistake a readable mouse or touchpad node for a
+/// usable keyboard.
+pub fn readable_keyboard_available() -> bool {
+    !device::discover_keyboards().keyboards.is_empty()
+}
+
 use std::{
     collections::{HashSet, VecDeque},
     os::fd::BorrowedFd,

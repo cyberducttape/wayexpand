@@ -33,6 +33,8 @@ Changes not yet released.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
   `READY`; probe results are reported as available-to-try until live typing is
   certified.
+- Share evdev's keyboard-capability probe with setup and doctor so readable
+  non-keyboard event nodes cannot be presented as usable capture devices.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. Launchpad synchronization now uses the canonical SSH

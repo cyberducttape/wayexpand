@@ -5,8 +5,9 @@
 //! WayExpand actually start? Keeping probing, policy, and explanation here
 //! prevents the user-facing answer from drifting away from daemon behavior.
 
-use std::{env, fmt, fs::File};
+use std::{env, fmt};
 use tracing::{debug, warn};
+use wayexpand_backend_evdev::readable_keyboard_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 
@@ -188,7 +189,7 @@ impl Compositor {
 pub fn probe_capabilities() -> Capabilities {
     let is_wayland =
         env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("WAYLAND_SOCKET").is_some();
-    let has_dev_input = has_readable_input_device();
+    let has_dev_input = readable_keyboard_available();
     let has_input_method_v2 = is_wayland && InputMethodSource::probe().is_ok();
     let has_virtual_keyboard = is_wayland && WlrootsInjector::probe().is_ok();
     // Portal probing would show a consent dialog. An existing direct EIS
@@ -205,15 +206,6 @@ pub fn probe_capabilities() -> Capabilities {
     };
     debug!(?capabilities, "probed backend capabilities");
     capabilities
-}
-
-fn has_readable_input_device() -> bool {
-    let Ok(entries) = std::fs::read_dir("/dev/input") else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        entry.file_name().to_string_lossy().starts_with("event") && File::open(entry.path()).is_ok()
-    })
 }
 
 /// Pure policy: select a compatible source/backend pair from capabilities.
