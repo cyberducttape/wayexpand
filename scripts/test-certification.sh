@@ -32,6 +32,7 @@ jq -e '
     .schema == 1 and .certified == true and .status == "certified" and
     .compositor == "kde" and .backend == "ibus" and
     .keyboard_layout == "us" and
+    .required_client_markers == ["gtk", "qt", "password"] and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
     .target_apps == ["gtk4-demo", "qt6-demo", "password-field"] and
     ([.scenarios[] | select(.result == "pass")] | length == 12)

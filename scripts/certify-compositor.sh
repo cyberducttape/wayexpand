@@ -170,6 +170,8 @@ certification_status=incomplete
 date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "$format" = json ]; then
     target_apps_json=$(printf '%s' "$target_apps" | jq -Rsc 'split(",") | map(select(length > 0))')
+    required_client_markers_json=$(jq -c --arg compositor "$compositor" \
+        '.targets[] | select(.id == $compositor) | .required_client_markers' "$matrix")
     jq -n \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
@@ -179,6 +181,7 @@ if [ "$format" = json ]; then
         --arg session "${XDG_SESSION_TYPE:-unknown}" \
         --arg recorded_at_utc "$date_utc" \
         --argjson target_apps "$target_apps_json" \
+        --argjson required_client_markers "$required_client_markers_json" \
         --argjson doctor "$doctor_json" \
         --argjson status "$status_json" \
         --argjson scenarios "$scenario_json" \
@@ -190,6 +193,7 @@ if [ "$format" = json ]; then
           status: $certification_status,
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
+          required_client_markers: $required_client_markers,
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
           doctor_exit: $doctor_exit, doctor_probe_valid: ($doctor_probe_valid == 1),
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"

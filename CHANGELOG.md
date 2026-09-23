@@ -17,6 +17,7 @@ Changes not yet released.
   clients before any compositor report can be marked complete.
 - Make required certification client coverage declarative in the compositor
   matrix so the evidence tools share one source of truth.
+- Record the matrix-derived client markers in each JSON certification report.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
