@@ -82,3 +82,13 @@ Normal setup uses compatibility modes instead of exposing protocol names:
 Experts can inspect the underlying protocol decision with
 `wayexpand explain-backend`. Administrators may continue to select exact
 daemon source/backend arguments in service configuration.
+
+## Self-hosted workflow
+
+The manual `.github/workflows/certification.yml` workflow runs the four target
+desktops as a matrix on self-hosted runners. Each runner must provide an
+executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
+`WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
+`WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
+Missing driver or session metadata fails the job; hosted CI is never treated as
+a substitute for a real compositor session.
