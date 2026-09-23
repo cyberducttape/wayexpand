@@ -144,7 +144,9 @@ can restore authorization on reconnect. Setting
 - [ ] Publish Fedora Copr (see PACKAGING.md)
 - [ ] Invest in simple landing/demo site
 - [ ] Create 2-3 short video clips (first-run, snippet creation, real-world use)
-- [ ] Build certified-compositor matrix and publish in SUPPORT_MATRIX.md
+- [x] Define and validate the certified-compositor matrix in
+  `tests/certification/compositor-matrix.json`, with the support status linked
+  from `docs/SUPPORT_MATRIX.md`
 
 ### Certification on the Big Four Compositors
 
