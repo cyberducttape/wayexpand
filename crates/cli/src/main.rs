@@ -1515,11 +1515,15 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
         });
     let socket_exists = socket_path.as_ref().is_some_and(|socket| socket.exists());
-    let policy = load_policy().unwrap_or_else(|_| OrganizationPolicy {
-        safe_mode: true,
-        allowed_backends: vec!["none".into()],
-        ..OrganizationPolicy::default()
-    });
+    let policy_result = load_policy();
+    let policy = match &policy_result {
+        Ok(policy) => policy.clone(),
+        Err(_) => OrganizationPolicy {
+            safe_mode: true,
+            allowed_backends: vec!["none".into()],
+            ..OrganizationPolicy::default()
+        },
+    };
     let backends: Vec<_> = discover_backends()
         .into_iter()
         .map(|status| {
@@ -1535,7 +1539,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
         .collect();
     let ibus_installed = ibus_engine_available();
-    let policy_json = print_policy_diagnostics_json();
+    let policy_json = print_policy_diagnostics_json(&policy_result);
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
     let (capture_state, capture_detail) =
@@ -1923,9 +1927,7 @@ fn load_policy() -> Result<OrganizationPolicy> {
     wayexpand_core::load_organization_policy().map_err(|error| anyhow::anyhow!(error))
 }
 
-fn print_policy_diagnostics_json() -> serde_json::Value {
-    let policy_result = load_policy();
-
+fn print_policy_diagnostics_json(policy_result: &Result<OrganizationPolicy>) -> serde_json::Value {
     let policy_json = match policy_result {
         Ok(policy) => {
             serde_json::json!({
