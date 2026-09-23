@@ -1,14 +1,14 @@
 #!/bin/sh
 # Prepare a WayExpand release by syncing version across all sources.
 # This script updates Cargo.toml/Cargo.lock, CHANGELOG.md, debian/changelog,
-# PKGBUILD, the RPM spec, and creates a git tag.
+# distro and desktop metadata, and creates a git tag.
 #
 # Usage:
 #   ./scripts/prepare-release.sh 1.2.0
 #
 # The script will:
 #   1. Verify the new version format (X.Y.Z)
-#   2. Update Cargo.toml/Cargo.lock, CHANGELOG.md, PKGBUILD, and the RPM spec
+#   2. Update Cargo.toml/Cargo.lock, CHANGELOG.md, distro and desktop metadata
 #   3. Update debian/changelog with a new entry
 #   4. Commit the changes as Stephan Loesevitz
 #   5. Create a git tag
@@ -110,6 +110,12 @@ sed -i.bak "s/^pkgver=.*/pkgver=$new_version/" PKGBUILD
 rm -f PKGBUILD.bak
 sed -i.bak "s/^Version:        .*/Version:        $new_version/" wayexpand.spec
 rm -f wayexpand.spec.bak
+sed -i.bak "0,/<release version=\"[^\"]*\"/s//<release version=\"$new_version\"/" \
+    io.github.itchyitchy123.WayExpand.metainfo.xml
+rm -f io.github.itchyitchy123.WayExpand.metainfo.xml.bak
+sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
+    desktop/wayexpand-ibus.xml
+rm -f desktop/wayexpand-ibus.xml.bak
 spec_tmp=$(mktemp)
 awk -v version="$new_version" -v date="$release_date" '
     !inserted && /^%changelog$/ {
@@ -142,11 +148,16 @@ test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | head -n1)" = "$ne
 test "$(sed -n 's/^pkgver=//p' PKGBUILD)" = "$new_version"
 test "$(sed -n 's/^Version: *//p' wayexpand.spec)" = "$new_version"
 test "$(sed -n "s/^wayexpand (\([^ -]*\)-.*/\1/p" debian/changelog | head -n1)" = "$new_version"
+test "$(sed -n 's/.*<release version=\"\([^\"]*\)\".*/\1/p' \
+    io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)" = "$new_version"
+test "$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' \
+    desktop/wayexpand-ibus.xml | head -n1)" = "$new_version"
 grep -q "^## \[$new_version\]" CHANGELOG.md
 
 # 5. Commit changes with the project maintainer identity.
 printf '%s\n' "Committing version updates..."
-git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec
+git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
+    io.github.itchyitchy123.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml
 git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
     commit -m "release: version $new_version"
 

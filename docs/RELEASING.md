@@ -37,9 +37,9 @@ also exercise newer compilers, but a release must not depend on whichever
 4. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
    section.
 5. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
-   changelogs, `PKGBUILD`, and RPM spec, then creates the maintainer-authored
-   commit and tag. Review the generated release section and recompute the
-   `PKGBUILD` source checksum before publishing.
+   changelogs, distro metadata, AppStream, and the IBus component, then creates
+   the maintainer-authored commit and tag. Review the generated release section
+   and recompute the `PKGBUILD` source checksum before publishing.
 6. Regenerate `Cargo.lock` if dependency versions changed, then run the
    release checks again.
 
