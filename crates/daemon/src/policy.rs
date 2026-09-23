@@ -185,7 +185,7 @@ mod tests {
             allowed_backends: vec!["libei".to_string()],
             ..Default::default()
         };
-        assert!(check_expansion_allowed(&policy, 1024, false, "input-method").is_err());
+        assert!(check_expansion_allowed(&policy, 1024, false, "input-method-v2").is_err());
     }
 
     #[test]
@@ -274,13 +274,13 @@ safe_mode = true
 disable_hotkeys = false
 disable_title_matching = false
 max_replacement_size = 65536
-allowed_backends = ["input-method", "libei"]
+allowed_backends = ["input-method-v2", "libei"]
 "#,
         )
         .expect("the documented Ansible policy must load");
 
         assert!(policy.safe_mode);
-        assert_eq!(policy.allowed_backends, ["input-method", "libei"]);
+        assert_eq!(policy.allowed_backends, ["input-method-v2", "libei"]);
     }
 
     #[test]

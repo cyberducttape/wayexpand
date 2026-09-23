@@ -36,6 +36,8 @@ Changes not yet released.
   IBus or automatic output backend is the active safe mode.
 - Make doctor readiness and human backend diagnostics hide policy-disallowed
   IBus paths instead of reporting them as available to try.
+- Correct the daemon’s published organization-policy test fixture to use the
+  authoritative `input-method-v2` backend name.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
