@@ -12,8 +12,12 @@ printf '%s\n' \
     'replacement = "ok"' >"$config_path"
 chmod 0600 "$config_path"
 
-WAYEXPAND_CONFIG="$config_path" \
-    "$project_dir/target/debug/wayexpand" doctor >"$test_root/valid.out"
+if WAYEXPAND_CONFIG="$config_path" \
+    "$project_dir/target/debug/wayexpand" doctor >"$test_root/valid.out" 2>&1; then
+    :
+fi
+# A valid configuration can still produce an unhealthy result when the test
+# host has no usable compositor path; inspect the diagnostics separately.
 grep -F 'Config validation: OK' "$test_root/valid.out" >/dev/null
 
 "$project_dir/target/debug/wayexpand" set-mode :doctor word-boundary "$config_path" \
@@ -21,12 +25,12 @@ grep -F 'Config validation: OK' "$test_root/valid.out" >/dev/null
 grep -F 'word-boundary :doctor' "$test_root/set-mode.out" >/dev/null
 grep -F 'match_mode = "word-boundary"' "$config_path" >/dev/null
 
-"$project_dir/target/debug/wayexpand" doctor "$config_path" >"$test_root/valid-positional.out"
+"$project_dir/target/debug/wayexpand" doctor "$config_path" >"$test_root/valid-positional.out" 2>&1 || :
 grep -F 'Config validation: OK' "$test_root/valid-positional.out" >/dev/null
 
 symlink_path="$test_root/config-link.toml"
 ln -s "$config_path" "$symlink_path"
-"$project_dir/target/debug/wayexpand" doctor "$symlink_path" >"$test_root/valid-symlink.out"
+"$project_dir/target/debug/wayexpand" doctor "$symlink_path" >"$test_root/valid-symlink.out" 2>&1 || :
 grep -F 'Config validation: OK' "$test_root/valid-symlink.out" >/dev/null
 
 control_parent="$test_root/control-parent"
