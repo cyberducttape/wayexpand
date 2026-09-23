@@ -46,7 +46,8 @@ jobs:
           status=$?
           set -e
           printf '%s\n' "$response"
-          if [ "$status" -ne 1 ] || ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
+          if { [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; } \
+            || ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
             echo 'Launchpad SSH authorization did not succeed.' >&2
             exit 1
           fi
