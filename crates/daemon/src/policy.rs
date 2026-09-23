@@ -37,31 +37,7 @@ fn expansion_policy_violations(
     has_command: bool,
     backend: &str,
 ) -> Option<String> {
-    let mut violations = Vec::new();
-
-    if has_command && policy.disable_commands {
-        violations.push("command execution is disabled by organization policy".to_string());
-    }
-
-    if !policy.replacement_size_allowed(replacement_size) {
-        violations.push(format!(
-            "replacement size {} bytes exceeds policy limit of {} bytes",
-            replacement_size, policy.max_replacement_size
-        ));
-    }
-
-    if !policy.backend_allowed(backend) {
-        violations.push(format!(
-            "backend '{}' is not in allowed list: {:?}",
-            backend, policy.allowed_backends
-        ));
-    }
-
-    if violations.is_empty() {
-        None
-    } else {
-        Some(violations.join("; "))
-    }
+    policy.expansion_policy_violation(replacement_size, has_command, backend)
 }
 
 /// Check if an expansion should be allowed under the current policy.

@@ -6,11 +6,13 @@
 //! IBus signals. Keeping that boundary explicit makes the expansion behavior
 //! testable and prevents D-Bus threading details from entering the matcher.
 
-use wayexpand_core::{Config, ExpansionEngine, InputEvent};
+use tracing::{error, warn};
+use wayexpand_core::{Config, ExpansionEngine, InputEvent, OrganizationPolicy};
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
 // crate is not used because it adds a mandatory libdbus system dependency.
 const IBUS_RELEASE_MASK: u32 = 1 << 30;
+const IBUS_BACKEND_NAME: &str = "input-method-v2";
 
 mod service;
 
@@ -38,13 +40,20 @@ pub struct IbusKeyResult {
 pub struct IbusEngineAdapter {
     engine: ExpansionEngine,
     enabled: bool,
+    policy: OrganizationPolicy,
 }
 
 impl IbusEngineAdapter {
     pub fn new(engine: ExpansionEngine) -> Self {
+        Self::with_policy(engine, OrganizationPolicy::default())
+    }
+
+    pub fn with_policy(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
+        apply_policy_to_engine(&mut engine, &policy);
         Self {
             engine,
             enabled: true,
+            policy,
         }
     }
 
@@ -67,6 +76,7 @@ impl IbusEngineAdapter {
         if self.engine.async_commands_enabled() {
             engine.enable_async_commands();
         }
+        apply_policy_to_engine(&mut engine, &self.policy);
         self.engine = engine;
         Ok(())
     }
@@ -135,7 +145,28 @@ impl IbusEngineAdapter {
         };
         let results = self.engine.process(event);
         let mut actions = Vec::new();
+        let mut policy_blocked = false;
         for result in results {
+            if let Some(violation) = self.policy.expansion_policy_violation(
+                result.insert.len(),
+                result.command_backed,
+                IBUS_BACKEND_NAME,
+            ) {
+                if self.policy.safe_mode {
+                    error!(
+                        audit_prefix = %self.policy.audit_prefix,
+                        violation = %violation,
+                        "IBus expansion blocked by organization policy"
+                    );
+                    policy_blocked = true;
+                    continue;
+                }
+                warn!(
+                    audit_prefix = %self.policy.audit_prefix,
+                    violation = %violation,
+                    "IBus expansion violates organization policy; audit mode permits it"
+                );
+            }
             actions.push(IbusAction::DeleteSurroundingText {
                 // IBus invokes the engine before forwarding the key to the
                 // client. The delimiter is not in the client's surrounding
@@ -148,6 +179,15 @@ impl IbusEngineAdapter {
                 replacement.push(character);
             }
             actions.push(IbusAction::CommitText(replacement));
+        }
+
+        if policy_blocked {
+            // The trigger characters have already been committed as ordinary
+            // IBus text. Do not leave a partial matcher after a blocked
+            // replacement; the current key is handled by the normal fallback
+            // below and the next trigger starts from a clean boundary.
+            self.engine.process(InputEvent::Reset);
+            actions.clear();
         }
 
         if actions.is_empty() {
@@ -172,6 +212,11 @@ impl IbusEngineAdapter {
     }
 }
 
+fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
+    engine.set_commands_disabled(policy.safe_mode && policy.disable_commands);
+    engine.set_title_matching_disabled(policy.disable_title_matching);
+}
+
 /// Convert the printable XKB keysyms that IBus supplies to Unicode.
 /// Keysyms in the Unicode range are intentionally handled without a keymap;
 /// layout/dead-key composition has already happened before IBus receives the
@@ -190,7 +235,7 @@ fn keysym_to_char(keysym: u32) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayexpand_core::{Config, ExpansionEngine};
+    use wayexpand_core::{Config, ExpansionEngine, OrganizationPolicy};
 
     fn adapter() -> IbusEngineAdapter {
         let config: Config = toml::from_str(
@@ -213,6 +258,17 @@ match_mode = "word-boundary"
         )
         .unwrap();
         IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
+    }
+
+    fn policy_adapter(policy: OrganizationPolicy) -> IbusEngineAdapter {
+        let config: Config = toml::from_str(
+            r#"[[expansion]]
+trigger = ":sig"
+replacement = "signature"
+"#,
+        )
+        .unwrap();
+        IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy)
     }
 
     #[test]
@@ -327,5 +383,37 @@ match_mode = "word-boundary"
         assert!(completed
             .actions
             .contains(&IbusAction::CommitText("signature".into())));
+    }
+
+    #[test]
+    fn safe_organization_policy_blocks_disallowed_ibus_expansion() {
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            allowed_backends: vec!["libei".into()],
+            ..Default::default()
+        });
+        for character in ":sig".chars() {
+            let result = adapter.process_key_event(character as u32, 0, 0);
+            if character == 'g' {
+                assert_eq!(result.actions, vec![IbusAction::CommitText("g".into())]);
+            }
+        }
+    }
+
+    #[test]
+    fn audit_organization_policy_allows_but_reports_disallowed_ibus_expansion() {
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: false,
+            allowed_backends: vec!["libei".into()],
+            ..Default::default()
+        });
+        for character in ":sig".chars() {
+            let result = adapter.process_key_event(character as u32, 0, 0);
+            if character == 'g' {
+                assert!(result
+                    .actions
+                    .contains(&IbusAction::CommitText("signature".into())));
+            }
+        }
     }
 }

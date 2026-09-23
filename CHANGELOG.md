@@ -28,6 +28,8 @@ Changes not yet released.
   systemd/XDG-safe paths and tests for disabled persistence.
 - Unify organization-policy parsing and trust validation across the daemon,
   CLI, and diagnostics; doctor health now reflects policy and backend state.
+- Apply the same root-owned organization policy to IBus as to the daemon, and
+  make setup/doctor refuse to recommend policy-disallowed input paths.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
