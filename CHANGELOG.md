@@ -9,6 +9,8 @@ Changes not yet released.
 - Make Launchpad synchronization use its decoded SSH key explicitly in the
   push step; GitHub Actions does not preserve an ssh-agent environment between
   steps.
+- Add a non-secret Launchpad SSH preflight that reports the decoded key
+  fingerprint and distinguishes authentication failure from push failure.
 - Make the headless capture-readiness regression test accept the documented
   `not-probed` state used by CI runners without a graphical session.
 - Serialize CI test harnesses to avoid hosted-runner races in tests that

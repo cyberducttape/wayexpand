@@ -34,6 +34,23 @@ jobs:
           EOF
           chmod 600 ~/.ssh/config
 
+      - name: Verify Launchpad SSH authorization
+        run: |
+          test -s ~/.ssh/launchpad_key
+          fingerprint="$(ssh-keygen -y -f ~/.ssh/launchpad_key | ssh-keygen -lf - | awk '{print $2}')"
+          echo "Launchpad key fingerprint: $fingerprint"
+          set +e
+          response="$(ssh -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key \
+            -T cyberducttape@git.launchpad.net 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$response"
+          if [ "$status" -ne 1 ] || ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
+            echo 'Launchpad SSH authorization did not succeed.' >&2
+            exit 1
+          fi
+
       - name: Push GitHub main to Launchpad
         env:
           GIT_SSH_COMMAND: ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key
