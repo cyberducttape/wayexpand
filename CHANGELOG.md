@@ -34,6 +34,8 @@ Changes not yet released.
 - Synchronize the installed man page with the complete CLI command surface.
 - Align installer onboarding with compatibility-mode setup instead of telling
   users to choose an unverified production backend manually.
+- Add a matrix-driven compositor certification driver contract so real GTK/Qt
+  runners can execute every KDE, GNOME, Sway, and Hyprland scenario uniformly.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
