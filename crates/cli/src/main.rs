@@ -1187,7 +1187,7 @@ fn print_certification(json: bool) -> Result<bool> {
             "configuration",
             "active configuration",
             "verified",
-            "the default configuration parses and passes security validation",
+            "the configured expansion file parses and passes security validation",
         ),
         Err(error) => add_check(
             "configuration",
@@ -1325,6 +1325,11 @@ fn print_certification(json: bool) -> Result<bool> {
             "GTK and Qt client behavior still requires live certification",
             "IME/preedit composition is not supported",
             "surrounding-text behavior depends on the client toolkit",
+        ]
+    } else if selected_capture == "stdin" {
+        vec![
+            "no automatic keyboard input path is selected",
+            "text expansion is available only through the stdin test harness",
         ]
     } else {
         wayexpand_core::all_capabilities()
