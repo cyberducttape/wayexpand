@@ -46,4 +46,11 @@ if "$project_dir/scripts/certify-compositor.sh" \
     exit 1
 fi
 
+if "$project_dir/scripts/certify-compositor.sh" \
+    --compositor sway --version 1.10 --backend ibus \
+    --layout us --target-apps gtk >/dev/null 2>&1; then
+    printf '%s\n' 'certification accepted an incompatible compositor/backend path' >&2
+    exit 1
+fi
+
 printf '%s\n' 'certification contract test passed'

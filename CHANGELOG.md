@@ -18,6 +18,8 @@ Changes not yet released.
 - Require compositor version/backend metadata and all scenarios to pass in
   certification evidence; explicit failures can no longer produce a passing
   evidence record.
+- Validate certification backend/compositor combinations and check the KDE,
+  GNOME, Sway, and Hyprland matrix contract in CI.
 - Use a named IBus release-mask constant shared by the adapter and regression
   tests; the official ibus-rs binding was evaluated but rejected because it
   adds a mandatory native libdbus build dependency.

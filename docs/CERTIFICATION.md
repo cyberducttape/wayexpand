@@ -28,7 +28,8 @@ clients:
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
 CI validates that all four required desktop targets and all twelve scenarios
-remain present.
+remain present, and rejects evidence that pairs a compositor with a backend
+outside its declared certification paths.
 
 | Environment | Required coverage |
 | --- | --- |
