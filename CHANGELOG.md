@@ -38,6 +38,8 @@ Changes not yet released.
   before collecting doctor and evidence probes.
 - Protect the four-desktop certification workflow with a matrix contract test
   that checks its driver, evidence, and runner-metadata requirements.
+- Align human doctor capture readiness with JSON diagnostics when IBus is the
+  only available, policy-allowed input path.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification
