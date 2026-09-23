@@ -15,3 +15,4 @@ categories.workspace = true
 tracing.workspace = true
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
+wayexpand-backend-evdev = { path = "../backend-evdev" }

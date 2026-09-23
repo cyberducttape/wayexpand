@@ -19,8 +19,8 @@ use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind,
-    BackendState, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
+    all_capabilities, default_config_path, discover_backends, import_espanso, Config,
+    ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
 };
 
 use args::{take_json_flag, take_option};
@@ -1042,31 +1042,42 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         }
         return true;
     }
-    let wlroots_available = match WlrootsInjector::probe() {
-        Ok(_) => {
-            println!("wlroots probe: virtual keyboard globals available");
-            true
-        }
-        Err(error) => {
-            println!("wlroots probe: unavailable ({error})");
-            false
-        }
-    };
-    let input_method_available =
-        match include_experimental_input_method.then(InputMethodSource::probe) {
-            None => false,
-            Some(Ok(_)) => {
-                println!("input-method-v2 probe: manager and seat connection succeeded");
+    let live_capabilities = probe_capabilities();
+    let wlroots_available = if live_capabilities.has_virtual_keyboard {
+        println!("wlroots probe: virtual keyboard globals available");
+        true
+    } else {
+        match WlrootsInjector::probe() {
+            Ok(_) => {
+                println!("wlroots probe: virtual keyboard globals available");
                 true
             }
-            Some(Err(error)) => {
-                println!("input-method-v2 probe: unavailable ({error})");
+            Err(error) => {
+                println!("wlroots probe: unavailable ({error})");
                 false
             }
-        };
-    let evdev_readable = backends.iter().any(|status| {
-        status.kind == BackendKind::Evdev && status.state == BackendState::Implemented
-    });
+        }
+    };
+    let input_method_available = if include_experimental_input_method {
+        if live_capabilities.has_input_method_v2 {
+            println!("input-method-v2 probe: manager and seat connection succeeded");
+            true
+        } else {
+            match InputMethodSource::probe() {
+                Ok(_) => {
+                    println!("input-method-v2 probe: manager and seat connection succeeded");
+                    true
+                }
+                Err(error) => {
+                    println!("input-method-v2 probe: unavailable ({error})");
+                    false
+                }
+            }
+        }
+    } else {
+        false
+    };
+    let evdev_readable = live_capabilities.has_dev_input;
     // libei needs a RemoteDesktop portal with EIS support (or an explicit
     // LIBEI_SOCKET); probing the portal would pop a consent dialog, so this
     // only recognizes desktops known to ship one.
