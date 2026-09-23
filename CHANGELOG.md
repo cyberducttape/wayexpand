@@ -11,6 +11,8 @@ Changes not yet released.
   executable to be present.
 - Require the IBus runtime client as well, so automatic setup never selects a
   path whose restart and engine-selection commands cannot run.
+- Synchronize CLI and man-page command discovery for fleet status and portal
+  token operations.
 - Make workflow validation shellcheck-safe while checking every GitHub Actions
   workflow, and keep clean-build archive extraction explicitly quoted.
 - Reject malformed, unknown, or duplicate compositor-certification results so
