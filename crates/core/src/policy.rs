@@ -7,6 +7,19 @@ pub const ORGANIZATION_POLICY_PATH: &str = "/etc/wayexpand/policy.toml";
 pub const ORGANIZATION_POLICY_DIR: &str = "/etc/wayexpand";
 pub const MAX_ORGANIZATION_POLICY_BYTES: u64 = 1024 * 100;
 
+/// Return the policy identity for a resolved source/output pair.
+///
+/// The input-method protocol is both source and injector, so the resolver
+/// represents its output as `none` while organization policy must govern it
+/// under the real runtime backend name `input-method-v2`.
+pub fn policy_backend_name<'a>(source: &str, backend: &'a str) -> &'a str {
+    if source == "input-method" {
+        "input-method-v2"
+    } else {
+        backend
+    }
+}
+
 /// Load the system organization policy using the same trust checks enforced by
 /// the daemon. A missing policy is intentionally equivalent to the default
 /// permissive policy; an existing invalid policy is an error.
@@ -125,5 +138,14 @@ mod tests {
             load_organization_policy_from_paths(&root.join("policy.toml"), &root).unwrap(),
             OrganizationPolicy::default()
         );
+    }
+
+    #[test]
+    fn policy_backend_name_uses_runtime_identity_for_input_method() {
+        assert_eq!(
+            policy_backend_name("input-method", "none"),
+            "input-method-v2"
+        );
+        assert_eq!(policy_backend_name("evdev", "libei"), "libei");
     }
 }
