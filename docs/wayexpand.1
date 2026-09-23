@@ -3,22 +3,12 @@
 wayexpand \- validate and manage WayExpand text-expansion configuration
 .SH SYNOPSIS
 .B wayexpand
-.BR setup
-\&|\&
-.BR status
-\&|\&
-.BR edit
-\&|\&
-.BR doctor
-\&|\&
-.BR certify
-\&|\&
-.B validate
-.I CONFIG
+.I COMMAND
+\&[\fIOPTIONS\fR]
 .SH DESCRIPTION
 WayExpand is a local Wayland text expander. The daemon performs expansion;
-this command provides setup, status, editing, diagnostics, and configuration
-validation.
+this command provides setup, status, editing, diagnostics, certification,
+configuration management, and configuration validation.
 .SH COMMANDS
 .TP
 .B setup
@@ -29,23 +19,50 @@ path after displaying session capabilities and safety tradeoffs. Use
 .B edit [CONFIG]
 Open the graphical snippet editor.
 .TP
-.B status
-Show the active daemon status.
+.B status [--json]
+Show the active daemon status. The JSON form is stable for automation.
 .TP
-.B doctor
+.B doctor [--json] [CONFIG]
 Report available input and output backends and their compatibility.
 .TP
 .B certify [--json]
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
+.B test TEXT [--json] [CONFIG]
+Simulate input and report matching expansions without starting the daemon.
+.TP
+.B test-hotkey CHORD [--json] [CONFIG]
+Resolve a hotkey without executing its action.
+.TP
+.B preview TRIGGER [--json] [CONFIG]
+Preview a replacement, optionally with an application context.
+.TP
+.B list [--json] [CONFIG]
+List configured expansions and hotkeys.
+.TP
+.B search QUERY [--json] [CONFIG]
+Search configured triggers, descriptions, and tags.
+.TP
 .B validate CONFIG
 Parse and validate a configuration file without starting the daemon.
+.TP
+.B backup [CONFIG] [DESTINATION]
+Create a private, non-overwriting configuration backup.
+.TP
+.B backend
+Show implementation and environment status for backend paths.
+.TP
+.B explain-backend
+Explain the expert backend selection decision and its tradeoffs.
 .TP
 .B portal status|reset
 Inspect or forget the stored libei portal restoration token. Resetting the
 local token may cause the portal to ask for access again; it does not revoke a
 portal grant already held by another session.
+.TP
+.B help | version
+Show command help or print the installed version.
 .SH FILES
 .TP
 .I ~/.config/wayexpand/expansions.toml
