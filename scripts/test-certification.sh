@@ -19,7 +19,7 @@ cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\\n' '{"healthy":true,"capture_readiness":{"end_to_end_verified":true}}' ;;
-    "status --json") printf '%s\\n' '{"response":"ok"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
 EOF
@@ -86,7 +86,7 @@ cat >"$unhealthy_probe" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false}' ;;
-    "status --json") printf '%s\n' '{"response":"ok"}' ;;
+    "status --json") printf '%s\n' '{"response":"running"}' ;;
 esac
 EOF
 chmod 0755 "$unhealthy_probe"
