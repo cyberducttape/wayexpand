@@ -1,0 +1,49 @@
+#!/bin/sh
+set -eu
+
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-test.XXXXXX")
+trap 'rm -rf "$test_root"' EXIT INT TERM
+
+results="$test_root/results.txt"
+output="$test_root/certification.md"
+for scenario in \
+    printable-press-release held-keys-repeat modifier-navigation \
+    unicode-combining multiline-rapid password-field focus-cross-window \
+    config-reload daemon-restart compositor-restart failed-insertion ime-preedit; do
+    printf '%s\n' "$scenario=pass"
+done >"$results"
+
+run_certification() {
+    PATH="$project_dir/target/debug:$PATH" \
+        "$project_dir/scripts/certify-compositor.sh" \
+        --compositor kde --version 6.6.2 --backend ibus --layout us \
+        --target-apps gtk4-demo,qt6-demo "$@"
+}
+
+run_certification --results "$results" --output "$output"
+grep -F -- '- keyboard_layout: us' "$output" >/dev/null
+grep -F -- '- target_apps: gtk4-demo,qt6-demo' "$output" >/dev/null
+
+missing="$test_root/missing.txt"
+sed '$d' "$results" >"$missing"
+if run_certification --results "$missing" --output "$test_root/missing.md"; then
+    printf '%s\n' 'certification accepted an incomplete results file' >&2
+    exit 1
+fi
+
+failed="$test_root/failed.txt"
+sed '1s/=pass$/=fail/' "$results" >"$failed"
+if run_certification --results "$failed" --output "$test_root/failed.md"; then
+    printf '%s\n' 'certification accepted an explicit failed scenario' >&2
+    exit 1
+fi
+
+if "$project_dir/scripts/certify-compositor.sh" \
+    --compositor kde --version 6.6.2 --backend ibus \
+    --results "$results" --output "$test_root/no-metadata.md"; then
+    printf '%s\n' 'certification accepted missing reproducibility metadata' >&2
+    exit 1
+fi
+
+printf '%s\n' 'certification contract test passed'

@@ -46,6 +46,8 @@ Changes not yet released.
   contract fixture so integrations receive an explicit stability guard.
 - Source CLI policy diagnostics from the core policy-path constant, removing
   another duplicated trust-boundary value.
+- Add CI coverage for certification evidence acceptance and rejection rules,
+  including missing scenarios, explicit failures, and missing metadata.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad
