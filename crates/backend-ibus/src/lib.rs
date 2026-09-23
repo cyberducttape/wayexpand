@@ -91,10 +91,6 @@ impl IbusEngineAdapter {
         // IBus delivers both press and release events through this method.
         // Releases carry IBUS_RELEASE_MASK and must not be interpreted as a
         // second printable character or delimiter.
-        // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30).
-        // Keep this named at the protocol boundary; the ibus-rs crate cannot
-        // be used here without adding a mandatory libdbus system dependency.
-        const IBUS_RELEASE_MASK: u32 = 1 << 30;
         if state & IBUS_RELEASE_MASK != 0 {
             return IbusKeyResult::default();
         }
