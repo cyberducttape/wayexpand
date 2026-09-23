@@ -1493,11 +1493,17 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     });
     let automatic_selection = wayexpand_backend_selection::auto_select(None, None)
         .map(|selection| {
+            let policy_allowed = policy.backend_allowed(selection.pair.backend());
             serde_json::json!({
                 "source": selection.pair.source(),
                 "backend": selection.pair.backend(),
                 "reason": selection.reason,
-                "ready": selection.pair.source() != "stdin",
+                "policy_allowed": policy_allowed,
+                "ready": automatic_selection_is_ready(
+                    selection.pair.source(),
+                    selection.pair.backend(),
+                    &policy,
+                ),
             })
         })
         .unwrap_or_else(|error| {
@@ -1505,6 +1511,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "source": serde_json::Value::Null,
                 "backend": serde_json::Value::Null,
                 "reason": error.to_string(),
+                "policy_allowed": false,
                 "ready": false,
             })
         });
@@ -1564,6 +1571,10 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+fn automatic_selection_is_ready(source: &str, backend: &str, policy: &OrganizationPolicy) -> bool {
+    source != "stdin" && policy.backend_allowed(backend)
 }
 
 /// Classify non-invasive session probes without calling them an end-to-end
@@ -2245,6 +2256,17 @@ mod tests {
         };
         let (state, _) = capture_readiness(&capabilities, true, &policy);
         assert!(matches!(state, "unavailable" | "not-probed"));
+    }
+
+    #[test]
+    fn automatic_selection_health_requires_policy_permission() {
+        let policy = OrganizationPolicy {
+            allowed_backends: vec!["wlroots".into()],
+            ..Default::default()
+        };
+        assert!(!automatic_selection_is_ready("evdev", "libei", &policy));
+        assert!(automatic_selection_is_ready("evdev", "wlroots", &policy));
+        assert!(!automatic_selection_is_ready("stdin", "wlroots", &policy));
     }
 
     #[test]

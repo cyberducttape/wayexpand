@@ -53,6 +53,8 @@ Changes not yet released.
   resolver, typed CLI exit categories, and uncertified compositor status.
 - Make compositor certification paths and required scenarios derive from the
   checked-in matrix, preventing backend, scenario, and documentation drift.
+- Make JSON doctor health reject automatic backend selections disallowed by
+  organization policy.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
