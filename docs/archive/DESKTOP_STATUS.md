@@ -1,6 +1,15 @@
-# Desktop Compositor Status
+# Historical Desktop Compositor Status
 
-This document clarifies WayExpand's verified support and known limitations per desktop compositor as of v1.1.2.
+> **Historical snapshot — not current support evidence.** This page predates
+> the certification matrix and contains exploratory or unverified claims. Do
+> not use its “Verified” labels, test counts, or feature summaries for a
+> deployment decision. The authoritative current status is
+> [`docs/COMPOSITOR_MATRIX.md`](../COMPOSITOR_MATRIX.md), and a live session
+> must produce explicit evidence through
+> [`docs/CERTIFICATION.md`](../CERTIFICATION.md).
+
+The material below is retained to document earlier implementation work and
+must be read as historical context only.
 
 ## Summary
 
