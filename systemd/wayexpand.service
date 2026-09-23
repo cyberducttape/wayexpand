@@ -61,7 +61,10 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 RestrictAddressFamilies=AF_UNIX
 MemoryMax=256M
-TasksMax=16
+# The daemon has a capture loop, control/reload workers, command and hotkey
+# workers, and backend threads. Keep a bounded ceiling with room for all of
+# them; 16 leaves no headroom for the hotkey worker under systemd.
+TasksMax=32
 LimitNOFILE=64
 LimitCORE=0
 

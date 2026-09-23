@@ -59,7 +59,9 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 RestrictAddressFamilies=AF_UNIX
 MemoryMax=256M
-TasksMax=16
+# Leave bounded thread headroom for capture, control/reload, command, and
+# hotkey workers; 16 can reject the hotkey worker with EAGAIN.
+TasksMax=32
 LimitNOFILE=64
 LimitCORE=0
 
