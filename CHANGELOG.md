@@ -36,6 +36,8 @@ Changes not yet released.
   self-hosted matrix is linted rather than silently skipped.
 - Bind the self-hosted certification job to the exact debug binaries it builds
   before collecting doctor and evidence probes.
+- Protect the four-desktop certification workflow with a matrix contract test
+  that checks its driver, evidence, and runner-metadata requirements.
 - Document the backend-specific certification probe rules, including the IBus
   exception for the daemon control socket.
 - Document the healthy-doctor and running-daemon prerequisites for certification
