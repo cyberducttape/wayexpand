@@ -40,6 +40,8 @@ Changes not yet released.
   available.
 - Require keyboard-layout and target-client metadata in compositor evidence so
   certification records are reproducible rather than merely version-labeled.
+- Require doctor JSON readiness to observe a complete capture/output pair;
+  output-only protocol globals no longer imply a usable backend.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad

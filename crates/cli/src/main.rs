@@ -1513,10 +1513,22 @@ fn capture_readiness(
     capabilities: &wayexpand_backend_selection::Capabilities,
     ibus_installed: bool,
 ) -> (&'static str, &'static str) {
-    if ibus_installed || capabilities.has_input_method_v2 || capabilities.has_virtual_keyboard {
+    if ibus_installed || capabilities.has_input_method_v2 {
         return (
             "available-to-try",
             "a protocol or IBus probe succeeded; live client typing is not verified",
+        );
+    }
+    if capabilities.has_dev_input && capabilities.has_virtual_keyboard {
+        return (
+            "available-to-try",
+            "evdev capture and a virtual-keyboard output probe succeeded; live typing is not verified",
+        );
+    }
+    if capabilities.has_dev_input && capabilities.has_direct_libei_socket {
+        return (
+            "available-to-try",
+            "evdev capture and a direct EIS socket were detected; live typing is not verified",
         );
     }
     if capabilities.has_dev_input && libei_portal_candidate() {
@@ -2088,6 +2100,17 @@ mod tests {
         let (state, detail) = capture_readiness(&Default::default(), true);
         assert_eq!(state, "available-to-try");
         assert!(detail.contains("live client typing is not verified"));
+    }
+
+    #[test]
+    fn output_probe_without_a_capture_source_is_not_a_ready_path() {
+        let capabilities = wayexpand_backend_selection::Capabilities {
+            has_virtual_keyboard: true,
+            ..Default::default()
+        };
+        let (state, detail) = capture_readiness(&capabilities, false);
+        assert_eq!(state, "unavailable");
+        assert!(detail.contains("no non-invasive source and output path"));
     }
 
     #[test]
