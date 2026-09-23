@@ -45,6 +45,8 @@ Changes not yet released.
   `EAGAIN` while starting the hotkey worker.
 - Make worker-thread startup fail closed to a synchronous fallback with a
   warning instead of panicking when an external task limit is too restrictive.
+- Make optional KWin tracker probing and nonce generation return availability
+  errors instead of panicking on thread or entropy resource failures.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
