@@ -115,6 +115,13 @@ uncertified. `--layout` and `--target-apps` are required so the report records
 the exact keyboard layout and client set used by the run; list every tested
 client as a comma-separated value.
 
+For repeatable automation, use `scripts/run-certification-driver.sh` with a
+compositor-specific driver. The driver receives the scenario name as its first
+argument and the exact session metadata through `WAYEXPAND_CERTIFICATION_*`
+environment variables. Exit `0` for pass, `1` for an observed failure, and
+`2` when the scenario cannot be verified. The wrapper runs every matrix
+scenario and produces the results file consumed by the evidence collector.
+
 ## Input-method source
 
 In a session that advertises `zwp_input_method_manager_v2`:

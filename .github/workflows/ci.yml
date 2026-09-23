@@ -170,8 +170,10 @@ jobs:
           jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | length == 12)' tests/certification/compositor-matrix.json
           bash scripts/test-certification-report.sh target/debug/wayexpand
           bash scripts/certify-compositor.sh --help
+          bash scripts/run-certification-driver.sh --help
           bash scripts/test-certification-matrix.sh
           bash scripts/test-certification.sh
+          bash scripts/test-certification-driver.sh
       - name: TUI smoke test
         run: bash scripts/test-ui.sh
       - name: Installer test (user)
