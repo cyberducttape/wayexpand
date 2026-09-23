@@ -137,12 +137,14 @@ else
 fi
 doctor_json=$(cat "$tmp/doctor.json")
 doctor_probe_valid=1
-if ! printf '%s' "$doctor_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+if ! printf '%s' "$doctor_json" | jq -e 'type == "object" and (.healthy == true)' >/dev/null 2>&1; then
     doctor_json=null
     doctor_probe_valid=0
 fi
+status_probe_valid=1
 if ! printf '%s' "$status_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     status_json=null
+    status_probe_valid=0
 fi
 
 complete=1
@@ -161,8 +163,9 @@ for scenario in $scenarios; do
     fi
 done
 certified=false
-[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && certified=true
+[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && [ "$status_probe_valid" -eq 1 ] && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
+[ "$status_probe_valid" -eq 1 ] || complete=0
 certification_status=incomplete
 [ "$failed" -eq 1 ] && certification_status=failed
 [ "$certified" = true ] && certification_status=certified
@@ -188,6 +191,7 @@ if [ "$format" = json ]; then
         --argjson certified "$certified" \
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
+        --argjson status_probe_valid "$status_probe_valid" \
         --arg certification_status "$certification_status" \
         '{schema: 1, certified: $certified, compositor: $compositor,
           status: $certification_status,
@@ -195,7 +199,9 @@ if [ "$format" = json ]; then
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
           required_client_markers: $required_client_markers,
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
-          doctor_exit: $doctor_exit, doctor_probe_valid: ($doctor_probe_valid == 1),
+          doctor_exit: $doctor_exit,
+          doctor_probe_valid: ($doctor_probe_valid == 1),
+          status_probe_valid: ($status_probe_valid == 1),
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"
 else
 {

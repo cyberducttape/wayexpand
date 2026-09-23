@@ -14,12 +14,23 @@ for scenario in $scenarios; do
     printf '%s\n' "$scenario=pass"
 done >"$results"
 
+certification_cli="$test_root/certification-cli"
+cat >"$certification_cli" <<EOF
+#!/bin/sh
+case "\${1-} \${2-}" in
+    "doctor --json") printf '%s\\n' '{"healthy":true,"capture_readiness":{"end_to_end_verified":true}}' ;;
+    "status --json") printf '%s\\n' '{"response":"ok"}' ;;
+    *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
+esac
+EOF
+chmod 0755 "$certification_cli"
+
 run_certification() {
     PATH="$project_dir/target/debug:$PATH" \
         "$project_dir/scripts/certify-compositor.sh" \
         --compositor kde --version 6.6.2 --backend ibus --layout us \
         --target-apps gtk4-demo,qt6-demo,password-field \
-        --cli "$project_dir/target/debug/wayexpand" "$@"
+        --cli "$certification_cli" "$@"
 }
 
 run_certification --results "$results" --output "$output"
@@ -34,13 +45,14 @@ jq -e '
     .keyboard_layout == "us" and
     .required_client_markers == ["gtk", "qt", "password"] and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
+    .status_probe_valid == true and
     .target_apps == ["gtk4-demo", "qt6-demo", "password-field"] and
     ([.scenarios[] | select(.result == "pass")] | length == 12)
 ' "$json_output" >/dev/null
 
 spaced_cli_dir="$test_root/cli with spaces"
 mkdir -p "$spaced_cli_dir"
-cp "$project_dir/target/debug/wayexpand" "$spaced_cli_dir/wayexpand"
+cp "$certification_cli" "$spaced_cli_dir/wayexpand"
 chmod 0755 "$spaced_cli_dir/wayexpand"
 spaced_json="$test_root/spaced-cli.json"
 "$project_dir/scripts/certify-compositor.sh" --format json \
@@ -68,6 +80,25 @@ if PATH="$invalid_probe_bin:$project_dir/target/debug:$PATH" \
     exit 1
 fi
 jq -e '.certified == false and .doctor_probe_valid == false' "$invalid_probe_json" >/dev/null
+
+unhealthy_probe="$test_root/unhealthy-probe"
+cat >"$unhealthy_probe" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":false}' ;;
+    "status --json") printf '%s\n' '{"response":"ok"}' ;;
+esac
+EOF
+chmod 0755 "$unhealthy_probe"
+unhealthy_json="$test_root/unhealthy.json"
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
+    --cli "$unhealthy_probe" --output "$unhealthy_json"; then
+    printf '%s\n' 'certification accepted an unhealthy doctor probe' >&2
+    exit 1
+fi
+jq -e '.certified == false and .doctor_probe_valid == false' "$unhealthy_json" >/dev/null
 
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus --layout us \
