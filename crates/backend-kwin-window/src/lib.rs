@@ -42,6 +42,8 @@ pub enum KwinWindowError {
     ScriptNotReady,
     #[error("org.kde.KWin's scripting interface is not reachable on the session bus")]
     NotAvailable,
+    #[error("could not generate a unique KWin tracker nonce: {0}")]
+    Nonce(String),
 }
 
 struct WindowTrackerService {
@@ -115,9 +117,12 @@ impl KwinWindowTracker {
         // a hung D-Bus call, this thread may never finish. Leaking it here
         // is preferable to letting that hang propagate to the caller --
         // the OS reclaims it when the process exits either way.
-        thread::spawn(move || {
-            let _ = sender.send(Self::probe_blocking());
-        });
+        thread::Builder::new()
+            .name("wayexpand-kwin-probe".into())
+            .spawn(move || {
+                let _ = sender.send(Self::probe_blocking());
+            })
+            .map_err(|_| KwinWindowError::NotAvailable)?;
         match receiver.recv_timeout(PROBE_TIMEOUT) {
             Ok(result) => result,
             Err(_) => Err(KwinWindowError::NotAvailable),
@@ -168,7 +173,8 @@ impl KwinWindowTracker {
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
         let mut nonce_bytes = [0_u8; 8];
-        getrandom::getrandom(&mut nonce_bytes).expect("getrandom failed");
+        getrandom::getrandom(&mut nonce_bytes)
+            .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
         let nonce = u64::from_le_bytes(nonce_bytes);
         let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
