@@ -20,6 +20,8 @@ Changes not yet released.
   including session metadata, live probes, and per-scenario results.
 - Clarify that river and other wlroots sessions have implementation paths but
   are outside the current four-desktop certification matrix.
+- Document the JSON evidence workflow alongside the human-readable
+  certification instructions.
 - Add compatibility-mode setup (`recommended`, `maximum`, and `experimental`)
   so routine onboarding chooses a safe path without requiring protocol
   knowledge; retain `explain-backend` for expert diagnostics.
