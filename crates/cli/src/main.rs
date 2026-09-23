@@ -1213,6 +1213,7 @@ fn print_backend_selection_explain() {
 }
 
 fn print_certification(json: bool) -> Result<bool> {
+    let required_scenarios = certification_scenarios()?;
     let capabilities = probe_capabilities();
     let policy_result = wayexpand_core::load_organization_policy();
     let policy_allows = |backend: &str| {
@@ -1394,17 +1395,8 @@ fn print_certification(json: bool) -> Result<bool> {
     // These checks intentionally remain NOT RUN until a compositor-specific
     // harness drives real GTK/Qt/Wayland clients. A preflight must never turn
     // protocol availability into a false CERTIFIED claim.
-    for (category, name) in [
-        ("typing-integrity", "printable press/release"),
-        ("typing-integrity", "held keys and auto-repeat"),
-        ("typing-integrity", "modifier and navigation keys"),
-        ("text-integrity", "Unicode and combining characters"),
-        ("text-integrity", "rapid typing and multiline replacement"),
-        ("safety", "password-field suppression"),
-        ("safety", "focus transition and cross-window isolation"),
-        ("recovery", "daemon and compositor restart"),
-        ("recovery", "failed insertion and config reload"),
-    ] {
+    for name in &required_scenarios {
+        let category = certification_scenario_category(name);
         add_check(
             category,
             name,
@@ -1441,6 +1433,7 @@ fn print_certification(json: bool) -> Result<bool> {
         "desktop": capabilities.compositor.name(),
         "config_path": certification_config,
         "selected_mode": selected_capture,
+        "required_scenarios": required_scenarios,
         "checks": checks,
         "limitations": limitations,
     });
@@ -1469,6 +1462,39 @@ fn print_certification(json: bool) -> Result<bool> {
         println!("Run the compositor harness before treating this record as a support claim.");
     }
     Ok(certified)
+}
+
+fn certification_scenarios() -> Result<Vec<String>> {
+    let matrix: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/certification/compositor-matrix.json"
+    ))
+    .context("checked-in compositor certification matrix is invalid")?;
+    matrix["required_scenarios"]
+        .as_array()
+        .context("certification matrix has no required_scenarios array")?
+        .iter()
+        .map(|scenario| {
+            scenario
+                .as_str()
+                .map(str::to_owned)
+                .context("certification matrix contains a non-string scenario")
+        })
+        .collect()
+}
+
+fn certification_scenario_category(scenario: &str) -> &'static str {
+    match scenario {
+        "printable-press-release" | "held-keys-repeat" | "modifier-navigation" => {
+            "typing-integrity"
+        }
+        "unicode-combining" | "multiline-rapid" => "text-integrity",
+        "password-field" | "focus-cross-window" => "safety",
+        "config-reload" | "daemon-restart" | "compositor-restart" | "failed-insertion" => {
+            "recovery"
+        }
+        "ime-preedit" => "input-method",
+        _ => "other",
+    }
 }
 
 /// Stable, automation-friendly diagnostic output for service managers and
