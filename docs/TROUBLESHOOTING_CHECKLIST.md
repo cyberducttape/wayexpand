@@ -91,7 +91,7 @@ For an explicit input-method-v2 setup, first acknowledge the intentionally
 obnoxious warning (experimental; unsupported non-text keys may be lost):
 
 ```sh
-wayexpand setup --experimental-input-method-v2
+wayexpand setup --mode experimental
 wayexpand-daemon --source=input-method ~/.config/wayexpand/expansions.toml
 wayexpand doctor
 ```
