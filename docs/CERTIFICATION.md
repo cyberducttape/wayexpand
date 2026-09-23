@@ -18,6 +18,10 @@ check with a stable status, and the limitations of the selected backend. It is
 safe to attach to a support report and contains no typed text or expansion
 contents.
 
+JSON mode exits successfully when the report is produced; automation must
+inspect `.certified`. Human-readable mode exits nonzero while certification is
+incomplete.
+
 The intended compositor harness will exercise the same checks against real
 clients:
 

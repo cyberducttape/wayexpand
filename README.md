@@ -124,6 +124,7 @@ by automated end-to-end tests. Check your own session:
 
 ```sh
 wayexpand doctor
+wayexpand certify --json
 wayexpand explain-backend
 ```
 
@@ -389,6 +390,7 @@ wayexpand set-mode ':sig' word-boundary expansions.toml
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 wayexpand doctor                                   # human-readable backend/session report
 wayexpand doctor --json                            # stable schema for health checks
+wayexpand certify --json                           # explicit certification evidence record
 wayexpand explain-backend                          # explain automatic backend selection
 wayexpand fleet status                              # inspect merged fleet layers
 wayexpand fleet status --json                        # inspect provenance as JSON

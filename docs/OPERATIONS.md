@@ -187,6 +187,7 @@ wayexpand-daemon --version
 
 ```sh
 wayexpand doctor [config]
+wayexpand certify --json
 wayexpand backend
 wayexpand test ';;hello'
 wayexpand preview ':today'
