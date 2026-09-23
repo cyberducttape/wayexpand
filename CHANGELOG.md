@@ -34,6 +34,8 @@ Changes not yet released.
   make setup/doctor refuse to recommend policy-disallowed input paths.
 - Make certification selection policy-aware so reports cannot claim a blocked
   IBus or automatic output backend is the active safe mode.
+- Make doctor readiness and human backend diagnostics hide policy-disallowed
+  IBus paths instead of reporting them as available to try.
 - Correct backend readiness reporting, CLI help, atomic backups, stable exit
   categories, and the `disable_title_matching` fail-closed contract.
 - Ensure `doctor` never labels a non-invasive protocol probe as end-to-end
