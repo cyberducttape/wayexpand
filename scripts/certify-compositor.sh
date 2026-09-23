@@ -20,6 +20,7 @@ target_apps=
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
 format=markdown
 results_file=
+cli=${WAYEXPAND_CLI:-wayexpand}
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --compositor) compositor=${2:?missing value for --compositor}; shift 2 ;;
@@ -30,8 +31,9 @@ while [ "$#" -gt 0 ]; do
         --output) output=${2:?missing value for --output}; shift 2 ;;
         --format) format=${2:?missing value for --format}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
+        --cli) cli=${2:?missing value for --cli}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--format markdown|json] [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
             printf '%s\n' "results format: one SCENARIO=pass|fail entry per line"
             exit 0
             ;;
@@ -66,6 +68,10 @@ fi
 }
 [ -n "$target_apps" ] || {
     printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
+    exit 2
+}
+command -v "$cli" >/dev/null 2>&1 || {
+    printf '%s\n' "error: certification CLI is not executable: $cli" >&2
     exit 2
 }
 
@@ -110,9 +116,9 @@ fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT TERM
 doctor_status=0
-wayexpand doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_status=$?
+$cli doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_status=$?
 status_json='unavailable'
-if wayexpand status --json >"$tmp/status.json" 2>/dev/null; then
+if "$cli" status --json >"$tmp/status.json" 2>/dev/null; then
     status_json=$(cat "$tmp/status.json")
 else
     status_json=null
