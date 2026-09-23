@@ -151,6 +151,9 @@ done
 certified=false
 [ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
+certification_status=incomplete
+[ "$failed" -eq 1 ] && certification_status=failed
+[ "$certified" = true ] && certification_status=certified
 
 date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "$format" = json ]; then
@@ -170,7 +173,9 @@ if [ "$format" = json ]; then
         --argjson certified "$certified" \
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
+        --arg certification_status "$certification_status" \
         '{schema: 1, certified: $certified, compositor: $compositor,
+          status: $certification_status,
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,

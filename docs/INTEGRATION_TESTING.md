@@ -86,8 +86,9 @@ under test rather than whichever installation happens to be in `PATH`.
 
 The JSON record includes the exact session metadata, live doctor/status
 snapshots, and one result object for every matrix scenario. It reports
-`certified: false` for missing or failed evidence; it does not replace the
-CLI preflight report or turn protocol availability into a certification.
+`certified: false` for missing or failed evidence; `status` distinguishes
+`incomplete` from `failed`. It does not replace the CLI preflight report or
+turn protocol availability into a certification.
 
 It captures the live doctor/status probes and writes every required scenario as
 `UNVERIFIED`; it never treats a probe as certification. A compositor-specific
