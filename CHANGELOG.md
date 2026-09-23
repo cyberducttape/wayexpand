@@ -35,6 +35,9 @@ Changes not yet released.
   certified.
 - Share evdev's keyboard-capability probe with setup and doctor so readable
   non-keyboard event nodes cannot be presented as usable capture devices.
+- Replace IBus' constant whole-file reload polling with parent-directory
+  notifications, retaining a bounded polling fallback when watching is not
+  available.
 - Harden CI and release workflows with complete actionlint coverage, pinned
   Syft artifacts, consistent MSRV/version validation, and corrected Launchpad
   synchronization YAML. The actionlint image is digest-pinned, and Launchpad
