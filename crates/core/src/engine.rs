@@ -1216,11 +1216,27 @@ fn run_command_fallback(
 }
 
 #[cfg(unix)]
+struct ChildGuard {
+    child: Option<Child>,
+}
+
+#[cfg(unix)]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(ref mut child) = self.child {
+            kill_process_group(child);
+            let _ = child.wait();
+        }
+    }
+}
+
+#[cfg(unix)]
 fn run_command_unix(
-    mut child: Child,
+    child: Child,
     mut stdout: ChildStdout,
     timeout_ms: u64,
 ) -> Result<String, CommandError> {
+    let mut guard = ChildGuard { child: Some(child) };
     set_nonblocking_stdout(&stdout)?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut bytes = Vec::new();
@@ -1230,17 +1246,13 @@ fn run_command_unix(
         if !stdout_eof {
             stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
         }
-        match child.try_wait() {
+        match guard.child.as_mut().unwrap().try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
             Ok(None) => {
-                kill_process_group(&child);
-                let _ = child.wait();
                 return Err(CommandError::Timeout);
             }
             Err(error) => {
-                kill_process_group(&child);
-                let _ = child.wait();
                 return Err(CommandError::WaitFailed(error.to_string()));
             }
         }
@@ -1251,7 +1263,9 @@ fn run_command_unix(
     // setsid(), and keep stdout open. Nonblocking reads below prevent that
     // case from pinning a WayExpand reader thread; service/cgroup containment
     // belongs in the planned Action Broker.
-    kill_process_group(&child);
+    if let Some(child) = &guard.child {
+        kill_process_group(child);
+    }
 
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while !stdout_eof && Instant::now() < drain_deadline {
@@ -1265,6 +1279,8 @@ fn run_command_unix(
         return Err(CommandError::NonZeroExit(status.code()));
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
+
+    guard.child = None;
     Ok(output.trim_end_matches(['\r', '\n']).to_owned())
 }
 
@@ -3405,5 +3421,66 @@ match_mode = "word-boundary""#,
             engine.last_expansion.is_none(),
             "any intervening event clears undo state"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn child_process_is_cleaned_up_when_output_exceeds_limit() {
+        // CRITICAL: Ensure that when a child process writes oversized output,
+        // the process is actually killed and reaped, not left running.
+        // This prevents resource leaks where a misbehaving command continues
+        // consuming CPU/memory even though WayExpand reported the error.
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("wayexpand-tests");
+        let _ = fs::create_dir_all(&temp_dir);
+        let pid_file = temp_dir.join(format!(
+            "child-cleanup-test-{}.pid",
+            std::process::id()
+        ));
+
+        let shell_command = format!(
+            r#"{{ echo "pid: $$" > '{}'; python3 -c "import sys; sys.stdout.write('x' * (1024 * 1024 + 1))"; sleep 60; }}"#,
+            pid_file.display()
+        );
+
+        let command = CommandConfig {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), shell_command],
+            timeout_ms: 5000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: vec![],
+        };
+
+        let result = run_command(&command);
+
+        assert!(
+            matches!(result, Err(CommandError::OutputTooLarge)),
+            "oversized output should return OutputTooLarge, got: {:?}",
+            result
+        );
+
+        thread::sleep(Duration::from_millis(500));
+
+        if pid_file.exists() {
+            if let Ok(contents) = fs::read_to_string(&pid_file) {
+                if let Some(pid_str) = contents.strip_prefix("pid: ").and_then(|s| s.trim().parse::<i32>().ok()) {
+                    let is_alive = unsafe { libc::kill(pid_str, 0) };
+                    assert_eq!(
+                        is_alive, -1,
+                        "child process {} must be killed after OutputTooLarge, but is still alive",
+                        pid_str
+                    );
+                    let errno = unsafe { *libc::__errno_location() };
+                    assert_eq!(
+                        errno,
+                        libc::ESRCH,
+                        "child process should be reaped with ESRCH"
+                    );
+                }
+            }
+            let _ = fs::remove_file(pid_file);
+        }
     }
 }
