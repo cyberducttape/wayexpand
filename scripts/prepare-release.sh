@@ -110,9 +110,21 @@ sed -i.bak "s/^pkgver=.*/pkgver=$new_version/" PKGBUILD
 rm -f PKGBUILD.bak
 sed -i.bak "s/^Version:        .*/Version:        $new_version/" wayexpand.spec
 rm -f wayexpand.spec.bak
-sed -i.bak "0,/<release version=\"[^\"]*\"/s//<release version=\"$new_version\"/" \
-    io.github.itchyitchy123.WayExpand.metainfo.xml
-rm -f io.github.itchyitchy123.WayExpand.metainfo.xml.bak
+metainfo_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /<releases>/ {
+        print
+        print "    <release version=\"" version "\" date=\"" date "\">"
+        print "      <description>"
+        print "        <p>Release v" version ". See CHANGELOG.md for details.</p>"
+        print "      </description>"
+        print "    </release>"
+        inserted = 1
+        next
+    }
+    { print }
+' io.github.itchyitchy123.WayExpand.metainfo.xml > "$metainfo_tmp"
+mv "$metainfo_tmp" io.github.itchyitchy123.WayExpand.metainfo.xml
 sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
     desktop/wayexpand-ibus.xml
 rm -f desktop/wayexpand-ibus.xml.bak

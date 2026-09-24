@@ -3,7 +3,7 @@
   <name>org.freedesktop.IBus.WayExpand</name>
   <description>WayExpand text expansion</description>
   <exec>wayexpand-ibus</exec>
-  <version>1.1.2</version>
+  <version>1.2.0</version>
   <author>Stephan Loesevitz &lt;stephan.loesevitz@gmail.com&gt;</author>
   <license>MIT</license>
   <textdomain>wayexpand</textdomain>
