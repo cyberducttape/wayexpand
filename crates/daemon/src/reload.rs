@@ -124,10 +124,6 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
 }
 
 impl ReloadableConfig {
-    pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
-        Self::load_mode(path.into(), false)
-    }
-
     pub fn load_with_fleet_and_policy(
         path: impl Into<PathBuf>,
         policy: OrganizationPolicy,
@@ -137,10 +133,6 @@ impl ReloadableConfig {
 
     pub fn load_with_policy(path: impl Into<PathBuf>, policy: OrganizationPolicy) -> Result<Self> {
         Self::load_mode_with_policy(path.into(), false, policy)
-    }
-
-    fn load_mode(path: PathBuf, fleet: bool) -> Result<Self> {
-        Self::load_mode_with_policy(path, fleet, OrganizationPolicy::default())
     }
 
     fn load_mode_with_policy(
