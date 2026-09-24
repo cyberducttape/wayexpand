@@ -110,6 +110,12 @@ pub struct PendingExpansionResult {
     pub command: Option<CommandConfig>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingExpansionDispatch {
+    Ready(ExpansionResult),
+    Queued,
+}
+
 /// Unified match plan: the result of successful matching before policy evaluation.
 /// Contains all information needed to decide whether to execute and how to commit.
 /// This structure has no side effects—it is read-only context for policy and execution.
@@ -312,6 +318,7 @@ enum AsyncCommandJob {
     Expansion {
         config_index: usize,
         generation: u64,
+        additional_max_size: usize,
         command: CommandConfig,
         result: ExpansionResult,
     },
@@ -321,6 +328,7 @@ struct AsyncCommandCompletion {
     config_index: usize,
     generation: u64,
     cache_ms: u64,
+    additional_max_size: usize,
     result: ExpansionResult,
     output: Result<String, CommandError>,
 }
@@ -448,6 +456,7 @@ impl ExpansionEngine {
                     let AsyncCommandJob::Expansion {
                         config_index,
                         generation,
+                        additional_max_size,
                         command,
                         result,
                     } = job;
@@ -462,6 +471,7 @@ impl ExpansionEngine {
                             config_index,
                             generation,
                             cache_ms,
+                            additional_max_size,
                             result,
                             output,
                         })
@@ -589,6 +599,11 @@ impl ExpansionEngine {
             let Some(validated_output) = self.apply_postflight_policy(&plan, &output) else {
                 continue;
             };
+            if completion.additional_max_size > 0
+                && validated_output.len() > completion.additional_max_size
+            {
+                continue;
+            }
 
             // Update cache before case propagation (cache stores original command output)
             if completion.cache_ms > 0 {
@@ -620,7 +635,7 @@ impl ExpansionEngine {
     /// Keeping execution and commit here preserves cache, case, and undo state.
     /// `additional_max_size` is a separately loaded administrator limit;
     /// zero means that only the limit carried by the engine is applied.
-    pub fn execute_pending_with_policy(
+    fn execute_pending_inline(
         &mut self,
         pending: PendingExpansionResult,
         additional_max_size: usize,
@@ -674,6 +689,59 @@ impl ExpansionEngine {
             reinsert_after: pending.reinsert_after,
             command_backed,
         })
+    }
+
+    /// Complete static/cache-hit matches immediately and queue uncached
+    /// commands on the bounded expansion worker. Command execution never
+    /// falls back to the caller thread when workers are unavailable.
+    pub fn dispatch_pending_with_policy(
+        &mut self,
+        pending: PendingExpansionResult,
+        additional_max_size: usize,
+    ) -> Result<PendingExpansionDispatch, CommandError> {
+        if pending.generation != self.input_generation || self.user_paused || self.sensitive_focus {
+            return Err(CommandError::StaleInput);
+        }
+        if pending.command.is_some() && self.config.organization.disable_commands {
+            return Err(CommandError::PolicyBlocked);
+        }
+
+        let Some(command) = pending.command.as_ref() else {
+            return self
+                .execute_pending_inline(pending, additional_max_size)
+                .map(PendingExpansionDispatch::Ready);
+        };
+        if pending.cached_output.is_some() {
+            return self
+                .execute_pending_inline(pending, additional_max_size)
+                .map(PendingExpansionDispatch::Ready);
+        }
+
+        let runtime = self
+            .async_commands
+            .as_ref()
+            .ok_or(CommandError::WorkerUnavailable)?;
+        let result = ExpansionResult {
+            trigger: pending.trigger,
+            matched_text: pending.matched_text,
+            insert: String::new(),
+            cursor_offset: pending.cursor_offset,
+            reinsert_after: pending.reinsert_after,
+            command_backed: true,
+        };
+        let job = AsyncCommandJob::Expansion {
+            config_index: pending.config_index,
+            generation: pending.generation,
+            additional_max_size,
+            command: command.clone(),
+            result,
+        };
+        runtime.try_send_command(job).map_err(|error| match error {
+            QueueSendError::Full => CommandError::QueueFull,
+            QueueSendError::Disconnected => CommandError::WorkerUnavailable,
+        })?;
+        self.last_expansion = None;
+        Ok(PendingExpansionDispatch::Queued)
     }
 
     /// Queue a hotkey action for bounded asynchronous execution. The caller
@@ -1010,7 +1078,7 @@ impl ExpansionEngine {
 
     /// Process input and return pending expansion results (v1.3+ deferred execution).
     /// Commands are NOT executed; caller must check policy and complete results
-    /// with `execute_pending_with_policy()` to preserve engine state.
+    /// with `dispatch_pending_with_policy()` to preserve engine state.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
         if !matches!(event, InputEvent::Key(_)) {
             self.last_expansion = None;
@@ -1344,6 +1412,7 @@ impl ExpansionEngine {
                 let job = AsyncCommandJob::Expansion {
                     config_index,
                     generation: self.input_generation,
+                    additional_max_size: 0,
                     command: expansion.command.clone().unwrap(),
                     result,
                 };
@@ -1586,6 +1655,10 @@ pub enum CommandError {
     StaleInput,
     /// Command execution was disabled by the active organization policy.
     PolicyBlocked,
+    /// The bounded command queue is full.
+    QueueFull,
+    /// Asynchronous command workers could not be started or have stopped.
+    WorkerUnavailable,
     /// Output was not valid UTF-8.
     InvalidUtf8,
     /// The output-reading thread did not report back in time (should not
@@ -1616,6 +1689,8 @@ impl std::fmt::Display for CommandError {
             ),
             CommandError::StaleInput => write!(f, "input changed before the expansion completed"),
             CommandError::PolicyBlocked => write!(f, "command execution is disabled by policy"),
+            CommandError::QueueFull => write!(f, "command queue is full"),
+            CommandError::WorkerUnavailable => write!(f, "command workers are unavailable"),
             CommandError::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
             CommandError::OutputChannelLost => write!(f, "output could not be read back"),
         }
@@ -1876,6 +1951,25 @@ mod tests {
             .unwrap(),
         )
         .unwrap()
+    }
+
+    fn dispatch_and_wait(
+        engine: &mut ExpansionEngine,
+        pending: PendingExpansionResult,
+    ) -> ExpansionResult {
+        match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            PendingExpansionDispatch::Ready(result) => result,
+            PendingExpansionDispatch::Queued => {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                loop {
+                    if let Some(result) = engine.drain_completed_commands().pop() {
+                        break result;
+                    }
+                    assert!(Instant::now() < deadline, "command did not complete");
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
     }
 
     #[test]
@@ -2250,6 +2344,53 @@ mod tests {
         assert_eq!(engine.buffer, before);
         assert_eq!(engine.command_metrics().command_queue_depth, 0);
         assert_eq!(engine.command_metrics().command_queue_rejected_total, 1);
+    }
+
+    #[test]
+    fn deferred_dispatch_rejects_a_saturated_queue_without_running_command() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-deferred-queue-full-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":full"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf ran > '{}'"]
+            timeout_ms = 500
+            "#,
+            marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        let (sender, _job_receiver) = mpsc::sync_channel(0);
+        let (hotkey_sender, _hotkey_receiver) = mpsc::sync_channel(0);
+        let (_, completion_receiver) = mpsc::sync_channel(1);
+        let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
+        engine.async_commands = Some(AsyncCommandRuntime {
+            command_sender: sender,
+            hotkey_sender,
+            receiver: completion_receiver,
+            hotkey_receiver: hotkey_completion_receiver,
+            metrics: Arc::clone(&engine.command_metrics),
+        });
+
+        let pending = engine
+            .process_deferred(InputEvent::Text(":full".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(
+            engine.dispatch_pending_with_policy(pending, 0),
+            Err(CommandError::QueueFull)
+        );
+        assert_eq!(engine.command_metrics().command_queue_depth, 0);
+        assert_eq!(engine.command_metrics().command_queue_rejected_total, 1);
+        assert!(!marker.exists(), "saturated dispatch must not run command");
     }
 
     #[test]
@@ -4148,8 +4289,12 @@ replacement = "signature""#,
             .pop()
             .unwrap();
         let static_deferred = deferred
-            .execute_pending_with_policy(static_pending, 0)
+            .dispatch_pending_with_policy(static_pending, 0)
             .unwrap();
+        let static_deferred = match static_deferred {
+            PendingExpansionDispatch::Ready(result) => result,
+            PendingExpansionDispatch::Queued => panic!("static expansion was queued"),
+        };
         assert_eq!(static_sync.trigger, static_deferred.trigger);
         assert_eq!(static_sync.matched_text, static_deferred.matched_text);
         assert_eq!(static_sync.insert, static_deferred.insert);
@@ -4181,9 +4326,8 @@ replacement = "signature""#,
             .process_deferred(InputEvent::Text(":CMD".into()))
             .pop()
             .unwrap();
-        let command_deferred = command_deferred_engine
-            .execute_pending_with_policy(command_pending, 0)
-            .unwrap();
+        assert!(command_deferred_engine.enable_async_commands());
+        let command_deferred = dispatch_and_wait(&mut command_deferred_engine, command_pending);
         assert_eq!(command_sync.trigger, command_deferred.trigger);
         assert_eq!(command_sync.matched_text, command_deferred.matched_text);
         assert_eq!(command_sync.insert, command_deferred.insert);
@@ -4223,7 +4367,7 @@ replacement = "signature""#,
             .unwrap();
 
         assert!(matches!(
-            engine.execute_pending_with_policy(pending, 256),
+            engine.execute_pending_inline(pending, 256),
             Err(CommandError::PolicyOutputTooLarge {
                 size: 257,
                 limit: 256
@@ -4279,20 +4423,17 @@ replacement = "signature""#,
             .unwrap();
 
         let mut deferred = ExpansionEngine::new(config_for(&deferred_marker)).unwrap();
+        assert!(deferred.enable_async_commands());
         let upper_pending = deferred
             .process_deferred(InputEvent::Text(":SIG".into()))
             .pop()
             .unwrap();
-        let upper_deferred = deferred
-            .execute_pending_with_policy(upper_pending, 0)
-            .unwrap();
+        let upper_deferred = dispatch_and_wait(&mut deferred, upper_pending);
         let lower_pending = deferred
             .process_deferred(InputEvent::Text(":sig".into()))
             .pop()
             .unwrap();
-        let lower_deferred = deferred
-            .execute_pending_with_policy(lower_pending, 0)
-            .unwrap();
+        let lower_deferred = dispatch_and_wait(&mut deferred, lower_pending);
         let undo_deferred = deferred
             .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
             .unwrap();
@@ -4307,6 +4448,43 @@ replacement = "signature""#,
         assert_eq!(std::fs::read_to_string(&deferred_marker).unwrap(), "x");
         let _ = std::fs::remove_file(sync_marker);
         let _ = std::fs::remove_file(deferred_marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_command_without_workers_fails_closed_without_running() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-deferred-no-workers-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf ran > '{}'"]
+            timeout_ms = 1000
+            "#,
+            marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":cmd".into()))
+            .pop()
+            .unwrap();
+
+        assert_eq!(
+            engine.dispatch_pending_with_policy(pending, 0),
+            Err(CommandError::WorkerUnavailable)
+        );
+        assert!(
+            !marker.exists(),
+            "worker failure must not run commands inline"
+        );
     }
 
     #[test]
@@ -4335,7 +4513,7 @@ replacement = "signature""#,
         engine.process_deferred(InputEvent::Text("x".into()));
 
         assert!(matches!(
-            engine.execute_pending_with_policy(pending, 0),
+            engine.execute_pending_inline(pending, 0),
             Err(CommandError::StaleInput)
         ));
         assert!(!marker.exists(), "stale deferred commands must not run");
@@ -4371,7 +4549,7 @@ replacement = "signature""#,
             .unwrap();
 
         assert!(matches!(
-            engine.execute_pending_with_policy(pending, 0),
+            engine.execute_pending_inline(pending, 0),
             Err(CommandError::PolicyBlocked)
         ));
         assert!(!marker.exists(), "policy-disabled commands must not run");

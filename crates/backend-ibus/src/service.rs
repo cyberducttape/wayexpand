@@ -62,6 +62,10 @@ impl Factory {
         let engine = ExpansionEngine::new(config).map_err(|error| {
             zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
         })?;
+        let mut engine = engine;
+        if !engine.enable_async_commands() {
+            warn!("IBus command workers could not start; command-backed expansions will be unavailable");
+        }
         let adapter = Arc::new(Mutex::new(
             IbusEngineAdapter::with_policy(engine, (*self.policy).clone()).map_err(|error| {
                 zbus::fdo::Error::Failed(format!(
@@ -88,8 +92,45 @@ impl Factory {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
             .push(Arc::downgrade(&adapter));
+        spawn_completion_dispatcher(
+            Arc::downgrade(&adapter),
+            Arc::clone(&self.connection),
+            path.clone(),
+        )
+        .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
         Ok(path)
     }
+}
+
+fn spawn_completion_dispatcher(
+    adapter: Weak<Mutex<IbusEngineAdapter>>,
+    connection: Arc<Mutex<Option<Connection>>>,
+    path: OwnedObjectPath,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-completion".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(10));
+            let Some(adapter) = adapter.upgrade() else {
+                break;
+            };
+            let actions = match adapter.lock() {
+                Ok(mut adapter) => adapter.drain_completed_commands(),
+                Err(_) => break,
+            };
+            if actions.is_empty() {
+                continue;
+            }
+            let engine = EngineObject {
+                adapter: Arc::clone(&adapter),
+                connection: Arc::clone(&connection),
+                path: path.clone(),
+            };
+            if let Err(error) = engine.emit_actions(&actions) {
+                warn!(%error, "could not deliver completed IBus expansion");
+            }
+        })
+        .map(|_| ())
 }
 
 fn engine_path(id: u64) -> OwnedObjectPath {

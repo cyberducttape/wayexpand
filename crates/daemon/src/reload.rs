@@ -203,12 +203,16 @@ impl ReloadableConfig {
                 let count = config.expansion.len();
                 match ExpansionEngine::new(config) {
                     Ok(mut engine) => {
-                        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+                        let workers_restart_failed =
+                            self.engine.async_commands_enabled() && !engine.enable_async_commands();
+                        if workers_restart_failed {
                             warn!(
-                                "asynchronous workers could not restart after configuration reload; using synchronous fallback"
+                                "asynchronous workers could not restart after configuration reload; command-backed actions are disabled"
                             );
                         }
-                        engine.set_commands_disabled(self.engine.commands_disabled());
+                        engine.set_commands_disabled(
+                            self.engine.commands_disabled() || workers_restart_failed,
+                        );
                         engine.set_title_matching_disabled(self.engine.title_matching_disabled());
                         engine.set_reinsert_terminators(self.engine.reinserts_terminators());
                         // A fresh engine has no window context yet. Without

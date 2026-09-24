@@ -226,6 +226,12 @@ impl OrganizationPolicy {
             .then(|| "command program must be an absolute path by organization policy".to_string())
     }
 
+    /// Whether a command-path policy violation should block behavior. Audit
+    /// mode reports the same violation but deliberately permits execution.
+    pub fn command_path_is_blocked(&self, program: &str) -> bool {
+        self.safe_mode && self.command_path_violation(program).is_some()
+    }
+
     /// Check if policy allows a pack
     pub fn pack_allowed(&self, pack_name: &str) -> bool {
         if self.allowed_packs.is_empty() {
@@ -824,9 +830,9 @@ impl Config {
                     reason: "command limits are invalid",
                 });
             }
-            if self.organization.safe_mode
-                && self.organization.require_absolute_commands
-                && !Path::new(&binding.command.program).is_absolute()
+            if self
+                .organization
+                .command_path_is_blocked(&binding.command.program)
             {
                 return Err(ConfigError::InvalidHotkey {
                     index,
@@ -946,10 +952,7 @@ impl Config {
                         reason: "program is too long or contains NUL",
                     });
                 }
-                if self.organization.safe_mode
-                    && self.organization.require_absolute_commands
-                    && !Path::new(&command.program).is_absolute()
-                {
+                if self.organization.command_path_is_blocked(&command.program) {
                     return Err(ConfigError::InvalidCommand {
                         index,
                         reason: "program must be an absolute path by organization policy",
@@ -1417,6 +1420,25 @@ mod tests {
         )
         .unwrap();
         assert!(config.organization.require_absolute_commands);
+    }
+
+    #[test]
+    fn command_path_violation_blocks_only_in_safe_mode() {
+        let audit = OrganizationPolicy {
+            safe_mode: false,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        assert!(audit.command_path_violation("git").is_some());
+        assert!(!audit.command_path_is_blocked("git"));
+
+        let safe = OrganizationPolicy {
+            safe_mode: true,
+            ..audit.clone()
+        };
+        assert!(safe.command_path_violation("git").is_some());
+        assert!(safe.command_path_is_blocked("git"));
+        assert!(!safe.command_path_is_blocked("/usr/bin/git"));
     }
 
     #[test]

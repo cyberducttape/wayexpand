@@ -16,7 +16,10 @@ use std::{
 };
 
 use tracing::{error, warn};
-use wayexpand_core::{Config, ExpansionEngine, InputEvent, OrganizationPolicy};
+use wayexpand_core::{
+    Config, ExpansionEngine, ExpansionResult, InputEvent, OrganizationPolicy,
+    PendingExpansionDispatch,
+};
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
 // crate is not used because it adds a mandatory libdbus system dependency.
@@ -163,6 +166,19 @@ impl IbusEngineAdapter {
         &mut self.engine
     }
 
+    pub fn drain_completed_commands(&mut self) -> Vec<IbusAction> {
+        self.engine
+            .drain_completed_commands()
+            .into_iter()
+            .flat_map(|mut result| {
+                // The key event was committed when its command was queued, so
+                // the delayed replacement must not commit the terminator twice.
+                result.reinsert_after = None;
+                expansion_actions(&result)
+            })
+            .collect()
+    }
+
     pub fn replace_config(&mut self, config: Config) -> Result<(), wayexpand_core::ConfigError> {
         let mut engine = ExpansionEngine::new(config)?;
         engine.apply_administrator_policy(&self.policy)?;
@@ -174,7 +190,7 @@ impl IbusEngineAdapter {
         engine.set_reinsert_terminators(self.engine.reinserts_terminators());
         if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
             warn!(
-                "IBus asynchronous workers could not restart after configuration reload; using synchronous fallback"
+                "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
         }
         apply_policy_to_engine(&mut engine, &self.policy);
@@ -272,7 +288,7 @@ impl IbusEngineAdapter {
 
             if let Some(command) = &pending_result.command {
                 if let Some(violation) = self.policy.command_path_violation(&command.program) {
-                    if self.policy.safe_mode {
+                    if self.policy.command_path_is_blocked(&command.program) {
                         error!(
                             audit_prefix = %self.policy.audit_prefix,
                             violation = %violation,
@@ -311,30 +327,31 @@ impl IbusEngineAdapter {
                 );
             }
 
-            // Policy approved: execute command (if any) and get final result
-            let result = match self
+            // Policy-approved commands are queued so ProcessKeyEvent never
+            // waits for command timeout. Static matches and cache hits commit
+            // synchronously because they require no child process.
+            let dispatch = match self
                 .engine
-                .execute_pending_with_policy(pending_result, self.policy.max_replacement_size)
+                .dispatch_pending_with_policy(pending_result, self.policy.max_replacement_size)
             {
-                Ok(result) => result,
+                Ok(dispatch) => dispatch,
                 Err(e) => {
-                    warn!("IBus command execution failed: {}", e);
+                    warn!("IBus expansion could not be queued or completed: {}", e);
                     continue;
                 }
             };
 
-            actions.push(IbusAction::DeleteSurroundingText {
-                // IBus invokes the engine before forwarding the key to the
-                // client. The delimiter is not in the client's surrounding
-                // text yet; delete only the trigger and commit the delimiter
-                // together with the replacement.
-                nchars: result.matched_text.chars().count() as u32,
-            });
-            let mut replacement = result.insert;
-            if let Some(character) = result.reinsert_after {
-                replacement.push(character);
+            match dispatch {
+                PendingExpansionDispatch::Ready(result) => {
+                    actions.extend(expansion_actions(&result));
+                }
+                PendingExpansionDispatch::Queued => {
+                    // The current key has not reached the client yet. Commit
+                    // it now so the eventual surrounding-text deletion covers
+                    // the complete trigger and preserves key order.
+                    actions.push(IbusAction::CommitText(character.to_string()));
+                }
             }
-            actions.push(IbusAction::CommitText(replacement));
         }
 
         if policy_blocked {
@@ -366,6 +383,18 @@ impl IbusEngineAdapter {
             actions,
         }
     }
+}
+
+fn expansion_actions(result: &ExpansionResult) -> Vec<IbusAction> {
+    let mut actions = vec![IbusAction::DeleteSurroundingText {
+        nchars: result.matched_text.chars().count() as u32,
+    }];
+    let mut replacement = result.insert.clone();
+    if let Some(character) = result.reinsert_after {
+        replacement.push(character);
+    }
+    actions.push(IbusAction::CommitText(replacement));
+    actions
 }
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
@@ -489,20 +518,78 @@ replacement = "signature"
             require_absolute_commands: true,
             ..OrganizationPolicy::default()
         };
-        let mut adapter =
-            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        let mut adapter = IbusEngineAdapter::with_policy(engine, policy).unwrap();
 
-        let mut last = IbusKeyResult::default();
+        let mut key_actions = Vec::new();
         for character in ":cmd".chars() {
-            last = adapter.process_key_event(character as u32, 0, 0);
+            key_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
+        assert!(key_actions.contains(&IbusAction::CommitText("d".into())));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let completed = loop {
+            let actions = adapter.drain_completed_commands();
+            if !actions.is_empty() {
+                break actions;
+            }
+            assert!(Instant::now() < deadline, "IBus command did not complete");
+            thread::sleep(Duration::from_millis(5));
+        };
         assert_eq!(
-            last.actions,
+            completed,
             vec![
                 IbusAction::DeleteSurroundingText { nchars: 4 },
                 IbusAction::CommitText("audit-ok".into())
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_execution_does_not_block_ibus_key_processing() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.4; printf done"]
+            timeout_ms = 1000
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        let mut adapter = IbusEngineAdapter::new(engine);
+        let started = Instant::now();
+        let mut key_actions = Vec::new();
+        for character in ":slow".chars() {
+            key_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "IBus key processing waited for the child process"
+        );
+        assert!(key_actions.contains(&IbusAction::CommitText("w".into())));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let actions = adapter.drain_completed_commands();
+            if !actions.is_empty() {
+                assert_eq!(
+                    actions,
+                    vec![
+                        IbusAction::DeleteSurroundingText { nchars: 5 },
+                        IbusAction::CommitText("done".into())
+                    ]
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "IBus command did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[cfg(unix)]
@@ -536,13 +623,20 @@ replacement = "signature"
         };
         let mut adapter =
             IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+        assert!(adapter.engine_mut().enable_async_commands());
 
         let mut actions = Vec::new();
         for character in ":large".chars() {
             actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
 
-        assert!(marker.exists(), "the subprocess should complete");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "the subprocess did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
+        thread::sleep(Duration::from_millis(20));
+        actions.extend(adapter.drain_completed_commands());
         assert!(
             !actions
                 .iter()
