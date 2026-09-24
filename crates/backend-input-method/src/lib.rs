@@ -1866,7 +1866,11 @@ mod tests {
 
         assert!(error.retryable, "injector errors should be retryable");
         assert!(error.message.contains("synthetic failure"));
-        assert_eq!(pending.len(), 1, "remaining keys should be preserved on error");
+        assert_eq!(
+            pending.len(),
+            1,
+            "remaining keys should be preserved on error"
+        );
         assert_eq!(pending.front().unwrap().keycode, 106);
     }
 

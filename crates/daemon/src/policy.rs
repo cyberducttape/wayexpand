@@ -285,8 +285,8 @@ allowed_backends = ["input-method-v2", "libei"]
 
     #[test]
     fn validate_policy_file_metadata_rejects_symlinks() {
-        use std::os::unix::fs::PermissionsExt;
         use std::fs;
+        use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join("wayexpand-symlink-test");
         let _ = fs::remove_dir_all(&root);

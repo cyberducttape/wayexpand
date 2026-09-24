@@ -917,10 +917,14 @@ impl ExpansionEngine {
                                 let trailing_word_character = match_mode == MatchMode::WordBoundary
                                     && is_word_character(character);
                                 if !trailing_word_character {
-                                    if let Some(result) =
-                                        self.take_match_deferred(config_index, length, Some(character))
-                                    {
-                                        let bytes = result.trigger.len()
+                                    if let Some(result) = self.take_match_deferred(
+                                        config_index,
+                                        length,
+                                        Some(character),
+                                    ) {
+                                        let bytes = result
+                                            .trigger
+                                            .len()
                                             .saturating_add(result.template_text.len());
                                         if results.len() >= MAX_RESULTS_PER_EVENT
                                             || result_bytes.saturating_add(bytes)
@@ -967,8 +971,8 @@ impl ExpansionEngine {
                             continue;
                         }
                         if let Some(result) = self.take_match_deferred(config_index, length, None) {
-                            let expansion_bytes = trigger.len()
-                                .saturating_add(result.template_text.len());
+                            let expansion_bytes =
+                                trigger.len().saturating_add(result.template_text.len());
                             if result_bytes.saturating_add(expansion_bytes)
                                 > MAX_RESULT_BYTES_PER_EVENT
                             {
@@ -1000,7 +1004,9 @@ impl ExpansionEngine {
                         self.matcher_indices
                             .get(index)
                             .copied()
-                            .and_then(|config_index| self.take_match_deferred(config_index, length, None))
+                            .and_then(|config_index| {
+                                self.take_match_deferred(config_index, length, None)
+                            })
                     });
                 self.clear_buffer();
                 result.into_iter().collect()
@@ -1136,10 +1142,9 @@ impl ExpansionEngine {
         let expansion = &self.config.expansion[config_index];
 
         // Render template to get cursor_offset (without executing command)
-        let (mut template_text, cursor_offset) = render_template_with_cursor(
-            &expansion.replacement,
-            &crate::TemplateContext::system(),
-        ).ok()?;
+        let (mut template_text, cursor_offset) =
+            render_template_with_cursor(&expansion.replacement, &crate::TemplateContext::system())
+                .ok()?;
 
         if propagate_case {
             template_text = apply_case_style(&typed, &template_text);
@@ -3656,10 +3661,7 @@ match_mode = "word-boundary""#,
 
         let temp_dir = std::env::temp_dir().join("wayexpand-tests");
         let _ = fs::create_dir_all(&temp_dir);
-        let pid_file = temp_dir.join(format!(
-            "child-cleanup-test-{}.pid",
-            std::process::id()
-        ));
+        let pid_file = temp_dir.join(format!("child-cleanup-test-{}.pid", std::process::id()));
 
         let shell_command = format!(
             r#"{{ echo "pid: $$" > '{}'; python3 -c "import sys; sys.stdout.write('x' * (1024 * 1024 + 1))"; sleep 60; }}"#,
@@ -3687,7 +3689,10 @@ match_mode = "word-boundary""#,
 
         if pid_file.exists() {
             if let Ok(contents) = fs::read_to_string(&pid_file) {
-                if let Some(pid_str) = contents.strip_prefix("pid: ").and_then(|s| s.trim().parse::<i32>().ok()) {
+                if let Some(pid_str) = contents
+                    .strip_prefix("pid: ")
+                    .and_then(|s| s.trim().parse::<i32>().ok())
+                {
                     let is_alive = unsafe { libc::kill(pid_str, 0) };
                     assert_eq!(
                         is_alive, -1,
