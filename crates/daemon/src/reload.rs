@@ -418,7 +418,7 @@ mod tests {
             &path,
             "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"kate\"]\n",
         );
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         config.engine.set_current_window(Some(WindowContext {
             app_id: Some("org.kde.kate".into()),
             title: None,
@@ -446,7 +446,7 @@ mod tests {
     fn valid_reload_replaces_active_engine() {
         let path = temporary_config();
         write_config(&path, &config_text("old"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, &config_text("new replacement"));
         config.reload_now();
         assert!(config.healthy());
@@ -464,7 +464,7 @@ mod tests {
     fn invalid_reload_keeps_previous_engine() {
         let path = temporary_config();
         write_config(&path, &config_text("stable"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, "[[expansion]]\ntrigger = ");
         config.reload_now();
         assert!(!config.healthy());
@@ -482,7 +482,7 @@ mod tests {
     fn missing_file_keeps_previous_engine_and_reloads_when_restored() {
         let path = temporary_config();
         write_config(&path, &config_text("before outage"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         fs::remove_file(&path).unwrap();
         config.reload_now();
         let result = config
@@ -508,7 +508,7 @@ mod tests {
     fn in_place_same_size_edit_is_detected() {
         let path = temporary_config();
         write_config(&path, &config_text("old"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, &config_text("new"));
         config.reload_if_changed();
 
@@ -536,7 +536,7 @@ mod tests {
     fn unchanged_metadata_reuses_existing_fingerprint() {
         let path = temporary_config();
         write_config(&path, &config_text("stable metadata"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         let stamp = config.observed.unwrap();
         config.last_fingerprint_check = Some(Instant::now());
         let reused = config.poll_stamp().unwrap();
@@ -558,7 +558,7 @@ mod tests {
         // Both are critical for maintaining password-field protection.
         let path = temporary_config();
         write_config(&path, &config_text("initial"));
-        let mut config = ReloadableConfig::load(&path).unwrap();
+        let mut config = ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
 
         // Simulate entering a sensitive field and pausing the user.
         config.engine.set_sensitive_focus(true);
