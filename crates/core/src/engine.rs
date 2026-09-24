@@ -1095,6 +1095,30 @@ impl ExpansionEngine {
         Some(plan)
     }
 
+    /// Apply postflight policy to command output. Validates output before injection.
+    /// Called after command execution completes, before result is committed.
+    /// Returns output if allowed, None if validation fails.
+    fn apply_postflight_policy(&self, plan: &MatchPlan, output: &str) -> Option<String> {
+        // Check max replacement size policy (0 = no limit)
+        let max_size = self.config.organization.max_replacement_size;
+        if max_size > 0 && output.len() > max_size {
+            return None;
+        }
+
+        // Generation changed between match time and command completion
+        // This means other input events occurred; result might be stale
+        if plan.generation != self.input_generation {
+            return None;
+        }
+
+        // State changed between match and completion - user paused or focused sensitive field
+        if plan.sensitive_focus != self.sensitive_focus || plan.user_paused != self.user_paused {
+            return None;
+        }
+
+        Some(output.to_string())
+    }
+
     /// Create a match plan without side effects. Returns context for policy evaluation and execution.
     /// This is the unified matching path for both immediate and deferred execution.
     fn take_match_plan(
