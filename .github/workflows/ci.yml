@@ -224,6 +224,8 @@ jobs:
         run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service
       - name: Enforce hardening contract
         run: bash scripts/check-systemd-hardening.sh
+      - name: Enforce libei token storage contract
+        run: bash scripts/check-libei-token-paths.sh
 
   udev:
     name: udev Rules Validation
