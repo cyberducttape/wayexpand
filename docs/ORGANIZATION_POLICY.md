@@ -71,12 +71,22 @@ When `safe_mode = true`:
 - Can require absolute command paths so `program = "git"` cannot resolve
   differently based on the daemon's `PATH`
 
+**Enforcement is consistent across all policy paths:** All expansion checks
+(core engine, daemon, CLI diagnostics) enforce the same restrictions. Violations
+are never silent; they are always logged and always block execution when
+safe_mode is true.
+
 ### Audit Mode (Logging Only)
 When `safe_mode = false`:
 - Policy violations **allow** expansions to proceed
 - Violations logged as **warnings** to journald
 - Suitable for testing policies before full enforcement
 - Enables discovery of problematic snippets without breaking workflows
+
+**Logging is consistent across all policy paths:** All expansion checks
+log the same violation details to journald with the configured audit_prefix.
+Violations never silently fail or cause unexpected behavior changes between
+audit and safe modes.
 
 ## Examples
 
