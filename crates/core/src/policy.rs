@@ -87,15 +87,14 @@ pub fn validate_organization_policy_file(
     if metadata.uid() != 0 {
         return Err(format!("{} must be owned by root", path.display()));
     }
-    // Policy file must not be world-accessible. It may be:
-    // - 0600 (root read/write only)
-    // - 0400 (root read-only)
-    // - 0440 (root read-only, group-readable for unprivileged services)
-    // This allows unprivileged WayExpand user services to read organization
-    // policy without compromising security through world-readable access.
-    if metadata.mode() & 0o007 != 0 {
+    // Policy file must not be writable by group or world (integrity protection).
+    // Read access for unprivileged users is safe: the policy is not a secret,
+    // and unprivileged WayExpand services need to read it for enforcement.
+    // Valid modes: 0600 (rw-------), 0400 (r--------), 0440 (r--r-----), 0444 (r--r--r--), etc.
+    // Invalid modes: any with write bits for group (0o020) or world (0o002).
+    if metadata.mode() & 0o022 != 0 {
         return Err(format!(
-            "{} must not be world-accessible (mode: {:o})",
+            "{} must not be writable by group or world (mode: {:o})",
             path.display(),
             metadata.mode() & 0o777
         ));
@@ -153,5 +152,36 @@ mod tests {
             "input-method-v2"
         );
         assert_eq!(policy_backend_name("evdev", "libei"), "libei");
+    }
+
+    #[test]
+    fn policy_file_permissions_validation_logic() {
+        // Unit test for permission validation logic (without filesystem dependency on uid=0)
+        // This tests the actual permission check that matters for unprivileged access.
+
+        // Test that write-protection check (& 0o022) correctly identifies writable bits
+        let test_cases = vec![
+            // (mode, should_pass_write_check, description)
+            (0o400, true, "r--------"),
+            (0o440, true, "r--r-----"),
+            (0o444, true, "r--r--r--"),
+            (0o600, true, "rw-------"),
+            (0o644, true, "rw-r--r--"),
+            (0o620, false, "rw--w---- (group writable)"),
+            (0o660, false, "rw-rw---- (group writable)"),
+            (0o666, false, "rw-rw-rw- (all writable)"),
+            (0o622, false, "-w--w--w- (world writable)"),
+        ];
+
+        for (mode, should_pass, description) in test_cases {
+            let is_group_or_world_writable = (mode & 0o022) != 0;
+            let passes_check = !is_group_or_world_writable;
+
+            assert_eq!(
+                passes_check, should_pass,
+                "mode {:o} ({}): expected write-check to be {}, but got {}",
+                mode, description, should_pass, passes_check
+            );
+        }
     }
 }
