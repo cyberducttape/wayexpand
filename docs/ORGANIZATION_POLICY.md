@@ -4,7 +4,7 @@
 
 ---
 
-> **Status:** Core feature implemented as of v1.1.2
+> **Status:** Core feature implemented as of v1.1.1
 
 Organization policies enforce administrator-defined constraints on text expansions, protecting sensitive environments and preventing unsafe operations.
 

@@ -67,7 +67,7 @@ sudo dpkg -i ../wayexpand_1.0.0-1_amd64.deb
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-mock wayexpand-1.1.2-1.fc39.src.rpm
+mock wayexpand-1.1.1-1.fc39.src.rpm
 ```
 
 **To build from the repository spec file:**

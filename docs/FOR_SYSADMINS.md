@@ -666,5 +666,5 @@ No central server required.
 
 ---
 
-**Last updated:** 2026-09-19
-**Scope:** WayExpand v1.1.2+
+**Last updated:** 2026-09-23
+**Scope:** WayExpand v1.1.1+
