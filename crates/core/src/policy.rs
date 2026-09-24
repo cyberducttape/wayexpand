@@ -115,6 +115,22 @@ pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, St
     })
 }
 
+/// Pre-flight policy check: violations determinable before trigger matching.
+/// Returns the reason if a policy violation would block expansion execution.
+///
+/// This catches determinable violations BEFORE engine.process(), preventing
+/// side effects (like command execution) before policy approval.
+///
+/// Post-execution violations (backend allowed, output size) are still checked
+/// after engine.process() because they depend on the matched expansion.
+pub fn pre_flight_check(policy: &OrganizationPolicy) -> Option<String> {
+    // Commands disabled is determinable before matching
+    if policy.safe_mode && policy.disable_commands {
+        return Some("command execution is disabled by organization policy".to_string());
+    }
+    None
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PolicyFile {
