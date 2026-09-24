@@ -124,10 +124,9 @@ pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, St
 /// Post-execution violations (backend allowed, output size) are still checked
 /// after engine.process() because they depend on the matched expansion.
 pub fn pre_flight_check(policy: &OrganizationPolicy) -> Option<String> {
-    // Commands disabled is determinable before matching
-    if policy.safe_mode && policy.disable_commands {
-        return Some("command execution is disabled by organization policy".to_string());
-    }
+    // NOTE: disable_commands does NOT block static snippets—only command-backed ones.
+    // That check happens per-expansion after matching (see apply_preflight_policy).
+    // This global check is not needed; static snippets must always be allowed.
     None
 }
 

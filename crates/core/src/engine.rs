@@ -3488,6 +3488,39 @@ match_mode = "word-boundary""#,
     }
 
     #[test]
+    fn static_expansions_work_with_disable_commands_policy() {
+        // Regression test: disable_commands should ONLY block command-backed expansions,
+        // not static snippets. This tests the IBus safe_mode bug where pre_flight_check()
+        // was blocking ALL snippets when both safe_mode and disable_commands were true.
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":sig"
+replacement = "signature""#,
+        )
+        .unwrap();
+
+        let mut config = config;
+        config.organization.disable_commands = true;
+
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        // Static expansion (no command) should work even with disable_commands policy
+        let results = engine.process(InputEvent::Text(":sig".into()));
+        assert!(
+            !results.is_empty(),
+            "static expansions must work even when disable_commands policy is set"
+        );
+        assert_eq!(
+            results[0].insert, "signature",
+            "static expansion should produce correct output"
+        );
+        assert!(
+            !results[0].command_backed,
+            "static expansion should have command_backed=false"
+        );
+    }
+
+    #[test]
     fn process_descendants_cleaned_up_on_successful_exit() {
         // Regression test: spawned descendants should not survive after the
         // command-backed expansion completes, even when the direct child exits
