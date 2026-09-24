@@ -114,8 +114,15 @@ reattaches that injector when creating or reconnecting the input-method source.
 Pass-through failures are reported as source errors and the daemon reconnects;
 keys are not silently discarded. Modifier state is synthesized around the
 passed-through key, but left/right modifier identity and compositor-specific
-shortcut behavior are not yet certified. Treat this as experimental keyboard
-compatibility, not proof that unrelated keys can never be lost.
+shortcut behavior are not yet certified.
+
+**Keyboard repeat limitation:** Only key-down events trigger pass-through for
+unsupported keys. The backend does not currently handle repeated input from held
+keys (compositor `repeat-info`), so held navigation (arrow keys held for
+continuous cursor movement) or text repetition is not preserved with the same
+fidelity as normal Wayland input. Treat this as experimental keyboard
+compatibility, not proof that unrelated keys can never be lost. This limitation
+requires architectural changes to address fully.
 
 Preedit handling and full compositor coverage remain open integration work,
 so this source is opt-in and intentionally hidden behind `wayexpand setup --mode experimental`.
