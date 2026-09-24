@@ -1,3 +1,17 @@
+wayexpand (1.2.0-1) focal; urgency=high
+
+  * Backend & keyboard correctness: fix child process cleanup on all error paths
+  * Fix libei token persistence configuration for input-method systemd service
+  * Make libei key pass-through optional and non-blocking during startup
+  * Add 9 new pass-through regression tests and bounded queue implementation
+  * Fix external editor integration for commands with arguments (e.g., code --wait)
+  * Resolve documentation contradictions about experimental key pass-through
+  * Reorder release workflow for accurate SBOM generation from artifacts
+  * Delete divergent v1.2 tag to restore release history consistency
+  * All 330+ unit tests passing with comprehensive test coverage
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Mon, 23 Sep 2026 20:35:00 +0000
+
 wayexpand (1.1.2-2) focal; urgency=high
 
   * Fix P0 blockers for v1.2 release candidate
