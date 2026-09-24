@@ -124,43 +124,6 @@ jobs:
           tar -czf "${root}.tar.gz" "$root"
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
           cargo metadata --locked --format-version 1 > "${root}.cargo-metadata.json"
-      - name: Generate SBOM (Software Bill of Materials)
-        run: |
-          set -euo pipefail
-          # Syft is fetched from an immutable release asset and verified against
-          # Anchore's published SHA-256 before execution. Do not replace this
-          # with the mutable install.sh on main.
-          syft_version=1.52.0
-          syft_sha256=caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
-          syft_archive="$RUNNER_TEMP/syft_${syft_version}_linux_amd64.tar.gz"
-          syft_bin="$RUNNER_TEMP/syft"
-          curl --fail --silent --show-error --location \
-            --output "$syft_archive" \
-            "https://github.com/anchore/syft/releases/download/v${syft_version}/syft_${syft_version}_linux_amd64.tar.gz"
-          printf '%s  %s\n' "$syft_sha256" "$syft_archive" | sha256sum --check --status
-          tar --extract --gzip --file="$syft_archive" --directory="$RUNNER_TEMP"
-          test -x "$syft_bin"
-          version="${GITHUB_REF_NAME#v}"
-
-          # Generate SBOM for source tarball (SPDX format)
-          "$syft_bin" "dir:." \
-            --output=spdx-json \
-            --file="wayexpand-${version}.sbom.spdx.json"
-
-          # Generate SBOM for binary artifacts (CycloneDX JSON format, for tool compatibility)
-          "$syft_bin" "dir:." \
-            --output=cyclonedx-json \
-            --file="wayexpand-${version}.sbom.cyclonedx.json"
-
-          # Generate SBOM for vendored dependencies
-          "$syft_bin" "dir:vendor" \
-            --output=spdx-json \
-            --file="wayexpand-${version}-vendored.sbom.spdx.json"
-
-          echo "✓ SBOMs generated:"
-          echo "  - wayexpand-${version}.sbom.spdx.json"
-          echo "  - wayexpand-${version}.sbom.cyclonedx.json"
-          echo "  - wayexpand-${version}-vendored.sbom.spdx.json"
       - name: Generate source tarballs (clean + vendored)
         shell: bash
         run: |
@@ -187,6 +150,52 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           sha256sum "wayexpand-${version}-vendored.tar.gz" > "wayexpand-${version}-vendored.tar.gz.sha256"
           rm -rf /tmp/wayexpand-vendor-build
+      - name: Generate SBOM (Software Bill of Materials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Syft is fetched from an immutable release asset and verified against
+          # Anchore's published SHA-256 before execution. Do not replace this
+          # with the mutable install.sh on main.
+          syft_version=1.52.0
+          syft_sha256=caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+          syft_archive="$RUNNER_TEMP/syft_${syft_version}_linux_amd64.tar.gz"
+          syft_bin="$RUNNER_TEMP/syft"
+          curl --fail --silent --show-error --location \
+            --output "$syft_archive" \
+            "https://github.com/anchore/syft/releases/download/v${syft_version}/syft_${syft_version}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$syft_sha256" "$syft_archive" | sha256sum --check --status
+          tar --extract --gzip --file="$syft_archive" --directory="$RUNNER_TEMP"
+          test -x "$syft_bin"
+          version="${GITHUB_REF_NAME#v}"
+          extract_dir="$RUNNER_TEMP/wayexpand-extract"
+
+          # Extract clean source tarball and scan
+          mkdir -p "$extract_dir/clean"
+          tar -xzf "wayexpand-${version}.tar.gz" -C "$extract_dir/clean"
+          "$syft_bin" "dir:$extract_dir/clean/wayexpand-${version}" \
+            --output=spdx-json \
+            --file="wayexpand-${version}.sbom.spdx.json"
+
+          # Generate SBOM for packaged binary artifacts (CycloneDX JSON format)
+          "$syft_bin" "dir:wayexpand-${version}-linux-x86_64/bin" \
+            --output=cyclonedx-json \
+            --file="wayexpand-${version}.sbom.cyclonedx.json"
+
+          # Extract vendored tarball and scan
+          mkdir -p "$extract_dir/vendored"
+          tar -xzf "wayexpand-${version}-vendored.tar.gz" -C "$extract_dir/vendored"
+          "$syft_bin" "dir:$extract_dir/vendored/wayexpand-${version}/vendor" \
+            --output=spdx-json \
+            --file="wayexpand-${version}-vendored.sbom.spdx.json"
+
+          # Clean up extraction temporary directory
+          rm -rf "$extract_dir"
+
+          echo "✓ SBOMs generated from release artifacts:"
+          echo "  - wayexpand-${version}.sbom.spdx.json (clean source)"
+          echo "  - wayexpand-${version}.sbom.cyclonedx.json (binary artifacts)"
+          echo "  - wayexpand-${version}-vendored.sbom.spdx.json (vendored dependencies)"
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
