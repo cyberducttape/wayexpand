@@ -66,9 +66,12 @@ the total insertion time becomes noticeable:
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.
 
-**When does this happen?** Observed with xdg-desktop-portal-kde on KWin 6.6.
-As KDE Portal support matures, `ei_text` support should become universal and
-this fallback will become rare.
+**When does this happen?** It has been observed with xdg-desktop-portal-kde on
+KWin 6.6. Treat that as a recorded compatibility observation, not a guarantee
+for every later KWin or portal build; use `wayexpand doctor` and compositor
+certification evidence for the session being deployed. As KDE Portal support
+matures, `ei_text` support should become universal and this fallback will
+become rare.
 
 **Workaround:** If latency is intolerable:
 - Use input-method-v2 instead (if your compositor supports it)
@@ -103,20 +106,24 @@ normalizes pressed keys into `InputEvent`s. It forwards printable text, Return,
 and Tab with `commit_string` and the required commit serial. Backspace uses
 the compositor's surrounding-text byte offsets, including selections and
 multibyte UTF-8 characters; if that state is unavailable or invalid, it fails
-closed rather than deleting a corrupt byte range. Escape and other unsupported
-non-text keys are discarded individually and clear the matcher because
-silently interpreting them would be unsafe. The individual grabbed event may
-be lost; the source does not claim general non-text pass-through and does not
-restart the daemon for ordinary unsupported keys. Preedit handling, full
-non-text pass-through, and compositor coverage
-remain open integration work, so this source is opt-in and intentionally hidden
-behind `wayexpand setup --mode experimental`. The daemon flag remains
-available for development and explicit automation, but normal setup does not
-recommend or enable it. Replacements larger than the protocol commit limit
-are rejected before any deletion is sent. Initial registry discovery is
-deadline-bounded so a connected but unresponsive compositor cannot hang one
-connection attempt indefinitely; retryable startup failures are retried with
-bounded backoff until shutdown.
+closed rather than deleting a corrupt byte range.
+
+**Key pass-through for unsupported keys:** Escape, arrows, F-keys, and other
+non-text keys are automatically passed through to a secondary libei injector
+when available. This allows full keyboard compatibility while preserving the
+password-field detection of input-method-v2. If libei is unavailable, unsupported
+keys are discarded and clear the matcher to fail closed -- the default safe behavior.
+The individual event loss is acceptable: the source does not claim to intercept
+everything and does not restart the daemon for ordinary unsupported keys.
+
+Preedit handling and full compositor coverage remain open integration work,
+so this source is opt-in and intentionally hidden behind `wayexpand setup --mode experimental`.
+The daemon flag remains available for development and explicit automation, but
+normal setup does not recommend or enable it. Replacements larger than the
+protocol commit limit are rejected before any deletion is sent. Initial registry
+discovery is deadline-bounded so a connected but unresponsive compositor cannot
+hang one connection attempt indefinitely; retryable startup failures are retried
+with bounded backoff until shutdown.
 
 Activation starts with capture disabled until the compositor reports the
 current content type. Password, hidden-text, sensitive-data, and unknown
@@ -146,9 +153,9 @@ this process hosts for exactly that purpose, named uniquely per process
 not collide. `loadScript` returns before the resulting
 `/Scripting/ScriptN` object is reliably reachable -- observed directly
 against a live KWin 6.6 session, where calling `run()` immediately after
-`loadScript` fails with "No such object path" for roughly the first
-second -- so starting the tracker retries `run()` with a short bounded
-backoff rather than guessing a fixed delay.
+`loadScript` failed with "No such object path" for roughly the first second.
+The tracker therefore retries `run()` with a short bounded backoff instead of
+treating any specific KWin version as a fixed-delay contract.
 
 An `app_filter`-scoped expansion fails closed rather than matching
 everywhere when window tracking is unavailable (no tracker for this
@@ -200,8 +207,9 @@ forever.
 
 The evdev backend reads keyboard events directly from `/dev/input/event*`
 devices, bypassing Wayland protocols entirely. This is necessary for compositors
-(notably KWin/KDE Plasma as of 6.6) that do not implement `zwp_input_method_manager_v2`
-or `zwp_virtual_keyboard_manager_v1`. The tradeoff is significant: evdev has
+(including KWin/KDE Plasma configurations observed on 6.6) that do not
+implement `zwp_input_method_manager_v2` or
+`zwp_virtual_keyboard_manager_v1`. The tradeoff is significant: evdev has
 **no way to detect password fields or sensitive inputs**, since field semantics
 are not available at the kernel level.
 

@@ -6,9 +6,10 @@
 # has real security consequences ordinary installation does not.
 #
 # What this does:
-#   1. Installs udev/71-wayexpand-evdev.rules to /etc/udev/rules.d/ and
-#      reloads udev rules.
-#   2. Adds the invoking (non-root) user to the `input` group.
+#   1. Installs exactly one selected udev policy to /etc/udev/rules.d/ and
+#      removes the other WayExpand evdev policy if present.
+#   2. For --access=input-group only, adds the invoking non-root user to the
+#      `input` group.
 #
 # This is the current legacy/simple access model. `input` group membership
 # lets a process read every keystroke typed on this system, in any session --
@@ -23,10 +24,18 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-rule_src="$project_dir/udev/71-wayexpand-evdev.rules"
-rule_dest="/etc/udev/rules.d/71-wayexpand-evdev.rules"
-uaccess_rule_src="$project_dir/udev/69-wayexpand-evdev-uaccess.rules"
-uaccess_rule_dest="/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules"
+if [ -f /usr/share/wayexpand/udev/71-wayexpand-evdev.rules ]; then
+    # Distro package layout: policies are deliberately outside udev's active
+    # rules directory until this helper is run explicitly.
+    rule_src=/usr/share/wayexpand/udev/71-wayexpand-evdev.rules
+    uaccess_rule_src=/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
+else
+    # Source tree and release archive layout.
+    rule_src="$project_dir/udev/71-wayexpand-evdev.rules"
+    uaccess_rule_src="$project_dir/udev/69-wayexpand-evdev-uaccess.rules"
+fi
+rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evdev.rules}
+uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
 access_mode=input-group
 dry_run=0
 do_uninstall=0
@@ -153,6 +162,9 @@ fi
 
 printf '%s\n' "This will:"
 if [ "$access_mode" = active-seat ]; then
+    if [ -e "$rule_dest" ]; then
+        printf '%s\n' "  - remove $rule_dest so it cannot override active-seat ACLs"
+    fi
     if [ "$active_rule_installed" -eq 1 ]; then
         printf '%s\n' "  - keep $uaccess_rule_dest (already installed, unchanged)"
     else
@@ -160,6 +172,9 @@ if [ "$access_mode" = active-seat ]; then
     fi
     printf '%s\n' "  - do not change input-group membership (logind active-seat ACLs)"
 else
+    if [ -e "$uaccess_rule_dest" ]; then
+        printf '%s\n' "  - remove $uaccess_rule_dest so the input-group model is unambiguous"
+    fi
     if [ "$rule_installed" -eq 1 ]; then
         printf '%s\n' "  - keep $rule_dest (already installed, unchanged)"
     else
@@ -185,20 +200,31 @@ if [ "$dry_run" -eq 1 ]; then
     exit 0
 fi
 
+udev_changed=0
+if [ "$access_mode" = active-seat ] && [ -e "$rule_dest" ]; then
+    rm -f -- "$rule_dest"
+    udev_changed=1
+    printf '%s\n' "Removed $rule_dest"
+fi
+if [ "$access_mode" = input-group ] && [ -e "$uaccess_rule_dest" ]; then
+    rm -f -- "$uaccess_rule_dest"
+    udev_changed=1
+    printf '%s\n' "Removed $uaccess_rule_dest"
+fi
+
 if [ "$access_mode" = active-seat ] && [ "$active_rule_installed" -eq 0 ]; then
     install -Dm644 "$uaccess_rule_src" "$uaccess_rule_dest"
-    if command -v udevadm >/dev/null 2>&1; then
-        udevadm control --reload
-        udevadm trigger --subsystem-match=input
-    fi
+    udev_changed=1
     printf '%s\n' "Installed $uaccess_rule_dest"
 elif [ "$access_mode" = input-group ] && [ "$rule_installed" -eq 0 ]; then
     install -Dm644 "$rule_src" "$rule_dest"
-    if command -v udevadm >/dev/null 2>&1; then
-        udevadm control --reload
-        udevadm trigger --subsystem-match=input
-    fi
+    udev_changed=1
     printf '%s\n' "Installed $rule_dest"
+fi
+
+if [ "$udev_changed" -eq 1 ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload
+    udevadm trigger --subsystem-match=input
 fi
 
 if [ "$access_mode" = input-group ] && ! is_member; then

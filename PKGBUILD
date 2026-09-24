@@ -70,9 +70,12 @@ package() {
         "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service" \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
 
-    # Install udev rules for evdev backend
-    install -Dm644 udev/71-wayexpand-evdev.rules "${pkgdir}/usr/lib/udev/rules.d/71-wayexpand-evdev.rules"
-    install -Dm644 udev/69-wayexpand-evdev-uaccess.rules "${pkgdir}/usr/lib/udev/rules.d/69-wayexpand-evdev-uaccess.rules"
+    # Ship evdev policies inertly. Installing WayExpand must not change raw
+    # input authorization; the explicit helper copies a selected policy into
+    # /etc/udev/rules.d when the user opts in.
+    install -Dm644 udev/71-wayexpand-evdev.rules "${pkgdir}/usr/share/wayexpand/udev/71-wayexpand-evdev.rules"
+    install -Dm644 udev/69-wayexpand-evdev-uaccess.rules "${pkgdir}/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules"
+    install -Dm755 scripts/install-evdev-permissions.sh "${pkgdir}/usr/bin/wayexpand-install-evdev-access"
 
     # Install documentation
     install -Dm644 README.md "${pkgdir}/usr/share/doc/wayexpand/README.md"

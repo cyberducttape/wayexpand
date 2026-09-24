@@ -20,6 +20,7 @@ install -m 0755 "$project_dir/scripts/install-release.sh" "$release_dir/scripts/
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-evdev-permissions.sh" "$release_dir/scripts/"
 install -m 0644 "$project_dir/udev/71-wayexpand-evdev.rules" "$release_dir/udev/"
+install -m 0644 "$project_dir/udev/69-wayexpand-evdev-uaccess.rules" "$release_dir/udev/"
 
 # install-evdev-permissions.sh must work from this release layout too (it
 # looks for udev/71-wayexpand-evdev.rules next to its own scripts/ dir).
@@ -75,10 +76,21 @@ grep -F -- '--user daemon-reload' "$systemctl_log" >/dev/null
 grep -F -- '--user enable wayexpand-evdev.service' "$systemctl_log" >/dev/null
 grep -F -- '--user restart wayexpand-evdev.service' "$systemctl_log" >/dev/null
 
+touch "$test_root/71-wayexpand-evdev.rules" "$test_root/69-wayexpand-evdev-uaccess.rules"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
-"$release_dir/scripts/uninstall-user.sh"
+WAYEXPAND_UNINSTALL_GROUPS="wheel input" \
+WAYEXPAND_EVDEV_RULE_DEST="$test_root/71-wayexpand-evdev.rules" \
+WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$test_root/69-wayexpand-evdev-uaccess.rules" \
+"$release_dir/scripts/uninstall-user.sh" >"$test_root/uninstall.out"
+
+grep -F "WayExpand user files were removed." "$test_root/uninstall.out" >/dev/null
+grep -F "WARNING: raw-input privileges are still configured:" "$test_root/uninstall.out" >/dev/null
+grep -F "is a member of the input group" "$test_root/uninstall.out" >/dev/null
+grep -F "WayExpand input-group udev rule is installed" "$test_root/uninstall.out" >/dev/null
+grep -F "WayExpand active-seat udev rule is installed" "$test_root/uninstall.out" >/dev/null
+grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$test_root/uninstall.out" >/dev/null
 
 [ ! -e "$test_root/home/.local/bin/wayexpand" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-daemon" ]

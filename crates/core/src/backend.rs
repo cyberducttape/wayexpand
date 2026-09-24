@@ -94,6 +94,14 @@ pub trait TextInjector: Send {
     fn move_cursor_left(&mut self, _count: usize) -> Result<(), InjectorError> {
         Ok(())
     }
+    /// Inject a keyboard key event by Linux evdev keycode. Used for
+    /// pass-through of unsupported keys in input-method-v2. Backends that
+    /// cannot synthesize key events (text-only backends) return Ok(()) as a
+    /// no-op. This is best-effort: if key synthesis fails, the key is lost
+    /// but the expansion continues.
+    fn inject_key(&mut self, _keycode: u32) -> Result<(), InjectorError> {
+        Ok(())
+    }
 }
 
 impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
@@ -115,6 +123,10 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
         (**self).move_cursor_left(count)
+    }
+
+    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
+        (**self).inject_key(keycode)
     }
 }
 

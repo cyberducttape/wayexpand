@@ -33,10 +33,13 @@ use wayexpand_core::{
 /// an expansion in evdev mode. Generous enough to cover a deliberate
 /// keypress, bounded so a genuinely held key cannot stall expansion.
 const KEY_RELEASE_TIMEOUT: Duration = Duration::from_millis(400);
-/// Maximum latency before the daemon services completed command results.
-/// Input sources remain blocking, so this is intentionally short: a command
-/// completion must not wait for the old 250 ms reconnect/heartbeat cadence.
-const COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Low-latency polling while command/hotkey work is queued or running.
+/// Long-term, command completion should wake the input loop directly; until
+/// then, keep the fast cadence only while there is async work to collect.
+const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Idle maintenance cadence for reload/pause/stop checks and completed command
+/// collection when no command or hotkey job is known to be pending.
+const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 /// Extra settling time for non-exclusive evdev capture. If another physical
 /// event arrives during this window, the pending expansion is abandoned to
 /// avoid deleting text from a cursor that has already moved.
@@ -54,6 +57,60 @@ struct EventError {
 struct OutputConnectError {
     message: String,
     retryable: bool,
+}
+
+#[derive(Default)]
+struct StatusPublisher {
+    last: Option<StatusSnapshot>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct StatusSnapshot {
+    source: String,
+    backend: String,
+    state: String,
+    paused: bool,
+    config_path: PathBuf,
+    config_healthy: bool,
+    metrics: CommandMetrics,
+}
+
+impl StatusPublisher {
+    fn publish(
+        &mut self,
+        control: &control::ControlServer,
+        source: &str,
+        backend: &str,
+        state: &str,
+        config_path: &Path,
+        config_healthy: bool,
+        metrics: CommandMetrics,
+    ) {
+        let snapshot = StatusSnapshot {
+            source: source.to_owned(),
+            backend: backend.to_owned(),
+            state: state.to_owned(),
+            paused: control
+                .pause_requested
+                .load(std::sync::atomic::Ordering::Acquire),
+            config_path: config_path.to_path_buf(),
+            config_healthy,
+            metrics,
+        };
+        if self.last.as_ref() == Some(&snapshot) {
+            return;
+        }
+        status::set_daemon_status(
+            control,
+            &snapshot.source,
+            &snapshot.backend,
+            &snapshot.state,
+            snapshot.config_path.as_path(),
+            snapshot.config_healthy,
+            snapshot.metrics,
+        );
+        self.last = Some(snapshot);
+    }
 }
 
 impl std::fmt::Display for OutputConnectError {
@@ -176,10 +233,9 @@ fn main() -> Result<()> {
     }
     let input_method_mode = source_name == "input-method";
     if input_method_mode {
-        warn!(
-            "input-method-v2 backend selected: exclusive keyboard capture is active; \
-            unsupported keys (Escape, arrows, F-keys, etc.) will not pass through. \
-            Use libei or wlroots backend for full key support."
+        info!(
+            "input-method-v2 backend selected with automatic key pass-through; \
+            unsupported keys (Escape, arrows, F-keys, etc.) will be re-injected via libei/wlroots"
         );
     }
     let evdev_mode = source_name == "evdev";
@@ -211,6 +267,31 @@ fn main() -> Result<()> {
             }
         }
     };
+
+    // When using input-method-v2, attach libei as a key pass-through backend for unsupported keys.
+    if input_method_mode && input_method.is_some() {
+        match connect_output_with_retry(
+            &control,
+            "input-method",
+            "libei",
+            &path,
+            config.healthy(),
+            config.engine.libei_token_persistence(),
+            portal_token_path.as_deref(),
+        ) {
+            Ok(Some(key_injector)) => {
+                input_method = input_method
+                    .take()
+                    .map(|source| source.with_key_pass_through(key_injector));
+            }
+            Ok(None) => {
+                warn!("libei unavailable; unsupported keys will not pass through (fallback to fail-closed)");
+            }
+            Err(error) => {
+                warn!(%error, "libei pass-through setup failed; unsupported keys will not pass through");
+            }
+        }
+    }
     let active_backend = input_method
         .as_ref()
         .map(|_| "input-method-v2")
@@ -222,7 +303,9 @@ fn main() -> Result<()> {
         "running"
     };
     let mut paused = false;
+    let mut status_publisher = StatusPublisher::default();
     set_daemon_status(
+        &mut status_publisher,
         &control,
         active_source,
         active_backend,
@@ -326,6 +409,7 @@ fn main() -> Result<()> {
             );
             logged_queue_rejections = metrics.command_queue_rejected_total;
         }
+        let poll_interval = input_poll_interval(metrics);
         let completed_commands = config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
             if input_method_mode {
@@ -346,6 +430,7 @@ fn main() -> Result<()> {
             }
         }
         set_daemon_status_with_metrics(
+            &mut status_publisher,
             &control,
             active_source,
             active_backend,
@@ -362,6 +447,7 @@ fn main() -> Result<()> {
                         reconnect_delay = Duration::from_millis(250);
                         connection_state = "connected";
                         set_daemon_status(
+                            &mut status_publisher,
                             &control,
                             active_source,
                             active_backend,
@@ -389,7 +475,7 @@ fn main() -> Result<()> {
             let Some(source) = input_method.as_mut() else {
                 return Err(anyhow::anyhow!("input-method mode lost its input source"));
             };
-            let event_result = source.next_event_timeout(COMPLETION_POLL_INTERVAL);
+            let event_result = source.next_event_timeout(poll_interval);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
@@ -431,6 +517,7 @@ fn main() -> Result<()> {
                                 active_backend,
                             )?;
                             set_daemon_status(
+                                &mut status_publisher,
                                 &control,
                                 active_source,
                                 active_backend,
@@ -455,6 +542,7 @@ fn main() -> Result<()> {
                         active_backend,
                     )?;
                     set_daemon_status(
+                        &mut status_publisher,
                         &control,
                         active_source,
                         active_backend,
@@ -477,6 +565,7 @@ fn main() -> Result<()> {
                         reconnect_delay = Duration::from_millis(250);
                         connection_state = "connected";
                         set_daemon_status(
+                            &mut status_publisher,
                             &control,
                             active_source,
                             active_backend,
@@ -504,7 +593,7 @@ fn main() -> Result<()> {
             let Some(source) = evdev.as_mut() else {
                 return Err(anyhow::anyhow!("evdev mode lost its input source"));
             };
-            let event_result = source.next_event_timeout(COMPLETION_POLL_INTERVAL);
+            let event_result = source.next_event_timeout(poll_interval);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
@@ -612,6 +701,7 @@ fn main() -> Result<()> {
                             config.engine.process(InputEvent::EndOfInput);
                             connection_state = "reconnecting";
                             set_daemon_status(
+                                &mut status_publisher,
                                 &control,
                                 active_source,
                                 active_backend,
@@ -650,6 +740,7 @@ fn main() -> Result<()> {
                         active_backend,
                     );
                     set_daemon_status(
+                        &mut status_publisher,
                         &control,
                         active_source,
                         active_backend,
@@ -665,13 +756,13 @@ fn main() -> Result<()> {
             continue;
         }
         if stdin_closed {
-            thread::sleep(COMPLETION_POLL_INTERVAL);
+            thread::sleep(poll_interval);
             continue;
         }
         let Some(receiver) = receiver.as_ref() else {
             break;
         };
-        match receiver.recv_timeout(COMPLETION_POLL_INTERVAL) {
+        match receiver.recv_timeout(poll_interval) {
             Ok(line) => {
                 drain_pending_window_events(
                     &window_tracker,
@@ -724,6 +815,7 @@ fn main() -> Result<()> {
                             );
                             connection_state = "reconnecting";
                             set_daemon_status(
+                                &mut status_publisher,
                                 &control,
                                 active_source,
                                 backend_name,
@@ -933,6 +1025,7 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
 }
 
 fn set_daemon_status(
+    publisher: &mut StatusPublisher,
     control: &control::ControlServer,
     source: &str,
     backend: &str,
@@ -941,6 +1034,7 @@ fn set_daemon_status(
     config_healthy: bool,
 ) {
     set_daemon_status_with_metrics(
+        publisher,
         control,
         source,
         backend,
@@ -952,6 +1046,7 @@ fn set_daemon_status(
 }
 
 fn set_daemon_status_with_metrics(
+    publisher: &mut StatusPublisher,
     control: &control::ControlServer,
     source: &str,
     backend: &str,
@@ -960,7 +1055,7 @@ fn set_daemon_status_with_metrics(
     config_healthy: bool,
     metrics: CommandMetrics,
 ) {
-    status::set_daemon_status(
+    publisher.publish(
         control,
         source,
         backend,
@@ -969,6 +1064,33 @@ fn set_daemon_status_with_metrics(
         config_healthy,
         metrics,
     );
+}
+
+fn set_daemon_status_direct(
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+) {
+    status::set_daemon_status(
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        config_healthy,
+        CommandMetrics::default(),
+    );
+}
+
+fn input_poll_interval(metrics: CommandMetrics) -> Duration {
+    if metrics.command_queue_depth > 0 || metrics.command_in_flight > 0 {
+        ACTIVE_COMPLETION_POLL_INTERVAL
+    } else {
+        IDLE_MAINTENANCE_INTERVAL
+    }
 }
 
 fn connect_input_method_with_retry(
@@ -1016,7 +1138,7 @@ fn connect_evdev_with_retry(
     loop {
         match EvdevSource::connect() {
             Ok(source) => {
-                set_daemon_status(
+                set_daemon_status_direct(
                     control,
                     "evdev",
                     backend,
@@ -1028,7 +1150,7 @@ fn connect_evdev_with_retry(
             }
             Err(error) if error.is_retryable() => {
                 warn!(%error, ?retry_delay, "evdev source unavailable at startup; retrying");
-                set_daemon_status(
+                set_daemon_status_direct(
                     control,
                     "evdev",
                     backend,
@@ -1103,7 +1225,7 @@ fn connect_output_with_retry(
     loop {
         match connect_output_backend(backend, persist_portal_token, portal_token_path) {
             Ok(injector) => {
-                set_daemon_status(
+                set_daemon_status_direct(
                     control,
                     source,
                     backend,
@@ -1116,7 +1238,7 @@ fn connect_output_with_retry(
             }
             Err(error) if error.retryable => {
                 warn!(%error, backend, ?retry_delay, "output backend unavailable; retrying");
-                set_daemon_status(
+                set_daemon_status_direct(
                     control,
                     source,
                     backend,

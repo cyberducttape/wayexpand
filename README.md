@@ -198,7 +198,8 @@ Both installers are non-destructive by default (no service is enabled or
 started until you pass `--enable`) and refuse to run as root — see
 [Installation](#installation) below for the full picture, including
 `--source=evdev` for compositors with no `input-method-v2` or
-virtual-keyboard support (KWin/KDE Plasma, as of KWin 6.6).
+virtual-keyboard support (including KWin/KDE Plasma configurations observed on
+KWin 6.6).
 
 ## Screenshots
 
@@ -359,6 +360,13 @@ sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first
 sudo ./scripts/install-evdev-permissions.sh             # then apply
 ```
 
+For a distro package, use the installed equivalent:
+`sudo wayexpand-install-evdev-access --access=active-seat` (or omit the
+access option for the explicitly acknowledged legacy `input`-group mode).
+Installing the package itself does not activate either udev policy; the
+policies are stored under `/usr/share/wayexpand/udev/` until this command is
+run.
+
 Once `wayexpand doctor` reports a usable path (not merely `AVAILABLE TO TRY`):
 
 ```sh
@@ -377,6 +385,17 @@ overwrites an existing configuration. `install-user.sh` builds from source;
 [release](https://github.com/itchyitchy123/wayexpand/releases) tarball. To
 remove an installation, run `./scripts/uninstall-user.sh` (`--purge` also
 deletes the configuration directory).
+
+If you previously enabled evdev access, uninstalling the user files does not
+automatically revoke system raw-input privileges. The uninstaller warns when
+the current user is still in the `input` group or a WayExpand evdev udev rule
+is still installed. Revoke that access explicitly:
+
+```sh
+sudo ./scripts/install-evdev-permissions.sh --uninstall
+# or, from a distro package:
+sudo wayexpand-install-evdev-access --uninstall
+```
 
 ## Using the CLI
 

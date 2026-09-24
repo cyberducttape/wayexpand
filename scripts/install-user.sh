@@ -61,7 +61,6 @@ case "$target_dir" in
 esac
 
 printf '%s\n' "Building WayExpand release binaries..."
-export RUSTUP_TOOLCHAIN=stable
 CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
     -p wayexpand-daemon \

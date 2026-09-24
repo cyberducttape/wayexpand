@@ -4,11 +4,13 @@ use crate::{
     TextInjector,
 };
 #[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::{
     collections::VecDeque,
     io::Read,
-    process::{Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc,
@@ -116,10 +118,12 @@ pub enum HotkeyError {
 
 /// Runtime counters for command-backed expansions and hotkey actions.
 /// Counters are monotonically increasing for the lifetime of an engine;
-/// `command_queue_depth` is the current number of jobs waiting for the worker.
+/// `command_queue_depth` is the current number of jobs waiting for the worker,
+/// and `command_in_flight` is the number currently executing in worker threads.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CommandMetrics {
     pub command_queue_depth: usize,
+    pub command_in_flight: usize,
     pub command_queue_rejected_total: u64,
     pub command_timeout_total: u64,
     pub command_failure_total: u64,
@@ -179,6 +183,7 @@ struct AsyncCommandRuntime {
 
 struct CommandMetricsState {
     queue_depth: AtomicUsize,
+    in_flight: AtomicUsize,
     queue_rejected_total: AtomicU64,
     timeout_total: AtomicU64,
     failure_total: AtomicU64,
@@ -188,6 +193,7 @@ impl CommandMetricsState {
     fn new() -> Self {
         Self {
             queue_depth: AtomicUsize::new(0),
+            in_flight: AtomicUsize::new(0),
             queue_rejected_total: AtomicU64::new(0),
             timeout_total: AtomicU64::new(0),
             failure_total: AtomicU64::new(0),
@@ -197,6 +203,7 @@ impl CommandMetricsState {
     fn snapshot(&self) -> CommandMetrics {
         CommandMetrics {
             command_queue_depth: self.queue_depth.load(Ordering::Relaxed),
+            command_in_flight: self.in_flight.load(Ordering::Relaxed),
             command_queue_rejected_total: self.queue_rejected_total.load(Ordering::Relaxed),
             command_timeout_total: self.timeout_total.load(Ordering::Relaxed),
             command_failure_total: self.failure_total.load(Ordering::Relaxed),
@@ -374,6 +381,7 @@ impl ExpansionEngine {
             .spawn(move || {
                 while let Ok(job) = command_receiver.recv() {
                     worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                    worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let AsyncCommandJob::Expansion {
                         config_index,
                         generation,
@@ -382,6 +390,7 @@ impl ExpansionEngine {
                     } = job;
                     let cache_ms = command.cache_ms;
                     let output = run_command(&command);
+                    worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                     if let Err(error) = &output {
                         worker_metrics.record_error(matches!(error, CommandError::Timeout));
                     }
@@ -409,7 +418,9 @@ impl ExpansionEngine {
             .spawn(move || {
                 while let Ok(action) = hotkey_receiver.recv() {
                     hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                    hotkey_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let output = Self::execute_hotkey(&action);
+                    hotkey_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                     if let Err(error) = &output {
                         hotkey_metrics.record_error(matches!(error, HotkeyError::Timeout(_)));
                     }
@@ -666,7 +677,8 @@ impl ExpansionEngine {
             }
         };
 
-        // Kill process group to ensure any descendant processes are terminated
+        // Best-effort cleanup for ordinary descendants; direct commands are
+        // trusted executable content, not a service/cgroup containment model.
         kill_process_group(&child);
 
         if status.success() {
@@ -1140,6 +1152,24 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     configure_process_group(&mut process);
     let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
     let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
+
+    #[cfg(unix)]
+    {
+        return run_command_unix(child, stdout, command.timeout_ms);
+    }
+
+    #[cfg(not(unix))]
+    {
+        return run_command_fallback(child, stdout, command.timeout_ms);
+    }
+}
+
+#[cfg(not(unix))]
+fn run_command_fallback(
+    mut child: Child,
+    stdout: ChildStdout,
+    timeout_ms: u64,
+) -> Result<String, CommandError> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -1150,7 +1180,7 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
         let _ = sender.send(result);
     });
 
-    let deadline = Instant::now() + Duration::from_millis(command.timeout_ms);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -1168,7 +1198,7 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
         }
     };
 
-    // Kill process group to ensure any descendant processes are terminated
+    // Best-effort descendant cleanup for the platforms that use this fallback.
     kill_process_group(&child);
 
     if !status.success() {
@@ -1183,6 +1213,93 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+#[cfg(unix)]
+fn run_command_unix(
+    mut child: Child,
+    mut stdout: ChildStdout,
+    timeout_ms: u64,
+) -> Result<String, CommandError> {
+    set_nonblocking_stdout(&stdout)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut bytes = Vec::new();
+    let mut stdout_eof = false;
+
+    let status = loop {
+        if !stdout_eof {
+            stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+            Ok(None) => {
+                kill_process_group(&child);
+                let _ = child.wait();
+                return Err(CommandError::Timeout);
+            }
+            Err(error) => {
+                kill_process_group(&child);
+                let _ = child.wait();
+                return Err(CommandError::WaitFailed(error.to_string()));
+            }
+        }
+    };
+
+    // Best-effort process-group cleanup handles ordinary descendants. It is
+    // not a containment boundary: a deliberately trusted command can fork,
+    // setsid(), and keep stdout open. Nonblocking reads below prevent that
+    // case from pinning a WayExpand reader thread; service/cgroup containment
+    // belongs in the planned Action Broker.
+    kill_process_group(&child);
+
+    let drain_deadline = Instant::now() + Duration::from_millis(100);
+    while !stdout_eof && Instant::now() < drain_deadline {
+        stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
+        if !stdout_eof {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    if !status.success() {
+        return Err(CommandError::NonZeroExit(status.code()));
+    }
+    let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
+    Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+#[cfg(unix)]
+fn set_nonblocking_stdout(stdout: &ChildStdout) -> Result<(), CommandError> {
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(CommandError::OutputChannelLost);
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(CommandError::OutputChannelLost);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_available_stdout(
+    stdout: &mut ChildStdout,
+    bytes: &mut Vec<u8>,
+) -> Result<bool, CommandError> {
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match stdout.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                bytes.extend_from_slice(&buffer[..count]);
+                if bytes.len() > MAX_COMMAND_OUTPUT_BYTES {
+                    return Err(CommandError::OutputTooLarge);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(_) => return Err(CommandError::OutputChannelLost),
+        }
+    }
 }
 
 fn configure_command_environment(process: &mut Command, command: &CommandConfig) {
@@ -2954,7 +3071,7 @@ match_mode = "word-boundary""#,
         // Give any surviving descendant enough time to write the marker.
         thread::sleep(Duration::from_millis(1500));
 
-        // The background process should have been killed with the process group.
+        // This ordinary descendant should have been killed with the process group.
         let survived = output_file.exists();
 
         // Clean up before asserting so a failure cannot leave test processes or
@@ -2965,6 +3082,56 @@ match_mode = "word-boundary""#,
         assert!(
             !survived,
             "descendant process survived after command-backed expansion completed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_stdout_holder_does_not_block_command_output() {
+        use std::fs::File;
+        use std::io::Write;
+
+        let script_path = format!(
+            "/tmp/wayexpand-detached-stdout-test-{}.sh",
+            std::process::id()
+        );
+        let escaped_marker = format!(
+            "/tmp/wayexpand-detached-stdout-marker-{}.txt",
+            std::process::id()
+        );
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&escaped_marker);
+
+        let script_content = format!(
+            "#!/bin/sh\n(setsid sh -c 'sleep 1; printf escaped > \"{}\"' >&1 2>/dev/null </dev/null &)\nprintf 'ready\\n'\n",
+            escaped_marker
+        );
+        let mut script_file = File::create(&script_path).unwrap();
+        script_file.write_all(script_content.as_bytes()).unwrap();
+        drop(script_file);
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let command = CommandConfig {
+            program: script_path.clone(),
+            args: Vec::new(),
+            timeout_ms: 5000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: Vec::new(),
+        };
+
+        let started = Instant::now();
+        let output = run_command(&command).unwrap();
+        let elapsed = started.elapsed();
+
+        let _ = std::fs::remove_file(&script_path);
+        thread::sleep(Duration::from_millis(1200));
+        let _ = std::fs::remove_file(&escaped_marker);
+
+        assert_eq!(output, "ready");
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "detached stdout holder delayed command output for {elapsed:?}"
         );
     }
 

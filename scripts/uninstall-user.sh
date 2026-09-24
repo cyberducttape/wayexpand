@@ -33,6 +33,9 @@ application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
 ibus_component_dir="$HOME/.local/share/ibus/component"
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+evdev_rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evdev.rules}
+evdev_uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
 
 if command -v systemctl >/dev/null 2>&1; then
     for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
@@ -102,4 +105,37 @@ else
     fi
 fi
 
-printf '%s\n' "WayExpand has been uninstalled."
+raw_input_configured=0
+current_user=$(id -un)
+user_groups=${WAYEXPAND_UNINSTALL_GROUPS:-$(id -nG)}
+if printf '%s\n' "$user_groups" | tr ' ' '\n' | grep -qx input; then
+    raw_input_configured=1
+fi
+if [ -e "$evdev_rule_dest" ] || [ -e "$evdev_uaccess_rule_dest" ]; then
+    raw_input_configured=1
+fi
+
+printf '%s\n' "WayExpand user files were removed."
+
+if [ "$raw_input_configured" -eq 1 ]; then
+    printf '\n%s\n' "WARNING: raw-input privileges are still configured:"
+    if printf '%s\n' "$user_groups" | tr ' ' '\n' | grep -qx input; then
+        printf '%s\n' "  - user $current_user is a member of the input group"
+    fi
+    if [ -e "$evdev_rule_dest" ]; then
+        printf '%s\n' "  - WayExpand input-group udev rule is installed: $evdev_rule_dest"
+    fi
+    if [ -e "$evdev_uaccess_rule_dest" ]; then
+        printf '%s\n' "  - WayExpand active-seat udev rule is installed: $evdev_uaccess_rule_dest"
+    fi
+
+    if command -v wayexpand-install-evdev-access >/dev/null 2>&1; then
+        cleanup_command="sudo wayexpand-install-evdev-access --uninstall"
+    elif [ -x "$script_dir/install-evdev-permissions.sh" ]; then
+        cleanup_command="sudo $script_dir/install-evdev-permissions.sh --uninstall"
+    else
+        cleanup_command="sudo /path/to/install-evdev-permissions.sh --uninstall"
+    fi
+    printf '\n%s\n' "Remove them with:"
+    printf '%s\n' "  $cleanup_command"
+fi

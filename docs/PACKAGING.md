@@ -219,6 +219,26 @@ This minimizes manual work for patch releases.
 
 ---
 
+## Vendored Dependencies
+
+The working repository does not need to keep `vendor/` checked in. Normal
+online builds use `Cargo.lock` and fetch crates from the configured Cargo
+registry.
+
+Release tooling supports two source archive shapes:
+
+- `wayexpand-<version>.tar.gz`: clean source archive without `vendor/`
+- `wayexpand-<version>-vendored.tar.gz`: offline-build archive with `vendor/`
+  and the generated Cargo source replacement config
+
+Use the clean archive for build systems that can access Cargo registries or run
+`cargo vendor` during their build step. Use the vendored archive for Launchpad,
+air-gapped builders, or any policy that requires all Rust dependencies to be
+present in the source upload. Large local `vendor/` directories are build
+artifacts, not required repository content.
+
+---
+
 ## References
 
 - [ArchWiki: Creating packages](https://wiki.archlinux.org/title/Creating_packages)

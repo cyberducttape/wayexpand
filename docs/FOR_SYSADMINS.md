@@ -598,7 +598,8 @@ journalctl --user -u wayexpand-input-method.service -f
 
 - **Matcher:** Scales linearly with snippet count (trie-based, bounded at 10,000 snippets)
 - **Reload:** Parses and validates full config before swap (safe but may stall on very large configs)
-- **Commands:** Bounded to 5-second timeout, max 1 MiB output (safe)
+- **Commands:** Bounded to 5-second timeout and 1 MiB output for trusted
+  helpers; direct commands are not a service/cgroup containment boundary
 - **Network:** No dependencies, all local
 
 ### Monitoring

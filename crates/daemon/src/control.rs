@@ -124,7 +124,10 @@ impl ControlServer {
 
     pub fn set_status(&self, status: impl Into<String>) {
         if let Ok(mut current) = self.status.lock() {
-            *current = status.into();
+            let status = status.into();
+            if *current != status {
+                *current = status;
+            }
         }
     }
 }

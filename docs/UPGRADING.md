@@ -251,7 +251,7 @@ systemctl --user is-active wayexpand-input-method.service
 
 | Version | Release Date | Major Changes |
 |---------|--------------|---------------|
-| 1.1.2 | **Unreleased** | Security hardening (P0 fixes), diagnostics improvements |
+| 1.1.2 | 2026-09-18 | Security hardening (P0 fixes), diagnostics improvements |
 | 1.1.1 | 2026-09-18 | GUI themes, font scaling, sysadmin examples |
 | 1.1.0 | 2026-09-18 | Language support, color packs, date math, cursor placement |
 | 1.0.0 | 2026-09-17 | **First stable release** — stability guarantees |
