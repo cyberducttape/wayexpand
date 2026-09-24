@@ -1289,37 +1289,35 @@ impl ExpansionEngine {
         length: usize,
         terminating_char: Option<char>,
     ) -> Option<PendingExpansionResult> {
-        if !self.match_allowed(config_index, length) {
-            return None;
-        }
-        let trigger = self.config.expansion[config_index].trigger.clone();
-        let propagate_case = self.config.expansion[config_index].propagate_case;
-        let typed: String = {
-            let start = self.buffer.len().saturating_sub(length);
-            self.buffer.iter().skip(start).collect()
-        };
-        let expansion = &self.config.expansion[config_index];
+        // Generate match plan with full context
+        let plan = self.take_match_plan(config_index, length, terminating_char)?;
+
+        // Note: preflight_policy NOT applied here - deferred execution is called by process_deferred()
+        // which uses is_capture_enabled() gate. Policy will be checked by caller via
+        // execute_with_policy(). This preserves deferred semantics where policy is external.
 
         // Render template to get cursor_offset (without executing command)
-        let (mut template_text, cursor_offset) =
-            render_template_with_cursor(&expansion.replacement, &crate::TemplateContext::system())
+        let (mut template_text, _cursor_offset) =
+            render_template_with_cursor(&plan.replacement_text, &crate::TemplateContext::system())
                 .ok()?;
 
-        if propagate_case {
-            template_text = apply_case_style(&typed, &template_text);
+        // Apply case to template (will be discarded if command exists, but correct for static)
+        if plan.propagate_case {
+            template_text = apply_case_style(&plan.matched_text, &template_text);
         }
 
+        // Consume buffer
         for _ in 0..length {
             self.buffer.pop_back();
         }
 
         Some(PendingExpansionResult {
-            trigger,
-            matched_text: typed,
+            trigger: plan.trigger_config,
+            matched_text: plan.matched_text,
             template_text,
-            cursor_offset,
-            reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
-            command: expansion.command.clone(),
+            cursor_offset: plan.cursor_offset,
+            reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
+            command: plan.command.as_ref().map(|c| (**c).clone()),
         })
     }
 
