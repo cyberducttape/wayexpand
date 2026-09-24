@@ -285,13 +285,29 @@ allowed_backends = ["input-method-v2", "libei"]
 
     #[test]
     fn validate_policy_file_metadata_rejects_symlinks() {
-        // Create a test metadata that claims to be a symlink
-        let path = Path::new("/etc/passwd");
-        let metadata = std::fs::symlink_metadata(path).unwrap();
-        let result = validate_policy_file_metadata(path, &metadata);
-        // Should either fail due to wrong ownership or symlink check
-        // (passwd is a regular file, so test our ownership check instead)
-        assert!(result.is_err());
+        use std::os::unix::fs::PermissionsExt;
+        use std::fs;
+
+        let root = std::env::temp_dir().join("wayexpand-symlink-test");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let real_file = root.join("real.toml");
+        let symlink_path = root.join("link.toml");
+
+        fs::write(&real_file, "safe_mode = false\n").unwrap();
+        fs::set_permissions(&real_file, fs::Permissions::from_mode(0o400)).unwrap();
+
+        // Create a symlink to the policy file
+        let _ = std::os::unix::fs::symlink(&real_file, &symlink_path);
+
+        let metadata = std::fs::symlink_metadata(&symlink_path).unwrap();
+        let result = validate_policy_file_metadata(&symlink_path, &metadata);
+
+        // Symlinks should be rejected
+        assert!(result.is_err(), "symlinks should be rejected");
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

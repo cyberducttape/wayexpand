@@ -135,6 +135,13 @@ impl ReloadableConfig {
         Self::load_mode_with_policy(path.into(), true, policy)
     }
 
+    pub fn load_with_policy(
+        path: impl Into<PathBuf>,
+        policy: OrganizationPolicy,
+    ) -> Result<Self> {
+        Self::load_mode_with_policy(path.into(), false, policy)
+    }
+
     fn load_mode(path: PathBuf, fleet: bool) -> Result<Self> {
         Self::load_mode_with_policy(path, fleet, OrganizationPolicy::default())
     }
@@ -337,14 +344,21 @@ fn load_for_mode(
     fleet: bool,
     policy: &OrganizationPolicy,
 ) -> Result<(Config, Option<FileStamp>)> {
-    let (base, stamp) = load_consistent(path)?;
+    let (mut base, stamp) = load_consistent(path)?;
     if fleet {
         let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
             .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
-        Ok((merged.config, stamp))
-    } else {
-        Ok((base, stamp))
+        base = merged.config;
     }
+
+    // Apply external organization policy to config for validation.
+    // This ensures require_absolute_commands and other policy fields
+    // are enforced during config validation, not just at runtime.
+    if policy.is_active() {
+        base.organization = policy.clone();
+    }
+
+    Ok((base, stamp))
 }
 
 fn standard_fleet_signature() -> u64 {
