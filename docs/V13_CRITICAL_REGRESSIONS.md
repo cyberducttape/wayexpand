@@ -1,10 +1,20 @@
-# v1.3 Critical Regressions Identified
+# v1.3 Critical Regressions - FIXED
 
 ## Executive Summary
 
-The v1.3 deferred execution implementation introduced **three critical architectural regressions** in command execution policy enforcement. These must be fixed before any release.
+The v1.3 deferred execution implementation introduced three critical architectural regressions in command execution policy enforcement.
 
-**Status:** All three bugs identified and documented. Regression tests need to be written. Code needs to be fixed.
+**Status:** ✅ ALL FIXED (2026-09-24) through unified command execution architecture refactor (5 phases)
+
+### How They Were Fixed
+
+**Bug #2 (Async Worker Fallback Policy Bypass):** Fixed by enforcing `disable_commands` policy in sync fallback path + setting `command_backed` correctly
+
+**Bug #3 (command_backed Flag Accuracy):** Fixed by setting `command_backed = expansion.command.is_some()` instead of hardcoding to false
+
+**Bug #1 (Output Size Policy):** Fixed by introducing postflight policy that validates output size after command execution
+
+**See:** [[P2_unified_command_execution_completion.md]](../../../memory/P2_unified_command_execution_completion.md) for implementation details
 
 ---
 
