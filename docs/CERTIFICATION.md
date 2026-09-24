@@ -91,4 +91,7 @@ executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
 Missing driver or session metadata fails the job; hosted CI is never treated as
-a substitute for a real compositor session.
+a substitute for a real compositor session. Workflow artifacts are evidence
+records only; the support matrix should not mark a compositor certified until a
+reviewed artifact reports `certified: true` for the relevant compositor,
+backend, layout, and client set.

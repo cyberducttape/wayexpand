@@ -31,4 +31,6 @@ page and the associated tests together.
 
 Invalid values are rejected before a configuration becomes active. Runtime
 command execution is additionally bounded by the configured timeout and runs
-in a process group so timeout cleanup includes descendants.
+in a process group so timeout cleanup reaches ordinary descendants. This is
+best-effort resource cleanup, not sandbox containment: a trusted command can
+deliberately fork, call `setsid()`, and escape the original process group.

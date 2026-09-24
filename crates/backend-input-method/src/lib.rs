@@ -162,6 +162,9 @@ struct StateData {
     commit_serial: u32,
     initial_roundtrip_done: bool,
     error: Option<InputMethodError>,
+    /// Keycodes (Linux evdev numbering) from unsupported keys that need
+    /// to be passed through to a separate injector if available.
+    pending_key_pass_through: VecDeque<u32>,
 }
 
 impl StateData {
@@ -178,6 +181,7 @@ impl StateData {
             commit_serial: 0,
             initial_roundtrip_done: false,
             error: None,
+            pending_key_pass_through: VecDeque::new(),
         }
     }
 
@@ -426,11 +430,12 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     }
                     Some(KeyAction::Ignore) => {}
                     Some(KeyAction::Unsupported) => {
-                        // The keyboard grab is exclusive. We cannot safely
-                        // synthesize pass-through for this key, but an
-                        // ordinary Escape/arrow/function key must not crash
-                        // the daemon or trigger a service restart. Clear any
-                        // pending trigger and discard only this event.
+                        // The keyboard grab is exclusive. If a separate pass-through
+                        // injector is available (e.g., libei), use it to re-inject the key.
+                        // Otherwise, clear any pending trigger to fail closed.
+                        if key_state == wl_keyboard::KeyState::Pressed {
+                            state.pending_key_pass_through.push_back(key);
+                        }
                         state.queue_event(matcher_event_for_unsupported_key());
                     }
                     None => {}
@@ -663,6 +668,7 @@ pub struct InputMethodSource {
     connection: Connection,
     event_queue: EventQueue<StateData>,
     state: StateData,
+    key_pass_through: Option<Box<dyn TextInjector>>,
 }
 
 impl InputMethodSource {
@@ -693,9 +699,8 @@ impl InputMethodSource {
     ///
     /// The compositor may give this object an exclusive keyboard grab after
     /// activation. Printable text and common editing keys are forwarded via
-    /// the input-method commit contract, but callers must still provide
-    /// pass-through handling for other non-text keys before exposing this as a
-    /// general-purpose desktop input source.
+    /// the input-method commit contract, and unsupported keys can now be
+    /// passed through via an optional separate injector (e.g., libei).
     pub fn connect() -> Result<Self, InputMethodError> {
         let connection = Connection::connect_to_env()?;
         let mut event_queue = connection.new_event_queue();
@@ -726,7 +731,18 @@ impl InputMethodSource {
             connection,
             event_queue,
             state,
+            key_pass_through: None,
         })
+    }
+
+    /// Attach an optional separate injector for passing through unsupported keys
+    /// (Escape, arrows, F-keys, etc.) from the input-method-v2 exclusive grab.
+    pub fn with_key_pass_through(
+        mut self,
+        injector: Box<dyn TextInjector>,
+    ) -> Self {
+        self.key_pass_through = Some(injector);
+        self
     }
 
     /// Poll for one event without indefinitely blocking lifecycle handling in
@@ -740,6 +756,15 @@ impl InputMethodSource {
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
+            // Before returning a Reset event, attempt to pass through any
+            // pending unsupported keys via the key-pass-through injector.
+            if matches!(event, InputEvent::Reset) {
+                while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
+                    if let Some(injector) = &mut self.key_pass_through {
+                        let _ = injector.inject_key(keycode);
+                    }
+                }
+            }
             return Ok(Some(event));
         }
         self.connection
@@ -774,7 +799,20 @@ impl InputMethodSource {
         if let Some(error) = self.state.error.take() {
             return Err(source_error(error));
         }
-        Ok(self.state.events.pop_front())
+        if let Some(event) = self.state.events.pop_front() {
+            // Before returning a Reset event, attempt to pass through any
+            // pending unsupported keys via the key-pass-through injector.
+            if matches!(event, InputEvent::Reset) {
+                while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
+                    if let Some(injector) = &mut self.key_pass_through {
+                        let _ = injector.inject_key(keycode);
+                    }
+                }
+            }
+            Ok(Some(event))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -1060,6 +1098,15 @@ impl InputSource for InputMethodSource {
                 return Err(source_error(error));
             }
             if let Some(event) = self.state.events.pop_front() {
+                // Before returning a Reset event, attempt to pass through any
+                // pending unsupported keys via the key-pass-through injector.
+                if matches!(event, InputEvent::Reset) {
+                    while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
+                        if let Some(injector) = &mut self.key_pass_through {
+                            let _ = injector.inject_key(keycode);
+                        }
+                    }
+                }
                 return Ok(event);
             }
             self.event_queue

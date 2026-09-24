@@ -65,8 +65,12 @@ sed -i 's#%h/.local/bin/#/usr/bin/#g' \
     %{buildroot}%{_userunitdir}/wayexpand-input-method.service \
     %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 
-install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_udevrulesdir}/71-wayexpand-evdev.rules
-install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_udevrulesdir}/69-wayexpand-evdev-uaccess.rules
+# Ship evdev policies inertly. Installing WayExpand must not change raw input
+# authorization; the explicit helper copies a selected policy into
+# /etc/udev/rules.d when the user opts in.
+install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
+install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
+install -Dm755 scripts/install-evdev-permissions.sh %{buildroot}%{_bindir}/wayexpand-install-evdev-access
 
 install -Dm644 expansions.toml %{buildroot}%{_sysconfdir}/wayexpand/expansions.toml.example
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
@@ -85,8 +89,8 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_mandir}/man1/wayexpand.1
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
-%{_udevrulesdir}/71-wayexpand-evdev.rules
-%{_udevrulesdir}/69-wayexpand-evdev-uaccess.rules
+%{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
+%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
 %config(noreplace) %{_sysconfdir}/wayexpand/expansions.toml.example
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 

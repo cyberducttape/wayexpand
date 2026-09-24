@@ -225,6 +225,9 @@ The broker is not ready for production until all of the following are tested:
    command itself.
 5. The broker's systemd unit has an independently reviewed hardening profile
    and service-account/secret ownership model.
+6. Action execution is contained at the service or cgroup boundary so a
+   malicious action cannot escape cleanup by forking, calling `setsid()`, or
+   retaining inherited output descriptors after the direct child exits.
 
 ## Comparison: Action Broker vs Current Model
 

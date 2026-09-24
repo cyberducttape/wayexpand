@@ -19,6 +19,22 @@ seat_out=$($script --access=active-seat --dry-run)
 printf '%s' "$seat_out" | grep -F 'active-seat' >/dev/null
 printf '%s' "$seat_out" | grep -F 'do not change input-group membership' >/dev/null
 
+empty_dir=
+policy_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-policy-test.XXXXXX")
+trap 'rm -rf "$policy_dir" "$empty_dir"' EXIT INT TERM
+group_rule="$policy_dir/71-wayexpand-evdev.rules"
+seat_rule="$policy_dir/69-wayexpand-evdev-uaccess.rules"
+printf '%s\n' 'stale input-group rule' >"$group_rule"
+exclusive_seat_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
+    WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
+    "$script" --access=active-seat --dry-run)
+printf '%s' "$exclusive_seat_out" | grep -F "remove $group_rule" >/dev/null
+printf '%s\n' 'stale active-seat rule' >"$seat_rule"
+exclusive_group_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
+    WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
+    "$script" --access=input-group --dry-run)
+printf '%s' "$exclusive_group_out" | grep -F "remove $seat_rule" >/dev/null
+
 if [ "$(id -u)" -eq 0 ]; then
     printf '%s\n' "skipping non-root-rejection checks: already running as root" >&2
 else
@@ -41,7 +57,6 @@ fi
 # layout (no udev/71-wayexpand-evdev.rules next to it), instead of a bare
 # "No such file" further down.
 empty_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-perm-test.XXXXXX")
-trap 'rm -rf "$empty_dir"' EXIT INT TERM
 mkdir -p "$empty_dir/scripts"
 cp "$script" "$empty_dir/scripts/"
 if "$empty_dir/scripts/install-evdev-permissions.sh" --dry-run >"$empty_dir/out" 2>&1; then

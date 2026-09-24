@@ -99,7 +99,7 @@ Fedora users should build from source or the RPM spec for now.
 
 ## Which Desktop Are You Using?
 
-### KDE Plasma Wayland (KWin 6.6+) — implementation candidate
+### KDE Plasma Wayland (KWin) — implementation candidate
 
 This is the most complete implementation path, but it still requires live
 session testing and is not certified by the current support matrix. Start
@@ -120,7 +120,9 @@ wayexpand-gui
 **Current status:** Use `wayexpand doctor` to confirm the available path. The
 KWin window tracker is implemented but still awaiting broader independent
 certification; app-restricted snippets should not be treated as universally
-verified.
+verified. KWin 6.6 has live-session observations in the backend notes, but
+newer KWin releases must still be checked with `doctor` and certification
+evidence instead of assumed compatible from the version number.
 
 **Next:** See [README.md](../README.md) for examples. The GUI walks you through creating your first snippet.
 

@@ -705,6 +705,28 @@ impl LibeiInjector {
             .flush()
             .map_err(|error| LibeiError::Flush(error.to_string()))
     }
+
+    /// Injects a single keyboard key event for pass-through of unsupported keys
+    /// from input-method-v2 (Escape, arrows, F-keys, etc.).
+    fn send_key(&mut self, keycode: u32) -> Result<(), LibeiError> {
+        let serial = self.connection.serial();
+        self.device.device().start_emulating(serial, self.sequence);
+        self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+        self.keyboard
+            .key(keycode, ei::keyboard::KeyState::Press);
+        self.device
+            .device()
+            .frame(serial, self.started_at.elapsed().as_micros() as u64);
+        self.keyboard
+            .key(keycode, ei::keyboard::KeyState::Released);
+        self.device
+            .device()
+            .frame(serial, self.started_at.elapsed().as_micros() as u64);
+        self.device.device().stop_emulating(serial);
+        self.connection
+            .flush()
+            .map_err(|error| LibeiError::Flush(error.to_string()))
+    }
 }
 
 fn split_text_chunks(text: &str) -> Vec<&str> {
@@ -1013,16 +1035,16 @@ fn validate_token_parent_chain(path: &Path) -> std::io::Result<()> {
                 "portal token parent has an untrusted owner",
             ));
         }
-        // Only check sticky bit for non-root-owned directories; root-owned
-        // directories like / are inherently safe even without sticky bit.
-        if metadata.uid() != 0 {
-            let mode = metadata.permissions().mode() & 0o7777;
-            if mode & 0o022 != 0 && mode & 0o1000 == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "portal token parent is writable by group or other users",
-                ));
-            }
+        // Trust is determined by writeability, not ownership. A root-owned
+        // directory with group/other write bits is still replaceable by an
+        // unprivileged user and must be rejected unless sticky protection is
+        // present.
+        let mode = metadata.permissions().mode() & 0o7777;
+        if !token_parent_mode_is_secure(mode) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "portal token parent is writable by group or other users",
+            ));
         }
         if current == Path::new("/") {
             break;
@@ -1030,6 +1052,10 @@ fn validate_token_parent_chain(path: &Path) -> std::io::Result<()> {
         current = current.parent().unwrap_or_else(|| Path::new("/"));
     }
     Ok(())
+}
+
+fn token_parent_mode_is_secure(mode: u32) -> bool {
+    mode & 0o022 == 0 || mode & 0o1000 != 0
 }
 
 fn validate_token_metadata(path: &Path, metadata: &fs::Metadata) -> std::io::Result<()> {
@@ -1218,6 +1244,14 @@ impl TextInjector for LibeiInjector {
             retryable: error.is_retryable(),
         })
     }
+
+    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
+        self.send_key(keycode).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })
+    }
 }
 
 fn validate_text(text: &str) -> Result<(), LibeiError> {
@@ -1288,7 +1322,12 @@ mod tests {
     }
 
     fn token_test_parent(name: &str) -> std::path::PathBuf {
-        let parent = std::env::temp_dir().join(format!(
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
+        let base = workspace_dir.join("target").join("libei-token-tests");
+        fs::create_dir_all(&base).unwrap();
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o700)).unwrap();
+        let parent = base.join(format!(
             "wayexpand-libei-token-{name}-{}",
             std::process::id()
         ));
@@ -1329,6 +1368,31 @@ mod tests {
 
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
         assert!(super::store_portal_token_at(&path, "new-token").is_err());
+        let _ = fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn portal_token_parent_mode_security_does_not_depend_on_owner() {
+        assert!(super::token_parent_mode_is_secure(0o700));
+        assert!(super::token_parent_mode_is_secure(0o755));
+        assert!(super::token_parent_mode_is_secure(0o1777));
+        assert!(!super::token_parent_mode_is_secure(0o777));
+        assert!(!super::token_parent_mode_is_secure(0o775));
+    }
+
+    #[test]
+    fn portal_token_rejects_root_owned_writable_parent_when_possible() {
+        if rustix::process::geteuid().as_raw() != 0 {
+            return;
+        }
+
+        let parent = token_test_parent("root-owned-unsafe");
+        let path = parent.join(super::PORTAL_TOKEN_FILENAME);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let error = super::store_portal_token_at(&path, "new-token").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
         let _ = fs::remove_dir_all(parent);
     }
 

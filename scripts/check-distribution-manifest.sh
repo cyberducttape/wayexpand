@@ -34,4 +34,17 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     }
 done
 
+# Distro packages may ship the policies as data, but must never install them
+# into udev's active rules directory as part of the base package.
+for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" "$project_dir/wayexpand.spec"; do
+    grep -q -E 'usr/share/wayexpand/udev|%\{_datadir\}/wayexpand/udev' "$manifest" || {
+        printf '%s\n' "manifest does not ship inert evdev policies: $manifest" >&2
+        exit 1
+    }
+    if grep -q -E 'usr/(lib|share)/udev/rules.d|%\{_udevrulesdir\}' "$manifest"; then
+        printf '%s\n' "manifest installs active udev policy: $manifest" >&2
+        exit 1
+    fi
+done
+
 printf '%s\n' "distribution manifest check passed"

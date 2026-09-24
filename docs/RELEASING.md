@@ -127,4 +127,7 @@ wayexpand explain-backend
 
 To remove a release-tarball or source-tree installation later, run
 `scripts/uninstall-user.sh` (pass `--purge` to also delete the configuration
-directory).
+directory). If evdev access was enabled, this removes user files only; revoke
+raw-input privileges separately with
+`sudo scripts/install-evdev-permissions.sh --uninstall` or the distro helper
+`sudo wayexpand-install-evdev-access --uninstall`.

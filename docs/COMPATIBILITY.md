@@ -468,7 +468,7 @@ Breaking changes **must**:
 - D-Bus session service (for KDE Plasma window tracking, when available)
 
 **Build dependencies:**
-- Rust 1.87+ (the workspace MSRV declared in `Cargo.toml` and `rust-toolchain.toml`)
+- Rust 1.87+ (the workspace Minimum Supported Rust Version declared in `Cargo.toml`). Development and release CI use Rust 1.96.0 as specified in `rust-toolchain.toml`
 - Standard development libraries (libwayland-dev, libxkbcommon-dev, pkg-config)
 
 These are not guaranteed stable across 1.x (new systemd versions, wayland protocol updates), but breaking changes are flagged with upstream deprecation warnings. Distro package maintainers should test before publishing major distro updates.
