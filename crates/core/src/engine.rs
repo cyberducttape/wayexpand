@@ -89,6 +89,42 @@ pub struct ExpansionResult {
     pub command_backed: bool,
 }
 
+/// Expansion result with deferred command execution (v1.3+ architecture).
+/// Commands are not executed until caller approves via policy check.
+#[derive(Debug, Clone)]
+pub struct PendingExpansionResult {
+    pub trigger: String,
+    pub matched_text: String,
+    pub template_text: String,
+    pub cursor_offset: Option<usize>,
+    pub reinsert_after: Option<char>,
+    /// Command to execute (if any). Not yet executed; caller decides.
+    pub command: Option<CommandConfig>,
+}
+
+impl PendingExpansionResult {
+    /// Execute the command (if present) and return the final expansion result.
+    /// Only call after policy approval.
+    pub fn execute_with_policy(self) -> Result<ExpansionResult, ExpansionError> {
+        let insert = if let Some(command) = self.command {
+            // Execute command and get output
+            let output = run_command(&command)?;
+            output
+        } else {
+            self.template_text
+        };
+
+        Ok(ExpansionResult {
+            trigger: self.trigger,
+            matched_text: self.matched_text,
+            insert,
+            cursor_offset: self.cursor_offset,
+            reinsert_after: self.reinsert_after,
+            command_backed: self.command.is_some(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HotkeyResult {
     pub chord: KeyChord,
