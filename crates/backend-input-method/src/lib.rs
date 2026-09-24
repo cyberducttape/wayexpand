@@ -205,6 +205,7 @@ impl StateData {
         // deactivation, or a sensitive-field transition.
         if matches!(event, InputEvent::FocusChanged { .. }) {
             self.events.clear();
+            self.pending_key_pass_through.clear();
             self.events.push_back(event);
             return;
         }
@@ -213,6 +214,7 @@ impl StateData {
             // boundary discards the partial trigger while preserving the
             // engine's normal non-sensitive capture policy.
             self.events.clear();
+            self.pending_key_pass_through.clear();
             self.events.push_back(InputEvent::Reset);
             return;
         }

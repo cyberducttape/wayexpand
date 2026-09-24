@@ -111,9 +111,9 @@ impl Capabilities {
                 x11: false,
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support must be probed; non-text key pass-through is experimental",
+                feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support and libei key pass-through must be probed; non-text key pass-through is experimental",
                 limitations: &[
-                    "exclusive capture can affect unsupported non-text keys",
+                    "exclusive capture requires working libei pass-through for unsupported keys and shortcuts",
                     "IME/preedit behavior is not certified",
                     "compositor support requires a live protocol probe",
                 ],
@@ -145,9 +145,9 @@ impl Capabilities {
                 x11: false,
                 app_filter_native: false,
                 max_replacement_size: 1024 * 1024,
-                feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking; non-text key pass-through is experimental",
+                feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking; libei key pass-through is required and experimental",
                 limitations: &[
-                    "exclusive capture can affect unsupported non-text keys",
+                    "exclusive capture requires working libei pass-through for unsupported keys and shortcuts",
                     "IME/preedit behavior is not certified",
                     "compositor support requires a live protocol probe",
                 ],

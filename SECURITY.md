@@ -91,10 +91,11 @@ fails in Preview due to sandbox restrictions will also fail when triggered
 during typing.
 
 The input-method source fails closed when it cannot safely pass through a
-non-text key or determine a UTF-8-safe Backspace range from surrounding text.
-Unsupported ordinary non-text keys are discarded individually and clear the
-pending matcher state; malformed protocol state remains fatal rather than
-risking text corruption.
+non-text key, preserve shortcut modifiers, or determine a UTF-8-safe Backspace
+range from surrounding text. Unsupported non-text keys require the daemon's
+libei pass-through injector; if that injector is unavailable or fails, the
+source reports an error and reconnects rather than silently discarding keys.
+Malformed protocol state remains fatal rather than risking text corruption.
 
 The evdev source (`--source=evdev`) trades away a real security property the
 other sources have: it reads keyboard events directly from the kernel

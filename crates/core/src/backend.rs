@@ -2,7 +2,7 @@ use std::fmt;
 use std::time::Duration;
 use std::{fs::OpenOptions, path::Path};
 
-use crate::{InputEvent, WindowContext};
+use crate::{InputEvent, Modifiers, WindowContext};
 
 /// Reports which application is currently focused, for `app_filter`-scoped
 /// expansions. Unlike `InputSource`, a tracker is polled/subscribed
@@ -96,11 +96,34 @@ pub trait TextInjector: Send {
     }
     /// Inject a keyboard key event by Linux evdev keycode. Used for
     /// pass-through of unsupported keys in input-method-v2. Backends that
-    /// cannot synthesize key events (text-only backends) return Ok(()) as a
-    /// no-op. This is best-effort: if key synthesis fails, the key is lost
-    /// but the expansion continues.
+    /// cannot synthesize key events must return an error rather than a
+    /// silent no-op: callers using an exclusive input grab would otherwise
+    /// lose the user's key.
     fn inject_key(&mut self, _keycode: u32) -> Result<(), InjectorError> {
-        Ok(())
+        Err(InjectorError {
+            backend: self.name(),
+            message: "backend cannot synthesize keyboard key events".into(),
+            retryable: false,
+        })
+    }
+
+    /// Inject a keyboard key event with active modifiers preserved. The
+    /// default implementation only accepts an empty modifier set; keyboard
+    /// event backends should override this when they can synthesize a full
+    /// shortcut such as Ctrl+C or Alt+Left.
+    fn inject_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), InjectorError> {
+        if modifiers.ctrl || modifiers.alt || modifiers.shift || modifiers.super_key {
+            return Err(InjectorError {
+                backend: self.name(),
+                message: "backend cannot synthesize modified keyboard shortcuts".into(),
+                retryable: false,
+            });
+        }
+        self.inject_key(keycode)
     }
 }
 
@@ -127,6 +150,14 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
 
     fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
         (**self).inject_key(keycode)
+    }
+
+    fn inject_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), InjectorError> {
+        (**self).inject_key_with_modifiers(keycode, modifiers)
     }
 }
 

@@ -108,13 +108,14 @@ the compositor's surrounding-text byte offsets, including selections and
 multibyte UTF-8 characters; if that state is unavailable or invalid, it fails
 closed rather than deleting a corrupt byte range.
 
-**Key pass-through for unsupported keys:** Escape, arrows, F-keys, and other
-non-text keys are automatically passed through to a secondary libei injector
-when available. This allows full keyboard compatibility while preserving the
-password-field detection of input-method-v2. If libei is unavailable, unsupported
-keys are discarded and clear the matcher to fail closed -- the default safe behavior.
-The individual event loss is acceptable: the source does not claim to intercept
-everything and does not restart the daemon for ordinary unsupported keys.
+**Key pass-through for unsupported keys:** Escape, arrows, F-keys, and
+shortcut-like modified keys require a secondary libei injector. The daemon now
+reattaches that injector when creating or reconnecting the input-method source.
+Pass-through failures are reported as source errors and the daemon reconnects;
+keys are not silently discarded. Modifier state is synthesized around the
+passed-through key, but left/right modifier identity and compositor-specific
+shortcut behavior are not yet certified. Treat this as experimental keyboard
+compatibility, not proof that unrelated keys can never be lost.
 
 Preedit handling and full compositor coverage remain open integration work,
 so this source is opt-in and intentionally hidden behind `wayexpand setup --mode experimental`.
