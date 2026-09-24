@@ -1,5 +1,6 @@
 use std::{env, fs};
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_RENDERED_BYTES: usize = 1024 * 1024;
 
@@ -146,7 +147,7 @@ fn parse_offset_variable(name: &str) -> Option<(&str, i64)> {
 
 /// Splits `template` on the first literal `{{cursor}}` marker (if any),
 /// renders each half independently through [`render_template`], and
-/// reports how many characters follow the marker in the rendered text --
+/// reports how many grapheme clusters follow the marker in the rendered text --
 /// the offset callers use to move the cursor back after typing the result.
 /// `{{cursor}}` is deliberately not a variable inside `render_template`
 /// itself (it substitutes to nothing; it only marks a position), so
@@ -166,7 +167,7 @@ pub fn render_template_with_cursor(
     };
     let mut rendered = render_template(&template[..marker_start], context)?;
     let after = render_template(&template[marker_start + MARKER.len()..], context)?;
-    let cursor_offset = after.chars().count();
+    let cursor_offset = after.graphemes(true).count();
     rendered.push_str(&after);
     Ok((rendered, Some(cursor_offset)))
 }
@@ -321,5 +322,28 @@ mod tests {
                 Err(TemplateError::UnknownVariable { .. })
             ));
         }
+    }
+
+    #[test]
+    fn cursor_offset_counts_combining_sequence_as_one_grapheme() {
+        let (rendered, offset) =
+            render_template_with_cursor("prefix{{cursor}}e\u{301}", &TemplateContext::default())
+                .unwrap();
+
+        assert_eq!(rendered, "prefixe\u{301}");
+        assert_eq!(offset, Some(1));
+    }
+
+    #[test]
+    fn cursor_offset_counts_zwj_emoji_as_one_grapheme() {
+        let family = "👨‍👩‍👧‍👦";
+        let (rendered, offset) = render_template_with_cursor(
+            &format!("prefix{{{{cursor}}}}{family}"),
+            &TemplateContext::default(),
+        )
+        .unwrap();
+
+        assert_eq!(rendered, format!("prefix{family}"));
+        assert_eq!(offset, Some(1));
     }
 }

@@ -1914,6 +1914,7 @@ fn kill_process_group(child: &mut std::process::Child) {
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
+    use unicode_segmentation::UnicodeSegmentation;
 
     use super::*;
 
@@ -3240,7 +3241,10 @@ replacement = "bad\u0000value""#;
         let result = engine.process(InputEvent::Text(":hi".into()))[0].clone();
         let expected_tail = format!(", {}!", crate::TemplateContext::system().username);
         assert_eq!(result.insert, format!("Hi {expected_tail}"));
-        assert_eq!(result.cursor_offset, Some(expected_tail.chars().count()));
+        assert_eq!(
+            result.cursor_offset,
+            Some(expected_tail.graphemes(true).count())
+        );
     }
 
     #[test]

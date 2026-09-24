@@ -85,12 +85,13 @@ pub trait TextInjector: Send {
         self.erase(trigger)?;
         self.insert(text)
     }
-    /// Move the text-insertion cursor left by `count` characters, for a
-    /// `{{cursor}}` placement marker. Always best-effort: the default no-op
-    /// implementation is a valid choice for a backend that cannot or does
-    /// not synthesize a Left key, since failing to reposition the cursor
-    /// does not mean the expansion itself failed -- the replacement text
-    /// was already inserted successfully by `replace`/`insert`.
+    /// Move the text-insertion cursor left by `count` grapheme clusters, for
+    /// a `{{cursor}}` placement marker. Backends synthesize one Left key per
+    /// cluster; toolkit cursor behavior may vary. Always best-effort: the
+    /// default no-op implementation is a valid choice for a backend that
+    /// cannot or does not synthesize a Left key, since failing to reposition
+    /// the cursor does not mean the expansion itself failed -- the replacement
+    /// text was already inserted successfully by `replace`/`insert`.
     fn move_cursor_left(&mut self, _count: usize) -> Result<(), InjectorError> {
         Ok(())
     }
