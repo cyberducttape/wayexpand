@@ -567,28 +567,54 @@ impl ExpansionEngine {
         };
         let completions: Vec<_> = runtime.receiver.try_iter().collect();
         let mut results = Vec::new();
-        for mut completion in completions {
+        for completion in completions {
             let Ok(mut output) = completion.output else {
                 continue;
             };
+
+            // Reconstruct MatchPlan context from completion for postflight checks
+            let plan = MatchPlan {
+                trigger: completion.result.trigger.clone(),
+                matched_text: completion.result.matched_text.clone(),
+                terminating_char: completion.result.reinsert_after,
+                cursor_offset: completion.result.cursor_offset,
+                config_index: completion.config_index,
+                generation: completion.generation,
+                sensitive_focus: false, // snapshot from queue time (conservative)
+                user_paused: false,      // snapshot from queue time (conservative)
+                trigger_config: self.config.expansion[completion.config_index].trigger.clone(),
+                replacement_text: self.config.expansion[completion.config_index].replacement.clone(),
+                command: self.config.expansion[completion.config_index].command.as_ref().map(|c| Arc::new(c.clone())),
+                propagate_case: self.config.expansion[completion.config_index].propagate_case,
+            };
+
+            // Apply postflight policy: check generation, output size, state changes
+            let Some(validated_output) = self.apply_postflight_policy(&plan, &output) else {
+                continue;
+            };
+
+            // Update cache before case propagation (cache stores original command output)
             if completion.cache_ms > 0 {
                 self.command_cache[completion.config_index] = Some(CommandCacheEntry {
                     expires_at: Instant::now() + Duration::from_millis(completion.cache_ms),
-                    value: output.clone(),
+                    value: validated_output.clone(),
                 });
             }
-            if self.config.expansion[completion.config_index].propagate_case {
-                output = apply_case_style(&completion.result.matched_text, &output);
-            }
-            if completion.generation != self.input_generation || !self.is_capture_enabled() {
-                continue;
-            }
-            completion.result.insert = output;
-            self.last_expansion = Some((
-                completion.result.matched_text.clone(),
-                completion.result.insert.clone(),
-            ));
-            results.push(completion.result);
+
+            // Apply case propagation
+            let final_output = if plan.propagate_case {
+                apply_case_style(&plan.matched_text, &validated_output)
+            } else {
+                validated_output
+            };
+
+            // Update undo state
+            self.last_expansion = Some((plan.matched_text.clone(), final_output.clone()));
+
+            // Build final result
+            let mut result = completion.result;
+            result.insert = final_output;
+            results.push(result);
         }
         results
     }
