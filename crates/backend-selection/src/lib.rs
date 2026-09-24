@@ -429,12 +429,12 @@ impl BackendSelection {
             ResolvedBackendPair::InputMethod => {
                 writeln!(
                     output,
-                    "  exclusive capture may drop unsupported navigation/function keys"
+                    "  experimental opt-in only: libei key pass-through exists but is not yet certified"
                 )
                 .unwrap();
                 writeln!(
                     output,
-                    "  experimental opt-in only: input-method-v2 does not provide general key pass-through"
+                    "  keyboard fidelity remains unvalidated for modifiers, repeats, and shortcuts"
                 )
                 .unwrap();
             }

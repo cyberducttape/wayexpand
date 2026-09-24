@@ -5,9 +5,10 @@
 //! compositor has activated the input method and grants its keyboard grab.
 //! Printable text, Backspace, Return, and Tab are forwarded through the
 //! input-method commit contract. Unsupported non-text keys and shortcut-like
-//! modified keys require a separate key-event injector for pass-through; if
-//! that injector is missing or fails, this source reports an error rather than
-//! silently discarding keys.
+//! modified keys can optionally use a separate key-event injector for
+//! experimental plain pass-through via libei; keyboard fidelity is not yet
+//! certified. If that injector is missing or fails, this source reports an
+//! error rather than silently discarding keys.
 
 use std::{
     collections::VecDeque,
@@ -658,8 +659,9 @@ fn matcher_event_for_deletion(before: u32, after: u32, selected: bool) -> InputE
 }
 
 fn matcher_event_for_unsupported_key() -> InputEvent {
-    // The keyboard grab is exclusive, so the key cannot be passed through
-    // safely. A boundary prevents a partial trigger surviving the lost event.
+    // Unsupported keys (Escape, arrows, F-keys, modifiers) can be passed through
+    // via experimental libei injector, but keyboard fidelity is not yet certified.
+    // A Reset boundary prevents a partial trigger surviving a lost or dropped key event.
     InputEvent::Reset
 }
 

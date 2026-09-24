@@ -32,10 +32,10 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 ### 2. Fundamental Capture Trade-Off: Security vs. Fidelity
 
 **The Problem:**
-- **input-method-v2:** Respects sensitive field signals and password protection, but exclusive keyboard grab cannot safely pass through Escape, arrow keys, and function keys (users on GNOME report lost navigation)
+- **input-method-v2:** Respects sensitive field signals and password protection, but exclusive keyboard grab and libei pass-through have not been certified for complete keyboard fidelity. Modifier chords, repetition behavior, reconnect scenarios, and application-specific shortcut conflicts remain under active validation (users on GNOME report navigation issues that may indicate incomplete key forwarding).
 - **evdev:** Preserves all keyboard events including Escape/arrows/F-keys, but reads all global keystrokes (requires `input` group), ignores password field signals, and needs careful timing/reinsert logic
 
-**Current Mitigation:** Explicit user opt-in with clear warnings on mode selection; behavior is honest in docs but creates tension between power users and security-conscious users
+**Current Mitigation:** Explicit user opt-in with clear warnings on mode selection; libei key pass-through is documented as experimental pending compositor-specific certification
 
 **Research Directions:**
 - Compositor-provided focused-window input filtering (systemd secure input, input ACLs)
