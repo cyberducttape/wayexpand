@@ -187,8 +187,9 @@ fn main() -> Result<()> {
     })?;
     if !config.engine.enable_async_commands() {
         warn!(
-            "asynchronous command/hotkey workers could not start; using bounded synchronous command fallback"
+            "asynchronous command/hotkey workers could not start; command-backed actions are disabled"
         );
+        config.engine.set_commands_disabled(true);
     }
 
     // Respect safe_mode semantics: only apply policy restrictions in enforcement mode.
@@ -1359,7 +1360,7 @@ fn process_event(
         for action in engine.process_key(&chord) {
             if let Some(violation) = policy.command_path_violation(&action.command.program) {
                 policy::log_violation(policy, &violation);
-                if policy.safe_mode {
+                if policy.command_path_is_blocked(&action.command.program) {
                     continue;
                 }
             }
@@ -1401,7 +1402,7 @@ fn apply_pending_results(
         if let Some(command) = &pending_result.command {
             if let Some(violation) = policy.command_path_violation(&command.program) {
                 policy::log_violation(policy, &violation);
-                if policy.safe_mode {
+                if policy.command_path_is_blocked(&command.program) {
                     continue;
                 }
             }
@@ -1418,15 +1419,18 @@ fn apply_pending_results(
             continue;
         }
 
-        // Policy approved: now execute the command (if any) and get final result
-        let result =
-            match engine.execute_pending_with_policy(pending_result, policy.max_replacement_size) {
-                Ok(result) => result,
-                Err(e) => {
-                    warn!("command execution failed: {}", e);
-                    continue;
-                }
-            };
+        // Policy approved: command-backed expansions go to the bounded worker;
+        // static replacements and cache hits are ready immediately.
+        let result = match engine
+            .dispatch_pending_with_policy(pending_result, policy.max_replacement_size)
+        {
+            Ok(wayexpand_core::PendingExpansionDispatch::Ready(result)) => result,
+            Ok(wayexpand_core::PendingExpansionDispatch::Queued) => continue,
+            Err(error) => {
+                warn!(%error, "expansion could not be queued or completed");
+                continue;
+            }
+        };
 
         if let Some(backend) = injector.as_deref_mut() {
             // P0 security fix: Never silently switch output transports.
@@ -1747,6 +1751,7 @@ mod tests {
         ))
         .unwrap();
         let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
         let mut injector = RecordingInjector { calls: Vec::new() };
         let policy = wayexpand_core::OrganizationPolicy {
             safe_mode: true,
@@ -1763,12 +1768,81 @@ mod tests {
         )
         .unwrap();
 
-        assert!(marker.exists(), "the subprocess should complete");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let completed = engine.drain_completed_commands();
+            for result in &completed {
+                ExpansionEngine::apply(&mut injector, result).unwrap();
+            }
+            let metrics = engine.command_metrics();
+            if marker.exists() && metrics.command_queue_depth == 0 && metrics.command_in_flight == 0
+            {
+                for _ in 0..5 {
+                    let _ = engine.drain_completed_commands();
+                    thread::sleep(Duration::from_millis(2));
+                }
+                break;
+            }
+            assert!(Instant::now() < deadline, "the subprocess should complete");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(
             injector.calls.is_empty(),
             "oversized output must not be injected"
         );
         let _ = std::fs::remove_file(marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_command_does_not_block_daemon_input_processing() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":slow"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.4; printf done"]
+            timeout_ms = 1000
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let started = Instant::now();
+        process_event(
+            &mut engine,
+            InputEvent::Text(":slow".into()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "daemon input processing waited for the child process"
+        );
+        assert!(injector.calls.is_empty());
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let results = engine.drain_completed_commands();
+            if !results.is_empty() {
+                for result in &results {
+                    ExpansionEngine::apply(&mut injector, result).unwrap();
+                }
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "command completion was not drained"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(injector.calls, ["erase::slow", "insert:done"]);
     }
 
     #[test]

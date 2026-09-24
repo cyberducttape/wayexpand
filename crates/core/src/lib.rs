@@ -24,7 +24,8 @@ pub use config::{
 };
 pub use engine::{
     run_command, CommandError, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    HotkeyError, HotkeyResult, InputEvent, PendingExpansionResult, WindowContext,
+    HotkeyError, HotkeyResult, InputEvent, PendingExpansionDispatch, PendingExpansionResult,
+    WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
