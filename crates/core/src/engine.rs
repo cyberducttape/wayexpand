@@ -124,6 +124,43 @@ impl PendingExpansionResult {
     }
 }
 
+/// Unified match plan: the result of successful matching before policy evaluation.
+/// Contains all information needed to decide whether to execute and how to commit.
+/// This structure has no side effects—it is read-only context for policy and execution.
+#[derive(Debug, Clone)]
+pub struct MatchPlan {
+    // Matching result
+    pub trigger: String,
+    /// Exact matched text (may differ from trigger if case propagation registered variant)
+    pub matched_text: String,
+    pub terminating_char: Option<char>,
+    pub cursor_offset: Option<usize>,
+
+    // Expansion reference
+    pub config_index: usize,
+
+    // State snapshot at match time (used for policy decisions)
+    pub generation: u64,
+    pub sensitive_focus: bool,
+    pub user_paused: bool,
+
+    // Expansion details (cloned for lifetime independence)
+    pub trigger_config: String,
+    pub replacement_text: String,
+    pub command: Option<Arc<CommandConfig>>,
+    pub propagate_case: bool,
+}
+
+impl MatchPlan {
+    pub fn is_static(&self) -> bool {
+        self.command.is_none()
+    }
+
+    pub fn is_command_backed(&self) -> bool {
+        self.command.is_some()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HotkeyResult {
     pub chord: KeyChord,
@@ -1035,6 +1072,53 @@ impl ExpansionEngine {
                 Vec::new()
             }
         }
+    }
+
+    /// Create a match plan without side effects. Returns context for policy evaluation and execution.
+    /// This is the unified matching path for both immediate and deferred execution.
+    fn take_match_plan(
+        &self,
+        config_index: usize,
+        length: usize,
+        terminating_char: Option<char>,
+    ) -> Option<MatchPlan> {
+        if !self.match_allowed(config_index, length) {
+            return None;
+        }
+
+        let expansion = &self.config.expansion[config_index];
+        let trigger = expansion.trigger.clone();
+        let propagate_case = expansion.propagate_case;
+
+        // Read the actually-typed trigger text (may be case variant due to case propagation)
+        let matched_text: String = {
+            let start = self.buffer.len().saturating_sub(length);
+            self.buffer.iter().skip(start).collect()
+        };
+
+        // Cursor behavior: commands have None (injected position), static expansion depends on template
+        let cursor_offset = if expansion.command.is_some() {
+            None
+        } else {
+            render_template_with_cursor(&expansion.replacement, &crate::TemplateContext::system())
+                .ok()
+                .and_then(|(_, offset)| offset)
+        };
+
+        Some(MatchPlan {
+            trigger,
+            matched_text,
+            terminating_char,
+            cursor_offset,
+            config_index,
+            generation: self.input_generation,
+            sensitive_focus: self.sensitive_focus,
+            user_paused: self.user_paused,
+            trigger_config: expansion.trigger.clone(),
+            replacement_text: expansion.replacement.clone(),
+            command: expansion.command.as_ref().map(|c| Arc::new(c.clone())),
+            propagate_case,
+        })
     }
 
     fn take_match(
