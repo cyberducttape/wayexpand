@@ -87,9 +87,15 @@ pub fn validate_organization_policy_file(
     if metadata.uid() != 0 {
         return Err(format!("{} must be owned by root", path.display()));
     }
-    if metadata.mode() & 0o077 != 0 {
+    // Policy file must not be world-accessible. It may be:
+    // - 0600 (root read/write only)
+    // - 0400 (root read-only)
+    // - 0440 (root read-only, group-readable for unprivileged services)
+    // This allows unprivileged WayExpand user services to read organization
+    // policy without compromising security through world-readable access.
+    if metadata.mode() & 0o007 != 0 {
         return Err(format!(
-            "{} must not be group- or world-accessible (mode: {:o})",
+            "{} must not be world-accessible (mode: {:o})",
             path.display(),
             metadata.mode() & 0o777
         ));
