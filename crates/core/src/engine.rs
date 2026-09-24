@@ -105,11 +105,10 @@ pub struct PendingExpansionResult {
 impl PendingExpansionResult {
     /// Execute the command (if present) and return the final expansion result.
     /// Only call after policy approval.
-    pub fn execute_with_policy(self) -> Result<ExpansionResult, ExpansionError> {
+    pub fn execute_with_policy(self) -> Result<ExpansionResult, CommandError> {
+        let command_backed = self.command.is_some();
         let insert = if let Some(command) = self.command {
-            // Execute command and get output
-            let output = run_command(&command)?;
-            output
+            run_command(&command)?
         } else {
             self.template_text
         };
@@ -120,7 +119,7 @@ impl PendingExpansionResult {
             insert,
             cursor_offset: self.cursor_offset,
             reinsert_after: self.reinsert_after,
-            command_backed: self.command.is_some(),
+            command_backed,
         })
     }
 }
@@ -889,6 +888,149 @@ impl ExpansionEngine {
         }
     }
 
+    /// Process input and return pending expansion results (v1.3+ deferred execution).
+    /// Commands are NOT executed; caller must check policy and call
+    /// PendingExpansionResult::execute_with_policy() to commit the expansion.
+    pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
+        if !matches!(event, InputEvent::Key(_)) {
+            self.last_expansion = None;
+        }
+        match event {
+            InputEvent::Key(_) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                Vec::new()
+            }
+            InputEvent::Text(text) => {
+                let mut results = Vec::new();
+                let mut result_bytes = 0usize;
+                if !self.is_capture_enabled() {
+                    return results;
+                }
+                for character in text.chars() {
+                    self.input_generation = self.input_generation.wrapping_add(1);
+                    let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
+                    if let Some((index, length)) = pending {
+                        if let Some(config_index) = self.matcher_indices.get(index).copied() {
+                            let trigger = &self.config.expansion[config_index].trigger;
+                            let match_mode = self.config.expansion[config_index].match_mode;
+                            if !self.matcher.can_continue(trigger, character) {
+                                let trailing_word_character = match_mode == MatchMode::WordBoundary
+                                    && is_word_character(character);
+                                if !trailing_word_character {
+                                    if let Some(result) =
+                                        self.take_match_deferred(config_index, length, Some(character))
+                                    {
+                                        let bytes = result.trigger.len()
+                                            .saturating_add(result.template_text.len());
+                                        if results.len() >= MAX_RESULTS_PER_EVENT
+                                            || result_bytes.saturating_add(bytes)
+                                                > MAX_RESULT_BYTES_PER_EVENT
+                                        {
+                                            self.clear_buffer();
+                                            break;
+                                        }
+                                        result_bytes = result_bytes.saturating_add(bytes);
+                                        results.push(result);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if results.len() >= MAX_RESULTS_PER_EVENT {
+                        self.clear_buffer();
+                        break;
+                    }
+                    self.buffer.push_back(character);
+                    while self.buffer.len() > self.max_buffer_chars {
+                        self.buffer.pop_front();
+                        self.buffer_truncated = true;
+                    }
+                    if let Some((index, length)) =
+                        self.matcher.find_suffix(self.buffer.iter().rev().copied())
+                    {
+                        let config_index = self.matcher_indices.get(index).copied();
+                        let Some(config_index) = config_index else {
+                            self.clear_buffer();
+                            continue;
+                        };
+                        let (trigger, match_mode) = {
+                            let expansion = &self.config.expansion[config_index];
+                            (expansion.trigger.clone(), expansion.match_mode)
+                        };
+                        let typed: String = {
+                            let start = self.buffer.len().saturating_sub(length);
+                            self.buffer.iter().skip(start).collect()
+                        };
+                        if self.matcher.has_continuation(&typed)
+                            || match_mode == MatchMode::WordBoundary
+                        {
+                            continue;
+                        }
+                        if let Some(result) = self.take_match_deferred(config_index, length, None) {
+                            let expansion_bytes = trigger.len()
+                                .saturating_add(result.template_text.len());
+                            if result_bytes.saturating_add(expansion_bytes)
+                                > MAX_RESULT_BYTES_PER_EVENT
+                            {
+                                self.clear_buffer();
+                                break;
+                            }
+                            result_bytes = result_bytes.saturating_add(expansion_bytes);
+                            results.push(result);
+                        }
+                        self.clear_buffer();
+                    }
+                }
+                results
+            }
+            InputEvent::Delimiter(character) => {
+                self.process_deferred(InputEvent::Text(character.to_string()))
+            }
+            InputEvent::Backspace => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.buffer.pop_back();
+                Vec::new()
+            }
+            InputEvent::EndOfInput => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                let result = self
+                    .matcher
+                    .find_suffix(self.buffer.iter().rev().copied())
+                    .and_then(|(index, length)| {
+                        self.matcher_indices
+                            .get(index)
+                            .copied()
+                            .and_then(|config_index| self.take_match_deferred(config_index, length, None))
+                    });
+                self.clear_buffer();
+                result.into_iter().collect()
+            }
+            InputEvent::Reset => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.clear_buffer();
+                Vec::new()
+            }
+            InputEvent::FocusChanged { sensitive } => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.sensitive_focus = sensitive;
+                self.clear_buffer();
+                Vec::new()
+            }
+            InputEvent::PauseChanged(paused) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.user_paused = paused;
+                self.clear_buffer();
+                Vec::new()
+            }
+            InputEvent::WindowChanged(window) => {
+                self.input_generation = self.input_generation.wrapping_add(1);
+                self.current_window = window;
+                self.clear_buffer();
+                Vec::new()
+            }
+        }
+    }
+
     fn take_match(
         &mut self,
         config_index: usize,
@@ -970,6 +1112,50 @@ impl ExpansionEngine {
             cursor_offset,
             reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
             command_backed: false,
+        })
+    }
+
+    /// Deferred execution variant: returns pending results without executing commands.
+    /// v1.3+ architecture: caller must check policy and execute via
+    /// PendingExpansionResult::execute_with_policy().
+    fn take_match_deferred(
+        &mut self,
+        config_index: usize,
+        length: usize,
+        terminating_char: Option<char>,
+    ) -> Option<PendingExpansionResult> {
+        if !self.match_allowed(config_index, length) {
+            return None;
+        }
+        let trigger = self.config.expansion[config_index].trigger.clone();
+        let propagate_case = self.config.expansion[config_index].propagate_case;
+        let typed: String = {
+            let start = self.buffer.len().saturating_sub(length);
+            self.buffer.iter().skip(start).collect()
+        };
+        let expansion = &self.config.expansion[config_index];
+
+        // Render template to get cursor_offset (without executing command)
+        let (mut template_text, cursor_offset) = render_template_with_cursor(
+            &expansion.replacement,
+            &crate::TemplateContext::system(),
+        ).ok()?;
+
+        if propagate_case {
+            template_text = apply_case_style(&typed, &template_text);
+        }
+
+        for _ in 0..length {
+            self.buffer.pop_back();
+        }
+
+        Some(PendingExpansionResult {
+            trigger,
+            matched_text: typed,
+            template_text,
+            cursor_offset,
+            reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
+            command: expansion.command.clone(),
         })
     }
 
