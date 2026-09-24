@@ -472,6 +472,11 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                                 });
                             }
                         }
+                        // ARCHITECTURAL LIMITATION (P1): Only PRESS events are passed through.
+                        // RELEASE events are not tracked, so held keys become synthetic taps.
+                        // Example: physically holding Right Arrow produces tap behavior.
+                        // This breaks: held navigation, held Delete, key-repeat workflows.
+                        // Proper fix requires tracking press/release pairs and held-key state.
                         state.queue_event(matcher_event_for_unsupported_key());
                     }
                     None => {}
