@@ -2067,6 +2067,16 @@ fn load_policy() -> Result<OrganizationPolicy> {
     wayexpand_core::load_organization_policy().map_err(|error| anyhow::anyhow!(error))
 }
 
+fn absolute_command_policy_diagnostic(policy: &OrganizationPolicy) -> Option<&'static str> {
+    policy
+        .require_absolute_commands
+        .then_some(if policy.safe_mode {
+            "Require absolute command paths: enforced"
+        } else {
+            "Require absolute command paths: audit only"
+        })
+}
+
 fn print_policy_diagnostics_json(policy_result: &Result<OrganizationPolicy>) -> serde_json::Value {
     let policy_json = match policy_result {
         Ok(policy) => {
@@ -2074,6 +2084,7 @@ fn print_policy_diagnostics_json(policy_result: &Result<OrganizationPolicy>) -> 
                 "valid": true,
                 "safe_mode": policy.safe_mode,
                 "disable_commands": policy.disable_commands,
+                "require_absolute_commands": policy.require_absolute_commands,
                 "disable_hotkeys": policy.disable_hotkeys,
                 "disable_title_matching": policy.disable_title_matching,
                 "max_replacement_size": policy.max_replacement_size,
@@ -2174,6 +2185,9 @@ fn print_policy_diagnostics() -> bool {
                 if policy.disable_commands {
                     println!("  Disable commands: enabled");
                 }
+                if let Some(diagnostic) = absolute_command_policy_diagnostic(&policy) {
+                    println!("  {diagnostic}");
+                }
                 if policy.disable_hotkeys {
                     println!("  Disable hotkeys: enabled");
                 }
@@ -2215,6 +2229,29 @@ fn print_policy_diagnostics() -> bool {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn doctor_policy_json_reports_absolute_command_requirement() {
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let diagnostics = print_policy_diagnostics_json(&Ok(policy));
+
+        assert_eq!(
+            diagnostics["policy"]["require_absolute_commands"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(
+            absolute_command_policy_diagnostic(&OrganizationPolicy {
+                safe_mode: false,
+                require_absolute_commands: true,
+                ..OrganizationPolicy::default()
+            }),
+            Some("Require absolute command paths: audit only")
+        );
+    }
 
     #[test]
     fn backup_refuses_existing_destination_atomically() {

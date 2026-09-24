@@ -15,13 +15,20 @@ result; see `deferred_command_output_over_policy_limit_is_rejected_after_complet
 
 ### How They Were Fixed
 
-**Bug #2 (Async Worker Fallback Policy Bypass):** Fixed by enforcing `disable_commands` policy in sync fallback path + setting `command_backed` correctly
+**Bug #2 (Async Worker Initialization):** Command-backed actions now fail closed
+when workers are unavailable; daemon startup and reload disable command actions
+if worker initialization fails. `dispatch_pending_with_policy()` has no
+synchronous fallback.
 
-**Bug #3 (command_backed Flag Accuracy):** Fixed by setting `command_backed = expansion.command.is_some()` instead of hardcoding to false
+**Bug #3 (`command_backed` Flag Accuracy):** Results now reflect whether the
+matched expansion actually used a command.
 
-**Bug #1 (Output Size Policy):** Fixed by enforcing the engine and administrator limits in `ExpansionEngine::execute_pending_with_policy()` before returning an injectable result.
-
-**See:** [[P2_unified_command_execution_completion.md]](../../../memory/P2_unified_command_execution_completion.md) for implementation details
+**Bug #1 (Output Size Policy):** Fixed by validating engine and administrator
+limits on worker completion before an injectable result is returned. The
+current path is `ExpansionEngine::dispatch_pending_with_policy()` followed by
+`ExpansionEngine::drain_completed_commands()` in
+[`crates/core/src/engine.rs`](../crates/core/src/engine.rs); daemon and IBus
+boundary regressions cover the production injection/commit paths.
 
 ---
 
@@ -52,7 +59,8 @@ Execution flow:
 The original defect was a context-free pending-result executor that called
 `run_command()` without post-execution size validation. That API is no longer
 used: deferred completion now goes through
-`ExpansionEngine::execute_pending_with_policy()`, which checks the engine and
+`ExpansionEngine::dispatch_pending_with_policy()` and
+`ExpansionEngine::drain_completed_commands()`, which check the engine and
 administrator output limits before returning an `ExpansionResult`.
 
 ### Design Problem
@@ -305,7 +313,8 @@ command_backed: true,  // ← Fix: was false
 
 1. **Daemon:** `apply_pending_results()` + `take_match()`
 2. **IBus Backend:** pending result handler + `take_match()`
-3. **Core Engine:** `ExpansionEngine::execute_pending_with_policy()`
+3. **Core Engine:** `ExpansionEngine::dispatch_pending_with_policy()` and
+   `ExpansionEngine::drain_completed_commands()`
 
 ### Why This Matters
 

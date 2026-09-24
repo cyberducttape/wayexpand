@@ -250,7 +250,11 @@ Diagnostic output suitable for health checks and monitoring systems.
   "policy": {
     "path": "/etc/wayexpand/policy.toml",
     "exists": false,
-    "policy": { "valid": true, "is_active": false }
+    "policy": {
+      "valid": true,
+      "require_absolute_commands": false,
+      "is_active": false
+    }
   },
   "backends": [
     {
@@ -296,6 +300,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
+- `policy.policy.require_absolute_commands` (bool): Whether command programs must use absolute paths; in audit mode this is reported but not enforced
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
   - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.
