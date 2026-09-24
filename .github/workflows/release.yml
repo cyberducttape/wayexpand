@@ -130,11 +130,15 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
 
-          # Clean tarball (Cargo.lock only)
+          # Clean source archive: lockfile included, no vendored source redirect.
           git archive --format=tar.gz \
             --prefix="wayexpand-${version}/" \
             --output="wayexpand-${version}.tar.gz" \
             HEAD
+          if tar -tzf "wayexpand-${version}.tar.gz" | grep -E '^wayexpand-[^/]+/(\.cargo/config\.toml|vendor/)' >/dev/null; then
+            echo "clean source archive unexpectedly contains vendored Cargo configuration or vendor/" >&2
+            exit 1
+          fi
           sha256sum "wayexpand-${version}.tar.gz" > "wayexpand-${version}.tar.gz.sha256"
           cargo metadata --locked --format-version 1 > "wayexpand-${version}.cargo-metadata.json"
 
