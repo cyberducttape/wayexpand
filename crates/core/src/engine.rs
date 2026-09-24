@@ -1129,8 +1129,8 @@ impl ExpansionEngine {
     ) -> ExpansionResult {
         let mut final_insert = insert;
 
-        // Apply case propagation if configured and this is command output
-        if plan.propagate_case && plan.is_command_backed() {
+        // Apply case propagation if configured (applies to all expansion types)
+        if plan.propagate_case {
             final_insert = apply_case_style(&plan.matched_text, &final_insert);
         }
 
@@ -1146,9 +1146,9 @@ impl ExpansionEngine {
             }
         }
 
-        // Save undo state (for commands, save original trigger; for static, trigger consumed)
+        // Save undo state (only if no cursor offset - cursor marker expansions don't support undo)
         // Skip undo for async commands since they return empty immediately
-        if !plan.is_command_backed() || self.async_commands.is_none() {
+        if plan.cursor_offset.is_none() && (!plan.is_command_backed() || self.async_commands.is_none()) {
             self.last_expansion = Some((plan.matched_text.clone(), final_insert.clone()));
         }
 
@@ -1157,7 +1157,7 @@ impl ExpansionEngine {
             matched_text: plan.matched_text.clone(),
             insert: final_insert,
             cursor_offset: plan.cursor_offset,
-            reinsert_after: plan.terminating_char,
+            reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
             command_backed: plan.is_command_backed(),
         }
     }
@@ -1215,21 +1215,17 @@ impl ExpansionEngine {
         length: usize,
         terminating_char: Option<char>,
     ) -> Option<ExpansionResult> {
-        if !self.match_allowed(config_index, length) {
+        // Generate match plan with full context
+        let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
+
+        // Apply preflight policy
+        if self.apply_preflight_policy(plan.clone()).is_none() {
             return None;
         }
-        let trigger = self.config.expansion[config_index].trigger.clone();
-        let propagate_case = self.config.expansion[config_index].propagate_case;
-        // Read the actually-typed trigger text (which may be an uppercase
-        // or capitalized variant registered in the matcher for this entry;
-        // see `ExpansionEngine::new`) before it is popped off below. Needed
-        // both for case propagation and as the text an undo restores.
-        let typed: String = {
-            let start = self.buffer.len().saturating_sub(length);
-            self.buffer.iter().skip(start).collect()
-        };
+
         let expansion = &self.config.expansion[config_index];
-        let has_command = expansion.command.is_some();
+
+        // Check cache before deciding on async vs sync
         let cached_command = expansion.command.as_ref().and_then(|command| {
             (command.cache_ms > 0)
                 .then(|| self.command_cache[config_index].as_ref())
@@ -1237,66 +1233,51 @@ impl ExpansionEngine {
                 .filter(|entry| entry.expires_at > Instant::now())
                 .map(|entry| entry.value.clone())
         });
-        let (mut insert, cursor_offset) = if let Some(value) = cached_command {
-            (value, None)
-        } else if let (Some(runtime), Some(command)) =
-            (self.async_commands.as_ref(), expansion.command.as_ref())
-        {
-            // Policy enforcement: block command execution if policy disables it
-            if self.config.organization.disable_commands {
-                return None;
-            }
 
-            let result = ExpansionResult {
-                trigger,
-                matched_text: typed,
-                insert: String::new(),
-                cursor_offset: None,
-                reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
-                command_backed: true,
-            };
-            let job = AsyncCommandJob::Expansion {
-                config_index,
-                generation: self.input_generation,
-                command: command.clone(),
-                result,
-            };
-            if runtime.try_send_command(job).is_err() {
-                return None;
-            }
-            // Do not consume the trigger until the worker has accepted the
-            // job. A saturated queue therefore cannot make input silently
-            // disappear from the engine's state.
+        // Cached command: use cache
+        if let Some(cached_value) = cached_command {
             for _ in 0..length {
                 self.buffer.pop_back();
             }
-            self.last_expansion = None;
-            return None;
-        } else {
-            // Policy enforcement must also apply when falling back to synchronous execution.
-            // This ensures disable_commands is respected even if async infrastructure fails.
-            if has_command && self.config.organization.disable_commands {
+            // Commit with cached value (already cached, no re-caching needed)
+            return Some(self.commit_expansion(&plan, cached_value));
+        }
+
+        // Async command: queue and return empty
+        if let Some(runtime) = self.async_commands.as_ref() {
+            if expansion.command.is_some() {
+                let result = ExpansionResult {
+                    trigger: plan.trigger_config.clone(),
+                    matched_text: plan.matched_text.clone(),
+                    insert: String::new(),
+                    cursor_offset: None,
+                    reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
+                    command_backed: true,
+                };
+                let job = AsyncCommandJob::Expansion {
+                    config_index,
+                    generation: self.input_generation,
+                    command: expansion.command.clone().unwrap(),
+                    result,
+                };
+                if runtime.try_send_command(job).is_err() {
+                    return None;
+                }
+                // Do not consume the trigger until the worker has accepted
+                for _ in 0..length {
+                    self.buffer.pop_back();
+                }
+                self.last_expansion = None;
                 return None;
             }
-            self.render_expansion(config_index).ok()?
-        };
-        if propagate_case {
-            insert = apply_case_style(&typed, &insert);
         }
+
+        // Sync fallback: render and commit
+        let (insert, _) = self.render_expansion(config_index).ok()?;
         for _ in 0..length {
             self.buffer.pop_back();
         }
-        if cursor_offset.is_none() {
-            self.last_expansion = Some((typed.clone(), insert.clone()));
-        }
-        Some(ExpansionResult {
-            trigger,
-            matched_text: typed,
-            insert,
-            cursor_offset,
-            reinsert_after: terminating_char.filter(|_| self.reinsert_terminators),
-            command_backed: has_command,
-        })
+        Some(self.commit_expansion(&plan, insert))
     }
 
     /// Deferred execution variant: returns pending results without executing commands.
