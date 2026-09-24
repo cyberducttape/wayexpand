@@ -3979,7 +3979,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
@@ -3997,7 +3997,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-clipboard"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "thiserror 2.0.20",
  "wayexpand-core",
@@ -4006,7 +4006,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-evdev"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "evdev",
  "rustix 1.1.4",
@@ -4020,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-ibus"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "notify",
  "thiserror 2.0.20",
@@ -4034,7 +4034,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-input-method"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
@@ -4050,7 +4050,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-kwin-window"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "getrandom 0.2.17",
  "thiserror 2.0.20",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-libei"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "ashpd",
  "libc",
@@ -4076,7 +4076,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-selection"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "tracing",
  "wayexpand-backend-evdev",
@@ -4086,7 +4086,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-backend-wlroots"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
@@ -4100,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-core"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "libc",
@@ -4113,7 +4113,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-daemon"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "rustix 1.1.4",
@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-gui"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "eframe",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "wayexpand-ui"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "crossterm",
