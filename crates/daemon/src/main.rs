@@ -183,14 +183,14 @@ fn main() -> Result<()> {
         );
     }
 
-    // Respect safe_mode semantics: only disable commands in the engine when in enforcement mode.
-    // In audit mode (safe_mode=false), commands are allowed but violations are logged by check_and_log_expansion_violations().
+    // Respect safe_mode semantics: only apply policy restrictions in enforcement mode.
+    // In audit mode (safe_mode=false), violations are logged but behavior is unchanged.
     config
         .engine
         .set_commands_disabled(policy::commands_enforced(&policy));
     config
         .engine
-        .set_title_matching_disabled(policy.disable_title_matching);
+        .set_title_matching_disabled(policy.safe_mode && policy.disable_title_matching);
     // evdev observes keystrokes non-exclusively. The focused application will
     // receive the terminating punctuation itself, so do not erase and
     // synthesize that character as part of the replacement.

@@ -303,8 +303,10 @@ impl IbusEngineAdapter {
 }
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
+    // Only apply policy restrictions in safe_mode (enforcement mode).
+    // In audit mode (safe_mode=false), policy violations are logged but behavior is unchanged.
     engine.set_commands_disabled(policy.safe_mode && policy.disable_commands);
-    engine.set_title_matching_disabled(policy.disable_title_matching);
+    engine.set_title_matching_disabled(policy.safe_mode && policy.disable_title_matching);
 }
 
 /// Convert the printable XKB keysyms that IBus supplies to Unicode.
