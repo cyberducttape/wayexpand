@@ -23,6 +23,41 @@ env:
   RUST_TEST_THREADS: 1
 
 jobs:
+  versions:
+    name: Version Consistency Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check version consistency across all files
+        run: |
+          set -e
+
+          # Extract versions from each file
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+          pkgbuild_version=$(sed -n 's/^pkgver=//p' PKGBUILD)
+          debian_version=$(sed -n 's/^wayexpand (\([^ -]*\)-.*/\1/p' debian/changelog | head -n1)
+          spec_version=$(sed -n 's/^Version: *//p' wayexpand.spec)
+          ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
+          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)
+
+          echo "Version check:"
+          echo "  Cargo.toml:            $cargo_version"
+          echo "  PKGBUILD:              $pkgbuild_version"
+          echo "  debian/changelog:      $debian_version"
+          echo "  wayexpand.spec:        $spec_version"
+          echo "  IBus XML:              $ibus_version"
+          echo "  AppStream metadata:    $appstream_version"
+
+          # Verify all match
+          test "$cargo_version" = "$pkgbuild_version" || exit 1
+          test "$cargo_version" = "$debian_version" || exit 1
+          test "$cargo_version" = "$spec_version" || exit 1
+          test "$cargo_version" = "$ibus_version" || exit 1
+          test "$cargo_version" = "$appstream_version" || exit 1
+
+          echo "✓ All versions consistent"
+
   workflow:
     name: GitHub Actions Validation
     runs-on: ubuntu-latest
