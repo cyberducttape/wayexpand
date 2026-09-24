@@ -155,6 +155,10 @@ pub struct OrganizationPolicy {
     /// Disable hotkey execution. Hotkeys still parse but refuse to run.
     pub disable_hotkeys: bool,
 
+    /// Require command-backed expansions and hotkeys to use absolute program
+    /// paths. This avoids PATH-dependent command resolution in managed fleets.
+    pub require_absolute_commands: bool,
+
     /// Disable title fallback for app-filtered expansions. When no compositor
     /// app ID is available, matching fails closed instead of using the
     /// user-editable window title. App IDs remain eligible for matching.
@@ -183,6 +187,7 @@ impl Default for OrganizationPolicy {
             safe_mode: false,
             disable_commands: false,
             disable_hotkeys: false,
+            require_absolute_commands: false,
             disable_title_matching: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
@@ -198,6 +203,7 @@ impl OrganizationPolicy {
         self.safe_mode
             || self.disable_commands
             || self.disable_hotkeys
+            || self.require_absolute_commands
             || self.disable_title_matching
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
@@ -683,43 +689,74 @@ impl Config {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("expansions.toml");
-        let temp = parent.join(format!(".{file_name}.tmp.{}", std::process::id()));
         let serialized = toml::to_string_pretty(self)?;
-        let result = (|| -> Result<(), ConfigError> {
-            let mut file = fs::OpenOptions::new()
+        let mut last_error = None;
+        for attempt in 0..16 {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            let temp = parent.join(format!(
+                ".{file_name}.tmp.{}.{}.{}",
+                std::process::id(),
+                nonce,
+                attempt
+            ));
+            let mut file = match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
                 .open(&temp)
-                .map_err(|source| ConfigError::Read {
+            {
+                Ok(file) => file,
+                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                    last_error = Some(ConfigError::Read {
+                        path: temp.display().to_string(),
+                        source,
+                    });
+                    continue;
+                }
+                Err(source) => {
+                    return Err(ConfigError::Read {
+                        path: temp.display().to_string(),
+                        source,
+                    });
+                }
+            };
+            let result = (|| -> Result<(), ConfigError> {
+                file.write_all(serialized.as_bytes())
+                    .map_err(|source| ConfigError::Read {
+                        path: temp.display().to_string(),
+                        source,
+                    })?;
+                file.sync_all().map_err(|source| ConfigError::Read {
                     path: temp.display().to_string(),
                     source,
                 })?;
-            file.write_all(serialized.as_bytes())
-                .map_err(|source| ConfigError::Read {
-                    path: temp.display().to_string(),
+                fs::rename(&temp, &resolved).map_err(|source| ConfigError::Read {
+                    path: resolved.display().to_string(),
                     source,
                 })?;
-            file.sync_all().map_err(|source| ConfigError::Read {
-                path: temp.display().to_string(),
-                source,
-            })?;
-            fs::rename(&temp, &resolved).map_err(|source| ConfigError::Read {
-                path: resolved.display().to_string(),
-                source,
-            })?;
-            fs::File::open(parent)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|source| ConfigError::Read {
-                    path: parent.display().to_string(),
-                    source,
-                })?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temp);
+                fs::File::open(parent)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|source| ConfigError::Read {
+                        path: parent.display().to_string(),
+                        source,
+                    })?;
+                Ok(())
+            })();
+            if result.is_err() {
+                let _ = fs::remove_file(&temp);
+            }
+            return result;
         }
-        result
+        Err(last_error.unwrap_or_else(|| ConfigError::Read {
+            path: parent.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate a unique configuration temporary file",
+            ),
+        }))
     }
 
     /// Validate a configuration assembled through the public Rust API.
@@ -776,6 +813,14 @@ impl Config {
                 return Err(ConfigError::InvalidHotkey {
                     index,
                     reason: "command limits are invalid",
+                });
+            }
+            if self.organization.require_absolute_commands
+                && !Path::new(&binding.command.program).is_absolute()
+            {
+                return Err(ConfigError::InvalidHotkey {
+                    index,
+                    reason: "command program must be an absolute path by organization policy",
                 });
             }
             let mut argument_chars = 0usize;
@@ -889,6 +934,14 @@ impl Config {
                     return Err(ConfigError::InvalidCommand {
                         index,
                         reason: "program is too long or contains NUL",
+                    });
+                }
+                if self.organization.require_absolute_commands
+                    && !Path::new(&command.program).is_absolute()
+                {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "program must be an absolute path by organization policy",
                     });
                 }
                 if command.args.len() > MAX_COMMAND_ARGS {
@@ -1262,6 +1315,59 @@ mod tests {
             Config::parse(&too_many),
             Err(ConfigError::InvalidAppFilter { index: 0 })
         ));
+    }
+
+    #[test]
+    fn organization_policy_can_require_absolute_command_paths() {
+        let error = Config::parse(
+            r#"
+            [organization]
+            require_absolute_commands = true
+
+            [[expansion]]
+            trigger = ":git"
+            replacement = ""
+            command = { program = "git", args = ["status"] }
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::InvalidCommand { index: 0, .. }
+        ));
+
+        let config = Config::parse(
+            r#"
+            [organization]
+            require_absolute_commands = true
+
+            [[expansion]]
+            trigger = ":git"
+            replacement = ""
+            command = { program = "/usr/bin/git", args = ["status"] }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.expansion[0].command.as_ref().unwrap().program,
+            "/usr/bin/git"
+        );
+    }
+
+    #[test]
+    fn organization_policy_can_require_absolute_hotkey_command_paths() {
+        let error = Config::parse(
+            r#"
+            [organization]
+            require_absolute_commands = true
+
+            [[hotkey]]
+            chord = "Ctrl+Alt+T"
+            command = { program = "konsole" }
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ConfigError::InvalidHotkey { index: 0, .. }));
     }
 
     #[test]

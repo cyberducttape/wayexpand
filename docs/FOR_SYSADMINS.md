@@ -13,7 +13,7 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 Users install locally via available package managers or source:
 
 ```bash
-# Ubuntu/Debian (via PPA)
+# Ubuntu (via PPA)
 sudo apt install wayexpand
 
 # Arch (packaging prepared; build locally)
@@ -25,7 +25,8 @@ cd wayexpand && makepkg -si
 ```
 
 **Packaging Status:**
-- ✅ Ubuntu/Debian: Available via PPA
+- ✅ Ubuntu: Available via PPA
+- ⚠️ Debian: Build from the vendored source archive; the Launchpad PPA targets Ubuntu series
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
 - 📦 Fedora: Copr packaging prepared (not yet published)
 - 🔧 Others: Build from source using `./scripts/install-user.sh`
@@ -39,7 +40,8 @@ cd wayexpand && makepkg -si
 For teams with shared machines or controlled environments:
 
 **Approach 1: Package distribution** (recommended)
-- **Ubuntu/Debian:** Deploy via PPA (apt)
+- **Ubuntu:** Deploy via PPA (apt)
+- **Debian:** Build/deploy from the vendored release archive or internal package repository
 - **Arch:** Packaging prepared (not yet official AUR)
 - **Fedora:** Packaging prepared (Copr packaging ready)
 - Users self-install from organizational repo
@@ -66,16 +68,16 @@ For teams with shared machines or controlled environments:
 - name: Deploy WayExpand
   hosts: workstations
   tasks:
-    - name: Add PPA (Ubuntu/Debian)
+    - name: Add PPA (Ubuntu)
       ansible.builtin.apt_repository:
         repo: "ppa:cyberducttape/ppa"
-      when: ansible_os_family == "Debian"
+      when: ansible_distribution == "Ubuntu"
 
     - name: Install WayExpand
       ansible.builtin.apt:
         name: wayexpand
         state: present
-      when: ansible_os_family == "Debian"
+      when: ansible_distribution == "Ubuntu"
 
     - name: Create config directory
       ansible.builtin.file:

@@ -1,6 +1,6 @@
 [package]
 name = "wayexpand-backend-clipboard"
-description = "Clipboard-based text injection backend for WayExpand (fallback for newlines)"
+description = "Legacy X11 clipboard injection backend for WayExpand (not used by the daemon)"
 version.workspace = true
 rust-version.workspace = true
 edition.workspace = true

@@ -11,8 +11,7 @@ override_dh_clean:
 	dh_clean -X.orig
 
 override_dh_auto_configure:
-	mkdir -p .cargo
-	cargo vendor vendor/ > .cargo/config.toml
+	test -f .cargo/config.toml || { echo "debian/rules expects the vendored release archive with .cargo/config.toml; use wayexpand-<version>-vendored.tar.gz for Launchpad/offline builds" >&2; exit 1; }
 	dh_auto_configure
 
 override_dh_auto_build:

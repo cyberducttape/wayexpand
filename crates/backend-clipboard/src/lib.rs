@@ -8,6 +8,11 @@ use std::{
 use thiserror::Error;
 use wayexpand_core::TextInjector;
 
+// Legacy X11 clipboard injection backend retained for reference tests and
+// archived fallback research. The production daemon/backend-selection path
+// does not use this crate; active Wayland output paths are libei, wlroots,
+// input-method-v2, or explicit none.
+
 const BACKEND_NAME: &str = "clipboard";
 /// Upper bound on any single external process (`xclip`/`xsel`/`xdotool`/
 /// `which`) this backend spawns. Every one of these calls is reachable

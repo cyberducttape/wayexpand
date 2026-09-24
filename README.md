@@ -30,7 +30,7 @@ Rust, has a GUI and CLI, and collects no telemetry.
 
 ## Install in a minute
 
-On Ubuntu or Debian:
+On Ubuntu:
 
 ```sh
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -38,6 +38,9 @@ sudo apt update
 sudo apt install wayexpand
 wayexpand doctor
 ```
+
+On Debian, use the source/release installation path for now; the Launchpad PPA
+targets Ubuntu series, not Debian releases.
 
 `doctor` checks your live Wayland session and explains which capture and
 injection paths are available. Then open the snippet manager:
@@ -321,7 +324,9 @@ Pros:
 - evdev provides compositor-independent capture; output still requires a compatible libei/EIS portal or virtual-keyboard protocol
 
 Cons:
-- **Requires `input` group membership** — grants raw keyboard access to **all keystrokes** system-wide, not just WayExpand's
+- **Requires raw input-event access** — the WayExpand udev template is scoped
+  to keyboard-class event nodes, but legacy `input` group membership may grant
+  broader raw input event access depending on distribution policy
 - **No password-field protection** — matching is never suspended in password fields
 - **Legacy/simple permission model** — active-seat ACLs or a device broker are future security work; see [EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
 - **Best-effort timing** — non-exclusive capture cannot make rapid trigger replacement atomic; see [P0_3_DECISION_REQUIRED.md](docs/P0_3_DECISION_REQUIRED.md)
@@ -353,7 +358,11 @@ lost.
 
 **Granting evdev permission**
 
-Granting the permission is a separate, explicit, root-requiring step the installers never run for you. Understand what `input` group membership means before proceeding (see [SECURITY.md](SECURITY.md) for details).
+Granting the permission is a separate, explicit, root-requiring step the
+installers never run for you. The active-seat rule targets keyboard-class input
+event nodes; the legacy `input` group mode may be broader depending on your
+distribution's default input-device policy. Understand that tradeoff before
+proceeding (see [SECURITY.md](SECURITY.md) for details).
 
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --dry-run   # preview first

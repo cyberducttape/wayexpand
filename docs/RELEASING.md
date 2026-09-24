@@ -87,7 +87,7 @@ those pins with moving version tags during release-workflow maintenance.
 |--------|---------|-------|-------|
 | AUR | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | Build system adds `cargo vendor vendor/` automatically |
 | Copr (Fedora) | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | RPM spec includes `cargo vendor vendor/` in %build |
-| Launchpad PPA | `wayexpand-<version>-vendored.tar.gz` | `dh build --buildsystem=cargo` | Debian rules handles `cargo vendor vendor/` |
+| Launchpad PPA | `wayexpand-<version>-vendored.tar.gz` | `dh build --buildsystem=cargo` | Debian rules expect the vendored archive's `.cargo/config.toml` |
 | Source distribution | `wayexpand-<version>.tar.gz` | Any | Cleaner, more professional appearance (70 MB vs 600 MB) |
 | Offline build | `wayexpand-<version>-vendored.tar.gz` | `CARGO_NET_OFFLINE=true` | All dependencies included, no network required |
 

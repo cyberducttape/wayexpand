@@ -213,11 +213,14 @@ implement `zwp_input_method_manager_v2` or
 **no way to detect password fields or sensitive inputs**, since field semantics
 are not available at the kernel level.
 
-**Requires:** Membership in the `input` group, which grants raw keyboard access
-to **all keystrokes** system-wide (not just WayExpand's). See SECURITY.md for
-the full security model and explicit opt-in procedure. This is the current
-legacy/simple permission model; active-seat ACLs and a device broker are future
-investigation work documented in [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md).
+**Requires:** Explicit raw input-event access. WayExpand's shipped udev
+templates target udev's keyboard-class event nodes (`ID_INPUT_KEYBOARD`), but
+the legacy `input` group model may still be broader on a given distribution
+because system rules can grant that group access to additional input event
+devices. See SECURITY.md for the full security model and explicit opt-in
+procedure. This is the current legacy/simple permission model; active-seat ACLs
+and a device broker are future investigation work documented in
+[EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md).
 
 ### Known Limitations
 

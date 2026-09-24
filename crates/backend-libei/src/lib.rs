@@ -712,13 +712,11 @@ impl LibeiInjector {
         let serial = self.connection.serial();
         self.device.device().start_emulating(serial, self.sequence);
         self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-        self.keyboard
-            .key(keycode, ei::keyboard::KeyState::Press);
+        self.keyboard.key(keycode, ei::keyboard::KeyState::Press);
         self.device
             .device()
             .frame(serial, self.started_at.elapsed().as_micros() as u64);
-        self.keyboard
-            .key(keycode, ei::keyboard::KeyState::Released);
+        self.keyboard.key(keycode, ei::keyboard::KeyState::Released);
         self.device
             .device()
             .frame(serial, self.started_at.elapsed().as_micros() as u64);

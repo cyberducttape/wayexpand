@@ -23,17 +23,19 @@ source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
 sha256sums=('db56609c2ba49d0fc9669e52a4f79dda6b59cb9fdd6b724987cf475487214f60')
 conflicts=('wayexpand-git')
 
+prepare() {
+    cd "${pkgname}-${pkgver}"
+    cargo fetch --locked
+}
+
 build() {
     cd "${pkgname}-${pkgver}"
-    # Generate vendored dependencies for offline builds
-    mkdir -p .cargo
-    cargo vendor vendor/ > .cargo/config.toml
-    cargo build --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+    cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 }
 
 check() {
     cd "${pkgname}-${pkgver}"
-    cargo test --release --locked --workspace
+    cargo test --release --frozen --workspace
 }
 
 package() {

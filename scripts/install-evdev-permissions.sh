@@ -11,12 +11,12 @@
 #   2. For --access=input-group only, adds the invoking non-root user to the
 #      `input` group.
 #
-# This is the current legacy/simple access model. `input` group membership
-# lets a process read every keystroke typed on this system, in any session --
-# including other users' terminals and password fields -- not only keystrokes
-# WayExpand's matcher sees. It is not the long-term preferred architecture;
-# see docs/EVDEV_ACCESS_DESIGN.md for the active-seat ACL and device-broker
-# investigation. Read SECURITY.md before running this.
+# This is the current legacy/simple access model. The WayExpand rule is scoped
+# to udev keyboard-class event nodes, but `input` group membership itself may
+# be broader on a given distribution and can grant raw access to input event
+# devices beyond WayExpand's matcher. It is not the long-term preferred
+# architecture; see docs/EVDEV_ACCESS_DESIGN.md for the active-seat ACL and
+# device-broker investigation. Read SECURITY.md before running this.
 #
 # Usage:
 #   sudo ./scripts/install-evdev-permissions.sh [--access=input-group|active-seat]
@@ -187,8 +187,8 @@ else
     fi
 fi
 if [ "$access_mode" = input-group ]; then
-    printf '\n%s\n' "The \`input\` group can read every keystroke typed on this system, in any"
-    printf '%s\n' "session -- not only keystrokes WayExpand matches against. See"
+    printf '\n%s\n' "This installs a keyboard-event udev rule, but the \`input\` group may"
+    printf '%s\n' "also read other raw input event devices on this system. See"
     printf '%s\n' "SECURITY.md and docs/EVDEV_ACCESS_DESIGN.md before continuing."
 else
     printf '\n%s\n' "Active-seat mode relies on systemd-logind uaccess ACLs. Verify the"
