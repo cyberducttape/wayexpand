@@ -404,21 +404,33 @@ fn main() -> Result<()> {
         let poll_interval = input_poll_interval(metrics);
         let completed_commands = config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
-            if input_method_mode {
-                if let Some(source) = input_method.as_mut() {
-                    apply_results(completed_commands, Some(source), &policy, active_backend)?;
-                }
-            } else if let Some(mut backend) = injector.take() {
-                let result = apply_results(
-                    completed_commands,
-                    Some(backend.as_mut()),
-                    &policy,
-                    active_backend,
-                );
-                injector = Some(backend);
-                result?;
+            // Apply evdev safety gating: ensure physical key-up was processed
+            // and no competing input arrived during command execution.
+            // This prevents the race condition where fast commands finish
+            // before the trigger key's physical release event is processed.
+            let completed_commands = if evdev_mode {
+                apply_evdev_gating(completed_commands, &mut evdev)
             } else {
-                apply_results(completed_commands, None, &policy, active_backend)?;
+                completed_commands
+            };
+
+            if !completed_commands.is_empty() {
+                if input_method_mode {
+                    if let Some(source) = input_method.as_mut() {
+                        apply_results(completed_commands, Some(source), &policy, active_backend)?;
+                    }
+                } else if let Some(mut backend) = injector.take() {
+                    let result = apply_results(
+                        completed_commands,
+                        Some(backend.as_mut()),
+                        &policy,
+                        active_backend,
+                    );
+                    injector = Some(backend);
+                    result?;
+                } else {
+                    apply_results(completed_commands, None, &policy, active_backend)?;
+                }
             }
         }
         set_daemon_status_with_metrics(
@@ -1427,6 +1439,59 @@ fn apply_pending_results(
         }
     }
     Ok(())
+}
+
+/// Apply evdev safety gating to expansion results before injection.
+/// Ensures physical key-up event is processed and no competing input arrived.
+/// Only applies when evdev source is available and in use.
+fn apply_evdev_gating(
+    mut results: Vec<ExpansionResult>,
+    evdev: &mut Option<EvdevSource>,
+) -> Vec<ExpansionResult> {
+    if let Some(source) = evdev.as_mut() {
+        // Wait for physical key release before injecting synthetic input.
+        // Injecting while trigger key is held can make synthetic input appear
+        // as auto-repeat or cancel the physical release.
+        if let Err(error) = source.wait_for_key_release(KEY_RELEASE_TIMEOUT) {
+            warn!(%error, "waiting for key release failed; injecting anyway");
+        }
+
+        // Check if any input arrived during key release wait.
+        let input_quiet = match source.wait_for_input_quiet(EVDEV_QUIET_TIMEOUT) {
+            Ok(quiet) => quiet,
+            Err(error) => {
+                warn!(%error, "evdev quiet-period check failed; abandoning expansion");
+                return Vec::new(); // Fail closed: don't inject if we can't verify safety
+            }
+        };
+
+        // If other input arrived, handle delimiter preservation or drop expansion
+        if !input_quiet {
+            let follow_up = source.take_pending_events();
+            if follow_up.len() == 1 {
+                if let InputEvent::Delimiter(character) = &follow_up[0] {
+                    // Single delimiter can be preserved: extend erase/reinsert to include it
+                    for result in &mut results {
+                        result.matched_text.push(*character);
+                        result.insert.push(*character);
+                    }
+                } else {
+                    // Other input arrived: don't inject (avoid cursor misplacement)
+                    warn!(
+                        "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                    );
+                    return Vec::new();
+                }
+            } else if follow_up.len() > 1 {
+                // Multiple inputs arrived: don't inject
+                warn!(
+                    "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                );
+                return Vec::new();
+            }
+        }
+    }
+    results
 }
 
 fn apply_results(
