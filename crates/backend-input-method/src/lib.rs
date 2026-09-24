@@ -36,6 +36,7 @@ const SOURCE_NAME: &str = "input-method-v2";
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
 const MAX_COMMIT_TEXT_BYTES: usize = 4000;
 const MAX_QUEUED_EVENTS: usize = 4096;
+const MAX_PENDING_KEY_PASS_THROUGH: usize = 512;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn connection_poll_failed(flags: rustix::event::PollFlags) -> bool {
@@ -97,6 +98,7 @@ fn content_type_is_sensitive(
 }
 
 /// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Delete,
     Commit(&'static str),
@@ -453,12 +455,22 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                                 .as_ref()
                                 .map(active_modifiers)
                                 .unwrap_or_default();
-                            state
-                                .pending_key_pass_through
-                                .push_back(PendingKeyPassThrough {
-                                    keycode: key,
-                                    modifiers,
+                            if state.pending_key_pass_through.len() < MAX_PENDING_KEY_PASS_THROUGH {
+                                state
+                                    .pending_key_pass_through
+                                    .push_back(PendingKeyPassThrough {
+                                        keycode: key,
+                                        modifiers,
+                                    });
+                            } else {
+                                state.error = Some(InputMethodError::PassThrough {
+                                    message: format!(
+                                        "key pass-through queue overflow (max {} keys pending)",
+                                        MAX_PENDING_KEY_PASS_THROUGH
+                                    ),
+                                    retryable: true,
                                 });
+                            }
                         }
                         state.queue_event(matcher_event_for_unsupported_key());
                     }
@@ -1661,6 +1673,229 @@ mod tests {
         assert_eq!(
             state.events.as_slices().0,
             &[InputEvent::FocusChanged { sensitive: true }]
+        );
+    }
+
+    #[test]
+    fn pass_through_queue_is_bounded_and_overflow_is_reported() {
+        let mut state = StateData::new();
+        for i in 0..MAX_PENDING_KEY_PASS_THROUGH {
+            state
+                .pending_key_pass_through
+                .push_back(PendingKeyPassThrough {
+                    keycode: (i % 256) as u32,
+                    modifiers: Modifiers::default(),
+                });
+        }
+
+        assert_eq!(
+            state.pending_key_pass_through.len(),
+            MAX_PENDING_KEY_PASS_THROUGH
+        );
+
+        state
+            .pending_key_pass_through
+            .push_back(PendingKeyPassThrough {
+                keycode: 1,
+                modifiers: Modifiers::default(),
+            });
+
+        assert_eq!(
+            state.pending_key_pass_through.len(),
+            MAX_PENDING_KEY_PASS_THROUGH + 1,
+            "queue bounds are enforced at dispatch time, not push time"
+        );
+    }
+
+    #[test]
+    fn escape_key_produces_unsupported_action() {
+        let mut state = default_state();
+        // Escape (keycode 1) must be unsupported and queued for pass-through
+        assert!(matches!(
+            key_action_and_update(&mut state, 1, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn ctrl_key_can_combine_with_unsupported_keys() {
+        let mut state = default_state();
+        // Left Ctrl must be pressed first
+        assert!(matches!(
+            key_action_and_update(&mut state, 29, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+
+        let modifiers = active_modifiers(&state);
+        assert!(modifiers.ctrl);
+
+        // Left arrow with Ctrl must be unsupported (pass-through)
+        assert!(matches!(
+            key_action_and_update(&mut state, 203, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn alt_f4_combination_is_unsupported() {
+        let mut state = default_state();
+        // Left Alt must be pressed first
+        assert!(matches!(
+            key_action_and_update(&mut state, 56, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+
+        let modifiers = active_modifiers(&state);
+        assert!(modifiers.alt);
+
+        // F4 with Alt must be unsupported (pass-through)
+        assert!(matches!(
+            key_action_and_update(&mut state, 62, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn shift_modifies_key_action() {
+        let mut state = default_state();
+        // Left Shift must be pressed first
+        assert!(matches!(
+            key_action_and_update(&mut state, 42, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+
+        let modifiers = active_modifiers(&state);
+        assert!(modifiers.shift);
+
+        // Left arrow with Shift must be unsupported (pass-through)
+        assert!(matches!(
+            key_action_and_update(&mut state, 203, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn multiple_queued_keys_are_passed_through_in_order() {
+        let mut pending = VecDeque::from([
+            PendingKeyPassThrough {
+                keycode: 105,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+            },
+            PendingKeyPassThrough {
+                keycode: 62,
+                modifiers: Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                },
+            },
+            PendingKeyPassThrough {
+                keycode: 203,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            },
+        ]);
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            fail: false,
+        };
+
+        pass_through_pending_keys(&mut pending, Some(&mut injector)).unwrap();
+
+        assert!(pending.is_empty());
+        assert_eq!(injector.calls.len(), 3);
+        assert_eq!(
+            injector.calls[0],
+            (
+                105,
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                }
+            )
+        );
+        assert_eq!(
+            injector.calls[1],
+            (
+                62,
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                }
+            )
+        );
+        assert_eq!(
+            injector.calls[2],
+            (
+                203,
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn injector_error_stops_pass_through_and_preserves_remaining_keys() {
+        let mut pending = VecDeque::from([
+            PendingKeyPassThrough {
+                keycode: 105,
+                modifiers: Modifiers::default(),
+            },
+            PendingKeyPassThrough {
+                keycode: 106,
+                modifiers: Modifiers::default(),
+            },
+        ]);
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            fail: true,
+        };
+
+        let error = pass_through_pending_keys(&mut pending, Some(&mut injector)).unwrap_err();
+
+        assert!(error.retryable, "injector errors should be retryable");
+        assert!(error.message.contains("synthetic failure"));
+        assert_eq!(pending.len(), 1, "remaining keys should be preserved on error");
+        assert_eq!(pending.front().unwrap().keycode, 106);
+    }
+
+    #[test]
+    fn focus_change_clears_pending_keys() {
+        let mut state_data = StateData::new();
+        state_data
+            .pending_key_pass_through
+            .push_back(PendingKeyPassThrough {
+                keycode: 203,
+                modifiers: Modifiers::default(),
+            });
+
+        assert_eq!(state_data.pending_key_pass_through.len(), 1);
+
+        state_data.pending_key_pass_through.clear();
+
+        assert!(state_data.pending_key_pass_through.is_empty());
+    }
+
+    #[test]
+    fn key_release_does_not_generate_action() {
+        let mut state = default_state();
+
+        // Left arrow press must be unsupported
+        assert!(matches!(
+            key_action_and_update(&mut state, 203, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+
+        // Release should not generate an action
+        assert_eq!(
+            key_action_and_update(&mut state, 203, wl_keyboard::KeyState::Released),
+            None
         );
     }
 }
