@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     let mut config = if use_fleet {
         ReloadableConfig::load_with_fleet_and_policy(&path, policy.clone())
     } else {
-        ReloadableConfig::load(&path)
+        ReloadableConfig::load_with_policy(&path, policy.clone())
     }
     .map_err(|_| {
         anyhow::anyhow!(
