@@ -4,8 +4,10 @@
 //! wlroots virtual-keyboard injector. It receives key events only while the
 //! compositor has activated the input method and grants its keyboard grab.
 //! Printable text, Backspace, Return, and Tab are forwarded through the
-//! input-method commit contract; unsupported non-text keys are discarded
-//! fail-closed because this source does not yet provide general pass-through.
+//! input-method commit contract. Unsupported non-text keys and shortcut-like
+//! modified keys require a separate key-event injector for pass-through; if
+//! that injector is missing or fails, this source reports an error rather than
+//! silently discarding keys.
 
 use std::{
     collections::VecDeque,
@@ -102,6 +104,12 @@ pub enum KeyAction {
     Unsupported,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingKeyPassThrough {
+    keycode: u32,
+    modifiers: Modifiers,
+}
+
 #[derive(Debug, Clone)]
 struct SurroundingText {
     text: String,
@@ -127,6 +135,8 @@ pub enum InputMethodError {
     Transport(String),
     #[error("Wayland startup timed out: {0}")]
     Timeout(String),
+    #[error("input-method key pass-through failed: {message}")]
+    PassThrough { message: String, retryable: bool },
 }
 
 impl InputMethodError {
@@ -138,6 +148,10 @@ impl InputMethodError {
                 | Self::Unavailable
                 | Self::Transport(_)
                 | Self::Timeout(_)
+                | Self::PassThrough {
+                    retryable: true,
+                    ..
+                }
         )
     }
 }
@@ -162,9 +176,9 @@ struct StateData {
     commit_serial: u32,
     initial_roundtrip_done: bool,
     error: Option<InputMethodError>,
-    /// Keycodes (Linux evdev numbering) from unsupported keys that need
-    /// to be passed through to a separate injector if available.
-    pending_key_pass_through: VecDeque<u32>,
+    /// Key events (Linux evdev numbering plus effective modifiers) from
+    /// unsupported keys that must be passed through to a separate injector.
+    pending_key_pass_through: VecDeque<PendingKeyPassThrough>,
 }
 
 impl StateData {
@@ -430,11 +444,18 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     }
                     Some(KeyAction::Ignore) => {}
                     Some(KeyAction::Unsupported) => {
-                        // The keyboard grab is exclusive. If a separate pass-through
-                        // injector is available (e.g., libei), use it to re-inject the key.
-                        // Otherwise, clear any pending trigger to fail closed.
                         if key_state == wl_keyboard::KeyState::Pressed {
-                            state.pending_key_pass_through.push_back(key);
+                            let modifiers = state
+                                .keyboard_state
+                                .as_ref()
+                                .map(active_modifiers)
+                                .unwrap_or_default();
+                            state
+                                .pending_key_pass_through
+                                .push_back(PendingKeyPassThrough {
+                                    keycode: key,
+                                    modifiers,
+                                });
                         }
                         state.queue_event(matcher_event_for_unsupported_key());
                     }
@@ -468,6 +489,13 @@ pub fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
         "TAB" => "TAB".to_string(),
         name => name.to_string(),
     };
+    Some(KeyChord {
+        modifiers: active_modifiers(keyboard_state),
+        key,
+    })
+}
+
+fn active_modifiers(keyboard_state: &State) -> Modifiers {
     let effective = StateComponent::MODS_EFFECTIVE;
     let active = |names: &[&str]| {
         names.iter().any(|name| {
@@ -476,15 +504,12 @@ pub fn key_chord(keyboard_state: &State, key: u32) -> Option<KeyChord> {
                 .unwrap_or(false)
         })
     };
-    Some(KeyChord {
-        modifiers: Modifiers {
-            ctrl: active(&["Control", "Ctrl"]),
-            alt: active(&["Mod1", "Alt"]),
-            shift: active(&["Shift"]),
-            super_key: active(&["Mod4", "Super"]),
-        },
-        key,
-    })
+    Modifiers {
+        ctrl: active(&["Control", "Ctrl"]),
+        alt: active(&["Mod1", "Alt"]),
+        shift: active(&["Shift"]),
+        super_key: active(&["Mod4", "Super"]),
+    }
 }
 
 /// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
@@ -538,11 +563,16 @@ pub fn key_action_and_update(
 /// transition.
 pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
     let keycode = key.checked_add(8)?;
-    match keyboard_state
+    let raw_keysym = keyboard_state
         .key_get_one_sym(keycode)
-        .map(|keysym| keysym.raw())
-    {
+        .map(|keysym| keysym.raw());
+    let modifiers = active_modifiers(keyboard_state);
+    match raw_keysym {
         None => Some(KeyAction::Unsupported),
+        Some(raw_keysym) if is_modifier_keysym(raw_keysym) => Some(KeyAction::Ignore),
+        Some(_) if modifiers.ctrl || modifiers.alt || modifiers.super_key => {
+            Some(KeyAction::Unsupported)
+        }
         Some(raw_keysym) if matches!(classify_keysym(raw_keysym), Some(InputEvent::Backspace)) => {
             Some(KeyAction::Delete)
         }
@@ -556,7 +586,6 @@ pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
             }))
         }
         Some(raw_keysym) if raw_keysym == xkeysym::key::Escape => Some(KeyAction::Unsupported),
-        Some(raw_keysym) if is_modifier_keysym(raw_keysym) => Some(KeyAction::Ignore),
         Some(_) => keyboard_state
             .key_get_utf8(keycode)
             .filter(|text| !text.is_empty())
@@ -630,6 +659,35 @@ fn matcher_event_for_unsupported_key() -> InputEvent {
     // The keyboard grab is exclusive, so the key cannot be passed through
     // safely. A boundary prevents a partial trigger surviving the lost event.
     InputEvent::Reset
+}
+
+fn pass_through_pending_keys(
+    pending_keys: &mut VecDeque<PendingKeyPassThrough>,
+    injector: Option<&mut dyn TextInjector>,
+) -> Result<(), InputSourceError> {
+    let Some(injector) = injector else {
+        if let Some(pending) = pending_keys.front() {
+            return Err(source_error(InputMethodError::PassThrough {
+                message: format!(
+                    "unsupported key {} was captured but no key pass-through injector is attached",
+                    pending.keycode
+                ),
+                retryable: true,
+            }));
+        }
+        return Ok(());
+    };
+    while let Some(pending) = pending_keys.pop_front() {
+        injector
+            .inject_key_with_modifiers(pending.keycode, pending.modifiers)
+            .map_err(|error| {
+                source_error(InputMethodError::PassThrough {
+                    message: error.to_string(),
+                    retryable: error.retryable,
+                })
+            })?;
+    }
+    Ok(())
 }
 
 fn deactivation_event() -> InputEvent {
@@ -753,14 +811,12 @@ impl InputMethodSource {
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
-            // Before returning a Reset event, attempt to pass through any
-            // pending unsupported keys via the key-pass-through injector.
             if matches!(event, InputEvent::Reset) {
-                while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
-                    if let Some(injector) = &mut self.key_pass_through {
-                        let _ = injector.inject_key(keycode);
-                    }
-                }
+                let injector = self
+                    .key_pass_through
+                    .as_mut()
+                    .map(|injector| injector.as_mut() as &mut dyn TextInjector);
+                pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
             }
             return Ok(Some(event));
         }
@@ -797,14 +853,12 @@ impl InputMethodSource {
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
-            // Before returning a Reset event, attempt to pass through any
-            // pending unsupported keys via the key-pass-through injector.
             if matches!(event, InputEvent::Reset) {
-                while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
-                    if let Some(injector) = &mut self.key_pass_through {
-                        let _ = injector.inject_key(keycode);
-                    }
-                }
+                let injector = self
+                    .key_pass_through
+                    .as_mut()
+                    .map(|injector| injector.as_mut() as &mut dyn TextInjector);
+                pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
             }
             Ok(Some(event))
         } else {
@@ -1095,14 +1149,12 @@ impl InputSource for InputMethodSource {
                 return Err(source_error(error));
             }
             if let Some(event) = self.state.events.pop_front() {
-                // Before returning a Reset event, attempt to pass through any
-                // pending unsupported keys via the key-pass-through injector.
                 if matches!(event, InputEvent::Reset) {
-                    while let Some(keycode) = self.state.pending_key_pass_through.pop_front() {
-                        if let Some(injector) = &mut self.key_pass_through {
-                            let _ = injector.inject_key(keycode);
-                        }
-                    }
+                    let injector = self
+                        .key_pass_through
+                        .as_mut()
+                        .map(|injector| injector.as_mut() as &mut dyn TextInjector);
+                    pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
                 }
                 return Ok(event);
             }
@@ -1116,6 +1168,54 @@ impl InputSource for InputMethodSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xkbcommon_rs::xkb_keymap::RuleNames;
+
+    struct RecordingInjector {
+        calls: Vec<(u32, Modifiers)>,
+        fail: bool,
+    }
+
+    fn default_state() -> State {
+        let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
+        State::new(keymap)
+    }
+
+    fn keymap_state(layout: &str, variant: &str) -> Option<State> {
+        let names = RuleNames::new("", "", layout, variant, "");
+        Keymap::new_from_names(Context::new(0).unwrap(), Some(names), 0)
+            .ok()
+            .map(State::new)
+    }
+
+    impl TextInjector for RecordingInjector {
+        fn name(&self) -> &'static str {
+            "recording"
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn inject_key_with_modifiers(
+            &mut self,
+            keycode: u32,
+            modifiers: Modifiers,
+        ) -> Result<(), InjectorError> {
+            if self.fail {
+                return Err(InjectorError {
+                    backend: self.name(),
+                    message: "synthetic failure".into(),
+                    retryable: true,
+                });
+            }
+            self.calls.push((keycode, modifiers));
+            Ok(())
+        }
+    }
 
     #[test]
     fn special_keysyms_become_engine_events() {
@@ -1140,8 +1240,7 @@ mod tests {
 
     #[test]
     fn xkb_state_transition_applies_modifiers_before_next_key() {
-        let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
-        let mut state = State::new(keymap);
+        let mut state = default_state();
 
         assert!(matches!(
             key_action_and_update(&mut state, 42, wl_keyboard::KeyState::Pressed),
@@ -1156,9 +1255,193 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_shortcut_is_passed_through_instead_of_committed_as_text() {
+        let mut state = default_state();
+
+        assert!(matches!(
+            key_action_and_update(&mut state, 29, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+        assert_eq!(
+            active_modifiers(&state),
+            Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            }
+        );
+        assert!(matches!(
+            key_action_and_update(&mut state, 46, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn common_control_shortcuts_are_passed_through_before_utf8_conversion() {
+        for (name, key) in [("Ctrl+C", 46), ("Ctrl+V", 47), ("Ctrl+Z", 44)] {
+            let mut state = default_state();
+            assert!(matches!(
+                key_action_and_update(&mut state, 29, wl_keyboard::KeyState::Pressed),
+                Some(KeyAction::Ignore)
+            ));
+            assert!(
+                matches!(
+                    key_action_and_update(&mut state, key, wl_keyboard::KeyState::Pressed),
+                    Some(KeyAction::Unsupported)
+                ),
+                "{name} must pass through instead of committing control text"
+            );
+        }
+    }
+
+    #[test]
+    fn ctrl_shift_shortcuts_are_passed_through_with_modifiers_preserved() {
+        let mut state = default_state();
+        assert!(matches!(
+            key_action_and_update(&mut state, 29, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+        assert!(matches!(
+            key_action_and_update(&mut state, 42, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+        assert_eq!(
+            active_modifiers(&state),
+            Modifiers {
+                ctrl: true,
+                shift: true,
+                ..Modifiers::default()
+            }
+        );
+        assert!(matches!(
+            key_action_and_update(&mut state, 20, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn alt_and_super_shortcuts_are_passed_through_before_utf8_conversion() {
+        for (name, modifier, key) in [("Alt+F4", 56, 62), ("Super+L", 125, 38)] {
+            let mut state = default_state();
+            assert!(matches!(
+                key_action_and_update(&mut state, modifier, wl_keyboard::KeyState::Pressed),
+                Some(KeyAction::Ignore)
+            ));
+            assert!(
+                matches!(
+                    key_action_and_update(&mut state, key, wl_keyboard::KeyState::Pressed),
+                    Some(KeyAction::Unsupported)
+                ),
+                "{name} must pass through instead of becoming text"
+            );
+        }
+    }
+
+    #[test]
+    fn caps_lock_and_shift_remain_text_producing_modifiers() {
+        let mut shifted = default_state();
+        assert!(matches!(
+            key_action_and_update(&mut shifted, 42, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+        assert!(matches!(
+            key_action_and_update(&mut shifted, 30, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Text(text)) if text == "A"
+        ));
+
+        let mut caps = default_state();
+        assert!(matches!(
+            key_action_and_update(&mut caps, 58, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Ignore)
+        ));
+        assert!(matches!(
+            key_action_and_update(&mut caps, 30, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Text(text)) if text == "A"
+        ));
+    }
+
+    #[test]
+    fn altgr_text_is_not_treated_as_shortcut_alt_when_layout_supports_it() {
+        let Some(mut state) = keymap_state("de", "") else {
+            return;
+        };
+        let _ = key_action_and_update(&mut state, 100, wl_keyboard::KeyState::Pressed);
+        let action = key_action_and_update(&mut state, 16, wl_keyboard::KeyState::Pressed);
+        if let Some(KeyAction::Text(text)) = action {
+            // On systems with complete xkeyboard-config, AltGr+Q produces @
+            assert_eq!(text, "@");
+        } else {
+            // Some minimal CI images lack complete xkeyboard-config data or
+            // map right Alt differently. The required invariant is that AltGr
+            // must not be classified as shortcut Alt by `active_modifiers`.
+            assert!(!active_modifiers(&state).alt);
+        }
+    }
+
+    #[test]
+    fn pending_pass_through_preserves_modifiers() {
+        let mut pending = VecDeque::from([PendingKeyPassThrough {
+            keycode: 105,
+            modifiers: Modifiers {
+                alt: true,
+                shift: true,
+                ..Modifiers::default()
+            },
+        }]);
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            fail: false,
+        };
+
+        pass_through_pending_keys(&mut pending, Some(&mut injector)).unwrap();
+
+        assert!(pending.is_empty());
+        assert_eq!(
+            injector.calls,
+            vec![(
+                105,
+                Modifiers {
+                    alt: true,
+                    shift: true,
+                    ..Modifiers::default()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn missing_pass_through_injector_is_reported_not_silent() {
+        let mut pending = VecDeque::from([PendingKeyPassThrough {
+            keycode: 1,
+            modifiers: Modifiers::default(),
+        }]);
+
+        let error = pass_through_pending_keys(&mut pending, None).unwrap_err();
+
+        assert!(error.retryable);
+        assert!(error.message.contains("no key pass-through injector"));
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn pass_through_injector_failure_is_reported_not_silent() {
+        let mut pending = VecDeque::from([PendingKeyPassThrough {
+            keycode: 1,
+            modifiers: Modifiers::default(),
+        }]);
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            fail: true,
+        };
+
+        let error = pass_through_pending_keys(&mut pending, Some(&mut injector)).unwrap_err();
+
+        assert!(error.retryable);
+        assert!(error.message.contains("synthetic failure"));
+    }
+
+    #[test]
     fn overflowing_protocol_keycode_fails_closed() {
-        let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
-        let mut state = State::new(keymap);
+        let mut state = default_state();
         assert!(matches!(
             key_action_and_update(&mut state, u32::MAX, wl_keyboard::KeyState::Pressed),
             Some(KeyAction::Unsupported)
