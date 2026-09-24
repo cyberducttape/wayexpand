@@ -18,6 +18,7 @@ makedepends=(
 )
 optdepends=(
     'systemd: for user service support'
+    'ibus: for native GNOME IBus input method integration'
 )
 source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
 sha256sums=('db56609c2ba49d0fc9669e52a4f79dda6b59cb9fdd6b724987cf475487214f60')
