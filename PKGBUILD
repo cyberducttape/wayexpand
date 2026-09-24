@@ -1,6 +1,6 @@
 # Maintainer: Stephan Loesevitz <stephan.loesevitz at gmail dot com>
 pkgname=wayexpand
-pkgver=1.1.2
+pkgver=1.2.0
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64')

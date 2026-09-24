@@ -1,5 +1,5 @@
 Name:           wayexpand
-Version:        1.1.2
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        A privacy-first, Wayland-native text expander for Linux
 License:        MIT
