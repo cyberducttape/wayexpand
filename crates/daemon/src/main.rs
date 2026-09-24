@@ -1096,7 +1096,10 @@ fn connect_input_method_session(
     let mut source = InputMethodSource::connect()?;
 
     if !policy.backend_allowed("libei") {
-        warn!("organization policy prohibits libei backend; unsupported keys will not pass through");
+        warn!(
+            "organization policy prohibits libei backend; \
+            unsupported keys will not pass through"
+        );
         return Ok(source);
     }
 
