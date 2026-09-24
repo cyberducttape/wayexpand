@@ -24,7 +24,7 @@ pub use config::{
 };
 pub use engine::{
     run_command, CommandError, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    HotkeyError, HotkeyResult, InputEvent, WindowContext,
+    HotkeyError, HotkeyResult, InputEvent, PendingExpansionResult, WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
@@ -33,8 +33,9 @@ pub use migration::{import_espanso, EspansoImport, MigrationError};
 pub use paths::default_config_path;
 pub use policy::{
     load_organization_policy, load_organization_policy_from_paths, parse_organization_policy,
-    policy_backend_name, validate_organization_policy_directory, validate_organization_policy_file,
-    MAX_ORGANIZATION_POLICY_BYTES, ORGANIZATION_POLICY_DIR, ORGANIZATION_POLICY_PATH,
+    policy_backend_name, pre_flight_check, validate_organization_policy_directory,
+    validate_organization_policy_file, MAX_ORGANIZATION_POLICY_BYTES, ORGANIZATION_POLICY_DIR,
+    ORGANIZATION_POLICY_PATH,
 };
 pub use store::{ConfigStore, ConfigStoreStatus};
 pub use template::{render_template, render_template_with_cursor, TemplateContext, TemplateError};

@@ -251,30 +251,25 @@ impl IbusEngineAdapter {
         } else {
             InputEvent::Text(character.to_string())
         };
-        // WARNING: Policy enforcement happens AFTER engine.process(), which means
-        // synchronous commands may have already executed and produced side effects
-        // before this policy check. This is a known architectural limitation:
-        // - Commands disabled at engine setup time are checked before execution
-        // - Runtime policy violations (backend, output size) are checked after
-        // - Disabling an expansion via policy does not undo already-executed commands
-        //
-        // Safe-mode violations for determinable constraints (disabled commands,
-        // require_absolute_commands) are enforced pre-execution by the engine.
-        // Runtime violations discovered here should be rare in normal operation.
-        let results = self.engine.process(event);
+        // v1.3+ deferred execution: policy check BEFORE command execution
+        // This prevents side effects from occurring before approval.
+        let pending = self.engine.process_deferred(event);
         let mut actions = Vec::new();
         let mut policy_blocked = false;
-        for result in results {
+        for pending_result in pending {
+            let has_command = pending_result.command.is_some();
+
+            // Check policy BEFORE executing commands
             if let Some(violation) = self.policy.expansion_policy_violation(
-                result.insert.len(),
-                result.command_backed,
+                pending_result.template_text.len(),
+                has_command,
                 IBUS_BACKEND_NAME,
             ) {
                 if self.policy.safe_mode {
                     error!(
                         audit_prefix = %self.policy.audit_prefix,
                         violation = %violation,
-                        "IBus expansion blocked by organization policy (post-execution)"
+                        "IBus expansion blocked by organization policy (pre-execution)"
                     );
                     policy_blocked = true;
                     continue;
@@ -285,6 +280,16 @@ impl IbusEngineAdapter {
                     "IBus expansion violates organization policy; audit mode permits it"
                 );
             }
+
+            // Policy approved: execute command (if any) and get final result
+            let result = match pending_result.execute_with_policy() {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("IBus command execution failed: {}", e);
+                    continue;
+                }
+            };
+
             actions.push(IbusAction::DeleteSurroundingText {
                 // IBus invokes the engine before forwarding the key to the
                 // client. The delimiter is not in the client's surrounding
