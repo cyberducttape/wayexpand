@@ -200,10 +200,10 @@ impl FleetConfig {
     ) -> Result<Self, FleetError> {
         let fleet = Self::load_standard()?;
         let mut merged = Self::apply_base_and_policy(fleet, base, policy)?;
-        if policy.is_active() {
-            merged.config.organization = policy.clone();
-            merged.config.validate().map_err(FleetError::Config)?;
-        }
+        merged
+            .config
+            .apply_administrator_policy(policy)
+            .map_err(FleetError::Config)?;
         Ok(merged)
     }
 
@@ -738,5 +738,43 @@ replacement = "other"
         // policy was loaded but never stored in ConfigMerger)
         assert!(config1.organization.is_active());
         assert!(!config2.organization.is_active());
+    }
+
+    #[test]
+    fn administrator_command_path_policy_obeys_safe_and_audit_modes_in_fleet_merge() {
+        let base = || {
+            Config::parse(
+                r#"
+                [[expansion]]
+                trigger = ":cmd"
+                replacement = ""
+                [expansion.command]
+                program = "printf"
+                args = ["ok"]
+                "#,
+            )
+            .unwrap()
+        };
+        let fleet = || ConfigMerger::new().merge().unwrap();
+
+        let audit_policy = OrganizationPolicy {
+            safe_mode: false,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let mut audit = FleetConfig::apply_base_and_policy(fleet(), base(), &audit_policy)
+            .unwrap()
+            .config;
+        assert!(audit.apply_administrator_policy(&audit_policy).is_ok());
+
+        let safe_policy = OrganizationPolicy {
+            safe_mode: true,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let mut safe = FleetConfig::apply_base_and_policy(fleet(), base(), &safe_policy)
+            .unwrap()
+            .config;
+        assert!(safe.apply_administrator_policy(&safe_policy).is_err());
     }
 }

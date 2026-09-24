@@ -59,12 +59,16 @@ impl Factory {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
             .clone();
-        let adapter = Arc::new(Mutex::new(IbusEngineAdapter::with_policy(
-            ExpansionEngine::new(config).map_err(|error| {
-                zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
+        let engine = ExpansionEngine::new(config).map_err(|error| {
+            zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
+        })?;
+        let adapter = Arc::new(Mutex::new(
+            IbusEngineAdapter::with_policy(engine, (*self.policy).clone()).map_err(|error| {
+                zbus::fdo::Error::Failed(format!(
+                    "administrator policy rejects IBus config: {error}"
+                ))
             })?,
-            (*self.policy).clone(),
-        )));
+        ));
         let engine = EngineObject {
             adapter: Arc::clone(&adapter),
             connection: Arc::clone(&self.connection),

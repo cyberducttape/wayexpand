@@ -340,6 +340,10 @@ fn load_for_mode(
         base = merged.config;
     }
 
+    base.apply_administrator_policy(policy).map_err(|error| {
+        anyhow::anyhow!("organization policy invalidates configuration: {error}")
+    })?;
+
     Ok((base, stamp))
 }
 
@@ -433,6 +437,59 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "z");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn non_fleet_load_applies_administrator_absolute_command_policy() {
+        let path = temporary_config();
+        write_config(
+            &path,
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "printf"
+            args = ["ok"]
+            "#,
+        );
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+
+        let error = match ReloadableConfig::load_with_policy(&path, policy) {
+            Ok(_) => panic!("non-fleet load must enforce the administrator policy"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("absolute path"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn non_fleet_audit_policy_allows_relative_command_programs() {
+        let path = temporary_config();
+        write_config(
+            &path,
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "printf"
+            args = ["ok"]
+            "#,
+        );
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+
+        let config = ReloadableConfig::load_with_policy(&path, policy).unwrap();
+        assert!(config.healthy());
         let _ = fs::remove_file(path);
     }
 

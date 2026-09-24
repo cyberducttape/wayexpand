@@ -101,44 +101,13 @@ pub struct PendingExpansionResult {
     pub reinsert_after: Option<char>,
     /// Organization-level output limit from the engine configuration (0 = unlimited).
     max_replacement_size: usize,
+    config_index: usize,
+    generation: u64,
+    propagate_case: bool,
+    cache_ms: u64,
+    cached_output: Option<String>,
     /// Command to execute (if any). Not yet executed; caller decides.
     pub command: Option<CommandConfig>,
-}
-
-impl PendingExpansionResult {
-    /// Execute the command (if present) and return the final expansion result.
-    /// Only call after policy approval.
-    /// `additional_max_size` is a separately loaded administrator policy limit
-    /// (0 = unlimited); both limits are enforced after command completion.
-    pub fn execute_with_policy(
-        self,
-        additional_max_size: usize,
-    ) -> Result<ExpansionResult, CommandError> {
-        let command_backed = self.command.is_some();
-        let insert = if let Some(command) = self.command {
-            run_command(&command)?
-        } else {
-            self.template_text
-        };
-
-        for limit in [self.max_replacement_size, additional_max_size] {
-            if limit > 0 && insert.len() > limit {
-                return Err(CommandError::PolicyOutputTooLarge {
-                    size: insert.len(),
-                    limit,
-                });
-            }
-        }
-
-        Ok(ExpansionResult {
-            trigger: self.trigger,
-            matched_text: self.matched_text,
-            insert,
-            cursor_offset: self.cursor_offset,
-            reinsert_after: self.reinsert_after,
-            command_backed,
-        })
-    }
 }
 
 /// Unified match plan: the result of successful matching before policy evaluation.
@@ -147,7 +116,6 @@ impl PendingExpansionResult {
 #[derive(Debug, Clone)]
 pub struct MatchPlan {
     // Matching result
-    pub trigger: String,
     /// Exact matched text (may differ from trigger if case propagation registered variant)
     pub matched_text: String,
     pub terminating_char: Option<char>,
@@ -169,10 +137,6 @@ pub struct MatchPlan {
 }
 
 impl MatchPlan {
-    pub fn is_static(&self) -> bool {
-        self.command.is_none()
-    }
-
     pub fn is_command_backed(&self) -> bool {
         self.command.is_some()
     }
@@ -436,6 +400,16 @@ impl ExpansionEngine {
         })
     }
 
+    /// Apply administrator-owned policy to an already constructed engine.
+    /// This changes policy metadata only; matching state and runtime state are
+    /// preserved.
+    pub fn apply_administrator_policy(
+        &mut self,
+        policy: &crate::OrganizationPolicy,
+    ) -> Result<(), ConfigError> {
+        self.config.apply_administrator_policy(policy)
+    }
+
     /// Configure whether delimiters reported with a match must be reinserted.
     /// Exclusive sources need this enabled; non-exclusive sources (evdev)
     /// should leave the physical delimiter to the focused application.
@@ -585,13 +559,12 @@ impl ExpansionEngine {
         let completions: Vec<_> = runtime.receiver.try_iter().collect();
         let mut results = Vec::new();
         for completion in completions {
-            let Ok(mut output) = completion.output else {
+            let Ok(output) = completion.output else {
                 continue;
             };
 
             // Reconstruct MatchPlan context from completion for postflight checks
             let plan = MatchPlan {
-                trigger: completion.result.trigger.clone(),
                 matched_text: completion.result.matched_text.clone(),
                 terminating_char: completion.result.reinsert_after,
                 cursor_offset: completion.result.cursor_offset,
@@ -641,6 +614,66 @@ impl ExpansionEngine {
             results.push(result);
         }
         results
+    }
+
+    /// Complete a deferred match after caller-side preflight policy approval.
+    /// Keeping execution and commit here preserves cache, case, and undo state.
+    /// `additional_max_size` is a separately loaded administrator limit;
+    /// zero means that only the limit carried by the engine is applied.
+    pub fn execute_pending_with_policy(
+        &mut self,
+        pending: PendingExpansionResult,
+        additional_max_size: usize,
+    ) -> Result<ExpansionResult, CommandError> {
+        if pending.generation != self.input_generation || self.user_paused || self.sensitive_focus {
+            return Err(CommandError::StaleInput);
+        }
+        if pending.command.is_some() && self.config.organization.disable_commands {
+            return Err(CommandError::PolicyBlocked);
+        }
+
+        let command_backed = pending.command.is_some();
+        let output = if let Some(cached) = pending.cached_output {
+            cached
+        } else if let Some(command) = &pending.command {
+            run_command(command)?
+        } else {
+            pending.template_text
+        };
+
+        for limit in [pending.max_replacement_size, additional_max_size] {
+            if limit > 0 && output.len() > limit {
+                return Err(CommandError::PolicyOutputTooLarge {
+                    size: output.len(),
+                    limit,
+                });
+            }
+        }
+
+        if command_backed && pending.cache_ms > 0 {
+            self.command_cache[pending.config_index] = Some(CommandCacheEntry {
+                expires_at: Instant::now() + Duration::from_millis(pending.cache_ms),
+                value: output.clone(),
+            });
+        }
+
+        let insert = if pending.propagate_case {
+            apply_case_style(&pending.matched_text, &output)
+        } else {
+            output
+        };
+        if pending.cursor_offset.is_none() {
+            self.last_expansion = Some((pending.matched_text.clone(), insert.clone()));
+        }
+
+        Ok(ExpansionResult {
+            trigger: pending.trigger,
+            matched_text: pending.matched_text,
+            insert,
+            cursor_offset: pending.cursor_offset,
+            reinsert_after: pending.reinsert_after,
+            command_backed,
+        })
     }
 
     /// Queue a hotkey action for bounded asynchronous execution. The caller
@@ -976,8 +1009,8 @@ impl ExpansionEngine {
     }
 
     /// Process input and return pending expansion results (v1.3+ deferred execution).
-    /// Commands are NOT executed; caller must check policy and call
-    /// PendingExpansionResult::execute_with_policy() to commit the expansion.
+    /// Commands are NOT executed; caller must check policy and complete results
+    /// with `execute_pending_with_policy()` to preserve engine state.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
         if !matches!(event, InputEvent::Key(_)) {
             self.last_expansion = None;
@@ -1072,6 +1105,9 @@ impl ExpansionEngine {
                         self.clear_buffer();
                     }
                 }
+                for result in &mut results {
+                    result.generation = self.input_generation;
+                }
                 results
             }
             InputEvent::Delimiter(character) => {
@@ -1096,7 +1132,13 @@ impl ExpansionEngine {
                             })
                     });
                 self.clear_buffer();
-                result.into_iter().collect()
+                result
+                    .map(|mut pending| {
+                        pending.generation = self.input_generation;
+                        pending
+                    })
+                    .into_iter()
+                    .collect()
             }
             InputEvent::Reset => {
                 self.input_generation = self.input_generation.wrapping_add(1);
@@ -1173,6 +1215,7 @@ impl ExpansionEngine {
     /// This is the single path for committing any expansion (static or command-backed).
     /// Handles case propagation, caching, undo state, and result metadata.
     fn commit_expansion(&mut self, plan: &MatchPlan, insert: String) -> ExpansionResult {
+        let cache_value = insert.clone();
         let mut final_insert = insert;
 
         // Apply case propagation if configured (applies to all expansion types)
@@ -1186,7 +1229,7 @@ impl ExpansionEngine {
                 if command.cache_ms > 0 {
                     self.command_cache[plan.config_index] = Some(CommandCacheEntry {
                         expires_at: Instant::now() + Duration::from_millis(command.cache_ms),
-                        value: final_insert.clone(),
+                        value: cache_value,
                     });
                 }
             }
@@ -1223,7 +1266,6 @@ impl ExpansionEngine {
         }
 
         let expansion = &self.config.expansion[config_index];
-        let trigger = expansion.trigger.clone();
         let propagate_case = expansion.propagate_case;
 
         // Read the actually-typed trigger text (may be case variant due to case propagation)
@@ -1242,7 +1284,6 @@ impl ExpansionEngine {
         };
 
         Some(MatchPlan {
-            trigger,
             matched_text,
             terminating_char,
             cursor_offset,
@@ -1264,12 +1305,10 @@ impl ExpansionEngine {
         terminating_char: Option<char>,
     ) -> Option<ExpansionResult> {
         // Generate match plan with full context
-        let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
+        let plan = self.take_match_plan(config_index, length, terminating_char)?;
 
         // Apply preflight policy
-        if self.apply_preflight_policy(plan.clone()).is_none() {
-            return None;
-        }
+        self.apply_preflight_policy(plan.clone())?;
 
         let expansion = &self.config.expansion[config_index];
 
@@ -1329,8 +1368,8 @@ impl ExpansionEngine {
     }
 
     /// Deferred execution variant: returns pending results without executing commands.
-    /// v1.3+ architecture: caller must check policy and execute via
-    /// PendingExpansionResult::execute_with_policy().
+    /// v1.3+ architecture: caller must check policy and complete through the
+    /// engine so cache, case propagation, and undo state are committed.
     fn take_match_deferred(
         &mut self,
         config_index: usize,
@@ -1340,19 +1379,12 @@ impl ExpansionEngine {
         // Generate match plan with full context
         let plan = self.take_match_plan(config_index, length, terminating_char)?;
 
-        // Note: preflight_policy NOT applied here - deferred execution is called by process_deferred()
-        // which uses is_capture_enabled() gate. Policy will be checked by caller via
-        // execute_with_policy(). This preserves deferred semantics where policy is external.
+        // Policy is checked by the caller before deferred completion.
 
         // Render template to get cursor_offset (without executing command)
-        let (mut template_text, _cursor_offset) =
+        let (template_text, _cursor_offset) =
             render_template_with_cursor(&plan.replacement_text, &crate::TemplateContext::system())
                 .ok()?;
-
-        // Apply case to template (will be discarded if command exists, but correct for static)
-        if plan.propagate_case {
-            template_text = apply_case_style(&plan.matched_text, &template_text);
-        }
 
         // Consume buffer
         for _ in 0..length {
@@ -1366,6 +1398,17 @@ impl ExpansionEngine {
             cursor_offset: plan.cursor_offset,
             reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
             max_replacement_size: self.config.organization.max_replacement_size,
+            config_index,
+            generation: plan.generation,
+            propagate_case: plan.propagate_case,
+            cache_ms: plan.command.as_ref().map_or(0, |command| command.cache_ms),
+            cached_output: plan.command.as_ref().and_then(|command| {
+                (command.cache_ms > 0)
+                    .then(|| self.command_cache[config_index].as_ref())
+                    .flatten()
+                    .filter(|entry| entry.expires_at > Instant::now())
+                    .map(|entry| entry.value.clone())
+            }),
             command: plan.command.as_ref().map(|c| (**c).clone()),
         })
     }
@@ -1539,6 +1582,10 @@ pub enum CommandError {
     OutputTooLarge,
     /// Output exceeded an organization-configured replacement limit.
     PolicyOutputTooLarge { size: usize, limit: usize },
+    /// Input changed or capture became disabled before a deferred match completed.
+    StaleInput,
+    /// Command execution was disabled by the active organization policy.
+    PolicyBlocked,
     /// Output was not valid UTF-8.
     InvalidUtf8,
     /// The output-reading thread did not report back in time (should not
@@ -1567,6 +1614,8 @@ impl std::fmt::Display for CommandError {
                 f,
                 "produced {size} bytes, exceeding the organization limit of {limit} bytes"
             ),
+            CommandError::StaleInput => write!(f, "input changed before the expansion completed"),
+            CommandError::PolicyBlocked => write!(f, "command execution is disabled by policy"),
             CommandError::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
             CommandError::OutputChannelLost => write!(f, "output could not be read back"),
         }
@@ -4039,8 +4088,8 @@ replacement = "signature""#,
         let mut engine = ExpansionEngine::new(config).unwrap();
         engine.enable_async_commands();
 
-        // This should fail policy check because output (100KB) > max_replacement_size (1KB)
-        // But currently passes because policy only checks template (0 bytes)
+        // The empty template passes preflight, but the completed command output
+        // must still be rejected by postflight validation.
         let results = engine.process(InputEvent::Text(":big".into()));
         assert!(results.is_empty(), "async command should be pending");
 
@@ -4076,6 +4125,7 @@ replacement = "signature""#,
             [[expansion]]
             trigger = ":cmd"
             replacement = ""
+            propagate_case = true
             [expansion.command]
             program = "printf"
             args = ["generated"]
@@ -4097,22 +4147,26 @@ replacement = "signature""#,
             .process_deferred(InputEvent::Text(":SIG".into()))
             .pop()
             .unwrap();
-        let static_deferred = static_pending.execute_with_policy(0).unwrap();
+        let static_deferred = deferred
+            .execute_pending_with_policy(static_pending, 0)
+            .unwrap();
         assert_eq!(static_sync.trigger, static_deferred.trigger);
         assert_eq!(static_sync.matched_text, static_deferred.matched_text);
         assert_eq!(static_sync.insert, static_deferred.insert);
         assert_eq!(static_sync.cursor_offset, static_deferred.cursor_offset);
 
         let command_sync = deferred
-            .process(InputEvent::Text(":cmd".into()))
+            .process(InputEvent::Text(":CMD".into()))
             .pop()
             .unwrap();
+        assert_eq!(command_sync.insert, "GENERATED");
         let mut command_deferred_engine = ExpansionEngine::new(
             Config::parse(
                 r#"
                 [[expansion]]
                 trigger = ":cmd"
                 replacement = ""
+                propagate_case = true
                 [expansion.command]
                 program = "printf"
                 args = ["generated"]
@@ -4124,10 +4178,12 @@ replacement = "signature""#,
         )
         .unwrap();
         let command_pending = command_deferred_engine
-            .process_deferred(InputEvent::Text(":cmd".into()))
+            .process_deferred(InputEvent::Text(":CMD".into()))
             .pop()
             .unwrap();
-        let command_deferred = command_pending.execute_with_policy(0).unwrap();
+        let command_deferred = command_deferred_engine
+            .execute_pending_with_policy(command_pending, 0)
+            .unwrap();
         assert_eq!(command_sync.trigger, command_deferred.trigger);
         assert_eq!(command_sync.matched_text, command_deferred.matched_text);
         assert_eq!(command_sync.insert, command_deferred.insert);
@@ -4167,7 +4223,7 @@ replacement = "signature""#,
             .unwrap();
 
         assert!(matches!(
-            pending.execute_with_policy(256),
+            engine.execute_pending_with_policy(pending, 256),
             Err(CommandError::PolicyOutputTooLarge {
                 size: 257,
                 limit: 256
@@ -4178,6 +4234,147 @@ replacement = "signature""#,
             "the subprocess should complete before rejection"
         );
         let _ = std::fs::remove_file(marker);
+    }
+
+    #[test]
+    fn deferred_command_preserves_case_cache_and_undo_semantics() {
+        let sync_marker =
+            std::env::temp_dir().join(format!("wayexpand-sync-cache-{}", std::process::id()));
+        let deferred_marker =
+            std::env::temp_dir().join(format!("wayexpand-deferred-cache-{}", std::process::id()));
+        let _ = std::fs::remove_file(&sync_marker);
+        let _ = std::fs::remove_file(&deferred_marker);
+        let config_for = |marker: &std::path::Path| {
+            let command = format!("printf x >> '{}'; printf Regards", marker.display());
+            Config::parse(&format!(
+                r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":sig"
+            replacement = ""
+            propagate_case = true
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "{command}"]
+            cache_ms = 5000
+            timeout_ms = 500
+            "#
+            ))
+            .unwrap()
+        };
+
+        let mut synchronous = ExpansionEngine::new(config_for(&sync_marker)).unwrap();
+        let upper_sync = synchronous
+            .process(InputEvent::Text(":SIG".into()))
+            .pop()
+            .unwrap();
+        let lower_sync = synchronous
+            .process(InputEvent::Text(":sig".into()))
+            .pop()
+            .unwrap();
+        let undo_sync = synchronous
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .unwrap();
+
+        let mut deferred = ExpansionEngine::new(config_for(&deferred_marker)).unwrap();
+        let upper_pending = deferred
+            .process_deferred(InputEvent::Text(":SIG".into()))
+            .pop()
+            .unwrap();
+        let upper_deferred = deferred
+            .execute_pending_with_policy(upper_pending, 0)
+            .unwrap();
+        let lower_pending = deferred
+            .process_deferred(InputEvent::Text(":sig".into()))
+            .pop()
+            .unwrap();
+        let lower_deferred = deferred
+            .execute_pending_with_policy(lower_pending, 0)
+            .unwrap();
+        let undo_deferred = deferred
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .unwrap();
+
+        assert_eq!(upper_sync.insert, "REGARDS");
+        assert_eq!(upper_sync.insert, upper_deferred.insert);
+        assert_eq!(lower_sync.insert, "Regards");
+        assert_eq!(lower_sync.insert, lower_deferred.insert);
+        assert_eq!(undo_sync.matched_text, undo_deferred.matched_text);
+        assert_eq!(undo_sync.insert, undo_deferred.insert);
+        assert_eq!(std::fs::read_to_string(&sync_marker).unwrap(), "x");
+        assert_eq!(std::fs::read_to_string(&deferred_marker).unwrap(), "x");
+        let _ = std::fs::remove_file(sync_marker);
+        let _ = std::fs::remove_file(deferred_marker);
+    }
+
+    #[test]
+    fn deferred_command_is_not_run_after_input_generation_changes() {
+        let marker =
+            std::env::temp_dir().join(format!("wayexpand-deferred-stale-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf ran > '{}'"]
+            timeout_ms = 500
+            "#,
+            marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":cmd".into()))
+            .pop()
+            .unwrap();
+        engine.process_deferred(InputEvent::Text("x".into()));
+
+        assert!(matches!(
+            engine.execute_pending_with_policy(pending, 0),
+            Err(CommandError::StaleInput)
+        ));
+        assert!(!marker.exists(), "stale deferred commands must not run");
+    }
+
+    #[test]
+    fn deferred_command_respects_engine_disable_commands_policy() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-deferred-disabled-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf ran > '{}'"]
+            timeout_ms = 500
+
+            [organization]
+            disable_commands = true
+            "#,
+            marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":cmd".into()))
+            .pop()
+            .unwrap();
+
+        assert!(matches!(
+            engine.execute_pending_with_policy(pending, 0),
+            Err(CommandError::PolicyBlocked)
+        ));
+        assert!(!marker.exists(), "policy-disabled commands must not run");
     }
 
     #[test]

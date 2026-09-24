@@ -19,7 +19,7 @@ result; see `deferred_command_output_over_policy_limit_is_rejected_after_complet
 
 **Bug #3 (command_backed Flag Accuracy):** Fixed by setting `command_backed = expansion.command.is_some()` instead of hardcoding to false
 
-**Bug #1 (Output Size Policy):** Fixed by enforcing the engine limit and the separately loaded administrator limit in `execute_with_policy()`.
+**Bug #1 (Output Size Policy):** Fixed by enforcing the engine and administrator limits in `ExpansionEngine::execute_pending_with_policy()` before returning an injectable result.
 
 **See:** [[P2_unified_command_execution_completion.md]](../../../memory/P2_unified_command_execution_completion.md) for implementation details
 
@@ -47,9 +47,13 @@ Execution flow:
   Inject 500 KB ✗ VIOLATES max_replacement_size
 ```
 
-### Root Cause
+### Historical Root Cause
 
-`PendingExpansionResult::execute_with_policy()` calls `run_command()` directly without post-execution size validation.
+The original defect was a context-free pending-result executor that called
+`run_command()` without post-execution size validation. That API is no longer
+used: deferred completion now goes through
+`ExpansionEngine::execute_pending_with_policy()`, which checks the engine and
+administrator output limits before returning an `ExpansionResult`.
 
 ### Design Problem
 
@@ -75,11 +79,17 @@ POST-EXECUTION checks (after run_command()):
 ```rust
 #[test]
 fn output_size_policy_must_be_checked_post_execution() {
-    // Template is empty (0 bytes), command outputs 100KB
-    // max_replacement_size = 1KB
-    // Command may complete, but its output must be rejected before injection.
+    // Engine-level postflight check; production-boundary tests additionally
+    // verify that daemon injection and IBus commit never receive the output.
 }
 ```
+
+The daemon and IBus boundary regressions use an empty replacement, a command
+that completes and emits 257 bytes, and a 256-byte organization limit. They
+assert that the command completed but no output was injected or committed.
+External administrator policy is also applied to non-fleet configs before
+validation; safe mode rejects relative command programs while audit mode
+allows them and reports the violation.
 
 ---
 
@@ -295,7 +305,7 @@ command_backed: true,  // ← Fix: was false
 
 1. **Daemon:** `apply_pending_results()` + `take_match()`
 2. **IBus Backend:** pending result handler + `take_match()`
-3. **Core Engine:** `PendingExpansionResult::execute_with_policy()`
+3. **Core Engine:** `ExpansionEngine::execute_pending_with_policy()`
 
 ### Why This Matters
 

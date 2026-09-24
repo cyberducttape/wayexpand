@@ -132,17 +132,27 @@ pub struct IbusEngineAdapter {
 }
 
 impl IbusEngineAdapter {
-    pub fn new(engine: ExpansionEngine) -> Self {
-        Self::with_policy(engine, OrganizationPolicy::default())
-    }
-
-    pub fn with_policy(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
+    pub fn new(mut engine: ExpansionEngine) -> Self {
+        let policy = OrganizationPolicy::default();
         apply_policy_to_engine(&mut engine, &policy);
         Self {
             engine,
             enabled: true,
             policy,
         }
+    }
+
+    pub fn with_policy(
+        mut engine: ExpansionEngine,
+        policy: OrganizationPolicy,
+    ) -> Result<Self, wayexpand_core::ConfigError> {
+        engine.apply_administrator_policy(&policy)?;
+        apply_policy_to_engine(&mut engine, &policy);
+        Ok(Self {
+            engine,
+            enabled: true,
+            policy,
+        })
     }
 
     pub fn engine(&self) -> &ExpansionEngine {
@@ -155,6 +165,7 @@ impl IbusEngineAdapter {
 
     pub fn replace_config(&mut self, config: Config) -> Result<(), wayexpand_core::ConfigError> {
         let mut engine = ExpansionEngine::new(config)?;
+        engine.apply_administrator_policy(&self.policy)?;
         engine.set_user_paused(self.engine.is_user_paused());
         engine.set_sensitive_focus(self.engine.is_sensitive_focus());
         engine.set_current_window(self.engine.current_window().cloned());
@@ -259,6 +270,25 @@ impl IbusEngineAdapter {
         for pending_result in pending {
             let has_command = pending_result.command.is_some();
 
+            if let Some(command) = &pending_result.command {
+                if let Some(violation) = self.policy.command_path_violation(&command.program) {
+                    if self.policy.safe_mode {
+                        error!(
+                            audit_prefix = %self.policy.audit_prefix,
+                            violation = %violation,
+                            "IBus command blocked by organization path policy"
+                        );
+                        policy_blocked = true;
+                        continue;
+                    }
+                    warn!(
+                        audit_prefix = %self.policy.audit_prefix,
+                        violation = %violation,
+                        "IBus command violates organization path policy; audit mode permits it"
+                    );
+                }
+            }
+
             // Check policy BEFORE executing commands
             if let Some(violation) = self.policy.expansion_policy_violation(
                 pending_result.template_text.len(),
@@ -282,7 +312,9 @@ impl IbusEngineAdapter {
             }
 
             // Policy approved: execute command (if any) and get final result
-            let result = match pending_result.execute_with_policy(self.policy.max_replacement_size)
+            let result = match self
+                .engine
+                .execute_pending_with_policy(pending_result, self.policy.max_replacement_size)
             {
                 Ok(result) => result,
                 Err(e) => {
@@ -410,7 +442,114 @@ replacement = "signature"
 "#,
         )
         .unwrap();
-        IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy)
+        IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap()
+    }
+
+    #[test]
+    fn administrator_absolute_command_policy_rejects_relative_programs() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "printf"
+            args = ["ok"]
+            "#,
+        )
+        .unwrap();
+        let engine = ExpansionEngine::new(config).unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+
+        assert!(matches!(
+            IbusEngineAdapter::with_policy(engine, policy),
+            Err(wayexpand_core::ConfigError::InvalidCommand { .. })
+        ));
+    }
+
+    #[test]
+    fn audit_absolute_command_policy_allows_relative_programs() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "printf"
+            args = ["audit-ok"]
+            "#,
+        )
+        .unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let mut adapter =
+            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+
+        let mut last = IbusKeyResult::default();
+        for character in ":cmd".chars() {
+            last = adapter.process_key_event(character as u32, 0, 0);
+        }
+        assert_eq!(
+            last.actions,
+            vec![
+                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::CommitText("audit-ok".into())
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_command_output_over_organization_limit_is_not_committed() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-ibus-policy-output-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let command = format!(
+            "printf completed > '{}'; yes x | head -c 257",
+            marker.display()
+        );
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":large"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "{command}"]
+            timeout_ms = 1000
+            "#
+        ))
+        .unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            max_replacement_size: 256,
+            ..OrganizationPolicy::default()
+        };
+        let mut adapter =
+            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+
+        let mut actions = Vec::new();
+        for character in ":large".chars() {
+            actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
+        }
+
+        assert!(marker.exists(), "the subprocess should complete");
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, IbusAction::CommitText(text) if text.len() > 1)),
+            "oversized command output must not be committed"
+        );
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]

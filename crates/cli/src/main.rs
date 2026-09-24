@@ -366,17 +366,44 @@ fn run() -> Result<()> {
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
+            let policy = load_policy()?;
             let config = Config::load(&path).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
             let config = if merged {
-                let policy = load_policy()?;
                 FleetConfig::load_standard_with_base_and_policy(config, &policy)
                     .map_err(|error| config_error(format!("fleet configuration invalid: {error}")))?
                     .config
             } else {
+                let mut config = config;
+                config
+                    .apply_administrator_policy(&policy)
+                    .map_err(|error| {
+                        config_error(format!(
+                            "organization policy rejects configuration: {error}"
+                        ))
+                    })?;
                 config
             };
+            if config.organization.require_absolute_commands && !config.organization.safe_mode {
+                let relative_commands = config
+                    .expansion
+                    .iter()
+                    .filter_map(|expansion| expansion.command.as_ref())
+                    .chain(config.hotkey.iter().map(|hotkey| &hotkey.command))
+                    .filter(|command| {
+                        config
+                            .organization
+                            .command_path_violation(&command.program)
+                            .is_some()
+                    })
+                    .count();
+                if relative_commands > 0 {
+                    eprintln!(
+                        "warning: audit policy found {relative_commands} command(s) with relative program paths; they are allowed in audit mode"
+                    );
+                }
+            }
             if requested_json {
                 println!(
                     "{}",

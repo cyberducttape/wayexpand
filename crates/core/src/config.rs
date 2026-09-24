@@ -219,6 +219,13 @@ impl OrganizationPolicy {
         }
     }
 
+    /// Explain a command-path policy violation. Callers enforce the result in
+    /// safe mode and log it while allowing execution in audit mode.
+    pub fn command_path_violation(&self, program: &str) -> Option<String> {
+        (self.require_absolute_commands && !Path::new(program).is_absolute())
+            .then(|| "command program must be an absolute path by organization policy".to_string())
+    }
+
     /// Check if policy allows a pack
     pub fn pack_allowed(&self, pack_name: &str) -> bool {
         if self.allowed_packs.is_empty() {
@@ -817,7 +824,8 @@ impl Config {
                     reason: "command limits are invalid",
                 });
             }
-            if self.organization.require_absolute_commands
+            if self.organization.safe_mode
+                && self.organization.require_absolute_commands
                 && !Path::new(&binding.command.program).is_absolute()
             {
                 return Err(ConfigError::InvalidHotkey {
@@ -938,7 +946,8 @@ impl Config {
                         reason: "program is too long or contains NUL",
                     });
                 }
-                if self.organization.require_absolute_commands
+                if self.organization.safe_mode
+                    && self.organization.require_absolute_commands
                     && !Path::new(&command.program).is_absolute()
                 {
                     return Err(ConfigError::InvalidCommand {
@@ -1071,6 +1080,19 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Apply an active administrator-owned policy and validate the resulting
+    /// configuration. User-embedded policy remains available when no external
+    /// policy is active; an active external policy is authoritative.
+    pub fn apply_administrator_policy(
+        &mut self,
+        policy: &OrganizationPolicy,
+    ) -> Result<(), ConfigError> {
+        if policy.is_active() {
+            self.organization = policy.clone();
+        }
+        self.validate()
     }
 }
 
@@ -1324,6 +1346,7 @@ mod tests {
         let error = Config::parse(
             r#"
             [organization]
+            safe_mode = true
             require_absolute_commands = true
 
             [[expansion]]
@@ -1341,6 +1364,7 @@ mod tests {
         let config = Config::parse(
             r#"
             [organization]
+            safe_mode = true
             require_absolute_commands = true
 
             [[expansion]]
@@ -1361,6 +1385,7 @@ mod tests {
         let error = Config::parse(
             r#"
             [organization]
+            safe_mode = true
             require_absolute_commands = true
 
             [[hotkey]]
@@ -1370,6 +1395,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ConfigError::InvalidHotkey { index: 0, .. }));
+    }
+
+    #[test]
+    fn audit_policy_allows_relative_command_paths() {
+        let config = Config::parse(
+            r#"
+            [organization]
+            safe_mode = false
+            require_absolute_commands = true
+
+            [[expansion]]
+            trigger = ":git"
+            replacement = ""
+            command = { program = "git", args = ["status"] }
+
+            [[hotkey]]
+            chord = "Ctrl+Alt+T"
+            command = { program = "konsole" }
+            "#,
+        )
+        .unwrap();
+        assert!(config.organization.require_absolute_commands);
     }
 
     #[test]
