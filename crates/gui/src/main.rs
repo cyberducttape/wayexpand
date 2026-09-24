@@ -203,12 +203,19 @@ impl GuiApp {
             FleetConfig::load_standard_with_base_and_policy(self.config.clone(), &policy)
                 .map_err(|error| error.to_string())
         }) {
-            Ok(fleet) => format!(
-                "active · {} files · {} expansions · {} hotkeys",
-                fleet.stats.total_files_loaded,
-                fleet.stats.total_expansions,
-                fleet.stats.total_hotkeys
-            ),
+            Ok(fleet) => {
+                let mut status = format!(
+                    "active · {} files · {} expansions · {} hotkeys",
+                    fleet.stats.total_files_loaded,
+                    fleet.stats.total_expansions,
+                    fleet.stats.total_hotkeys
+                );
+                if !fleet.policy_violations.is_empty() {
+                    status.push_str(" · policy: ");
+                    status.push_str(&fleet.policy_violations.join("; "));
+                }
+                status
+            }
             Err(error) => format!("invalid: {error}"),
         };
         self.protocol_probes = diagnostics::probe_protocols();

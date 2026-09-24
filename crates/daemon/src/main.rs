@@ -1117,11 +1117,19 @@ fn connect_input_method_session(
     let mut source = InputMethodSource::connect()?;
 
     if !policy.backend_allowed("libei") {
-        warn!(
-            "organization policy prohibits libei backend; \
-            unsupported keys will not pass through"
+        let violation = format!(
+            "backend 'libei' is not in allowed list: {:?}",
+            policy.allowed_backends
         );
-        return Ok(source);
+        policy::log_violation(policy, &violation);
+        if libei_policy_blocks(policy) {
+            warn!(
+                "organization policy prohibits libei backend; \
+                unsupported keys will not pass through"
+            );
+            return Ok(source);
+        }
+        info!("audit mode permits libei key pass-through with a disallowed backend");
     }
 
     match connect_output_backend("libei", persist_portal_token, portal_token_path) {
@@ -1160,6 +1168,10 @@ fn connect_input_method_session(
     }
 
     Ok(source)
+}
+
+fn libei_policy_blocks(policy: &wayexpand_core::OrganizationPolicy) -> bool {
+    policy.safe_mode && !policy.backend_allowed("libei")
 }
 
 fn connect_input_method_with_retry(
@@ -1607,6 +1619,21 @@ mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
     use wayexpand_core::{Config, InjectorError};
+
+    #[test]
+    fn libei_backend_policy_only_blocks_in_safe_mode() {
+        let audit = wayexpand_core::OrganizationPolicy {
+            safe_mode: false,
+            allowed_backends: vec!["input-method-v2".into()],
+            ..Default::default()
+        };
+        assert!(!libei_policy_blocks(&audit));
+        let safe = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            ..audit
+        };
+        assert!(libei_policy_blocks(&safe));
+    }
 
     /// The status body's field set is a documented Stable contract (see
     /// docs/COMPATIBILITY.md, "wayexpand status --json"). This is the

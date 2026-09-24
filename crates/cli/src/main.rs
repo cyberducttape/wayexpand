@@ -370,10 +370,12 @@ fn run() -> Result<()> {
             let config = Config::load(&path).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
-            let config = if merged {
-                FleetConfig::load_standard_with_base_and_policy(config, &policy)
-                    .map_err(|error| config_error(format!("fleet configuration invalid: {error}")))?
-                    .config
+            let (config, policy_violations) = if merged {
+                let fleet = FleetConfig::load_standard_with_base_and_policy(config, &policy)
+                    .map_err(|error| {
+                        config_error(format!("fleet configuration invalid: {error}"))
+                    })?;
+                (fleet.config, fleet.policy_violations)
             } else {
                 let mut config = config;
                 config
@@ -383,8 +385,11 @@ fn run() -> Result<()> {
                             "organization policy rejects configuration: {error}"
                         ))
                     })?;
-                config
+                (config, Vec::new())
             };
+            for violation in &policy_violations {
+                eprintln!("policy warning: {violation}");
+            }
             if config.organization.require_absolute_commands && !config.organization.safe_mode {
                 let relative_commands = config
                     .expansion
@@ -413,6 +418,7 @@ fn run() -> Result<()> {
                         "expansion_count": config.expansion.len(),
                         "hotkey_count": config.hotkey.len(),
                         "max_buffer_chars": config.settings.max_buffer_chars,
+                        "policy_violations": policy_violations,
                     })
                 );
             } else {
@@ -724,6 +730,9 @@ fn run() -> Result<()> {
                     .map_err(|error| {
                         config_error(format!("fleet configuration invalid: {error}"))
                     })?;
+                for violation in &fleet.policy_violations {
+                    eprintln!("policy warning: {violation}");
+                }
                 if requested_json {
                     println!(
                         "{}",
@@ -733,6 +742,7 @@ fn run() -> Result<()> {
                             "expansion_count": fleet.stats.total_expansions,
                             "hotkey_count": fleet.stats.total_hotkeys,
                             "layers": fleet.stats.layers_applied,
+                            "policy_violations": fleet.policy_violations,
                             "expansions": fleet.config.expansion.iter().map(|expansion| serde_json::json!({
                                 "trigger": expansion.trigger,
                                 "source": fleet.trigger_source(&expansion.trigger),
@@ -748,6 +758,9 @@ fn run() -> Result<()> {
                     println!("Files loaded: {}", fleet.stats.total_files_loaded);
                     println!("Expansions: {}", fleet.stats.total_expansions);
                     println!("Hotkeys: {}", fleet.stats.total_hotkeys);
+                    for violation in &fleet.policy_violations {
+                        println!("Policy violation: {violation}");
+                    }
                     for layer in fleet.stats.layers_applied {
                         println!("Layer: {layer}");
                     }

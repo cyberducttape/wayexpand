@@ -339,6 +339,9 @@ fn load_for_mode(
     if fleet {
         let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
             .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
+        for violation in &merged.policy_violations {
+            super::policy::log_violation(policy, violation);
+        }
         base = merged.config;
     }
 

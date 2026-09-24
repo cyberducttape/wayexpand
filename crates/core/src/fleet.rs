@@ -27,7 +27,7 @@
 use crate::{Config, ConfigError, OrganizationPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -137,6 +137,8 @@ pub struct FleetConfig {
     pub hotkeys_source: HashMap<String, Provenance>,
     /// Merge statistics
     pub stats: MergeStats,
+    /// Administrator policy violations discovered while merging pack sources.
+    pub policy_violations: Vec<String>,
 }
 
 /// Statistics about the merge operation.
@@ -214,9 +216,25 @@ impl FleetConfig {
         let mut config = base;
         config.organization = crate::OrganizationPolicy::default();
 
-        // Policy enforcement: filter pack-sourced expansions only in safe_mode.
-        // In audit mode, allowed_packs violations are logged but packs are retained.
-        // This ensures audit-only policies can discover which packs would be filtered.
+        let disallowed_packs: BTreeSet<_> = fleet
+            .expansions_source
+            .values()
+            .chain(fleet.hotkeys_source.values())
+            .filter(|provenance| provenance.layer.starts_with("pack:"))
+            .map(pack_name)
+            .filter(|name| !policy.pack_allowed(name))
+            .collect();
+        fleet.policy_violations = disallowed_packs
+            .into_iter()
+            .map(|name| {
+                format!(
+                    "pack '{name}' is not in allowed_packs: {:?}",
+                    policy.allowed_packs
+                )
+            })
+            .collect();
+
+        // Enforce the same audited decision only when safe mode is enabled.
         if !policy.allowed_packs.is_empty() && policy.safe_mode {
             fleet.config.expansion.retain(|expansion| {
                 if let Some(prov) = fleet.expansions_source.get(&expansion.trigger) {
@@ -455,6 +473,7 @@ impl ConfigMerger {
             expansions_source,
             hotkeys_source,
             stats: self.stats,
+            policy_violations: Vec::new(),
         })
     }
 }
@@ -731,6 +750,45 @@ replacement = "third"
         assert!(triggers.contains(&":org"));
         assert!(triggers.contains(&":approved"));
         assert!(!triggers.contains(&":blocked"));
+        assert_eq!(
+            merged.policy_violations,
+            ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
+        );
+    }
+
+    #[test]
+    fn audit_mode_reports_but_retains_disallowed_pack() {
+        let mut merger = ConfigMerger::new();
+        let expansion = Config::parse("[[expansion]]\ntrigger = ':blocked'\nreplacement = 'x'\n")
+            .unwrap()
+            .expansion
+            .into_iter()
+            .next()
+            .unwrap();
+        merger.expansions.insert(
+            ":blocked".to_string(),
+            (
+                expansion,
+                Provenance {
+                    file: "snippets.toml".to_string(),
+                    layer: "pack:disallowed".to_string(),
+                },
+            ),
+        );
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert!(merged.all_triggers().contains(&":blocked"));
+        assert_eq!(
+            merged.policy_violations,
+            ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
+        );
     }
 
     #[test]
