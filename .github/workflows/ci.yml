@@ -154,6 +154,8 @@ jobs:
           mkdir -p /tmp/clean-build
           cd /tmp/clean-build
           tar -xzf "${GITHUB_WORKSPACE}/wayexpand.tar.gz"
+          test ! -e .cargo/config.toml
+          test ! -d vendor
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean

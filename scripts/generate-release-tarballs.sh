@@ -5,7 +5,7 @@
 #   ./scripts/generate-release-tarballs.sh <version>
 #
 # Creates:
-#   wayexpand-<version>.tar.gz           - Clean source (Cargo.lock only)
+#   wayexpand-<version>.tar.gz           - Clean source (Cargo.lock, no vendor config)
 #   wayexpand-<version>-vendored.tar.gz  - With vendor/ (offline builds)
 #   SHA256 checksums for both
 
@@ -36,6 +36,12 @@ git archive --format=tar.gz \
     --prefix="wayexpand-${version}/" \
     --output="${tmpdir}/wayexpand-${version}.tar.gz" \
     HEAD
+
+if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" \
+    | grep -E "^wayexpand-${version}/(\.cargo/config\.toml|vendor/)" >/dev/null; then
+    printf '%s\n' "ERROR: clean tarball contains vendored Cargo configuration or vendor/" >&2
+    exit 1
+fi
 
 # Verify .git is not in archive
 if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" | grep -q '\.git/'; then
