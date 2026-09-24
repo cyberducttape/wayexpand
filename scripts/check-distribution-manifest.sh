@@ -15,6 +15,14 @@ for relative in \
     }
 done
 
+for rule in "$project_dir/udev/71-wayexpand-evdev.rules" \
+    "$project_dir/udev/69-wayexpand-evdev-uaccess.rules"; do
+    grep -q -F 'ENV{ID_INPUT_KEYBOARD}=="?*"' "$rule" || {
+        printf '%s\n' "evdev udev rule is not scoped to keyboard-class event nodes: $rule" >&2
+        exit 1
+    }
+done
+
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml" \
     "$project_dir/scripts/install-release.sh" "$project_dir/scripts/install-user.sh"; do

@@ -37,6 +37,9 @@ disable_commands = false
 # Disable hotkey execution (hotkeys parse but don't run)
 disable_hotkeys = false
 
+# Require command/hotkey programs to be absolute paths
+require_absolute_commands = false
+
 # Disable title-based fallback in app filtering (require app_id match only)
 disable_title_matching = false
 
@@ -61,6 +64,8 @@ When `safe_mode = true`:
 - Violations logged as **errors** to journald
 - Suitable for locked-down production environments
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends
+- Can require absolute command paths so `program = "git"` cannot resolve
+  differently based on the daemon's `PATH`
 
 ### Audit Mode (Logging Only)
 When `safe_mode = false`:
@@ -77,6 +82,7 @@ When `safe_mode = false`:
 safe_mode = true
 disable_commands = true
 disable_hotkeys = true
+require_absolute_commands = true
 disable_title_matching = false
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]
@@ -90,6 +96,7 @@ audit_prefix = "corp-policy"
 safe_mode = true
 disable_commands = false
 disable_hotkeys = false
+require_absolute_commands = true
 disable_title_matching = false
 max_replacement_size = 65536
 allowed_backends = ["libei", "input-method-v2"]
@@ -103,6 +110,7 @@ audit_prefix = "sre-policy"
 safe_mode = false
 disable_commands = true
 disable_hotkeys = false
+require_absolute_commands = false
 disable_title_matching = false
 max_replacement_size = 65536
 allowed_backends = []
@@ -134,7 +142,16 @@ sudo chown root:root /etc/wayexpand/policy.toml
 
 # 3. Verify
 wayexpand doctor --json | jq '.policy.policy'
+
+# 4. Restart running services after policy changes
+systemctl --user restart wayexpand-input-method.service
+# or: systemctl --user restart wayexpand-evdev.service
 ```
+
+Policy is loaded at service startup. Changing `/etc/wayexpand/policy.toml`
+does not alter an already-running daemon or IBus engine until the relevant
+WayExpand user service or IBus session is restarted. Invalid or insecure policy
+continues to fail closed at the next startup/diagnostic check.
 
 ## Audit Logging
 

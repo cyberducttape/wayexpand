@@ -1155,12 +1155,12 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
 
     #[cfg(unix)]
     {
-        return run_command_unix(child, stdout, command.timeout_ms);
+        run_command_unix(child, stdout, command.timeout_ms)
     }
 
     #[cfg(not(unix))]
     {
-        return run_command_fallback(child, stdout, command.timeout_ms);
+        run_command_fallback(child, stdout, command.timeout_ms)
     }
 }
 

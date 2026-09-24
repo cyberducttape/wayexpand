@@ -737,10 +737,7 @@ impl InputMethodSource {
 
     /// Attach an optional separate injector for passing through unsupported keys
     /// (Escape, arrows, F-keys, etc.) from the input-method-v2 exclusive grab.
-    pub fn with_key_pass_through(
-        mut self,
-        injector: Box<dyn TextInjector>,
-    ) -> Self {
+    pub fn with_key_pass_through(mut self, injector: Box<dyn TextInjector>) -> Self {
         self.key_pass_through = Some(injector);
         self
     }

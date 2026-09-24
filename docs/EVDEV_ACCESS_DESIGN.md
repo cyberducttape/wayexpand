@@ -7,10 +7,12 @@ mechanism is already implemented or portable.
 ## Current state: legacy/simple access and active-seat prototype
 
 `--source=evdev` currently requires `scripts/install-evdev-permissions.sh`.
-That script installs a udev rule and adds the desktop user to the system
-`input` group. The group is a broad grant: a process running as that user can
-read raw input devices, including keyboards outside the active Wayland session
-and password prompts.
+That script installs a udev rule for udev keyboard-class event nodes. In the
+legacy mode it also adds the desktop user to the system `input` group. The
+group itself may be broader than WayExpand's rule on a given distribution: a
+process running as that user can read raw input event devices outside
+WayExpand's matcher, including devices visible outside the active Wayland
+session and password prompts.
 
 This remains an explicit, administrator-approved fallback for compositors that
 do not provide a usable input-method or other capture path. It is not the
@@ -23,11 +25,12 @@ An opt-in seat-aware prototype is available with:
 sudo ./scripts/install-evdev-permissions.sh --access=active-seat
 ```
 
-This installs a `TAG+="uaccess"` rule and does not add the user to the broad
-`input` group. systemd-logind must be active, and access is granted only while
-the user owns the active local seat. Verify the resulting ACL with
-`getfacl /dev/input/eventN` and confirm that `wayexpand doctor` can see a
-keyboard before starting the daemon. This mode is not yet certified across
+This installs a `TAG+="uaccess"` rule for keyboard-class event nodes and does
+not add the user to the broad `input` group. systemd-logind must be active, and
+access is granted only while the user owns the active local seat. Verify the
+resulting ACL with `getfacl /dev/input/eventN` and confirm that
+`wayexpand doctor` can see a keyboard before starting the daemon. This mode is
+not yet certified across
 distributions, seat switching, suspend/resume, or remote sessions; use the
 legacy mode only when that tradeoff is explicitly accepted.
 

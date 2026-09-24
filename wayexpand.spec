@@ -32,14 +32,10 @@ Features:
 %autosetup -n %{name}-%{version}
 
 %build
-# Generate vendored dependencies for offline builds
-mkdir -p .cargo
-cargo vendor vendor/ > .cargo/config.toml
-export CARGO_NET_OFFLINE=true
-cargo build --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
 %check
-cargo test --release --locked --workspace
+cargo test --release --frozen --workspace
 
 %install
 install -Dm755 target/release/wayexpand %{buildroot}%{_bindir}/wayexpand

@@ -64,11 +64,11 @@
 
   <screenshots>
     <screenshot type="default">
-      <image type="source">https://github.com/itchyitchy123/wayexpand/blob/main/docs/wiki/assets/snippets-dashboard.png</image>
+      <image type="source">https://raw.githubusercontent.com/itchyitchy123/wayexpand/main/docs/archive/wiki/assets/snippets-dashboard.png</image>
       <caption>Snippet library dashboard with search and live preview</caption>
     </screenshot>
     <screenshot>
-      <image type="source">https://github.com/itchyitchy123/wayexpand/blob/main/docs/wiki/assets/diagnostics.png</image>
+      <image type="source">https://raw.githubusercontent.com/itchyitchy123/wayexpand/main/docs/archive/wiki/assets/diagnostics.png</image>
       <caption>System diagnostics showing backend availability</caption>
     </screenshot>
   </screenshots>
@@ -121,19 +121,6 @@
     <control>pointing</control>
     <control>keyboard</control>
   </recommends>
-
-  <supports>
-    <relation type="requires_os">linux</relation>
-    <relation type="requires_protocol">wayland</relation>
-  </supports>
-
-  <custom>
-    <wayland_protocols>
-      <protocol name="zwp_input_method_v2" required="false" />
-      <protocol name="zwp_virtual_keyboard_v1" required="false" />
-      <protocol name="xdg_foreign_stable_v1" required="false" />
-    </wayland_protocols>
-  </custom>
 
   <update_contact>stephan.loesevitz@gmail.com</update_contact>
 </component>

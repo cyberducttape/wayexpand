@@ -5,7 +5,8 @@ This guide covers building and maintaining WayExpand packages for different Linu
 ## Rust toolchain policy
 
 WayExpand supports Rust **1.87 or newer**. This is the project MSRV and is
-declared in the workspace `Cargo.toml`; CI checks both Rust 1.87 and stable.
+declared in the workspace `Cargo.toml`; CI checks Rust 1.87 and the pinned
+project toolchain in `rust-toolchain.toml` (currently Rust 1.96.0).
 Distribution packages must provide at least `rustc 1.87` and `cargo 1.87`.
 Older Debian/Ubuntu releases may need a maintained Rust toolchain from the
 distribution backports or an isolated toolchain installation.
@@ -15,7 +16,8 @@ distribution backports or an isolated toolchain installation.
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 only |
-| Debian/Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
+| Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
+| Debian | source/release build | No native archive yet | Use vendored source archive for package builds |
 | Fedora/RHEL | `wayexpand` | Build from source | ⚠️ No official Copr yet |
 | aarch64 | source build | No pre-built release archive yet | Cross-build or build natively |
 
@@ -32,14 +34,18 @@ makepkg -si
 
 **To maintain:**
 1. Update `pkgver` and `pkgrel` in `PKGBUILD`
-2. Compute SHA256: `sha256sum wayexpand-1.0.0.tar.gz`
+2. Compute SHA256: `sha256sum wayexpand-1.1.2.tar.gz`
 3. Update `sha256sums` array
 4. Test with `makepkg -si`
 5. Before publication, generate `.SRCINFO` and verify in a clean Arch chroot
 
-### Debian/Ubuntu
+### Ubuntu PPA / Debian Vendored Build
 
 ```bash
+# Debian packaging expects the vendored release archive for offline builds.
+tar -xzf wayexpand-1.1.2-vendored.tar.gz
+cd wayexpand-1.1.2
+
 # Build source package
 dpkg-buildpackage -us -uc
 
@@ -47,8 +53,12 @@ dpkg-buildpackage -us -uc
 dpkg-buildpackage -b
 
 # Install locally
-sudo dpkg -i ../wayexpand_1.0.0-1_amd64.deb
+sudo dpkg -i ../wayexpand_1.1.2-1_amd64.deb
 ```
+
+The Launchpad PPA path targets Ubuntu series. Plain Debian users should build
+from the vendored release archive or install from the upstream release/source
+workflow until a native Debian repository exists.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -67,7 +77,7 @@ sudo dpkg -i ../wayexpand_1.0.0-1_amd64.deb
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-mock wayexpand-1.1.1-1.fc39.src.rpm
+mock wayexpand-1.1.2-1.fc39.src.rpm
 ```
 
 **To build from the repository spec file:**
@@ -117,7 +127,7 @@ toolchain.
 1. Create AUR account at https://aur.archlinux.org
 2. Add SSH public key to account
 3. Clone empty repo: `git clone ssh://aur@aur.archlinux.org/wayexpand.git`
-4. Copy `PKGBUILD`, `.gitignore`, `.SRCINFO` to repo
+4. Copy `PKGBUILD` and `.gitignore` to repo
 5. Generate `.SRCINFO`: `makepkg --printsrcinfo > .SRCINFO`
 6. Commit and push
 
@@ -127,11 +137,11 @@ cd wayexpand-aur
 # Update PKGBUILD with new version
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Update to v1.0.0"
+git commit -m "Update to v1.1.2"
 git push
 ```
 
-### Debian/Ubuntu PPA
+### Ubuntu PPA
 
 **First Time:**
 1. Create Launchpad account at https://launchpad.net
@@ -145,7 +155,7 @@ git push
 debuild -S -sa
 
 # Upload to PPA
-dput ppa:cyberducttape/ppa ../wayexpand_1.1.1-1_source.changes
+dput ppa:cyberducttape/ppa ../wayexpand_1.1.2-1_source.changes
 ```
 
 ### Fedora/Copr
@@ -175,7 +185,7 @@ wayexpand-gui
 ```bash
 # In a container
 docker run -it debian:bookworm bash
-# Add PPA and install
+# Ubuntu PPA test
 add-apt-repository ppa:cyberducttape/ppa
 apt update && apt install wayexpand
 wayexpand-gui
@@ -185,9 +195,8 @@ wayexpand-gui
 ```bash
 # In a container
 docker run -it fedora:39 bash
-# Enable Copr and install
-dnf copr enable @itchyitchy123/wayexpand
-dnf install wayexpand
+# No official Copr exists yet; build locally from the spec/source package.
+rpmbuild -ba wayexpand.spec
 wayexpand-gui
 ```
 
@@ -197,7 +206,7 @@ wayexpand-gui
 
 When releasing a new version:
 
-1. **Tag in git:** `git tag v1.0.0 && git push origin v1.0.0`
+1. **Tag in git:** `git tag v1.1.2 && git push origin v1.1.2`
 2. **Update all packaging files:**
    - `PKGBUILD`: bump `pkgver`, reset `pkgrel=1`
    - `debian/changelog`: add new entry (use `dch -i`)
@@ -212,8 +221,8 @@ When releasing a new version:
 
 Consider setting up:
 - **GitHub Actions** to auto-publish releases when tags are pushed
-- **Copr webhook** to auto-rebuild when repository updates
-- **Debian PPA** to auto-sync from GitHub releases
+- **Copr webhook** to auto-rebuild when an official Copr exists
+- **Ubuntu PPA** to auto-sync from GitHub releases
 
 This minimizes manual work for patch releases.
 
