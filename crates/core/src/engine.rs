@@ -127,9 +127,6 @@ pub struct MatchPlan {
     pub terminating_char: Option<char>,
     pub cursor_offset: Option<usize>,
 
-    // Expansion reference
-    pub config_index: usize,
-
     // State snapshot at match time (used for policy decisions)
     pub generation: u64,
     pub sensitive_focus: bool,
@@ -578,7 +575,6 @@ impl ExpansionEngine {
                 matched_text: completion.result.matched_text.clone(),
                 terminating_char: completion.result.reinsert_after,
                 cursor_offset: completion.result.cursor_offset,
-                config_index: completion.config_index,
                 generation: completion.generation,
                 sensitive_focus: false, // snapshot from queue time (conservative)
                 user_paused: false,     // snapshot from queue time (conservative)
@@ -1281,26 +1277,13 @@ impl ExpansionEngine {
 
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
     /// This is the single path for committing any expansion (static or command-backed).
-    /// Handles case propagation, caching, undo state, and result metadata.
+    /// Handles case propagation, undo state, and result metadata.
     fn commit_expansion(&mut self, plan: &MatchPlan, insert: String) -> ExpansionResult {
-        let cache_value = insert.clone();
         let mut final_insert = insert;
 
         // Apply case propagation if configured (applies to all expansion types)
         if plan.propagate_case {
             final_insert = apply_case_style(&plan.matched_text, &final_insert);
-        }
-
-        // Update command cache if this was a command
-        if plan.is_command_backed() {
-            if let Some(command) = &plan.command {
-                if command.cache_ms > 0 {
-                    self.command_cache[plan.config_index] = Some(CommandCacheEntry {
-                        expires_at: Instant::now() + Duration::from_millis(command.cache_ms),
-                        value: cache_value,
-                    });
-                }
-            }
         }
 
         // Save undo state (only if no cursor offset - cursor marker expansions don't support undo)
@@ -1355,7 +1338,6 @@ impl ExpansionEngine {
             matched_text,
             terminating_char,
             cursor_offset,
-            config_index,
             generation: self.input_generation,
             sensitive_focus: self.sensitive_focus,
             user_paused: self.user_paused,
@@ -2582,6 +2564,39 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].insert, "1");
         assert_eq!(results[1].insert, "1");
+    }
+
+    #[test]
+    fn synchronous_command_cache_keeps_raw_output_before_case_propagation() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-command-case-cache-{}",
+            std::process::id()
+        ));
+        std::fs::write(&marker, "").unwrap();
+        let script = format!("printf 'Hello World'; printf x >> '{}'", marker.display());
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":word"
+            replacement = ""
+            propagate_case = true
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", {script:?}]
+            cache_ms = 1000
+            timeout_ms = 500
+            "#
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        let results = engine.process(InputEvent::Text(":WORD:word".into()));
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].insert, "HELLO WORLD");
+        assert_eq!(results[1].insert, "Hello World");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "x");
+        std::fs::remove_file(marker).unwrap();
     }
 
     #[test]
