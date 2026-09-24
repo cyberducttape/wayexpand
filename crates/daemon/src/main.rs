@@ -243,8 +243,8 @@ fn main() -> Result<()> {
     let input_method_mode = source_name == "input-method";
     if input_method_mode {
         info!(
-            "input-method-v2 backend selected with required libei key pass-through; \
-            unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) must be re-injected"
+            "input-method-v2 backend selected; optional libei key pass-through allows \
+            unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) to be re-injected"
         );
     }
     let evdev_mode = source_name == "evdev";
@@ -1093,28 +1093,49 @@ fn connect_input_method_session(
     portal_token_path: Option<&Path>,
     policy: &wayexpand_core::OrganizationPolicy,
 ) -> Result<InputMethodSource, InputMethodError> {
-    let source = InputMethodSource::connect()?;
+    let mut source = InputMethodSource::connect()?;
+
     if !policy.backend_allowed("libei") {
-        return Err(InputMethodError::Protocol(
-            "organization policy prohibits libei backend for key pass-through".into(),
-        ));
+        warn!("organization policy prohibits libei backend; unsupported keys will not pass through");
+        return Ok(source);
     }
-    let key_injector = connect_output_with_retry(
-        control,
-        "input-method",
-        "libei",
-        config_path,
-        config_healthy,
-        persist_portal_token,
-        portal_token_path,
-    )
-    .map_err(|error| InputMethodError::Protocol(error.to_string()))?
-    .ok_or_else(|| {
-        InputMethodError::Transport(
-            "input-method key pass-through setup was cancelled while stopping".into(),
-        )
-    })?;
-    Ok(source.with_key_pass_through(key_injector))
+
+    match connect_output_backend("libei", persist_portal_token, portal_token_path) {
+        Ok(key_injector) => {
+            set_daemon_status_direct(
+                control,
+                "input-method",
+                "libei",
+                "connected",
+                config_path,
+                config_healthy,
+            );
+            source = source.with_key_pass_through(key_injector);
+        }
+        Err(error) if error.retryable => {
+            warn!(
+                %error,
+                "libei unavailable at startup; unsupported keys will not pass through \
+                (connection will be retried asynchronously)"
+            );
+            set_daemon_status_direct(
+                control,
+                "input-method",
+                "libei",
+                "degraded",
+                config_path,
+                config_healthy,
+            );
+        }
+        Err(error) => {
+            return Err(InputMethodError::Protocol(format!(
+                "libei unavailable: {}",
+                error.message
+            )));
+        }
+    }
+
+    Ok(source)
 }
 
 fn connect_input_method_with_retry(
