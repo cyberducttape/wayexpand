@@ -1403,7 +1403,7 @@ fn apply_pending_results(
         }
 
         // Policy approved: now execute the command (if any) and get final result
-        let result = match pending_result.execute_with_policy() {
+        let result = match pending_result.execute_with_policy(policy.max_replacement_size) {
             Ok(result) => result,
             Err(e) => {
                 warn!("command execution failed: {}", e);

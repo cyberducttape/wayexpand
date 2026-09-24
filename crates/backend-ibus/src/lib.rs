@@ -282,7 +282,8 @@ impl IbusEngineAdapter {
             }
 
             // Policy approved: execute command (if any) and get final result
-            let result = match pending_result.execute_with_policy() {
+            let result = match pending_result.execute_with_policy(self.policy.max_replacement_size)
+            {
                 Ok(result) => result,
                 Err(e) => {
                     warn!("IBus command execution failed: {}", e);

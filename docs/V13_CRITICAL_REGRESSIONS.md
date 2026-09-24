@@ -1,4 +1,4 @@
-# v1.3 Critical Regressions - FIXED
+# v1.3 Critical Regressions - Historical Findings
 
 > Historical regression analysis. The initial assessment below records bugs
 > before fixes landed; its reproduction snippets and “currently passes” claims
@@ -9,7 +9,9 @@
 
 The v1.3 deferred execution implementation introduced three critical architectural regressions in command execution policy enforcement.
 
-**Status:** ✅ ALL FIXED (2026-09-24) through unified command execution architecture refactor (5 phases)
+**Status:** All three findings are fixed. The deferred execution path now enforces
+replacement-size limits after command completion and before returning an injectable
+result; see `deferred_command_output_over_policy_limit_is_rejected_after_completion`.
 
 ### How They Were Fixed
 
@@ -17,7 +19,7 @@ The v1.3 deferred execution implementation introduced three critical architectur
 
 **Bug #3 (command_backed Flag Accuracy):** Fixed by setting `command_backed = expansion.command.is_some()` instead of hardcoding to false
 
-**Bug #1 (Output Size Policy):** Fixed by introducing postflight policy that validates output size after command execution
+**Bug #1 (Output Size Policy):** Fixed by enforcing the engine limit and the separately loaded administrator limit in `execute_with_policy()`.
 
 **See:** [[P2_unified_command_execution_completion.md]](../../../memory/P2_unified_command_execution_completion.md) for implementation details
 
@@ -68,14 +70,14 @@ POST-EXECUTION checks (after run_command()):
   ✓ output is valid UTF-8
 ```
 
-### Test Case Needed
+### Regression Coverage
 
 ```rust
 #[test]
 fn output_size_policy_must_be_checked_post_execution() {
     // Template is empty (0 bytes), command outputs 100KB
     // max_replacement_size = 1KB
-    // Historical expected behavior: blocked after command output is checked
+    // Command may complete, but its output must be rejected before injection.
 }
 ```
 
