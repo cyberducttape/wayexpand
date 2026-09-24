@@ -20,9 +20,13 @@ Policy files must meet strict security requirements:
 - Regular file (not symlink)
 - Root ownership (`uid = 0`)
 - Permissions: `0600` (rw-------), `0400` (r--------), or `0440` (r--r-----)
-- No group/world writable bits
+  - `0600`: Root read/write only (most restrictive)
+  - `0400`: Root read-only (secure, immutable after deployment)
+  - `0440`: Root read-only, group-readable (allows unprivileged services in the policy group to read)
+- **No world-accessible bits** (world must not be able to read)
+- No world-writable bits ever allowed
 - Maximum size: 100 KB (DoS prevention)
-- Parent directory `/etc/wayexpand/` also validated
+- Parent directory `/etc/wayexpand/` also validated (root-owned, not group/world-writable)
 
 ## Policy Fields
 
@@ -127,6 +131,8 @@ See [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) for fleet configuration.
 See [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) for fleet configuration.
 
 ### Manual Deployment
+
+**Option A: Root-only policy (most restrictive)**
 ```bash
 # 1. Create policy file
 sudo tee /etc/wayexpand/policy.toml > /dev/null << 'EOF'
@@ -136,17 +142,61 @@ disable_commands = true
 # ... other fields
 EOF
 
-# 2. Set strict permissions
-sudo chmod 0600 /etc/wayexpand/policy.toml
+# 2. Set restrictive permissions (root-only readable)
+sudo chmod 0400 /etc/wayexpand/policy.toml
 sudo chown root:root /etc/wayexpand/policy.toml
 
 # 3. Verify
-wayexpand doctor --json | jq '.policy.policy'
+sudo wayexpand doctor --json | jq '.policy.policy'
 
 # 4. Restart running services after policy changes
 systemctl --user restart wayexpand-input-method.service
 # or: systemctl --user restart wayexpand-evdev.service
 ```
+
+**Option B: Unprivileged service access (with wayexpand group)**
+
+This allows WayExpand user services to read the policy without needing root.
+
+```bash
+# 1. Create wayexpand group if it doesn't exist
+sudo groupadd -r wayexpand || true
+
+# 2. Add your user to the wayexpand group
+sudo usermod -a -G wayexpand $USER
+
+# 3. Ensure systemd user units run with group membership (see below)
+
+# 4. Create policy file
+sudo tee /etc/wayexpand/policy.toml > /dev/null << 'EOF'
+[organization]
+safe_mode = true
+disable_commands = true
+# ... other fields
+EOF
+
+# 5. Set group-readable permissions
+# Note: 0440 allows root and the wayexpand group to read
+sudo chmod 0440 /etc/wayexpand/policy.toml
+sudo chown root:wayexpand /etc/wayexpand/policy.toml
+
+# 6. Also ensure the directory is owned by root:wayexpand
+sudo chown root:wayexpand /etc/wayexpand
+sudo chmod 0750 /etc/wayexpand
+
+# 7. Verify (your user must be in wayexpand group; may require logout/login)
+wayexpand doctor --json | jq '.policy.policy'
+
+# 8. Restart services
+systemctl --user daemon-reload
+systemctl --user restart wayexpand-input-method.service
+# or: systemctl --user restart wayexpand-evdev.service
+```
+
+Note: For Option B to work with systemd user services, your session must start with
+group membership (typically requires logging out and back in after `usermod`). Alternatively,
+use `newgrp wayexpand` in a new shell to start services with group membership, or configure
+the `User=` and `Group=` directives in override files to explicitly set the service context.
 
 Policy is loaded at service startup. Changing `/etc/wayexpand/policy.toml`
 does not alter an already-running daemon or IBus engine until the relevant
