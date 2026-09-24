@@ -649,15 +649,35 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
             .with_context(|| format!("creating editor file {}", temp.display()))?;
         file.write_all(app.config.expansion[index].replacement.as_bytes())?;
         file.sync_all()?;
-        let editor = std::env::var("VISUAL")
+        let editor_spec = std::env::var("VISUAL")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .or_else(|| std::env::var("EDITOR").ok())
             .unwrap_or_else(|| "vi".into());
-        let status = std::process::Command::new(&editor)
-            .arg(&temp)
+
+        let parts = shlex::split(&editor_spec)
+            .unwrap_or_else(|| vec![editor_spec.clone()]);
+
+        let editor_name = if parts.is_empty() {
+            "vi".to_string()
+        } else {
+            parts[0].clone()
+        };
+
+        let mut cmd = if parts.is_empty() {
+            std::process::Command::new("vi")
+        } else {
+            let mut cmd = std::process::Command::new(&parts[0]);
+            for arg in &parts[1..] {
+                cmd.arg(arg);
+            }
+            cmd
+        };
+        cmd.arg(&temp);
+
+        let status = cmd
             .status()
-            .with_context(|| format!("starting editor {editor:?}"))?;
+            .with_context(|| format!("starting editor {editor_name:?}"))?;
         if !status.success() {
             anyhow::bail!("editor exited unsuccessfully");
         }
