@@ -36,7 +36,9 @@ else
 fi
 rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evdev.rules}
 uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
-access_mode=input-group
+state_file=${WAYEXPAND_EVDEV_STATE_FILE:-/var/lib/wayexpand/evdev-permissions.state}
+access_mode=active-seat
+access_explicit=0
 dry_run=0
 do_uninstall=0
 
@@ -44,6 +46,7 @@ for argument in "$@"; do
     case "$argument" in
         --access=input-group|--access=active-seat)
             access_mode=${argument#--access=}
+            access_explicit=1
             ;;
         --dry-run)
             dry_run=1
@@ -53,8 +56,8 @@ for argument in "$@"; do
             ;;
         --help|-h)
             printf '%s\n' "usage: sudo $0 [--access=input-group|active-seat] [--dry-run] [--uninstall]"
-            printf '%s\n' "  --access=input-group  broad legacy input-group grant (default)"
-            printf '%s\n' "  --access=active-seat  logind/uaccess ACL; no group membership change"
+            printf '%s\n' "  --access=active-seat  logind/uaccess ACL; no group membership change (default)"
+            printf '%s\n' "  --access=input-group  broad legacy input-group grant"
             printf '%s\n' "  --dry-run    print what would change without changing anything"
             printf '%s\n' "  --uninstall  remove the udev rule and the input group grant instead"
             exit 0
@@ -99,6 +102,25 @@ is_member() {
     id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx input
 }
 
+state_added_input_group=0
+state_user=
+state_mode=
+if [ -r "$state_file" ]; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            added_input_group) state_added_input_group=$value ;;
+            target_user) state_user=$value ;;
+            access_mode) state_mode=$value ;;
+        esac
+    done <"$state_file"
+fi
+
+# Keep the safe active-seat default, while allowing an uninstall to clean up
+# an older explicitly selected input-group installation.
+if [ "$do_uninstall" -eq 1 ] && [ "$access_explicit" -eq 0 ] && [ -n "$state_mode" ]; then
+    access_mode=$state_mode
+fi
+
 if [ "$access_mode" = input-group ] && [ "$dry_run" -eq 0 ] && ! getent group input >/dev/null 2>&1; then
     printf '%s\n' "error: the \`input\` group does not exist on this system; cannot continue" >&2
     exit 1
@@ -116,10 +138,11 @@ if [ "$do_uninstall" -eq 1 ]; then
     else
         printf '%s\n' "  - leave $uaccess_rule_dest alone (not present)"
     fi
-    if [ "$access_mode" = input-group ] && is_member; then
+    if [ "$access_mode" = input-group ] && [ "$state_added_input_group" -eq 1 ] \
+        && [ "$state_user" = "$target_user" ] && is_member; then
         printf '%s\n' "  - remove $target_user from the \`input\` group"
     else
-        printf '%s\n' "  - leave $target_user out of the \`input\` group (already not a member)"
+        printf '%s\n' "  - leave $target_user's existing \`input\` group membership unchanged"
     fi
     if [ "$dry_run" -eq 1 ]; then
         printf '%s\n' "(dry run; no changes made)"
@@ -135,7 +158,8 @@ if [ "$do_uninstall" -eq 1 ]; then
         command -v udevadm >/dev/null 2>&1 && udevadm control --reload
         printf '%s\n' "Removed $uaccess_rule_dest"
     fi
-    if [ "$access_mode" = input-group ] && is_member; then
+    if [ "$access_mode" = input-group ] && [ "$state_added_input_group" -eq 1 ] \
+        && [ "$state_user" = "$target_user" ] && is_member; then
         if command -v gpasswd >/dev/null 2>&1; then
             gpasswd -d "$target_user" input >/dev/null
         else
@@ -147,6 +171,9 @@ if [ "$do_uninstall" -eq 1 ]; then
         printf '%s\n' "restart and is still running with the old group list -- run"
         printf '%s\n' "\`loginctl terminate-user $target_user\` (ends all sessions for that user) or"
         printf '%s\n' "reboot, then check again."
+    fi
+    if [ -e "$state_file" ]; then
+        rm -f -- "$state_file"
     fi
     exit 0
 fi
@@ -170,7 +197,11 @@ if [ "$access_mode" = active-seat ]; then
     else
         printf '%s\n' "  - install $uaccess_rule_dest and reload udev rules"
     fi
-    printf '%s\n' "  - do not change input-group membership (logind active-seat ACLs)"
+    if [ "$state_added_input_group" -eq 1 ] && [ "$state_user" = "$target_user" ] && is_member; then
+        printf '%s\n' "  - remove the input-group membership previously added by WayExpand"
+    else
+        printf '%s\n' "  - leave pre-existing input-group membership unchanged"
+    fi
 else
     if [ -e "$uaccess_rule_dest" ]; then
         printf '%s\n' "  - remove $uaccess_rule_dest so the input-group model is unambiguous"
@@ -198,6 +229,17 @@ fi
 if [ "$dry_run" -eq 1 ]; then
     printf '\n%s\n' "(dry run; no changes made)"
     exit 0
+fi
+
+if [ "$access_mode" = active-seat ] && [ "$state_added_input_group" -eq 1 ] \
+    && [ "$state_user" = "$target_user" ] && is_member; then
+    if command -v gpasswd >/dev/null 2>&1; then
+        gpasswd -d "$target_user" input >/dev/null
+    else
+        deluser "$target_user" input >/dev/null
+    fi
+    state_added_input_group=0
+    printf '%s\n' "Removed the input-group membership previously added by WayExpand."
 fi
 
 udev_changed=0
@@ -229,8 +271,17 @@ fi
 
 if [ "$access_mode" = input-group ] && ! is_member; then
     usermod -aG input "$target_user"
+    state_added_input_group=1
     printf '%s\n' "Added $target_user to the \`input\` group."
 fi
+
+install -d -m 0755 "$(dirname -- "$state_file")"
+umask 077
+{
+    printf 'access_mode=%s\n' "$access_mode"
+    printf 'target_user=%s\n' "$target_user"
+    printf 'added_input_group=%s\n' "$state_added_input_group"
+} >"$state_file"
 
 if [ "$access_mode" = active-seat ]; then
     printf '%s\n' "Active-seat ACLs apply after udev reload/trigger and seat activation."

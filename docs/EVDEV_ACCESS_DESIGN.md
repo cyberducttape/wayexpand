@@ -4,7 +4,7 @@ This document records the security direction for WayExpand's raw evdev input
 path. It is an investigation plan, not a claim that a tighter access
 mechanism is already implemented or portable.
 
-## Current state: legacy/simple access and active-seat prototype
+## Current state: active-seat default and legacy/simple fallback
 
 `--source=evdev` currently requires `scripts/install-evdev-permissions.sh`.
 That script installs a udev rule for udev keyboard-class event nodes. In the
@@ -19,7 +19,7 @@ do not provide a usable input-method or other capture path. It is not the
 long-term preferred security architecture. Automatic backend selection never
 enables evdev merely because the current process can read `/dev/input`.
 
-An opt-in seat-aware prototype is available with:
+The default setup uses the seat-aware ACL model:
 
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --access=active-seat
@@ -29,12 +29,13 @@ This installs a `TAG+="uaccess"` rule for keyboard-class event nodes and does
 not add the user to the broad `input` group. systemd-logind must be active, and
 access is granted only while the user owns the active local seat. Verify the
 resulting ACL with `getfacl /dev/input/eventN` and confirm that
-`wayexpand doctor` can see a keyboard before starting the daemon. This mode is
-not yet certified across
+`wayexpand doctor` can see a keyboard before starting the daemon. The legacy
+group model remains available only when explicitly requested with
+`--access=input-group`. This mode is not yet certified across
 distributions, seat switching, suspend/resume, or remote sessions; use the
 legacy mode only when that tradeoff is explicitly accepted.
 
-Before using it, administrators should review [SECURITY.md](../SECURITY.md),
+Before using either mode, administrators should review [SECURITY.md](../SECURITY.md),
 run the permission script with `--dry-run`, and document the grant. Remove it
 with `--uninstall` when the evdev deployment is retired.
 

@@ -38,6 +38,10 @@ wayexpand-gui
 
 The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
 `WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
+They rewrite the complete TOML file in canonical formatting, so comments and
+hand formatting are not preserved. If you maintain comments or formatting in
+the file, edit the TOML directly and keep a backup before saving through an
+editor.
 
 ### 3. Start the route selected for your session
 
@@ -46,7 +50,7 @@ Automatic mode intentionally leaves raw evdev disabled, even when
 install the evdev permission rule and start the explicit service:
 
 ```sh
-sudo ./scripts/install-evdev-permissions.sh
+sudo ./scripts/install-evdev-permissions.sh --access=active-seat
 systemctl --user enable --now wayexpand-evdev.service
 wayexpand status --json
 ```

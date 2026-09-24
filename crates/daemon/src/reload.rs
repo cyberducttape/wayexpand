@@ -104,15 +104,7 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
     file.take(16 * 1024 * 1024 + 1)
         .read_to_end(&mut contents)
         .ok()?;
-    // Use a stable hash algorithm independent of Rust compiler version.
-    // A simple byte-wise XOR and sum is sufficient to detect content changes
-    // on filesystems with coarse timestamps (same-size edits).
-    let mut fingerprint: u64 = 0;
-    for chunk in contents.chunks(8) {
-        let mut bytes = [0_u8; 8];
-        bytes[..chunk.len()].copy_from_slice(chunk);
-        fingerprint = fingerprint.wrapping_add(u64::from_le_bytes(bytes));
-    }
+    let fingerprint = stable_content_fingerprint(&contents);
     Some(FileStamp {
         modified,
         length,
@@ -120,6 +112,14 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
         change_time,
         change_time_nsec,
         fingerprint,
+    })
+}
+
+fn stable_content_fingerprint(contents: &[u8]) -> u64 {
+    // FNV-1a is deterministic across compiler versions and sensitive to byte
+    // order, unlike the previous commutative chunk sum.
+    contents.iter().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
 }
 
@@ -338,13 +338,6 @@ fn load_for_mode(
         let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
             .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
         base = merged.config;
-    }
-
-    // Apply external organization policy to config for validation.
-    // This ensures require_absolute_commands and other policy fields
-    // are enforced during config validation, not just at runtime.
-    if policy.is_active() {
-        base.organization = policy.clone();
     }
 
     Ok((base, stamp))

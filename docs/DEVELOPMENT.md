@@ -51,6 +51,11 @@ bash scripts/test-install-user.sh  # Test installer
   - `config.rs` — Configuration parsing and validation
   - `backend.rs` — Backend trait definitions (`InputSource`, `TextInjector`, `WindowTracker`)
 
+`Config::save_atomic()` validates and atomically rewrites the complete
+configuration using canonical TOML formatting. It does not preserve comments
+or manual formatting; structured editors should make this behavior clear to
+users who maintain configuration files by hand.
+
 - `crates/daemon` — Event loop and lifecycle
   - `main.rs` — Daemon entry point and systemd integration
   - `control.rs` — Control socket on separate thread

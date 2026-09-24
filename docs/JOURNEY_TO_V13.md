@@ -1,5 +1,9 @@
 # Journey to v1.3: From P1 Debt to Implementation
 
+> Historical project narrative from the v1.2/v1.3 planning period. It is not
+> current implementation status. Consult `BACKENDS.md`, `SUPPORT_MATRIX.md`,
+> and `SECURITY.md` for current behavior and certification.
+
 This document summarizes the complete journey of identifying, documenting, and preparing for implementation of P1 architectural improvements.
 
 ## Problem Discovery (v1.2)
@@ -198,8 +202,10 @@ Through comprehensive code review and security analysis, 8 critical and importan
 
 ## Success Metrics
 
-✅ **Security:** Commands don't execute before policy approval
-✅ **Correctness:** Held keys produce proper continuous input
+⚠️ **Security:** Deferred execution is caller-dependent; legacy synchronous
+command paths and output-dependent checks do not provide universal
+pre-execution approval.
+⚠️ **Correctness:** Held-key fidelity remains incomplete for input-method-v2
 ✅ **Reliability:** Release artifacts match tagged commits
 ✅ **Maintainability:** Clear separation of concerns in architecture
 ✅ **Transparency:** Full visibility in audit mode

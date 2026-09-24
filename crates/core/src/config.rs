@@ -649,10 +649,12 @@ impl Config {
         Ok(config)
     }
 
-    /// Atomically replace a trusted configuration file. A missing target is
-    /// created with private permissions, which lets settings frontends
-    /// initialize a first-run library without weakening the same parent and
-    /// ownership checks used for existing files.
+    /// Atomically replace a trusted configuration file. The full document is
+    /// serialized with canonical TOML formatting, so comments and manual
+    /// formatting are not preserved. A missing target is created with private
+    /// permissions, which lets settings frontends initialize a first-run
+    /// library without weakening the same parent and ownership checks used for
+    /// existing files.
     pub fn save_atomic(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         self.validate()?;
         let path = path.as_ref();

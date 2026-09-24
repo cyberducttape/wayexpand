@@ -22,6 +22,7 @@ use std::{
 const MAX_RESULTS_PER_EVENT: usize = 1024;
 const MAX_RESULT_BYTES_PER_EVENT: usize = 4 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
+const MINIMAL_COMMAND_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -581,10 +582,17 @@ impl ExpansionEngine {
                 config_index: completion.config_index,
                 generation: completion.generation,
                 sensitive_focus: false, // snapshot from queue time (conservative)
-                user_paused: false,      // snapshot from queue time (conservative)
-                trigger_config: self.config.expansion[completion.config_index].trigger.clone(),
-                replacement_text: self.config.expansion[completion.config_index].replacement.clone(),
-                command: self.config.expansion[completion.config_index].command.as_ref().map(|c| Arc::new(c.clone())),
+                user_paused: false,     // snapshot from queue time (conservative)
+                trigger_config: self.config.expansion[completion.config_index]
+                    .trigger
+                    .clone(),
+                replacement_text: self.config.expansion[completion.config_index]
+                    .replacement
+                    .clone(),
+                command: self.config.expansion[completion.config_index]
+                    .command
+                    .as_ref()
+                    .map(|c| Arc::new(c.clone())),
                 propagate_case: self.config.expansion[completion.config_index].propagate_case,
             };
 
@@ -1148,11 +1156,7 @@ impl ExpansionEngine {
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
     /// This is the single path for committing any expansion (static or command-backed).
     /// Handles case propagation, caching, undo state, and result metadata.
-    fn commit_expansion(
-        &mut self,
-        plan: &MatchPlan,
-        insert: String,
-    ) -> ExpansionResult {
+    fn commit_expansion(&mut self, plan: &MatchPlan, insert: String) -> ExpansionResult {
         let mut final_insert = insert;
 
         // Apply case propagation if configured (applies to all expansion types)
@@ -1174,7 +1178,9 @@ impl ExpansionEngine {
 
         // Save undo state (only if no cursor offset - cursor marker expansions don't support undo)
         // Skip undo for async commands since they return empty immediately
-        if plan.cursor_offset.is_none() && (!plan.is_command_backed() || self.async_commands.is_none()) {
+        if plan.cursor_offset.is_none()
+            && (!plan.is_command_backed() || self.async_commands.is_none())
+        {
             self.last_expansion = Some((plan.matched_text.clone(), final_insert.clone()));
         }
 
@@ -1734,7 +1740,7 @@ fn configure_command_environment(process: &mut Command, command: &CommandConfig)
     }
 
     process.env_clear();
-    for name in ["HOME", "USER", "PATH", "LANG"] {
+    for name in ["HOME", "USER", "LANG"] {
         if let Some(value) = std::env::var_os(name) {
             process.env(name, value);
         }
@@ -1744,6 +1750,7 @@ fn configure_command_environment(process: &mut Command, command: &CommandConfig)
             process.env(name, value);
         }
     }
+    process.env("PATH", MINIMAL_COMMAND_PATH);
 }
 
 #[cfg(unix)]
@@ -3979,23 +3986,32 @@ replacement = "signature""#,
 
     #[test]
     fn output_size_policy_must_be_checked_post_execution() {
-        // BUG: Policy checks template_text.len(), but command output can exceed max_replacement_size
-        // This test exposes that a command producing oversized output bypasses policy if template is empty
-        let config = Config::parse(
+        // Command output is checked after execution as well as the empty
+        // template placeholder used during preflight.
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-command-completed-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let command = format!(
+            "printf completed > '{}'; yes x | head -c 100000",
+            marker.display()
+        );
+        let config_text = format!(
             r#"
             [[expansion]]
             trigger = ":big"
             replacement = ""
             [expansion.command]
-            program = "python3"
-            args = ["-c", "import sys; sys.stdout.write('x' * 100000)"]
+            program = "/bin/sh"
+            args = ["-c", "{command}"]
             timeout_ms = 500
 
             [organization]
             max_replacement_size = 1000
-            "#,
-        )
-        .unwrap();
+            "#
+        );
+        let config = Config::parse(&config_text).unwrap();
 
         let mut engine = ExpansionEngine::new(config).unwrap();
         engine.enable_async_commands();
@@ -4003,20 +4019,96 @@ replacement = "signature""#,
         // This should fail policy check because output (100KB) > max_replacement_size (1KB)
         // But currently passes because policy only checks template (0 bytes)
         let results = engine.process(InputEvent::Text(":big".into()));
+        assert!(results.is_empty(), "async command should be pending");
 
-        // Wait for async command to complete
-        std::thread::sleep(Duration::from_millis(100));
-        engine.drain_completed_commands();
+        // The command is allowed to complete, but its output must be rejected
+        // after execution because the organization limit applies to output,
+        // not just the empty template placeholder.
+        for _ in 0..50 {
+            if marker.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(marker.exists(), "the oversized command should complete");
+        assert!(engine.drain_completed_commands().is_empty());
 
-        // EXPECTED: should be empty (blocked by policy) - POST-EXECUTION check needed
-        // ACTUAL (BUG): will have result if command succeeded before size check
-        // This test documents the missing post-execution policy check
         let completed = engine.process(InputEvent::EndOfInput);
         assert!(
-            completed.is_empty() || completed[0].insert.len() <= 1000,
-            "KNOWN BUG: output size policy not checked post-execution. Got: {} bytes",
-            completed.get(0).map(|r| r.insert.len()).unwrap_or(0)
+            completed.is_empty(),
+            "oversized output must never be injected"
         );
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[test]
+    fn sync_and_deferred_paths_have_matching_snippet_semantics() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards, {{cursor}} team"
+            propagate_case = true
+
+            [[expansion]]
+            trigger = ":cmd"
+            replacement = ""
+            [expansion.command]
+            program = "printf"
+            args = ["generated"]
+            cache_ms = 1000
+            timeout_ms = 500
+            "#,
+        )
+        .unwrap();
+
+        let mut synchronous = ExpansionEngine::new(config.clone()).unwrap();
+        let static_sync = synchronous
+            .process(InputEvent::Text(":SIG".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(static_sync.insert, "REGARDS,  TEAM");
+
+        let mut deferred = ExpansionEngine::new(config).unwrap();
+        let static_pending = deferred
+            .process_deferred(InputEvent::Text(":SIG".into()))
+            .pop()
+            .unwrap();
+        let static_deferred = static_pending.execute_with_policy().unwrap();
+        assert_eq!(static_sync.trigger, static_deferred.trigger);
+        assert_eq!(static_sync.matched_text, static_deferred.matched_text);
+        assert_eq!(static_sync.insert, static_deferred.insert);
+        assert_eq!(static_sync.cursor_offset, static_deferred.cursor_offset);
+
+        let command_sync = deferred
+            .process(InputEvent::Text(":cmd".into()))
+            .pop()
+            .unwrap();
+        let mut command_deferred_engine = ExpansionEngine::new(
+            Config::parse(
+                r#"
+                [[expansion]]
+                trigger = ":cmd"
+                replacement = ""
+                [expansion.command]
+                program = "printf"
+                args = ["generated"]
+                cache_ms = 1000
+                timeout_ms = 500
+                "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let command_pending = command_deferred_engine
+            .process_deferred(InputEvent::Text(":cmd".into()))
+            .pop()
+            .unwrap();
+        let command_deferred = command_pending.execute_with_policy().unwrap();
+        assert_eq!(command_sync.trigger, command_deferred.trigger);
+        assert_eq!(command_sync.matched_text, command_deferred.matched_text);
+        assert_eq!(command_sync.insert, command_deferred.insert);
+        assert!(command_sync.command_backed && command_deferred.command_backed);
     }
 
     #[test]

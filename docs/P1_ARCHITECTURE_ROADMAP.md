@@ -1,5 +1,10 @@
 # P1 Architectural Improvements Roadmap (v1.3+)
 
+> Historical design roadmap. Proposed APIs and status statements below describe
+> the planning snapshot, not the current implementation. See
+> [`BACKENDS.md`](BACKENDS.md), [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md), and
+> [`SECURITY.md`](../SECURITY.md) for current status.
+
 This document outlines P1 architectural debt that requires refactoring for full correctness and security.
 
 ## Current P1 Issues

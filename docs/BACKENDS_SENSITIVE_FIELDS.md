@@ -118,11 +118,13 @@ systemctl --user enable --now wayexpand-input-method.service
 Use `--source=evdev --backend=libei`. Accept no password protection.
 
 ```bash
-sudo ./scripts/install-evdev-permissions.sh
+sudo ./scripts/install-evdev-permissions.sh --access=active-seat
 systemctl --user enable --now wayexpand-evdev.service
 ```
 
-Before enabling, read [SECURITY.md](../SECURITY.md) carefully. You're granting broad keyboard visibility.
+Before enabling, read [SECURITY.md](../SECURITY.md) carefully. The default
+active-seat mode limits access to the active local seat; use the explicit
+`--access=input-group` fallback only when its broader visibility is accepted.
 
 ### "I'm configuring for a team"
 

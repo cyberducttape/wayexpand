@@ -370,7 +370,8 @@ fn run() -> Result<()> {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
             let config = if merged {
-                FleetConfig::load_standard_with_base(config)
+                let policy = load_policy()?;
+                FleetConfig::load_standard_with_base_and_policy(config, &policy)
                     .map_err(|error| config_error(format!("fleet configuration invalid: {error}")))?
                     .config
             } else {
@@ -691,9 +692,11 @@ fn run() -> Result<()> {
                 let base = Config::load(default_config_path()).map_err(|error| {
                     config_error(format!("configuration invalid: {}", error.safe_summary()))
                 })?;
-                let fleet = FleetConfig::load_standard_with_base(base).map_err(|error| {
-                    config_error(format!("fleet configuration invalid: {error}"))
-                })?;
+                let policy = load_policy()?;
+                let fleet = FleetConfig::load_standard_with_base_and_policy(base, &policy)
+                    .map_err(|error| {
+                        config_error(format!("fleet configuration invalid: {error}"))
+                    })?;
                 if requested_json {
                     println!(
                         "{}",

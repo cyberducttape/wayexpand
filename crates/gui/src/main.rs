@@ -199,7 +199,10 @@ impl GuiApp {
 
     fn refresh_diagnostics(&mut self) {
         self.backend_status = discover_backends();
-        self.fleet_status = match FleetConfig::load_standard_with_base(self.config.clone()) {
+        self.fleet_status = match wayexpand_core::load_organization_policy().and_then(|policy| {
+            FleetConfig::load_standard_with_base_and_policy(self.config.clone(), &policy)
+                .map_err(|error| error.to_string())
+        }) {
             Ok(fleet) => format!(
                 "active · {} files · {} expansions · {} hotkeys",
                 fleet.stats.total_files_loaded,

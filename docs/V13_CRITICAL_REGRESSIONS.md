@@ -1,5 +1,10 @@
 # v1.3 Critical Regressions - FIXED
 
+> Historical regression analysis. The initial assessment below records bugs
+> before fixes landed; its reproduction snippets and “currently passes” claims
+> are not descriptions of current behavior. Use the repository's current tests
+> and `SECURITY.md` for the supported contract.
+
 ## Executive Summary
 
 The v1.3 deferred execution implementation introduced three critical architectural regressions in command execution policy enforcement.
@@ -70,7 +75,7 @@ POST-EXECUTION checks (after run_command()):
 fn output_size_policy_must_be_checked_post_execution() {
     // Template is empty (0 bytes), command outputs 100KB
     // max_replacement_size = 1KB
-    // Expected: blocked (but currently passes)
+    // Historical expected behavior: blocked after command output is checked
 }
 ```
 
