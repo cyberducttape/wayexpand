@@ -139,7 +139,7 @@ If an upgrade causes issues, downgrade to the previous version:
 ### From Source
 
 ```bash
-git checkout v1.1.2
+git checkout v1.1.1
 ./scripts/install-user.sh
 systemctl --user restart wayexpand-input-method.service
 ```
@@ -147,7 +147,7 @@ systemctl --user restart wayexpand-input-method.service
 ### From PPA
 
 ```bash
-sudo apt install wayexpand=1.1.2-1
+sudo apt install wayexpand=1.1.1-1
 sudo apt-mark hold wayexpand  # Prevent auto-upgrade
 ```
 
@@ -163,7 +163,7 @@ To resume auto-updates: `sudo apt-mark unhold wayexpand`
 # Downgrade to specific version (requires git history)
 cd /tmp && git clone https://github.com/itchyitchy123/wayexpand.git
 cd wayexpand
-git checkout v1.1.2
+git checkout v1.1.1
 makepkg -si
 ```
 
@@ -251,7 +251,7 @@ systemctl --user is-active wayexpand-input-method.service
 
 | Version | Release Date | Major Changes |
 |---------|--------------|---------------|
-| 1.1.2 | 2026-09-18 | Security hardening (P0 fixes), diagnostics improvements |
+| 1.1.2 | **Unreleased** | Security hardening (P0 fixes), diagnostics improvements |
 | 1.1.1 | 2026-09-18 | GUI themes, font scaling, sysadmin examples |
 | 1.1.0 | 2026-09-18 | Language support, color packs, date math, cursor placement |
 | 1.0.0 | 2026-09-17 | **First stable release** — stability guarantees |
