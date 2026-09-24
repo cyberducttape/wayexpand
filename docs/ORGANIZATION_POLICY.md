@@ -73,8 +73,7 @@ When `safe_mode = true`:
 - Violations logged as **errors** to journald
 - Suitable for locked-down production environments
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends
-- Can require absolute command paths so `program = "git"` cannot resolve
-  differently based on the daemon's `PATH`
+- Can require absolute command paths so `program = "git"` is rejected
 
 **Enforcement is consistent across all policy paths:** All expansion checks
 (core engine, daemon, CLI diagnostics) enforce the same restrictions. Violations
@@ -87,6 +86,7 @@ When `safe_mode = false`:
 - Violations logged as **warnings** to journald
 - Suitable for testing policies before full enforcement
 - Enables discovery of problematic snippets without breaking workflows
+- `require_absolute_commands = true` warns about relative program names but permits them
 
 **Logging is consistent across all policy paths:** All expansion checks
 log the same violation details to journald with the configured audit_prefix.

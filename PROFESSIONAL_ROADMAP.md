@@ -7,8 +7,8 @@ The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; 
 Production release with:
 - Stability guarantees for CLI, JSON, and config schema
 - Security audit and formal threat model documentation
-- Package distribution: Ubuntu PPA and Arch AUR (Fedora has no Copr repo
-  yet -- see docs/PACKAGING.md)
+- Package distribution: Ubuntu PPA; Arch packaging is prepared but has not
+  been submitted to AUR (Fedora has no Copr repo yet -- see docs/PACKAGING.md)
 - Professional GUI with themes, language packs, and accessibility support
 - KDE Plasma support (evdev capture + KWin window tracking)
 - Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
@@ -226,7 +226,8 @@ See [docs/AUDIT_FINDINGS.md](docs/AUDIT_FINDINGS.md) for detailed findings and r
 
 #### Distribution & Discoverability
 
-**Current:** Ubuntu PPA, Arch AUR; Fedora Copr not yet published
+**Current:** Ubuntu PPA is available. Arch packaging is a preview and has not
+been submitted to AUR; Fedora Copr is not published.
 
 **What's needed:**
 - [ ] Publish Fedora Copr repository (see `docs/PACKAGING.md`)
@@ -284,9 +285,10 @@ Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippet
 
 ### Release Architectures
 
-Native x86_64 and aarch64 release archives are built on GitHub-hosted Linux
-runners. Package-manager publication and installation testing on aarch64 remain
-distribution-maintainer verification tasks.
+The GitHub release workflow publishes a prebuilt Linux archive for x86_64
+only. There is no official aarch64 release archive yet; aarch64 users build
+from source. Arch packaging is prepared but has not been submitted to AUR.
+See [docs/PACKAGING.md](docs/PACKAGING.md) for current details.
 
 ### Enhanced Telemetry (Privacy-Respecting)
 
@@ -303,7 +305,8 @@ distribution-maintainer verification tasks.
 ## Success Metrics for Professional Status
 
 ### Professional Tier (Achieved v1.0.0)
-- ✅ Available via Ubuntu PPA and Arch AUR
+- ✅ Available via Ubuntu PPA
+- ◐ Arch PKGBUILD prepared; AUR publication is pending
 - ✅ Documented security policy with vulnerability disclosure process
 - ✅ Stability guarantees (COMPATIBILITY.md)
 - ✅ No known critical bugs

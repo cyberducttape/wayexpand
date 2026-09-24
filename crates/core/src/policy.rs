@@ -123,7 +123,7 @@ pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, St
 ///
 /// Post-execution violations (backend allowed, output size) are still checked
 /// after engine.process() because they depend on the matched expansion.
-pub fn pre_flight_check(policy: &OrganizationPolicy) -> Option<String> {
+pub fn pre_flight_check(_policy: &OrganizationPolicy) -> Option<String> {
     // NOTE: disable_commands does NOT block static snippets—only command-backed ones.
     // That check happens per-expansion after matching (see apply_preflight_policy).
     // This global check is not needed; static snippets must always be allowed.

@@ -1357,6 +1357,12 @@ fn process_event(
         }
 
         for action in engine.process_key(&chord) {
+            if let Some(violation) = policy.command_path_violation(&action.command.program) {
+                policy::log_violation(policy, &violation);
+                if policy.safe_mode {
+                    continue;
+                }
+            }
             if let Err(error) = engine.queue_hotkey(&action) {
                 warn!(
                     chord = %action.chord,
@@ -1377,12 +1383,13 @@ fn process_event(
     }
     // v1.3+ deferred execution: check policy BEFORE executing commands
     let pending = engine.process_deferred(event);
-    apply_pending_results(pending, injector, policy, active_backend)
+    apply_pending_results(engine, pending, injector, policy, active_backend)
 }
 
 /// Apply deferred expansion results with policy pre-approval (v1.3+ architecture).
 /// Checks policy before executing commands, preventing irreversible side effects.
 fn apply_pending_results(
+    engine: &mut ExpansionEngine,
     pending: Vec<wayexpand_core::PendingExpansionResult>,
     mut injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
@@ -1390,6 +1397,15 @@ fn apply_pending_results(
 ) -> std::result::Result<(), Box<EventError>> {
     for pending_result in pending {
         let has_command = pending_result.command.is_some();
+
+        if let Some(command) = &pending_result.command {
+            if let Some(violation) = policy.command_path_violation(&command.program) {
+                policy::log_violation(policy, &violation);
+                if policy.safe_mode {
+                    continue;
+                }
+            }
+        }
 
         // Check policy BEFORE executing commands
         if policy::check_and_log_expansion_violations(
@@ -1403,13 +1419,14 @@ fn apply_pending_results(
         }
 
         // Policy approved: now execute the command (if any) and get final result
-        let result = match pending_result.execute_with_policy(policy.max_replacement_size) {
-            Ok(result) => result,
-            Err(e) => {
-                warn!("command execution failed: {}", e);
-                continue;
-            }
-        };
+        let result =
+            match engine.execute_pending_with_policy(pending_result, policy.max_replacement_size) {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("command execution failed: {}", e);
+                    continue;
+                }
+            };
 
         if let Some(backend) = injector.as_deref_mut() {
             // P0 security fix: Never silently switch output transports.
@@ -1703,6 +1720,55 @@ mod tests {
             injector.calls,
             ["erase::a", "insert:alpha", "erase::b", "insert:beta"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_command_output_over_organization_limit_is_not_injected() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-daemon-policy-output-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let command = format!(
+            "printf completed > '{}'; yes x | head -c 257",
+            marker.display()
+        );
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":large"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "{command}"]
+            timeout_ms = 1000
+            "#
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            max_replacement_size: 256,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(":large".into()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        assert!(marker.exists(), "the subprocess should complete");
+        assert!(
+            injector.calls.is_empty(),
+            "oversized output must not be injected"
+        );
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]
