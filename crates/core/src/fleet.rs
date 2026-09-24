@@ -199,8 +199,10 @@ impl FleetConfig {
         let mut config = base;
         config.organization = crate::OrganizationPolicy::default();
 
-        // Policy enforcement: filter pack-sourced expansions if allowed_packs is set
-        if !policy.allowed_packs.is_empty() {
+        // Policy enforcement: filter pack-sourced expansions only in safe_mode.
+        // In audit mode, allowed_packs violations are logged but packs are retained.
+        // This ensures audit-only policies can discover which packs would be filtered.
+        if !policy.allowed_packs.is_empty() && policy.safe_mode {
             fleet.config.expansion.retain(|expansion| {
                 if let Some(prov) = fleet.expansions_source.get(&expansion.trigger) {
                     // Keep organization and user layers, filter packs
@@ -630,6 +632,7 @@ replacement = "third"
         let fleet = merger.merge().unwrap();
 
         let policy = OrganizationPolicy {
+            safe_mode: true,
             allowed_packs: vec!["approved".to_string()],
             ..OrganizationPolicy::default()
         };
