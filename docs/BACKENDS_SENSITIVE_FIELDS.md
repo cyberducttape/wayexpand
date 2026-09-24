@@ -56,8 +56,11 @@ When using `--source=evdev`:
 
 This is the documented tradeoff for using evdev. Before enabling evdev, you must:
 
-1. Read [SECURITY.md](../SECURITY.md) completely
-2. Understand that you're granting `input` group membership (raw keyboard access system-wide)
+1. Read [THREAT_MODEL.md](../THREAT_MODEL.md) and [SECURITY.md](../SECURITY.md)
+2. Understand that you're granting explicit raw input-event access. WayExpand's
+   active-seat rule targets keyboard-class event nodes; the legacy `input`
+   group mode may grant broader raw input-event access depending on your
+   distribution's policy.
 3. Accept that password fields are not protected
 
 **When to use evdev despite this limitation:**

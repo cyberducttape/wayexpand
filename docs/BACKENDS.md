@@ -281,7 +281,7 @@ claim that a usable keyboard was found:
 expand:
 1. List input devices: `ls -la /dev/input/event*`
 2. Check which ones are keyboards: `cat /proc/bus/input/devices`
-3. Verify at least one is readable: `ls -l /dev/input/event* | grep $USER` (for input group membership)
+3. Verify at least one keyboard event node is readable: `getfacl /dev/input/eventN` for active-seat mode, or `ls -l /dev/input/event* | grep $USER` for legacy input-group mode
 4. Restart daemon: `systemctl --user restart wayexpand-evdev.service`
 
 The authoritative `EvdevSource::connect` path does inspect keyboard key

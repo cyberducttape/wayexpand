@@ -37,6 +37,26 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 - And [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) or [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) for automation
 
 ### I want to handle sensitive data safely
+→ Start with [THREAT_MODEL.md](../THREAT_MODEL.md)
+- Concise protected / partial / out-of-scope security summary
+- Backend privacy tradeoffs
+
+Then see [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
+- Security best practices
+- Pattern recommendations
+- Integration with secret stores
+
+### I want to understand the security model
+→ Start with [THREAT_MODEL.md](../THREAT_MODEL.md)
+- One-page threat table
+- Command and backend security boundaries
+- Links to detailed security docs
+
+Then see [SECURITY.md](../SECURITY.md)
+- Vulnerability reporting
+- Detailed daemon, config, evdev, command, and socket model
+
+### I want to handle sensitive data safely in snippets
 → See [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
 - Security best practices
 - Pattern recommendations
@@ -94,6 +114,8 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
+| [THREAT_MODEL.md](../THREAT_MODEL.md) | Security-conscious users | Concise protected/partial/out-of-scope threat summary |
+| [SECURITY.md](../SECURITY.md) | Security-conscious users | Vulnerability reporting and detailed security model |
 | [FLEET_CONFIG.md](FLEET_CONFIG.md) | Enterprise teams | Multi-layer configuration |
 | [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) | Enterprise teams | Policy enforcement and compliance |
 | [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) | Enterprise teams | Handling sensitive data |
@@ -149,7 +171,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 
 #### Contributors
 - [DEVELOPMENT.md](DEVELOPMENT.md) — setup and testing
-- [ARCHITECTURE](../README.md#architecture) — design overview
+- [BACKENDS.md](BACKENDS.md) — backend architecture and protocol overview
 - [PACKAGING.md](PACKAGING.md) — distro packaging
 - [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) — test procedures
 
@@ -189,6 +211,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 - [BACKENDS.md](BACKENDS.md) — technical details
 
 #### Sensitive Data
+- [THREAT_MODEL.md](../THREAT_MODEL.md) — concise security boundary
 - [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) — best practices
 - [SECURITY.md](../SECURITY.md) — security model
 
@@ -250,7 +273,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 → [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md), [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md)
 
 **Need to handle secrets safely**
-→ [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
+→ [THREAT_MODEL.md](../THREAT_MODEL.md), [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)
 
 **Want to deploy to team**
 → [FLEET_CONFIG.md](FLEET_CONFIG.md), [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md), [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md)
@@ -276,14 +299,15 @@ For current guidance, see the live documentation above. Archived docs are for re
 
 - **GitHub Issues:** https://github.com/itchyitchy123/wayexpand/issues
 - **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
-- **Security:** See [SECURITY.md](../SECURITY.md) for vulnerability reporting
+- **Security:** See [THREAT_MODEL.md](../THREAT_MODEL.md) for the concise
+  security boundary and [SECURITY.md](../SECURITY.md) for vulnerability reporting
 - **Changelog:** [CHANGELOG.md](../CHANGELOG.md)
 
 ---
 
 ## Documentation Statistics
 
-- **Total public docs:** 27 files
+- **Total public docs:** 28 files
 - **Archived docs:** 11 files
 - **Total lines:** ~8,500 lines of documentation
 - **Last updated:** 2026-09-23

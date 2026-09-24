@@ -27,6 +27,9 @@ GitHub issue for those.
 WayExpand is intended to run as the unprivileged desktop user. It must not be
 run as root.
 
+For a concise table of protected, partially protected, and out-of-scope
+threats, see [THREAT_MODEL.md](THREAT_MODEL.md).
+
 The engine supports `InputEvent::FocusChanged { sensitive: true }`. An input
 source that can identify password or other sensitive fields must emit that
 event. The engine then clears its rolling buffer and ignores text until the
@@ -95,28 +98,28 @@ risking text corruption.
 
 The evdev source (`--source=evdev`) trades away a real security property the
 other sources have: it reads keyboard events directly from the kernel
-(`/dev/input/event*`) rather than through a Wayland protocol, so it has no
-way to learn which application field has focus. It therefore **never**
-suspends matching in password or other sensitive fields the way the
-input-method source does. Only enable it where that tradeoff is acceptable.
-It also requires the user to be in the `input` group, a broader grant than
-the Wayland sources need, since that group can read every keystroke typed
-anywhere in the session -- including other users' sessions and password
-prompts -- not only ones passed to WayExpand's own matcher. Granting this is
-a separate, explicit, root-requiring step
+(`/dev/input/event*`) rather than through a Wayland protocol, so it has no way
+to learn which application field has focus. It therefore **never** suspends
+matching in password or other sensitive fields the way the input-method source
+does. Only enable it where that tradeoff is acceptable.
+
+Granting evdev access is a separate, explicit, root-requiring step
 (`scripts/install-evdev-permissions.sh`, `--dry-run` first), never run
-automatically by the user installers, which install
-`udev/71-wayexpand-evdev.rules` (reasserting the standard
-`SUBSYSTEM=="input", GROUP="input"` default most systemd distributions
-already ship, rather than granting anything broader) and add the invoking
-user to `input`. Run `sudo scripts/install-evdev-permissions.sh --uninstall`
-to reverse it.
+automatically by the user installers or base distro packages. WayExpand's udev
+templates target udev keyboard-class event nodes. The active-seat mode uses
+logind/uaccess ACLs and does not add the user to the broad `input` group. The
+legacy input-group mode also adds the invoking user to `input`; that group may
+grant broader raw input-event access depending on the distribution's default
+input-device policy. Run `sudo scripts/install-evdev-permissions.sh --uninstall`
+to reverse WayExpand's installed evdev policy and remove the invoking user from
+`input` when appropriate.
+
 This input-group path is the current legacy/simple access model, not the
-long-term preferred architecture. Active-seat ACLs through logind/udev and a
-small device broker are investigation candidates; their session, seat,
-hotplug, and distribution behavior must be tested before either can replace
-the current path. See [docs/EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md)
-for the investigation plan and acceptance criteria.
+long-term preferred architecture. A small device broker remains an investigation
+candidate; session, seat, hotplug, and distribution behavior must be tested
+before it can replace the current path. See
+[docs/EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md) for the
+investigation plan and acceptance criteria.
 
 Evdev also has a correctness limitation independent of permissions: capture is
 non-exclusive, so the application can receive a terminating key before

@@ -1,0 +1,57 @@
+# cargo-deny policy for WayExpand.
+#
+# This complements `cargo audit`: audit catches known vulnerabilities, while
+# cargo-deny also reviews license policy, duplicate versions, banned crates,
+# and allowed dependency sources.
+
+[graph]
+all-features = true
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "deny"
+notice = "warn"
+ignore = []
+
+[licenses]
+unlicensed = "deny"
+confidence-threshold = 0.8
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "OFL-1.1",
+    "Unicode-3.0",
+    "Ubuntu-font-1.0",
+    "Unlicense",
+    "Zlib",
+]
+
+exceptions = [
+    # xkbcommon-rs 0.1.2 ships a LICENSE file derived from libxkbcommon's
+    # MIT/X11-style terms but does not publish a license expression in its
+    # Cargo manifest.
+    { name = "xkbcommon-rs", version = "0.1.2", allow = ["MIT"] },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
