@@ -161,7 +161,10 @@ fn main() -> Result<()> {
         .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
     let policy_backend = wayexpand_core::policy_backend_name(source_name, backend_name);
     if !policy.backend_allowed(policy_backend) {
-        let violation = format!("backend '{policy_backend}' is not in allowed list: {:?}", policy.allowed_backends);
+        let violation = format!(
+            "backend '{policy_backend}' is not in allowed list: {:?}",
+            policy.allowed_backends
+        );
         policy::log_violation(&policy, &violation);
         if policy.safe_mode {
             // In safe_mode (enforcement), disallowed backends refuse startup

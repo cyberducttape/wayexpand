@@ -135,10 +135,7 @@ impl ReloadableConfig {
         Self::load_mode_with_policy(path.into(), true, policy)
     }
 
-    pub fn load_with_policy(
-        path: impl Into<PathBuf>,
-        policy: OrganizationPolicy,
-    ) -> Result<Self> {
+    pub fn load_with_policy(path: impl Into<PathBuf>, policy: OrganizationPolicy) -> Result<Self> {
         Self::load_mode_with_policy(path.into(), false, policy)
     }
 
