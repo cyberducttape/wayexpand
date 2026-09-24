@@ -11,7 +11,10 @@ override_dh_clean:
 	dh_clean -X.orig
 
 override_dh_auto_configure:
-	test -f .cargo/config.toml || { echo "debian/rules expects the vendored release archive with .cargo/config.toml; use wayexpand-<version>-vendored.tar.gz for Launchpad/offline builds" >&2; exit 1; }
+	if [ ! -f .cargo/config.toml ]; then \
+		echo "Generating vendored dependencies for offline build..."; \
+		cargo vendor vendor/ > .cargo/config.toml; \
+	fi
 	dh_auto_configure
 
 override_dh_auto_build:
@@ -28,7 +31,7 @@ override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand-ibus usr/bin/
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
-	dh_install --package=wayexpand io.github.itchyitchy123.WayExpand.metainfo.xml usr/share/metainfo/
+	dh_install --package=wayexpand io.github.cyberducttape.WayExpand.metainfo.xml usr/share/metainfo/
 	dh_install --package=wayexpand docs/wayexpand.1 usr/share/man/man1/
 	dh_install --package=wayexpand assets/icon/hicolor/16x16/apps/wayexpand.png usr/share/icons/hicolor/16x16/apps/
 	dh_install --package=wayexpand assets/icon/hicolor/24x24/apps/wayexpand.png usr/share/icons/hicolor/24x24/apps/
