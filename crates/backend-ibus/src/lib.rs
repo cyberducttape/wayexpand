@@ -198,6 +198,24 @@ impl IbusEngineAdapter {
         if !self.enabled {
             return IbusKeyResult::default();
         }
+
+        // Pre-flight policy check: prevents side effects (e.g., command execution)
+        // before policy approval. Post-execution checks happen after engine.process().
+        if let Some(violation) = wayexpand_core::pre_flight_check(&self.policy) {
+            if self.policy.safe_mode {
+                error!(
+                    audit_prefix = %self.policy.audit_prefix,
+                    violation = %violation,
+                    "IBus blocked by pre-flight policy check (prevents execution)"
+                );
+                return IbusKeyResult::default();
+            }
+            warn!(
+                audit_prefix = %self.policy.audit_prefix,
+                violation = %violation,
+                "IBus pre-flight check violation in audit mode (execution allowed)"
+            );
+        }
         // When the core has disabled capture (password fields or an explicit
         // pause), do not consume or commit anything on the client's behalf.
         // The toolkit must receive the original key unchanged.
