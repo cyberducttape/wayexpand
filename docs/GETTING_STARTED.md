@@ -273,7 +273,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 ## Next Steps
 
 - **Learn the config format:** [Configuration Limits](CONFIGURATION_LIMITS.md) and [Compatibility](COMPATIBILITY.md)
-- **Understand the architecture:** [README.md](../README.md#architecture)
+- **Understand the architecture:** [BACKENDS.md](BACKENDS.md)
 - **Report bugs:** See [SECURITY.md](../SECURITY.md#reporting-a-vulnerability) for security issues, or open a GitHub issue for bugs
 
 Welcome to WayExpand! 🎉

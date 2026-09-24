@@ -76,6 +76,7 @@ struct StatusSnapshot {
 }
 
 impl StatusPublisher {
+    #[allow(clippy::too_many_arguments)]
     fn publish(
         &mut self,
         control: &control::ControlServer,
@@ -1045,6 +1046,7 @@ fn set_daemon_status(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn set_daemon_status_with_metrics(
     publisher: &mut StatusPublisher,
     control: &control::ControlServer,
