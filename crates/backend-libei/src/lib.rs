@@ -45,13 +45,17 @@ use std::{
 };
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
-use wayexpand_core::{InjectorError, TextInjector};
+use wayexpand_core::{InjectorError, Modifiers, TextInjector};
 use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
 
 const BACKEND_NAME: &str = "libei";
 const KEY_BACKSPACE: u32 = 14;
+const KEY_LEFTCTRL: u32 = 29;
+const KEY_LEFTSHIFT: u32 = 42;
+const KEY_LEFTALT: u32 = 56;
 // Linux evdev keycode for the Left arrow, used for `{{cursor}}` placement.
 const KEY_LEFT: u32 = 105;
+const KEY_LEFTMETA: u32 = 125;
 const EI_TEXT_MAX_UTF8_BYTES: usize = 254;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
@@ -706,17 +710,26 @@ impl LibeiInjector {
             .map_err(|error| LibeiError::Flush(error.to_string()))
     }
 
-    /// Injects a single keyboard key event for pass-through of unsupported keys
-    /// from input-method-v2 (Escape, arrows, F-keys, etc.).
-    fn send_key(&mut self, keycode: u32) -> Result<(), LibeiError> {
+    fn send_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), LibeiError> {
         let serial = self.connection.serial();
         self.device.device().start_emulating(serial, self.sequence);
         self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+        for modifier in modifier_keycodes(modifiers) {
+            self.keyboard.key(modifier, ei::keyboard::KeyState::Press);
+        }
         self.keyboard.key(keycode, ei::keyboard::KeyState::Press);
         self.device
             .device()
             .frame(serial, self.started_at.elapsed().as_micros() as u64);
         self.keyboard.key(keycode, ei::keyboard::KeyState::Released);
+        for modifier in modifier_keycodes(modifiers).into_iter().rev() {
+            self.keyboard
+                .key(modifier, ei::keyboard::KeyState::Released);
+        }
         self.device
             .device()
             .frame(serial, self.started_at.elapsed().as_micros() as u64);
@@ -725,6 +738,23 @@ impl LibeiInjector {
             .flush()
             .map_err(|error| LibeiError::Flush(error.to_string()))
     }
+}
+
+fn modifier_keycodes(modifiers: Modifiers) -> Vec<u32> {
+    let mut keycodes = Vec::with_capacity(4);
+    if modifiers.ctrl {
+        keycodes.push(KEY_LEFTCTRL);
+    }
+    if modifiers.alt {
+        keycodes.push(KEY_LEFTALT);
+    }
+    if modifiers.shift {
+        keycodes.push(KEY_LEFTSHIFT);
+    }
+    if modifiers.super_key {
+        keycodes.push(KEY_LEFTMETA);
+    }
+    keycodes
 }
 
 fn split_text_chunks(text: &str) -> Vec<&str> {
@@ -1244,11 +1274,25 @@ impl TextInjector for LibeiInjector {
     }
 
     fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
-        self.send_key(keycode).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })
+        self.send_key_with_modifiers(keycode, Modifiers::default())
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
+    }
+
+    fn inject_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), InjectorError> {
+        self.send_key_with_modifiers(keycode, modifiers)
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
     }
 }
 

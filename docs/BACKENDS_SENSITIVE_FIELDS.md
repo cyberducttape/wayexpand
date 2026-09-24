@@ -36,7 +36,9 @@ When using `--source=input-method`:
 
 **Tradeoff:** 
 - ✅ Password protection is automatic
-- ⚠️ Key pass-through is experimental (Escape/arrows/F-keys may not work)
+- ⚠️ Key pass-through is experimental. Unsupported keys and shortcuts require
+  libei pass-through; failures should surface and reconnect, but this is not
+  yet certified as lossless across desktops.
 
 ## evdev (KDE Plasma, Sway, Hyprland)
 
