@@ -85,10 +85,12 @@ home-directory, or broader filesystem access. The planned Action Broker is a
 separate privilege/environment boundary for that use case; it must receive an
 explicit action name and enforce its own allowlist, environment, cwd, network
 policy, timeout, output limit, and audit result. See
-[`docs/ACTION_BROKER_DESIGN.md`](docs/ACTION_BROKER_DESIGN.md). The
-`wayexpand-gui` preview feature can help identify these issues: a command that
-fails in Preview due to sandbox restrictions will also fail when triggered
-during typing.
+[`docs/ACTION_BROKER_DESIGN.md`](docs/ACTION_BROKER_DESIGN.md).
+
+**Note:** The `wayexpand-gui` preview feature does NOT run commands under the
+daemon's systemd sandbox restrictions. For testing command behavior under actual
+daemon constraints, either manually trigger the expansion during typing or check
+the daemon's `journalctl --user` output for error details.
 
 The input-method source fails closed when it cannot safely pass through a
 non-text key, preserve shortcut modifiers, or determine a UTF-8-safe Backspace
@@ -169,7 +171,9 @@ A typical SRE might want:
 ```toml
 [[expansion]]
 trigger = ":shortlist"
-command = "kubectl get svc -o wide"
+[expansion.command]
+program = "kubectl"
+args = ["get", "svc", "-o", "wide"]
 ```
 
 This command fails in the current sandbox and cannot be fixed without materially
