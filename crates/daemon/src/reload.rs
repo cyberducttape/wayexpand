@@ -9,9 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
-use wayexpand_core::{
-    Config, ConfigError, ExpansionEngine, FleetConfig, Layer, OrganizationPolicy,
-};
+use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, OrganizationPolicy};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -352,28 +350,24 @@ fn load_for_mode(
 }
 
 fn standard_fleet_signature() -> u64 {
+    match FleetConfig::standard_source_files() {
+        Ok(paths) => fleet_signature_for(paths),
+        Err(error) => {
+            let mut hasher = DefaultHasher::new();
+            error.to_string().hash(&mut hasher);
+            hasher.finish()
+        }
+    }
+}
+
+fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
     let mut hasher = DefaultHasher::new();
-    for (_, directory) in [Layer::Organization, Layer::User, Layer::Pack]
-        .into_iter()
-        .filter_map(|layer| layer.default_dir().map(|directory| (layer, directory)))
-    {
-        directory.hash(&mut hasher);
-        let Ok(entries) = fs::read_dir(&directory) else {
-            continue;
-        };
-        let mut paths: Vec<_> = entries
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "toml")
-            })
-            .collect();
-        paths.sort();
-        for path in paths {
-            path.hash(&mut hasher);
-            if let Ok(contents) = fs::read(&path) {
-                contents.hash(&mut hasher);
-            }
+    let mut paths: Vec<_> = paths.into_iter().collect();
+    paths.sort();
+    for path in paths {
+        path.hash(&mut hasher);
+        if let Ok(contents) = fs::read(&path) {
+            contents.hash(&mut hasher);
         }
     }
     hasher.finish()
@@ -399,6 +393,28 @@ mod tests {
 
     fn config_text(replacement: &str) -> String {
         format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
+    }
+
+    #[test]
+    fn fleet_signature_tracks_nested_pack_file_content() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-fleet-signature-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let nested = root.join("my-pack").join("foo.toml");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, "before").unwrap();
+
+        let before = fleet_signature_for([nested.clone()]);
+        fs::write(&nested, "after!").unwrap();
+        let after = fleet_signature_for([nested.clone()]);
+
+        assert_ne!(before, after);
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// Writes a fixture with an explicit private mode. Relying on the
