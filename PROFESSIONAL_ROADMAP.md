@@ -10,7 +10,7 @@ Production release with:
 - Package distribution: Ubuntu PPA; Arch packaging is prepared but has not
   been submitted to AUR (Fedora has no Copr repo yet -- see docs/PACKAGING.md)
 - Professional GUI with themes, language packs, and accessibility support
-- KDE Plasma support (evdev capture + KWin window tracking)
+- Experimental KDE-specific path (evdev capture + KWin window tracking; not certified)
 - Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
 - Stability guarantees documented in COMPATIBILITY.md
 
@@ -205,8 +205,9 @@ Daemon (capture/match/inject)
 
 ### Path to Legendary Status: Certification and Distribution
 
-**Why:** Current gaps (zero GitHub stars, unverified compositor support, limited packaging reach)
-are not due to code quality but execution: certification, distribution, and proof points.
+**Why:** Current gaps include uncertified compositor support and limited
+packaging reach; closing them requires certification, distribution, and
+independent proof points.
 
 **Scope:** Close the gap between a strong engineering foundation and a product users trust and recommend.
 
@@ -214,7 +215,10 @@ See [docs/AUDIT_FINDINGS.md](docs/AUDIT_FINDINGS.md) for detailed findings and r
 
 #### Compositor Certification (Sway, Hyprland, KDE Plasma, GNOME)
 
-**Status:** Window tracking and backend support are implemented; real-world validation pending
+**Status:** No compositor is certified. KWin window tracking is implemented;
+wlroots tracking is not shipped, and GNOME/Mutter has no supported tracker.
+Other backend support remains experimental where noted in
+[`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md).
 
 **What's needed:**
 - [ ] Automated end-to-end tests for each compositor covering normal typing, Unicode (emoji, RTL), password fields, focus changes, rapid triggers, undo, and shortcut conflicts
@@ -309,7 +313,8 @@ See [docs/PACKAGING.md](docs/PACKAGING.md) for current details.
 - ◐ Arch PKGBUILD prepared; AUR publication is pending
 - ✅ Documented security policy with vulnerability disclosure process
 - ✅ Stability guarantees (COMPATIBILITY.md)
-- ✅ No known critical bugs
+- Historical v1.0 milestone criterion; this is not a current defect-status
+  assertion. See the current support matrix and regression tests for status.
 - ✅ Public changelog for releases
 - ✅ GitHub repository with active CI
 

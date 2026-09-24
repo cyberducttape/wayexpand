@@ -66,13 +66,13 @@ x86_64 binaries with the locked dependency graph and publishes:
 **Source archives** (for distributions and offline builds):
 - `wayexpand-<version>.tar.gz` (clean source with Cargo.lock; no vendored source config or `vendor/`)
   - Recommended for AUR, Copr, and distributions that build from source
-  - ~70 MB, cargo downloads dependencies from crates.io during build
+  - Contains tracked project sources; Cargo downloads dependencies from crates.io during build
   - Build systems add `cargo vendor vendor/` as needed
   - SHA256: `wayexpand-<version>.tar.gz.sha256`
 
 - `wayexpand-<version>-vendored.tar.gz` (includes vendored dependencies)
   - For Launchpad PPA and offline/air-gapped builds
-  - ~600 MB, all dependencies pre-downloaded
+  - Includes dependencies for offline builds; archive size varies with the locked dependency graph
   - `CARGO_NET_OFFLINE=true` builds work without internet
   - SHA256: `wayexpand-<version>-vendored.tar.gz.sha256`
 
