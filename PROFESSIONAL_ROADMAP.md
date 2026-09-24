@@ -56,7 +56,9 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       re-insert the terminator. Corrects `:sig ` → `signature ` instead of
       `:regards ` (missing space).
 
-### v1.2.1
+### v1.2.1 (Implemented Concurrently)
+
+The following improvements were implemented in v1.2 alongside other work:
 
 - [x] **#25 Command expansions block the input thread** (up to the command
       timeout). Daemon command expansions now run through a bounded background
@@ -69,7 +71,7 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       behavior, explicit reset support, and fresh-consent fallback when tokens
       are disabled or invalid. Remaining work is compositor-specific validation.
 
-### Capture Path Improvements (v1.2.1+)
+### Capture Path Improvements (v1.2)
 
 **Known tradeoff:** No capture mode is currently both secure and universal.
 
@@ -88,15 +90,20 @@ desktop Linux users but does not prevent use in controlled environments
 
 ---
 
-## In Progress (v1.2 target)
+## Implemented in v1.2 (Not Yet Shipped)
 
-### Window Tracking for wlroots Compositors
+### Window Tracking for wlroots Compositors (Implemented, Awaiting Certification)
 
-**Status:** Phases 1-3 complete (2026-09-19). Ready for real-world testing.
+**Status:** Implementation complete (2026-09-19). Awaiting real-world certification.
 **Why:** Complete `app_filter` support across Sway, Hyprland, river  
 **Scope:** Implement wlroots `wlr-foreign-toplevel-management-v1` protocol
 
-**Phase 1 + 2 + 3 Complete:**
+**⚠️ IMPORTANT:** This implementation exists in the codebase but is not shipped
+or certified. Per [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md): "wlroots tracker
+is not shipped; GNOME/Mutter has no supported tracker." End-to-end certification
+requires reproducible tests across all target compositors.
+
+**Implementation Details:**
 - ✅ Protocol connection and registry discovery
 - ✅ Toplevel event handling (creation, destruction, metadata)
 - ✅ Focus tracking with async notifications
@@ -105,36 +112,29 @@ desktop Linux users but does not prevent use in controlled environments
 - ✅ Daemon event loop integration
 - ✅ Window focus changes routed to engine.process(InputEvent::WindowChanged)
 - ✅ app_filter matching with focused window context
-- ✅ Workspace tests covering protocol detection, naming, timeout, daemon integration,
-  configuration safety, matching, and backend behavior; run
-  `cargo test --locked --workspace` for the current count
+- ✅ Workspace tests covering protocol detection, naming, timeout, daemon integration
 
-**Commits:**
-- 1f58bc43: Phase 1 foundation
-- 0f48b022: Phase 2 event-driven focus tracking
-- 97b49438: Phase 3 daemon integration
-
-**Status by compositor:**
+**Certification Status by Compositor:**
 - Sway: 🟡 Implemented, awaiting real-world certification
 - Hyprland: 🟡 Implemented, awaiting real-world certification
 - river: 🟡 Implemented, awaiting real-world certification
-- GNOME: ❌ No usable protocol path (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
+- GNOME: ❌ No usable protocol path (no window-tracking protocol exists)
 
-### Libei-First Backend Auto-Selection (Phase 4)
+### Libei-First Backend Auto-Selection (Implemented, Experimental)
 
-**Status:** Implemented (2026-09-19). Conservative automatic selection is
-available, but production promotion remains gated on compositor/client
-certification and explicit readiness evidence.
+**Status:** Implemented (2026-09-19). Conservative automatic selection available.
+Production promotion remains gated on compositor/client certification.
+
 **Why:** Reduce user friction by auto-detecting optimal backend
 **Scope:** Intelligent backend selection based on compositor detection
 
-**Implementation Complete:**
+**Implementation Details:**
 - ✅ Compositor detection (KDE, wlroots, GNOME, X11, Unknown)
 - ✅ Libei-first strategy with compositor-specific fallbacks
 - ✅ Backend selection respects user overrides
 - ✅ Auto-selection only when both flags unset
 - ✅ 4 unit tests for auto-select logic
-- ✅ Daemon integration (Phase 4 UX improvement)
+- ✅ Daemon integration with conservative defaults
 
 **Selection Strategy:**
 - Daemon automatic selection → conservative stdin + libei; raw evdev and
@@ -144,16 +144,6 @@ certification and explicit readiness evidence.
   libei/wlroots output path.
 - Experimental input-method-v2 → explicit opt-in only, with unsupported
   non-text key pass-through visible to the operator.
-
-**Commits:**
-- e340be2c: Phase 4 daemon integration
-- a54913d2: Optimistic state tracking for input-method
-
-**Related:**
-- `crates/backend-wlroots-toplevel/src/lib.rs`: full Phase 1-2 implementation
-- `docs/WLROOTS_WINDOW_TRACKING_GUIDE.md`: implementation details
-- `docs/DESKTOP_STATUS.md`: current status by compositor
-- GNOME/Mutter: no window-tracking protocol exists (see GNOME_WINDOW_TRACKING.md)
 
 ### Polish & Quality Improvements
 
@@ -170,7 +160,7 @@ certification and explicit readiness evidence.
 
 ---
 
-## In Progress / Planned (v1.3+)
+## Planned (v1.3+)
 
 ### P1 Security Gate: Action Broker
 
