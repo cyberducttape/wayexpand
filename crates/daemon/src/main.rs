@@ -1360,7 +1360,70 @@ fn process_event(
         }
         return Ok(());
     }
-    apply_results(engine.process(event), injector, policy, active_backend)
+    // v1.3+ deferred execution: check policy BEFORE executing commands
+    let pending = engine.process_deferred(event);
+    apply_pending_results(pending, injector, policy, active_backend)
+}
+
+/// Apply deferred expansion results with policy pre-approval (v1.3+ architecture).
+/// Checks policy before executing commands, preventing irreversible side effects.
+fn apply_pending_results(
+    pending: Vec<wayexpand_core::PendingExpansionResult>,
+    mut injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> std::result::Result<(), Box<EventError>> {
+    for pending_result in pending {
+        let has_command = pending_result.command.is_some();
+
+        // Check policy BEFORE executing commands
+        if policy::check_and_log_expansion_violations(
+            policy,
+            pending_result.template_text.len(),
+            has_command,
+            active_backend,
+        ) {
+            // In safe_mode, block the expansion
+            continue;
+        }
+
+        // Policy approved: now execute the command (if any) and get final result
+        let result = match pending_result.execute_with_policy() {
+            Ok(result) => result,
+            Err(e) => {
+                warn!("command execution failed: {}", e);
+                continue;
+            }
+        };
+
+        if let Some(backend) = injector.as_deref_mut() {
+            // P0 security fix: Never silently switch output transports.
+            if text_contains_newlines(&result.insert) {
+                warn!(
+                    backend = backend.name(),
+                    "expansion contains newlines; selected backend may not support multiline insertion"
+                );
+            }
+            let inject_result = ExpansionEngine::apply(backend, &result);
+
+            if let Err(source) = inject_result {
+                return Err(Box::new(EventError { result, source }));
+            }
+            info!(
+                trigger_chars = result.trigger.chars().count(),
+                insert_bytes = result.insert.len(),
+                "expansion injected"
+            );
+        } else {
+            info!(
+                trigger_chars = result.trigger.chars().count(),
+                matched_chars = result.matched_text.chars().count(),
+                insert_bytes = result.insert.len(),
+                "expansion matched"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn apply_results(
