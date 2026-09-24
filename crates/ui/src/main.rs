@@ -655,8 +655,7 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
             .or_else(|| std::env::var("EDITOR").ok())
             .unwrap_or_else(|| "vi".into());
 
-        let parts = shlex::split(&editor_spec)
-            .unwrap_or_else(|| vec![editor_spec.clone()]);
+        let parts = shlex::split(&editor_spec).unwrap_or_else(|| vec![editor_spec.clone()]);
 
         let editor_name = if parts.is_empty() {
             "vi".to_string()
