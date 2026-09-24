@@ -20,14 +20,10 @@ X11-Implementierung mit nachträglich angeflanschter Wayland-Unterstützung.
 > Die Kern-Engine, das TOML-Konfigurationsformat und die CLI/JSON-Verträge
 > sind stabil (siehe [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Die
 > Unterstützung der Desktop-Backends hängt vom Compositor ab, und mehrere
-> Erfassungs-/Ausgabe-Pfade sind noch **experimentell** — die
-> [Support-Matrix](docs/SUPPORT_MATRIX.md) benennt genau, was verifiziert
-> wurde und was nur implementiert, aber ungetestet ist. `wayexpand doctor`
-> zeigt, was Ihre eigene Sitzung tatsächlich unterstützt, bevor Sie sich
-> darauf verlassen. KDE Plasma (KWin 6.6+) hat aktuell die vollständigste
-> verifizierte Abdeckung. **GNOME (Mutter) wird derzeit nicht unterstützt**
-> — es existiert keine Implementierung für Fenster-Tracking, und keine ist
-> terminiert.
+> Erfassungs-/Ausgabe-Pfade sind noch **experimentell**. Kein Compositor ist
+> derzeit durch automatisierte End-to-End-Tests zertifiziert; siehe die
+> [Support-Matrix](docs/SUPPORT_MATRIX.md). `wayexpand doctor` zeigt, was
+> Ihre eigene Sitzung tatsächlich unterstützt, bevor Sie sich darauf verlassen.
 
 ## Warum nicht einfach Espanso oder AutoKey?
 

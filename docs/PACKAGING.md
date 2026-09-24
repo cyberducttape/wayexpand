@@ -33,9 +33,9 @@ makepkg -si
 ```
 
 **To maintain:**
-1. Update `pkgver` and `pkgrel` in `PKGBUILD`
-2. Compute SHA256: `sha256sum wayexpand-1.1.2.tar.gz`
-3. Update `sha256sums` array
+1. Follow [RELEASING.md](RELEASING.md) to update version numbers across all files
+2. Update `pkgver` and `pkgrel` in `PKGBUILD` (happens automatically with `prepare-release.sh`)
+3. SHA256 checksum is computed and inserted during release workflow
 4. Test with `makepkg -si`
 5. Before publication, generate `.SRCINFO` and verify in a clean Arch chroot
 
@@ -43,8 +43,9 @@ makepkg -si
 
 ```bash
 # Debian packaging expects the vendored release archive for offline builds.
-tar -xzf wayexpand-1.1.2-vendored.tar.gz
-cd wayexpand-1.1.2
+# Replace ${VERSION} with the current release version (e.g., 1.2.0)
+tar -xzf wayexpand-${VERSION}-vendored.tar.gz
+cd wayexpand-${VERSION}
 
 # Build source package
 dpkg-buildpackage -us -uc
@@ -53,7 +54,7 @@ dpkg-buildpackage -us -uc
 dpkg-buildpackage -b
 
 # Install locally
-sudo dpkg -i ../wayexpand_1.1.2-1_amd64.deb
+sudo dpkg -i ../wayexpand_${VERSION}-1_amd64.deb
 ```
 
 The Launchpad PPA path targets Ubuntu series. Plain Debian users should build
@@ -77,7 +78,8 @@ workflow until a native Debian repository exists.
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-mock wayexpand-1.1.2-1.fc39.src.rpm
+# Replace ${VERSION} with the current release version (e.g., 1.2.0)
+mock wayexpand-${VERSION}-1.fc39.src.rpm
 ```
 
 **To build from the repository spec file:**
@@ -134,10 +136,10 @@ toolchain.
 **Updates:**
 ```bash
 cd wayexpand-aur
-# Update PKGBUILD with new version
+# Update PKGBUILD with new version (see RELEASING.md for version update process)
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
-git commit -m "Update to v1.1.2"
+git commit -m "Update to v${VERSION}"  # Replace ${VERSION} with current version
 git push
 ```
 
@@ -154,9 +156,12 @@ git push
 # Build source package
 debuild -S -sa
 
-# Upload to PPA
-dput ppa:cyberducttape/ppa ../wayexpand_1.1.2-1_source.changes
+# Upload to PPA (replace ${VERSION} with current version)
+dput ppa:cyberducttape/ppa ../wayexpand_${VERSION}-1_source.changes
 ```
+
+**Note:** See [RELEASING.md](RELEASING.md) for the authoritative release version workflow
+(it is the single source of truth for version numbers across all distributions).
 
 ### Fedora/Copr
 
@@ -204,16 +209,26 @@ wayexpand-gui
 
 ## Versioning and Release Flow
 
-When releasing a new version:
+**⚠️ IMPORTANT:** This document is for packaging maintainers. The authoritative
+release workflow is documented in [RELEASING.md](RELEASING.md).
 
-1. **Tag in git:** `git tag v1.1.2 && git push origin v1.1.2`
-2. **Update all packaging files:**
-   - `PKGBUILD`: bump `pkgver`, reset `pkgrel=1`
-   - `debian/changelog`: add new entry (use `dch -i`)
-   - `wayexpand.spec`: bump `Version:`, reset `Release: 1%{?dist}`
-3. **Build locally and test on each distro**
-4. **Submit/upload to each distro** (see above)
-5. **Announce release** on GitHub, Reddit, etc.
+Do not edit version numbers independently in `PKGBUILD`, `debian/changelog`, or
+`wayexpand.spec`. All version updates must go through the central release
+process defined in RELEASING.md, which ensures consistency across:
+- `Cargo.toml`
+- `debian/changelog`
+- `PKGBUILD`
+- `wayexpand.spec`
+- Release metadata (AppStream metainfo, IBus component XML)
+
+When a new release is tagged, the version numbers in all packaging files are
+already updated. Your packaging job is to:
+
+1. **Build locally and test** on each target distro
+2. **Submit/upload to each distro** using the updated version numbers
+3. **Report successful distribution** back to the project
+
+See [RELEASING.md](RELEASING.md) section "Release Checklist" for the complete workflow.
 
 ---
 
