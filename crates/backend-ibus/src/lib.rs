@@ -233,6 +233,16 @@ impl IbusEngineAdapter {
         } else {
             InputEvent::Text(character.to_string())
         };
+        // WARNING: Policy enforcement happens AFTER engine.process(), which means
+        // synchronous commands may have already executed and produced side effects
+        // before this policy check. This is a known architectural limitation:
+        // - Commands disabled at engine setup time are checked before execution
+        // - Runtime policy violations (backend, output size) are checked after
+        // - Disabling an expansion via policy does not undo already-executed commands
+        //
+        // Safe-mode violations for determinable constraints (disabled commands,
+        // require_absolute_commands) are enforced pre-execution by the engine.
+        // Runtime violations discovered here should be rare in normal operation.
         let results = self.engine.process(event);
         let mut actions = Vec::new();
         let mut policy_blocked = false;
@@ -246,7 +256,7 @@ impl IbusEngineAdapter {
                     error!(
                         audit_prefix = %self.policy.audit_prefix,
                         violation = %violation,
-                        "IBus expansion blocked by organization policy"
+                        "IBus expansion blocked by organization policy (post-execution)"
                     );
                     policy_blocked = true;
                     continue;
