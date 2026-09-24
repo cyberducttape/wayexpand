@@ -1119,6 +1119,49 @@ impl ExpansionEngine {
         Some(output.to_string())
     }
 
+    /// Unified commit: apply all post-execution logic to create final ExpansionResult.
+    /// This is the single path for committing any expansion (static or command-backed).
+    /// Handles case propagation, caching, undo state, and result metadata.
+    fn commit_expansion(
+        &mut self,
+        plan: &MatchPlan,
+        insert: String,
+    ) -> ExpansionResult {
+        let mut final_insert = insert;
+
+        // Apply case propagation if configured and this is command output
+        if plan.propagate_case && plan.is_command_backed() {
+            final_insert = apply_case_style(&plan.matched_text, &final_insert);
+        }
+
+        // Update command cache if this was a command
+        if plan.is_command_backed() {
+            if let Some(command) = &plan.command {
+                if command.cache_ms > 0 {
+                    self.command_cache[plan.config_index] = Some(CommandCacheEntry {
+                        expires_at: Instant::now() + Duration::from_millis(command.cache_ms),
+                        value: final_insert.clone(),
+                    });
+                }
+            }
+        }
+
+        // Save undo state (for commands, save original trigger; for static, trigger consumed)
+        // Skip undo for async commands since they return empty immediately
+        if !plan.is_command_backed() || self.async_commands.is_none() {
+            self.last_expansion = Some((plan.matched_text.clone(), final_insert.clone()));
+        }
+
+        ExpansionResult {
+            trigger: plan.trigger_config.clone(),
+            matched_text: plan.matched_text.clone(),
+            insert: final_insert,
+            cursor_offset: plan.cursor_offset,
+            reinsert_after: plan.terminating_char,
+            command_backed: plan.is_command_backed(),
+        }
+    }
+
     /// Create a match plan without side effects. Returns context for policy evaluation and execution.
     /// This is the unified matching path for both immediate and deferred execution.
     fn take_match_plan(
