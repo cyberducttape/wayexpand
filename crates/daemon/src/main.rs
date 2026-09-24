@@ -19,7 +19,7 @@ use std::{
 };
 use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
-use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_input_method::{InputMethodError, InputMethodSource};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_libei::{portal_token_path, LibeiInjector, LibeiOptions};
 use wayexpand_backend_selection::auto_select;
@@ -213,8 +213,16 @@ fn main() -> Result<()> {
     } else {
         warn!("XDG_RUNTIME_DIR unavailable; control socket disabled");
     }
+    let portal_token_path = portal_token_path();
     let mut input_method = match source_name {
-        "input-method" => Some(connect_input_method_with_retry(&control, &path)?),
+        "input-method" => Some(connect_input_method_with_retry(
+            &control,
+            &path,
+            config.healthy(),
+            config.engine.libei_token_persistence(),
+            portal_token_path.as_deref(),
+            &policy,
+        )?),
         _ => None,
     };
     let mut evdev = match source_name {
@@ -235,14 +243,13 @@ fn main() -> Result<()> {
     let input_method_mode = source_name == "input-method";
     if input_method_mode {
         info!(
-            "input-method-v2 backend selected with automatic key pass-through; \
-            unsupported keys (Escape, arrows, F-keys, etc.) will be re-injected via libei/wlroots"
+            "input-method-v2 backend selected with required libei key pass-through; \
+            unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) must be re-injected"
         );
     }
     let evdev_mode = source_name == "evdev";
     let active_source = source_name;
     let mut reconnect_delay = Duration::from_millis(250);
-    let portal_token_path = portal_token_path();
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
@@ -269,30 +276,6 @@ fn main() -> Result<()> {
         }
     };
 
-    // When using input-method-v2, attach libei as a key pass-through backend for unsupported keys.
-    if input_method_mode && input_method.is_some() {
-        match connect_output_with_retry(
-            &control,
-            "input-method",
-            "libei",
-            &path,
-            config.healthy(),
-            config.engine.libei_token_persistence(),
-            portal_token_path.as_deref(),
-        ) {
-            Ok(Some(key_injector)) => {
-                input_method = input_method
-                    .take()
-                    .map(|source| source.with_key_pass_through(key_injector));
-            }
-            Ok(None) => {
-                warn!("libei unavailable; unsupported keys will not pass through (fallback to fail-closed)");
-            }
-            Err(error) => {
-                warn!(%error, "libei pass-through setup failed; unsupported keys will not pass through");
-            }
-        }
-    }
     let active_backend = input_method
         .as_ref()
         .map(|_| "input-method-v2")
@@ -442,7 +425,14 @@ fn main() -> Result<()> {
         );
         if input_method_mode {
             if input_method.is_none() {
-                match InputMethodSource::connect() {
+                match connect_input_method_session(
+                    &control,
+                    &path,
+                    config.healthy(),
+                    config.engine.libei_token_persistence(),
+                    portal_token_path.as_deref(),
+                    &policy,
+                ) {
                     Ok(source) => {
                         input_method = Some(source);
                         reconnect_delay = Duration::from_millis(250);
@@ -1095,13 +1085,56 @@ fn input_poll_interval(metrics: CommandMetrics) -> Duration {
     }
 }
 
+fn connect_input_method_session(
+    control: &control::ControlServer,
+    config_path: &Path,
+    config_healthy: bool,
+    persist_portal_token: bool,
+    portal_token_path: Option<&Path>,
+    policy: &wayexpand_core::OrganizationPolicy,
+) -> Result<InputMethodSource, InputMethodError> {
+    let source = InputMethodSource::connect()?;
+    if !policy.backend_allowed("libei") {
+        return Err(InputMethodError::Protocol(
+            "organization policy prohibits libei backend for key pass-through".into(),
+        ));
+    }
+    let key_injector = connect_output_with_retry(
+        control,
+        "input-method",
+        "libei",
+        config_path,
+        config_healthy,
+        persist_portal_token,
+        portal_token_path,
+    )
+    .map_err(|error| InputMethodError::Protocol(error.to_string()))?
+    .ok_or_else(|| {
+        InputMethodError::Transport(
+            "input-method key pass-through setup was cancelled while stopping".into(),
+        )
+    })?;
+    Ok(source.with_key_pass_through(key_injector))
+}
+
 fn connect_input_method_with_retry(
     control: &control::ControlServer,
     config_path: &Path,
+    config_healthy: bool,
+    persist_portal_token: bool,
+    portal_token_path: Option<&Path>,
+    policy: &wayexpand_core::OrganizationPolicy,
 ) -> Result<InputMethodSource> {
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        match InputMethodSource::connect() {
+        match connect_input_method_session(
+            control,
+            config_path,
+            config_healthy,
+            persist_portal_token,
+            portal_token_path,
+            policy,
+        ) {
             Ok(source) => {
                 control.set_status(format!(
                     "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\nconfig={}\nconfig_state=ok",
