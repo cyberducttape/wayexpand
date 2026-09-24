@@ -90,35 +90,16 @@ desktop Linux users but does not prevent use in controlled environments
 
 ---
 
-## Implemented in v1.2 (Not Yet Shipped)
+## Historical Prototype: wlroots Window Tracking
 
-### Window Tracking for wlroots Compositors (Implemented, Awaiting Certification)
+The wlroots window-tracker prototype described in earlier planning notes was
+removed from the production workspace and is not shipped. `app_filter` window
+tracking is currently implemented for KDE only; see
+[`docs/BACKENDS.md`](docs/BACKENDS.md) and
+[`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md).
 
-**Status:** Implementation complete (2026-09-19). Awaiting real-world certification.
-**Why:** Complete `app_filter` support across Sway, Hyprland, river  
-**Scope:** Implement wlroots `wlr-foreign-toplevel-management-v1` protocol
-
-**⚠️ IMPORTANT:** This implementation exists in the codebase but is not shipped
-or certified. Per [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md): "wlroots tracker
-is not shipped; GNOME/Mutter has no supported tracker." End-to-end certification
-requires reproducible tests across all target compositors.
-
-**Implementation Details:**
-- ✅ Protocol connection and registry discovery
-- ✅ Toplevel event handling (creation, destruction, metadata)
-- ✅ Focus tracking with async notifications
-- ✅ Channel-based communication for non-blocking window changes
-- ✅ WindowTracker trait implementation with timeout support
-- ✅ Daemon event loop integration
-- ✅ Window focus changes routed to engine.process(InputEvent::WindowChanged)
-- ✅ app_filter matching with focused window context
-- ✅ Workspace tests covering protocol detection, naming, timeout, daemon integration
-
-**Certification Status by Compositor:**
-- Sway: 🟡 Implemented, awaiting real-world certification
-- Hyprland: 🟡 Implemented, awaiting real-world certification
-- river: 🟡 Implemented, awaiting real-world certification
-- GNOME: ❌ No usable protocol path (no window-tracking protocol exists)
+No implementation or certification work for wlroots window tracking should be
+inferred from the historical checklist that follows in older revisions.
 
 ### Libei-First Backend Auto-Selection (Implemented, Experimental)
 
@@ -174,8 +155,9 @@ action broker
 
 Until this gate is complete, WayExpand supports direct commands only for
 sandbox-compatible local actions. Infrastructure actions are explicitly
-unsupported; users must not relax the shipped daemon unit or treat a wrapper
-script as a supported escape hatch.
+unsupported. Completing the broker is a prerequisite for supporting
+networked or credentialed admin/SRE command workflows; users must not relax
+the shipped daemon unit or treat a wrapper script as a supported escape hatch.
 
 **Design:**
 - Capture process stays extremely locked down (no network, no HOME write, strict syscalls)

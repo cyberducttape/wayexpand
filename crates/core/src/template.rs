@@ -40,6 +40,8 @@ pub enum TemplateError {
     UnknownVariable { name: String },
     #[error("rendered template exceeds {maximum} bytes")]
     RenderedTooLarge { maximum: usize },
+    #[error("date arithmetic overflow for template variable {name:?}")]
+    DateArithmeticOverflow { name: String },
 }
 
 /// Render built-in variables without invoking a shell or external process.
@@ -81,7 +83,9 @@ pub fn render_template(template: &str, context: &TemplateContext) -> Result<Stri
                     let adjusted = context
                         .unix_timestamp
                         .checked_add_signed(offset)
-                        .unwrap_or(0);
+                        .ok_or_else(|| TemplateError::DateArithmeticOverflow {
+                            name: other.to_owned(),
+                        })?;
                     match base {
                         "date" => format_date(adjusted),
                         "time" => format_time(adjusted),

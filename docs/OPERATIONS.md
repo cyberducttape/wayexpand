@@ -101,8 +101,10 @@ Command stdout becomes the replacement after trailing newlines are removed.
 output is reused for that many milliseconds, which is useful for stable
 system facts such as the kernel release.
 Command processes receive a minimal environment by default (`HOME`, `USER`,
-`PATH`, and `LANG`). Use `pass_env` for specific additional variables; use
-`environment = "inherit"` only as an explicit trust decision because it passes
+`LANG`, and a fixed `PATH` of `/usr/local/bin:/usr/bin:/bin`). The daemon's
+ambient `PATH` is not inherited in this mode. Use `pass_env` for specific
+additional variables; the fixed `PATH` cannot be overridden through
+`pass_env`. Use `environment = "inherit"` only as an explicit trust decision because it passes
 desktop-session variables and other daemon environment values to the child.
 The daemon runs expansion commands and hotkey actions on a bounded background
 queue, so a slow command does not block keyboard capture or control-socket

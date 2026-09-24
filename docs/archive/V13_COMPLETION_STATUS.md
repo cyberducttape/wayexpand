@@ -1,26 +1,38 @@
 # v1.3 Implementation Status & Completion Report
 
+> Historical planning report from the v1.2/v1.3 transition. It is not a
+> statement of current implementation or test status. For current backend and
+> security status, see `docs/BACKENDS.md`, `docs/SUPPORT_MATRIX.md`, and
+> `SECURITY.md`.
+
 ## Executive Summary
 
-v1.2 has successfully implemented the **complete v1.3 architecture foundation**. All four P1 architectural improvements have comprehensive implementation guides, and the first (Command Execution Deferral) is fully implemented and tested.
+This report was written during early v1.3 planning. Its completion claims and
+test counts were not maintained as the architecture changed; the deferred API
+was not adopted by every runtime path, and the input-method key state machine
+was never implemented.
 
-**Status:** ✅ READY FOR v1.3 DEVELOPMENT TEAM
+**Status:** Archived; not a current release or implementation status report.
 
-## Completed in v1.2
+## Historical Notes
 
-### 1. Command Execution Deferral ✅ FULLY IMPLEMENTED
+### 1. Deferred Command API (Historical Status)
 
-**What was done:**
+**What the original report claimed:**
 - Added `PendingExpansionResult` type to engine.rs
 - Implemented `process_deferred()` method (mirrors `process()` without executing)
 - Implemented `take_match_deferred()` helper for deferred matching
 - Updated daemon to use `apply_pending_results()`
 - Updated IBus backend to use deferred flow
 - Exported `PendingExpansionResult` from core crate
-- **All 209+ tests pass**
+- The original test-count claim below is retained as a historical report only.
 
 **Security Impact:**
-Commands now NEVER execute before policy approval. Safe-mode can block any violations before side effects occur.
+`process_deferred()` provides deferred command execution for callers that use
+that API. The legacy `ExpansionEngine::process()` path can execute commands
+synchronously, and output-dependent policy checks necessarily happen after the
+command runs. Do not interpret this API as a universal pre-execution policy
+boundary.
 
 **Files Modified:**
 - `crates/core/src/engine.rs` (191+ lines added)
@@ -28,29 +40,29 @@ Commands now NEVER execute before policy approval. Safe-mode can block any viola
 - `crates/backend-ibus/src/lib.rs` (30+ lines updated)
 - `crates/core/src/lib.rs` (exports updated)
 
-**Verification:**
+**Historical verification claim (not current verification):**
 ```bash
 cargo test --locked --workspace
 # Result: 150 core tests ✅, 44 daemon tests ✅, 15 CLI tests ✅
 ```
 
-### 2. Input-Method Key State Machine ✅ ARCHITECTURE DESIGNED
+### 2. Input-Method Key State Machine (Unimplemented)
 
-**What was done:**
-- Designed comprehensive KeyStateMachine state machine
-- Created standalone implementation (key_state_machine.rs)
-- Designed integration with InputMethodSource
-- Created handler patterns for press/release/repeat
-- Designed disconnect cleanup flow
-- Wrote full integration guide with code examples
-- Designed test strategy (unit + integration + e2e)
+**What was documented:**
+- Described the required KeyStateMachine state machine
+- Described integration with InputMethodSource
+- Described handler patterns for press/release/repeat
+- Described disconnect cleanup and the test strategy
 
-**Files Created:**
-- `scratchpad/key_state_machine.rs` (standalone, testable implementation)
-- `scratchpad/KEY_STATE_MACHINE_INTEGRATION.md` (full integration guide)
+The standalone scratchpad implementation referenced by an earlier draft of this
+report is not present in this snapshot. The input-method-v2 backend therefore
+remains experimental and incomplete; see `docs/BACKENDS.md` for the current
+held-key limitation.
 
 **Ready for v1.3:**
-v1.3 developers can copy key_state_machine.rs into backend-input-method, then follow the integration guide step-by-step. Total effort: 1-2 days.
+v1.3 developers still need to implement and desktop-test the state machine in
+`backend-input-method`. Total effort remains an estimate, not a completed
+implementation.
 
 ### 3. Release Script PKGBUILD Checksum ✅ ARCHITECTURE DOCUMENTED
 
@@ -124,7 +136,7 @@ Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. T
 ### Architecture Documentation
 
 - Comprehensive specifications in V13_MIGRATION_GUIDE.md
-- Integration guide for Key State Machine (KEY_STATE_MACHINE_INTEGRATION.md)
+- Key state machine integration guidance (in the migration documentation)
 - Pseudocode examples for all implementations
 - Risk mitigation strategies
 - Rollback procedures
@@ -144,11 +156,11 @@ Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. T
 ✅ Core exports configured
 ```
 
-### Provided Separately (in scratchpad)
+### Not Implemented in This Snapshot
 
 ```
-✅ key_state_machine.rs (complete, tested implementation)
-✅ KEY_STATE_MACHINE_INTEGRATION.md (step-by-step integration)
+The standalone key-state-machine scratchpad referenced by older versions of
+this report is absent. The input-method-v2 implementation remains experimental.
 ```
 
 ---
@@ -189,8 +201,8 @@ Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. T
 - Consider: deprecation timeline for old API
 
 **Week 2: Input-Method Key State Machine**
-- Copy `scratchpad/key_state_machine.rs` → `backend-input-method/src/`
-- Follow `KEY_STATE_MACHINE_INTEGRATION.md` step-by-step
+- Implement press/release/repeat tracking in `backend-input-method`
+- Add real desktop coverage for held keys and disconnect cleanup
 - Reference: `V13_MIGRATION_GUIDE.md` Section 2 for overview
 - Effort: 1-2 days
 
@@ -216,15 +228,8 @@ Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. T
    - See complete problem→solution path
    - Understand why each fix matters
 
-4. **Integration Guide (Key State Machine):** `scratchpad/KEY_STATE_MACHINE_INTEGRATION.md`
-   - Step-by-step code integration
-   - Handler patterns shown
-   - Test strategies provided
-
-5. **Standalone Implementation (Key State Machine):** `scratchpad/key_state_machine.rs`
-   - Copy directly into backend-input-method
-   - All tests pass independently
-   - Well-commented for reference
+4. **Input-method limitation:** `docs/BACKENDS.md`
+   - Current held-key behavior and experimental status
 
 ---
 
@@ -278,35 +283,29 @@ Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. T
 - `crates/backend-ibus/src/lib.rs` - process_deferred() integration
 - `crates/core/src/lib.rs` - Updated exports
 
-### Standalone Implementations (Ready for v1.3)
+### Input-method-v2 Status
 
-- `scratchpad/key_state_machine.rs` - Complete KeyStateMachine impl
-- `scratchpad/KEY_STATE_MACHINE_INTEGRATION.md` - Integration guide
-
----
-
-## Success Metrics
-
-✅ **Security:** Commands blocked before execution in safe-mode
-✅ **Correctness:** Held keys produce continuous input (not taps)
-✅ **Reliability:** Release checksums match tagged commits
-✅ **Maintainability:** Clear separation of concerns
-✅ **Transparency:** Full audit trail in audit-mode
+The held-key state machine is still future work and requires desktop testing.
 
 ---
 
-## Blockers & Risks
+## Historical Success Metrics
 
-**None identified.**
-
-- Command execution deferral: ✅ Fully implemented
-- Key state machine: ✅ Design complete, standalone impl ready
-- Release checksum: ✅ Pure script changes, no blockers
-- Pack filtering: ✅ Pure refactoring, no blockers
+The following were goals in the original plan, not verified outcomes. In
+particular, held-key fidelity is incomplete in input-method-v2, and command
+policy enforcement is not universally pre-execution.
 
 ---
 
-## Next Steps for v1.3
+## Historical Blockers & Risks
+
+The original “None identified” assessment was incorrect. Current unresolved
+backend and command-execution limitations are documented in `docs/BACKENDS.md`,
+`docs/SUPPORT_MATRIX.md`, and `SECURITY.md`.
+
+---
+
+## Original Proposed Next Steps (Superseded)
 
 1. **Review** this status report and V13_MIGRATION_GUIDE.md
 2. **Plan** v1.3 sprint using the 1-2 week timeline

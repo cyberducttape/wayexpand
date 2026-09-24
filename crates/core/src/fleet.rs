@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -52,12 +53,26 @@ pub enum FleetError {
     },
     #[error("organization policy is not allowed in fleet layer file {file}; use /etc/wayexpand/policy.toml")]
     OrganizationPolicyInLayer { file: String },
+    #[error("organization fleet path {path} is not owned by root (uid {uid})")]
+    OrganizationPathNotRootOwned { path: String, uid: u32 },
+    #[error("organization fleet directory {path} must be a real, non-writable directory")]
+    InvalidOrganizationDirectory { path: String },
 }
 
 fn reject_embedded_policy(config: &Config, path: &Path) -> Result<(), FleetError> {
     if config.organization.is_active() {
         return Err(FleetError::OrganizationPolicyInLayer {
             file: path.display().to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn require_root_owned(path: &Path, metadata: &fs::Metadata) -> Result<(), FleetError> {
+    if metadata.uid() != 0 {
+        return Err(FleetError::OrganizationPathNotRootOwned {
+            path: path.display().to_string(),
+            uid: metadata.uid(),
         });
     }
     Ok(())
@@ -184,7 +199,12 @@ impl FleetConfig {
         policy: &OrganizationPolicy,
     ) -> Result<Self, FleetError> {
         let fleet = Self::load_standard()?;
-        Self::apply_base_and_policy(fleet, base, policy)
+        let mut merged = Self::apply_base_and_policy(fleet, base, policy)?;
+        if policy.is_active() {
+            merged.config.organization = policy.clone();
+            merged.config.validate().map_err(FleetError::Config)?;
+        }
+        Ok(merged)
     }
 
     fn apply_base_and_policy(
@@ -317,6 +337,25 @@ impl ConfigMerger {
             return Ok(()); // Layer directory doesn't exist, skip silently
         }
 
+        let is_organization = layer_name == Layer::Organization.name();
+        if is_organization {
+            let metadata = fs::symlink_metadata(dir).map_err(|source| {
+                FleetError::Config(ConfigError::Read {
+                    path: dir.display().to_string(),
+                    source,
+                })
+            })?;
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.mode() & 0o022 != 0
+            {
+                return Err(FleetError::InvalidOrganizationDirectory {
+                    path: dir.display().to_string(),
+                });
+            }
+            require_root_owned(dir, &metadata)?;
+        }
+
         let mut files: Vec<_> = fs::read_dir(dir)
             .map_err(|e| {
                 FleetError::Config(ConfigError::Read {
@@ -332,6 +371,20 @@ impl ConfigMerger {
 
         for entry in files {
             let path = entry.path();
+            if is_organization {
+                let metadata = fs::symlink_metadata(&path).map_err(|source| {
+                    FleetError::Config(ConfigError::Read {
+                        path: path.display().to_string(),
+                        source,
+                    })
+                })?;
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Err(FleetError::Config(ConfigError::NotRegular {
+                        path: path.display().to_string(),
+                    }));
+                }
+                require_root_owned(&path, &metadata)?;
+            }
             let relative = path
                 .strip_prefix(dir)
                 .unwrap_or(&path)

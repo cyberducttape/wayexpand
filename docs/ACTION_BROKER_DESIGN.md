@@ -6,8 +6,11 @@
 This document defines the boundary required before WayExpand can claim to
 support infrastructure actions. The current daemon does **not** implement an
 Action Broker, and its direct command feature remains limited by the daemon's
-systemd sandbox. Do not weaken that sandbox to make `kubectl`, `aws`, `vault`,
-`ssh`, or `terraform` work.
+systemd sandbox. Direct commands remain suitable for sandbox-compatible local
+helpers. A separately sandboxed, opt-in Action Broker is an architectural
+requirement before WayExpand can support networked or credentialed SRE
+workflows. Do not weaken the typing daemon's sandbox to make `kubectl`, `aws`,
+`vault`, `ssh`, or `terraform` work.
 
 ## Problem
 

@@ -14,16 +14,17 @@ script="$project_dir/scripts/install-evdev-permissions.sh"
 out=$("$script" --dry-run)
 printf '%s' "$out" | grep -F 'This will:' >/dev/null
 printf '%s' "$out" | grep -F '(dry run; no changes made)' >/dev/null
-printf '%s' "$out" | grep -F 'SECURITY.md' >/dev/null
+printf '%s' "$out" | grep -F 'Active-seat mode relies on systemd-logind' >/dev/null
 seat_out=$($script --access=active-seat --dry-run)
 printf '%s' "$seat_out" | grep -F 'active-seat' >/dev/null
-printf '%s' "$seat_out" | grep -F 'do not change input-group membership' >/dev/null
+printf '%s' "$seat_out" | grep -F 'leave pre-existing input-group membership unchanged' >/dev/null
 
 empty_dir=
 policy_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-policy-test.XXXXXX")
 trap 'rm -rf "$policy_dir" "$empty_dir"' EXIT INT TERM
 group_rule="$policy_dir/71-wayexpand-evdev.rules"
 seat_rule="$policy_dir/69-wayexpand-evdev-uaccess.rules"
+state_file="$policy_dir/evdev-permissions.state"
 printf '%s\n' 'stale input-group rule' >"$group_rule"
 exclusive_seat_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
@@ -34,6 +35,23 @@ exclusive_group_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     "$script" --access=input-group --dry-run)
 printf '%s' "$exclusive_group_out" | grep -F "remove $seat_rule" >/dev/null
+
+# A recorded membership grant is owned by WayExpand and is removed when an
+# existing installation is migrated to active-seat. An unrecorded membership
+# is deliberately left alone.
+printf '%s\n' 'access_mode=input-group' "target_user=$(id -un)" 'added_input_group=1' >"$state_file"
+owned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
+    WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
+    WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
+    "$script" --access=active-seat --dry-run)
+printf '%s' "$owned_migration_out" | grep -F 'remove the input-group membership previously added by WayExpand' >/dev/null
+
+printf '%s\n' 'access_mode=input-group' "target_user=$(id -un)" 'added_input_group=0' >"$state_file"
+unowned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
+    WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
+    WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
+    "$script" --access=active-seat --dry-run)
+printf '%s' "$unowned_migration_out" | grep -F 'leave pre-existing input-group membership unchanged' >/dev/null
 
 if [ "$(id -u)" -eq 0 ]; then
     printf '%s\n' "skipping non-root-rejection checks: already running as root" >&2

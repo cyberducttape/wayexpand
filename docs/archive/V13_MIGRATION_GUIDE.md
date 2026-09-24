@@ -1,6 +1,13 @@
 # v1.3 Architecture Migration Guide
 
-This guide provides step-by-step instructions for implementing the v1.3 architectural improvements that were planned in v1.2.
+> Historical implementation plan. This checklist describes a proposed v1.3
+> architecture, not the current code. Some APIs and flows have since changed;
+> check `docs/BACKENDS.md`, `docs/SUPPORT_MATRIX.md`, and `SECURITY.md` for
+> current behavior before using this as design guidance.
+
+This archived guide preserves the proposed steps from the v1.2 planning period.
+Its “current” and “target” architecture examples refer to that historical
+snapshot, not the present implementation.
 
 ## 1. Command Execution Deferral (PRIORITY: CRITICAL)
 
@@ -112,15 +119,11 @@ fn audit_mode_logs_but_executes() {
 }
 ```
 
-### Completion Checklist
-- [ ] Add `process_deferred()` method to ExpansionEngine
-- [ ] Implement command execution in `PendingExpansionResult::execute_with_policy()`
-- [ ] Update daemon to use new API
-- [ ] Update IBus backend to use new API
-- [ ] Update CLI to use new API
-- [ ] Add comprehensive tests
-- [ ] Mark old `process()` API as deprecated
-- [ ] Update documentation
+### Historical Checklist
+
+The unchecked list in the original plan is not a current work queue. A deferred
+API exists, but command execution and policy behavior differ by caller; see the
+current security documentation for its limits.
 
 ---
 
