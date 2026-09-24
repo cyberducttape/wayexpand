@@ -157,29 +157,24 @@ impl FleetConfig {
     /// Falls back gracefully if layers don't exist.
     pub fn load_standard() -> Result<Self, FleetError> {
         let mut merger = ConfigMerger::new();
-
-        // Load organization layer (required structure, optional content)
-        if let Some(dir) = Layer::Organization.default_dir() {
-            if dir.exists() {
-                merger.load_layer(dir, Layer::Organization)?;
-            }
-        }
-
-        // Load user layer (optional)
-        if let Some(dir) = Layer::User.default_dir() {
-            if dir.exists() {
-                merger.load_layer(dir, Layer::User)?;
-            }
-        }
-
-        // Load pack layer (optional)
-        if let Some(dir) = Layer::Pack.default_dir() {
-            if dir.exists() {
-                merger.load_pack_layer(dir)?;
-            }
+        for (dir, layer_name) in standard_layer_dirs()? {
+            merger.load_layer_named(dir, layer_name)?;
         }
 
         merger.merge()
+    }
+
+    /// Return the configuration files resolved by the standard fleet loader.
+    /// Reload watchers use this list so nested pack sources are covered too.
+    pub fn standard_source_files() -> Result<Vec<PathBuf>, FleetError> {
+        let mut files = Vec::new();
+        for (dir, layer_name) in standard_layer_dirs()? {
+            files.extend(discover_layer_files(
+                &dir,
+                layer_name == Layer::Organization.name(),
+            )?);
+        }
+        Ok(files)
     }
 
     /// Load the standard fleet layers on top of the user's primary config.
@@ -316,16 +311,6 @@ impl ConfigMerger {
         self.load_layer_named(dir, layer.name().to_string())
     }
 
-    fn load_pack_layer(&mut self, dir: impl AsRef<Path>) -> Result<(), FleetError> {
-        let dir = dir.as_ref();
-        self.load_layer_named(dir, "pack:root".to_string())?;
-
-        for (pack_dir, name) in discover_pack_dirs(dir)? {
-            self.load_layer_named(pack_dir, format!("pack:{name}"))?;
-        }
-        Ok(())
-    }
-
     fn load_layer_named(
         &mut self,
         dir: impl AsRef<Path>,
@@ -338,39 +323,8 @@ impl ConfigMerger {
         }
 
         let is_organization = layer_name == Layer::Organization.name();
-        if is_organization {
-            let metadata = fs::symlink_metadata(dir).map_err(|source| {
-                FleetError::Config(ConfigError::Read {
-                    path: dir.display().to_string(),
-                    source,
-                })
-            })?;
-            if !metadata.is_dir()
-                || metadata.file_type().is_symlink()
-                || metadata.mode() & 0o022 != 0
-            {
-                return Err(FleetError::InvalidOrganizationDirectory {
-                    path: dir.display().to_string(),
-                });
-            }
-            require_root_owned(dir, &metadata)?;
-        }
 
-        let mut files: Vec<_> = fs::read_dir(dir)
-            .map_err(|e| {
-                FleetError::Config(ConfigError::Read {
-                    path: dir.display().to_string(),
-                    source: e,
-                })
-            })?
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".toml"))
-            .collect();
-
-        files.sort_by_key(|e| e.file_name());
-
-        for entry in files {
-            let path = entry.path();
+        for path in discover_layer_files(dir, is_organization)? {
             if is_organization {
                 let metadata = fs::symlink_metadata(&path).map_err(|source| {
                     FleetError::Config(ConfigError::Read {
@@ -505,6 +459,66 @@ impl ConfigMerger {
     }
 }
 
+fn standard_layer_dirs() -> Result<Vec<(PathBuf, String)>, FleetError> {
+    let mut sources = Vec::new();
+    for layer in [Layer::Organization, Layer::User, Layer::Pack] {
+        let Some(dir) = layer.default_dir() else {
+            continue;
+        };
+        if !dir.exists() {
+            continue;
+        }
+        sources.extend(discover_layer_dirs(&dir, layer)?);
+    }
+    Ok(sources)
+}
+
+fn discover_layer_dirs(dir: &Path, layer: Layer) -> Result<Vec<(PathBuf, String)>, FleetError> {
+    if layer != Layer::Pack {
+        return Ok(vec![(dir.to_path_buf(), layer.name().to_string())]);
+    }
+    let mut dirs = vec![(dir.to_path_buf(), "pack:root".to_string())];
+    dirs.extend(
+        discover_pack_dirs(dir)?
+            .into_iter()
+            .map(|(pack_dir, name)| (pack_dir, format!("pack:{name}"))),
+    );
+    Ok(dirs)
+}
+
+fn discover_layer_files(dir: &Path, is_organization: bool) -> Result<Vec<PathBuf>, FleetError> {
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    if is_organization {
+        let metadata = fs::symlink_metadata(dir).map_err(|source| {
+            FleetError::Config(ConfigError::Read {
+                path: dir.display().to_string(),
+                source,
+            })
+        })?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.mode() & 0o022 != 0 {
+            return Err(FleetError::InvalidOrganizationDirectory {
+                path: dir.display().to_string(),
+            });
+        }
+        require_root_owned(dir, &metadata)?;
+    }
+    let mut files: Vec<_> = fs::read_dir(dir)
+        .map_err(|source| {
+            FleetError::Config(ConfigError::Read {
+                path: dir.display().to_string(),
+                source,
+            })
+        })?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".toml"))
+        .map(|entry| entry.path())
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 fn discover_pack_dirs(dir: &Path) -> Result<Vec<(PathBuf, String)>, FleetError> {
     let mut pack_dirs: Vec<_> = fs::read_dir(dir)
         .map_err(|e| {
@@ -590,6 +604,24 @@ mod tests {
         let packs = discover_pack_dirs(&root).unwrap();
         let names: Vec<_> = packs.iter().map(|(_, name)| name.as_str()).collect();
         assert_eq!(names, ["kubernetes", "linux-admin"]);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pack_source_discovery_includes_nested_toml_files() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-pack-sources-{}", std::process::id()));
+        let nested = root.join("my-pack").join("foo.toml");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "").unwrap();
+
+        let files: Vec<_> = discover_layer_dirs(&root, Layer::Pack)
+            .unwrap()
+            .into_iter()
+            .flat_map(|(dir, _)| discover_layer_files(&dir, false).unwrap())
+            .collect();
+        assert_eq!(files.as_slice(), std::slice::from_ref(&nested));
 
         std::fs::remove_dir_all(root).unwrap();
     }
