@@ -1074,6 +1074,27 @@ impl ExpansionEngine {
         }
     }
 
+    /// Apply preflight policy to a match plan. Decides if execution is allowed before any side effects.
+    /// Returns the plan if approved, None if blocked by policy.
+    fn apply_preflight_policy(&self, plan: MatchPlan) -> Option<MatchPlan> {
+        // Commands are disabled by policy
+        if plan.is_command_backed() && self.config.organization.disable_commands {
+            return None;
+        }
+
+        // User has paused expansion
+        if self.user_paused {
+            return None;
+        }
+
+        // Sensitive focus (password field, etc.) disables expansion
+        if self.sensitive_focus {
+            return None;
+        }
+
+        Some(plan)
+    }
+
     /// Create a match plan without side effects. Returns context for policy evaluation and execution.
     /// This is the unified matching path for both immediate and deferred execution.
     fn take_match_plan(
