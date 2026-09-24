@@ -99,6 +99,8 @@ pub struct PendingExpansionResult {
     pub template_text: String,
     pub cursor_offset: Option<usize>,
     pub reinsert_after: Option<char>,
+    /// Organization-level output limit from the engine configuration (0 = unlimited).
+    max_replacement_size: usize,
     /// Command to execute (if any). Not yet executed; caller decides.
     pub command: Option<CommandConfig>,
 }
@@ -106,13 +108,27 @@ pub struct PendingExpansionResult {
 impl PendingExpansionResult {
     /// Execute the command (if present) and return the final expansion result.
     /// Only call after policy approval.
-    pub fn execute_with_policy(self) -> Result<ExpansionResult, CommandError> {
+    /// `additional_max_size` is a separately loaded administrator policy limit
+    /// (0 = unlimited); both limits are enforced after command completion.
+    pub fn execute_with_policy(
+        self,
+        additional_max_size: usize,
+    ) -> Result<ExpansionResult, CommandError> {
         let command_backed = self.command.is_some();
         let insert = if let Some(command) = self.command {
             run_command(&command)?
         } else {
             self.template_text
         };
+
+        for limit in [self.max_replacement_size, additional_max_size] {
+            if limit > 0 && insert.len() > limit {
+                return Err(CommandError::PolicyOutputTooLarge {
+                    size: insert.len(),
+                    limit,
+                });
+            }
+        }
 
         Ok(ExpansionResult {
             trigger: self.trigger,
@@ -1349,6 +1365,7 @@ impl ExpansionEngine {
             template_text,
             cursor_offset: plan.cursor_offset,
             reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
+            max_replacement_size: self.config.organization.max_replacement_size,
             command: plan.command.as_ref().map(|c| (**c).clone()),
         })
     }
@@ -1520,6 +1537,8 @@ pub enum CommandError {
     NonZeroExit(Option<i32>),
     /// Output exceeded the bounded size this engine will buffer.
     OutputTooLarge,
+    /// Output exceeded an organization-configured replacement limit.
+    PolicyOutputTooLarge { size: usize, limit: usize },
     /// Output was not valid UTF-8.
     InvalidUtf8,
     /// The output-reading thread did not report back in time (should not
@@ -1543,6 +1562,10 @@ impl std::fmt::Display for CommandError {
                 f,
                 "produced more than {} bytes of output",
                 MAX_COMMAND_OUTPUT_BYTES
+            ),
+            CommandError::PolicyOutputTooLarge { size, limit } => write!(
+                f,
+                "produced {size} bytes, exceeding the organization limit of {limit} bytes"
             ),
             CommandError::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
             CommandError::OutputChannelLost => write!(f, "output could not be read back"),
@@ -4074,7 +4097,7 @@ replacement = "signature""#,
             .process_deferred(InputEvent::Text(":SIG".into()))
             .pop()
             .unwrap();
-        let static_deferred = static_pending.execute_with_policy().unwrap();
+        let static_deferred = static_pending.execute_with_policy(0).unwrap();
         assert_eq!(static_sync.trigger, static_deferred.trigger);
         assert_eq!(static_sync.matched_text, static_deferred.matched_text);
         assert_eq!(static_sync.insert, static_deferred.insert);
@@ -4104,11 +4127,57 @@ replacement = "signature""#,
             .process_deferred(InputEvent::Text(":cmd".into()))
             .pop()
             .unwrap();
-        let command_deferred = command_pending.execute_with_policy().unwrap();
+        let command_deferred = command_pending.execute_with_policy(0).unwrap();
         assert_eq!(command_sync.trigger, command_deferred.trigger);
         assert_eq!(command_sync.matched_text, command_deferred.matched_text);
         assert_eq!(command_sync.insert, command_deferred.insert);
         assert!(command_sync.command_backed && command_deferred.command_backed);
+    }
+
+    #[test]
+    fn deferred_command_output_over_policy_limit_is_rejected_after_completion() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-deferred-policy-output-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let command = format!(
+            "printf completed > '{}'; yes x | head -c 257",
+            marker.display()
+        );
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":large"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "{command}"]
+            timeout_ms = 500
+
+            [organization]
+            max_replacement_size = 0
+            "#
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":large".into()))
+            .pop()
+            .unwrap();
+
+        assert!(matches!(
+            pending.execute_with_policy(256),
+            Err(CommandError::PolicyOutputTooLarge {
+                size: 257,
+                limit: 256
+            })
+        ));
+        assert!(
+            marker.exists(),
+            "the subprocess should complete before rejection"
+        );
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]
