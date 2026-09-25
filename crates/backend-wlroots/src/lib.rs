@@ -28,6 +28,10 @@ const BACKEND_NAME: &str = "wlroots-virtual-keyboard";
 // Reserved alongside the BackSpace keycode (8) in every generated keymap,
 // for `{{cursor}}` placement after a replacement has already been typed.
 const LEFT_KEYCODE: u32 = 9;
+const FIRST_DYNAMIC_KEYCODE: u32 = 10;
+const KEYCODE_LIMIT: u32 = 255;
+/// XKB reserves K8/K9 for erase/cursor control, leaving 10..254 for output.
+const MAX_UNIQUE_OUTPUT_CHARS: usize = (KEYCODE_LIMIT - FIRST_DYNAMIC_KEYCODE) as usize;
 const MAX_OUTPUT_CHARS: usize = 8192;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
 static KEYMAP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -46,6 +50,8 @@ pub enum WlrootsError {
     ControlCharacter(u32),
     #[error("text contains {length} characters; maximum is {maximum}")]
     TextTooLong { length: usize, maximum: usize },
+    #[error("text contains {count} unique characters; maximum is {maximum}")]
+    TooManyUniqueCharacters { count: usize, maximum: usize },
     #[error("Wayland flush failed: {0}")]
     Flush(String),
     #[error("Wayland startup timed out: {0}")]
@@ -424,6 +430,9 @@ impl TextInjector for WlrootsInjector {
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+        // Build and upload the complete keymap before sending any destructive
+        // BackSpace events. This ordering keeps output-limit, keycode-range,
+        // and keymap-file failures from erasing user content.
         self.upload_keymap(text.chars())
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
@@ -458,7 +467,7 @@ fn build_keymap(
     chars: impl Iterator<Item = char>,
 ) -> Result<(String, HashMap<char, u32>), WlrootsError> {
     let mut mappings = HashMap::new();
-    let mut next_keycode = 10;
+    let mut next_keycode = FIRST_DYNAMIC_KEYCODE;
     let mut character_count = 0;
     let mut keycodes = String::from(
         "xkb_keymap {\n xkb_keycodes \"(unnamed)\" { minimum = 8; maximum = 255;\n <K8> = 8;\n <K9> = 9;\n",
@@ -480,11 +489,11 @@ fn build_keymap(
         if mappings.contains_key(&character) {
             continue;
         }
-        if next_keycode >= 255 {
-            return Err(WlrootsError::Keymap(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "too many unique characters",
-            )));
+        if mappings.len() >= MAX_UNIQUE_OUTPUT_CHARS {
+            return Err(WlrootsError::TooManyUniqueCharacters {
+                count: mappings.len() + 1,
+                maximum: MAX_UNIQUE_OUTPUT_CHARS,
+            });
         }
         let keycode = next_keycode;
         next_keycode += 1;
@@ -548,6 +557,20 @@ mod tests {
         assert!(matches!(
             build_keymap("a".repeat(MAX_OUTPUT_CHARS + 1).chars()),
             Err(WlrootsError::TextTooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn too_many_unique_output_characters_are_rejected_before_keymap_generation() {
+        let output: String = (0x1000..)
+            .filter_map(char::from_u32)
+            .take(MAX_UNIQUE_OUTPUT_CHARS + 1)
+            .collect();
+        assert!(matches!(
+            build_keymap(output.chars()),
+            Err(WlrootsError::TooManyUniqueCharacters { count, maximum })
+                if count == MAX_UNIQUE_OUTPUT_CHARS + 1
+                    && maximum == MAX_UNIQUE_OUTPUT_CHARS
         ));
     }
 
