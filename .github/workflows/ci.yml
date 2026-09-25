@@ -287,8 +287,14 @@ jobs:
           dpkg-buildpackage -us -uc -b
           deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
           test -n "$deb"
-          dpkg-deb -c "$deb" | grep -F '/usr/bin/wayexpand-install-evdev-access'
-          dpkg-deb -c "$deb" | grep -F '/etc/wayexpand/expansions.toml.example'
+          for path in \
+            '/usr/bin/wayexpand-install-evdev-access' \
+            '/etc/wayexpand/expansions.toml.example' \
+            '/usr/lib/systemd/user/wayexpand-evdev.service' \
+            '/usr/share/wayexpand/udev/71-wayexpand-evdev.rules' \
+            '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
+            dpkg-deb -c "$deb" | grep -F "$path"
+          done
       - name: Build RPM package and inspect manifest
         run: |
           version=$(sed -n 's/^Version: *//p' wayexpand.spec)
@@ -305,8 +311,14 @@ jobs:
             wayexpand.spec
           rpm=$(find "$top/rpmbuild/RPMS" -type f -name 'wayexpand-*.rpm' -print -quit)
           test -n "$rpm"
-          rpm -qlp "$rpm" | grep -F '/usr/bin/wayexpand-install-evdev-access'
-          rpm -qlp "$rpm" | grep -F '/etc/wayexpand/expansions.toml.example'
+          for path in \
+            '/usr/bin/wayexpand-install-evdev-access' \
+            '/etc/wayexpand/expansions.toml.example' \
+            '/usr/lib/systemd/user/wayexpand-evdev.service' \
+            '/usr/share/wayexpand/udev/71-wayexpand-evdev.rules' \
+            '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
+            rpm -qlp "$rpm" | grep -F "$path"
+          done
 
   systemd:
     name: Systemd Unit Validation
