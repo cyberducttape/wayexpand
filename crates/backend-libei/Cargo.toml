@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ashpd = "0.12"
+ashpd = "0.13"
 libc.workspace = true
 reis = "0.7.1"
 thiserror.workspace = true
