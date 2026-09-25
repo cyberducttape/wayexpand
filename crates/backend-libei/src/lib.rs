@@ -124,9 +124,8 @@ impl LibeiError {
 }
 
 struct PortalKeepalive {
-    _proxy: ashpd::desktop::remote_desktop::RemoteDesktop<'static>,
-    _session:
-        ashpd::desktop::Session<'static, ashpd::desktop::remote_desktop::RemoteDesktop<'static>>,
+    _proxy: ashpd::desktop::remote_desktop::RemoteDesktop,
+    _session: ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
     // Keep the Tokio reactor alive until the portal proxies have been dropped.
     _runtime: tokio::runtime::Runtime,
 }
@@ -1113,7 +1112,9 @@ fn connect_portal(
     options: LibeiOptions,
 ) -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError> {
     use ashpd::desktop::{
-        remote_desktop::{DeviceType, RemoteDesktop},
+        remote_desktop::{
+            ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions, StartOptions,
+        },
         PersistMode,
     };
 
@@ -1123,13 +1124,13 @@ fn connect_portal(
         .map_err(|error| LibeiError::Portal(error.to_string()))?;
     let (stream, proxy, session) = runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(30), async {
-            let proxy: RemoteDesktop<'static> = RemoteDesktop::new()
+            let proxy: RemoteDesktop = RemoteDesktop::new()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
             // Create a fresh session (restoration happens via select_devices token)
             let session = proxy
-                .create_session()
+                .create_session(Default::default())
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
@@ -1148,19 +1149,20 @@ fn connect_portal(
             proxy
                 .select_devices(
                     &session,
-                    DeviceType::Keyboard.into(),
-                    stored_token.as_deref(),
-                    if options.persist_portal_token {
-                        PersistMode::ExplicitlyRevoked
-                    } else {
-                        PersistMode::DoNot
-                    },
+                    SelectDevicesOptions::default()
+                        .set_devices(ashpd::enumflags2::BitFlags::from_flag(DeviceType::Keyboard))
+                        .set_restore_token(stored_token.as_deref())
+                        .set_persist_mode(if options.persist_portal_token {
+                            PersistMode::ExplicitlyRevoked
+                        } else {
+                            PersistMode::DoNot
+                        }),
                 )
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
             let start_response = proxy
-                .start(&session, None)
+                .start(&session, None, StartOptions::default())
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?
                 .response()
@@ -1181,7 +1183,7 @@ fn connect_portal(
             }
 
             let fd = proxy
-                .connect_to_eis(&session)
+                .connect_to_eis(&session, ConnectToEISOptions::default())
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
             Ok::<_, LibeiError>((UnixStream::from(fd), proxy, session))

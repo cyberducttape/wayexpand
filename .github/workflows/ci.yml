@@ -165,7 +165,7 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Create git archive (simulate release tarball)
-        run: git archive HEAD --output=wayexpand.tar.gz
+        run: git archive --format=tar HEAD | gzip -n > wayexpand.tar.gz
       - name: Extract to clean directory
         run: |
           mkdir -p /tmp/clean-build

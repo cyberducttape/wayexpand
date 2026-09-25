@@ -705,8 +705,8 @@ impl GuiApp {
         }
     }
 
-    fn render_toolbar(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        egui::Panel::top("toolbar")
+    fn render_toolbar(&mut self, ctx: &egui::Context, palette: &Palette) {
+        egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(palette.surface)
@@ -719,7 +719,7 @@ impl GuiApp {
                         color: Color32::from_black_alpha(if self.dark_mode { 60 } else { 18 }),
                     }),
             )
-            .show(ui, |ui| {
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
                     ui.label(RichText::new("WayExpand").heading().strong());
@@ -815,14 +815,14 @@ impl GuiApp {
             });
     }
 
-    fn render_diagnostics(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_diagnostics(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.diagnostics_open {
             let mut open = self.diagnostics_open;
             egui::Window::new(self.strings.diagnostics_title())
                 .open(&mut open)
                 .resizable(true)
                 .min_width(420.0)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     theme::section_header(ui, "", self.strings.runtime_health());
                     ui.add_space(4.0);
                     ui.label(
@@ -889,14 +889,14 @@ impl GuiApp {
         }
     }
 
-    fn render_import_dialog(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_import_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.import_open {
             let mut open = self.import_open;
             egui::Window::new(self.strings.import_dialog_title())
                 .open(&mut open)
                 .resizable(false)
                 .min_width(420.0)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     ui.label(self.strings.source_yaml());
                     ui.add(
                         TextEdit::singleline(&mut self.import_path)
@@ -937,14 +937,14 @@ impl GuiApp {
         }
     }
 
-    fn render_settings_dialog(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_settings_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.settings_open {
             let mut open = self.settings_open;
             egui::Window::new(self.strings.settings_title())
                 .open(&mut open)
                 .resizable(false)
                 .min_width(360.0)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     ui.label(self.strings.buffer_limit());
                     ui.add(TextEdit::singleline(&mut self.settings_buffer).desired_width(120.0));
                     ui.label(
@@ -1041,14 +1041,14 @@ impl GuiApp {
         }
     }
 
-    fn render_language_selector(&mut self, ui: &mut egui::Ui, _palette: &Palette) {
+    fn render_language_selector(&mut self, ctx: &egui::Context, _palette: &Palette) {
         if self.language_selector_open {
             let mut open = self.language_selector_open;
             egui::Window::new("Language / Sprache")
                 .open(&mut open)
                 .resizable(false)
                 .min_width(200.0)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     ui.label("Choose your language:");
                     ui.add_space(6.0);
                     if ui
@@ -1076,14 +1076,14 @@ impl GuiApp {
         }
     }
 
-    fn render_colorpack_selector(&mut self, ui: &mut egui::Ui, _palette: &Palette) {
+    fn render_colorpack_selector(&mut self, ctx: &egui::Context, _palette: &Palette) {
         if self.colorpack_selector_open {
             let mut open = self.colorpack_selector_open;
             egui::Window::new("Color Pack / Farbschema")
                 .open(&mut open)
                 .resizable(true)
                 .min_width(340.0)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     ui.label("Choose your color scheme:");
                     ui.add_space(6.0);
                     ui.separator();
@@ -1116,16 +1116,16 @@ impl GuiApp {
         }
     }
 
-    fn render_snippet_list(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        egui::Panel::left("snippets")
+    fn render_snippet_list(&mut self, ctx: &egui::Context, palette: &Palette) {
+        egui::SidePanel::left("snippets")
             .resizable(true)
-            .default_size(340.0)
+            .default_width(340.0)
             .frame(
                 egui::Frame::new()
                     .fill(palette.surface)
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
-            .show(ui, |ui| {
+            .show(ctx, |ui| {
                 ui.label(
                     RichText::new(if self.filter.is_empty() {
                         self.strings.your_library()
@@ -1255,14 +1255,14 @@ impl GuiApp {
             });
     }
 
-    fn render_editor(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_editor(&mut self, ctx: &egui::Context, palette: &Palette) {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
                     .fill(palette.background)
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
-            .show(ui, |ui| {
+            .show(ctx, |ui| {
                 let Some(index) = self.selected else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(70.0);
@@ -1724,12 +1724,12 @@ impl GuiApp {
             });
     }
 
-    fn render_pending_action(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_pending_action(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.pending_action.is_some() {
             egui::Window::new(self.strings.unsaved_title())
                 .collapsible(false)
                 .resizable(false)
-                .show(ui.ctx(), |ui| {
+                .show(ctx, |ui| {
                     let action = match self.pending_action {
                         Some(PendingAction::Select(_)) => self.strings.unsaved_switching(),
                         Some(PendingAction::New) => self.strings.unsaved_creating(),
@@ -1777,13 +1777,13 @@ impl GuiApp {
 }
 
 impl eframe::App for GuiApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let palette = Palette::for_pack(self.colorpack, self.dark_mode);
         let modal_open = self.diagnostics_open
             || self.import_open
             || self.settings_open
             || self.pending_action.is_some();
-        let (want_save, want_new, want_escape, close_requested) = ui.ctx().input(|input| {
+        let (want_save, want_new, want_escape, close_requested) = ctx.input(|input| {
             (
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
@@ -1800,13 +1800,12 @@ impl eframe::App for GuiApp {
             // Save/Discard/Cancel dialog; if confirmed, close_after_confirm
             // (below) re-issues the close next frame, by which point the
             // draft is no longer dirty so it goes through uncancelled.
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_action(PendingAction::Close);
         }
         if self.close_after_confirm {
             self.close_after_confirm = false;
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if want_save && self.selected.is_some() {
             self.save_selected();
@@ -1821,15 +1820,15 @@ impl eframe::App for GuiApp {
                 self.import_open = false;
             }
         }
-        self.render_toolbar(ui, &palette);
-        self.render_diagnostics(ui, &palette);
-        self.render_import_dialog(ui, &palette);
-        self.render_settings_dialog(ui, &palette);
-        self.render_language_selector(ui, &palette);
-        self.render_colorpack_selector(ui, &palette);
-        self.render_snippet_list(ui, &palette);
-        self.render_editor(ui, &palette);
-        self.render_pending_action(ui, &palette);
+        self.render_toolbar(ctx, &palette);
+        self.render_diagnostics(ctx, &palette);
+        self.render_import_dialog(ctx, &palette);
+        self.render_settings_dialog(ctx, &palette);
+        self.render_language_selector(ctx, &palette);
+        self.render_colorpack_selector(ctx, &palette);
+        self.render_snippet_list(ctx, &palette);
+        self.render_editor(ctx, &palette);
+        self.render_pending_action(ctx, &palette);
     }
 }
 

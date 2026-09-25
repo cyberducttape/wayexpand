@@ -173,7 +173,7 @@ impl KwinWindowTracker {
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
         let mut nonce_bytes = [0_u8; 8];
-        getrandom::getrandom(&mut nonce_bytes)
+        getrandom::fill(&mut nonce_bytes)
             .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
         let nonce = u64::from_le_bytes(nonce_bytes);
         let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
