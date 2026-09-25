@@ -5,7 +5,7 @@ Summary:        A privacy-first, Wayland-native text expander for Linux
 License:        MIT
 URL:            https://github.com/cyberducttape/wayexpand
 
-Source0:        %{url}/archive/v%{version}.tar.gz
+Source0:        %{url}/releases/download/v%{version}/wayexpand-%{version}.tar.gz
 
 BuildRequires:  cargo
 BuildRequires:  rustc
@@ -97,18 +97,18 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 - Add bounded asynchronous command processing and input pass-through safeguards
 - Improve compositor capability reporting, fleet policy handling, and packaging
 
-* Thu Sep 19 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.2-1
+* Sat Sep 19 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.2-1
 - Release v1.1.2: security hardening and correctness fixes
 - Fix P0: Cross-window buffer isolation, pause/sensitive-field state,
   ancestor path validation, clipboard fallback, and input-method-v2 key loss
 - Add 170+ regression tests for security fixes
 
-* Thu Sep 18 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.1-1
+* Fri Sep 18 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.1-1
 - Release v1.1.1: font scaling, retro color themes, WCAG AA contrast fixes,
   sysadmin snippet examples
 
-* Mon Sep 16 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 0.2.0-1
+* Wed Sep 16 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 0.2.0-1
 - Release v0.2.0: evdev backend, GUI redesign, character-drop fix
 
-* Tue Sep 10 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 0.1.0-1
+* Thu Sep 10 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 0.1.0-1
 - Initial Fedora package release
