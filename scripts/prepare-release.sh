@@ -116,6 +116,10 @@ mv "$links_tmp" CHANGELOG.md
 printf '%s\n' "Updating PKGBUILD and wayexpand.spec..."
 sed -i.bak "s/^pkgver=.*/pkgver=$new_version/" PKGBUILD
 rm -f PKGBUILD.bak
+sed -i.bak \
+    "s#^source=.*#source=(\"https://github.com/cyberducttape/wayexpand/releases/download/v${new_version}/wayexpand-${new_version}.tar.gz\")#" \
+    PKGBUILD
+rm -f PKGBUILD.bak
 sed -i.bak "s/^Version:        .*/Version:        $new_version/" wayexpand.spec
 rm -f wayexpand.spec.bak
 metainfo_tmp=$(mktemp)
