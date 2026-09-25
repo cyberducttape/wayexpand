@@ -99,7 +99,7 @@ else
 fi
 
 is_member() {
-    id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx input
+    id -nG "$target_user" 2>/dev/null | tr '[:space:]' '\n' | grep -qx input
 }
 
 state_added_input_group=0
