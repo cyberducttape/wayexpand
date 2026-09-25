@@ -170,6 +170,12 @@ mod tests {
     }
 
     #[test]
+    fn malformed_policy_preserves_toml_diagnostic_prefix() {
+        let error = parse_organization_policy("[organization\nnot valid").unwrap_err();
+        assert!(error.starts_with("invalid policy TOML:"), "{error}");
+    }
+
+    #[test]
     fn missing_policy_is_permissive() {
         let root = std::env::temp_dir().join("wayexpand-policy-missing");
         assert_eq!(
