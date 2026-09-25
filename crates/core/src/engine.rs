@@ -829,36 +829,26 @@ impl ExpansionEngine {
     /// trigger is put back before any later input so matcher order remains the
     /// same as the non-exclusive application's input stream.
     pub fn restore_deferred_match(&mut self, matched_text: &str) {
-        if self.release_deferred_match(matched_text) {
+        if self.take_deferred_reservation(matched_text).is_some() {
             self.buffer.extend(matched_text.chars());
         }
     }
 
-    fn release_deferred_match(&mut self, matched_text: &str) -> bool {
-        if let Some(index) = self
-            .deferred_matches
-            .iter()
-            .position(|reserved| reserved == matched_text)
-        {
-            self.deferred_matches.remove(index);
-            true
-        } else {
-            false
-        }
+    /// Remove the reservation represented by a result. Evdev may absorb one
+    /// delimiter into `matched_text` after the reservation was created, so a
+    /// result can be the reserved trigger plus exactly one scalar.
+    fn take_deferred_reservation(&mut self, matched_text: &str) -> Option<String> {
+        let index = self.deferred_matches.iter().position(|reserved| {
+            reserved == matched_text
+                || matched_text
+                    .strip_prefix(reserved)
+                    .is_some_and(|suffix| suffix.chars().count() == 1)
+        })?;
+        Some(self.deferred_matches.remove(index))
     }
 
     fn release_deferred_match_for_result(&mut self, result: &ExpansionResult) {
-        if self.release_deferred_match(&result.matched_text) {
-            return;
-        }
-        if let Some(index) = self.deferred_matches.iter().position(|reserved| {
-            result
-                .matched_text
-                .strip_prefix(reserved)
-                .is_some_and(|suffix| suffix.chars().count() == 1)
-        }) {
-            self.deferred_matches.remove(index);
-        }
+        self.take_deferred_reservation(&result.matched_text);
     }
 
     fn restore_deferred_matches(&mut self) {
@@ -4517,6 +4507,39 @@ replacement = "signature""#,
         assert_eq!(command_sync.matched_text, command_deferred.matched_text);
         assert_eq!(command_sync.insert, command_deferred.insert);
         assert!(command_sync.command_backed && command_deferred.command_backed);
+    }
+
+    #[test]
+    fn deferred_rollback_restores_an_absorbed_delimiter_with_the_trigger() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig "
+            replacement = "regards"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":sig".into()))
+            .pop();
+        assert!(pending.is_none(), "the delimiter completes this trigger");
+
+        // Model the evdev gate having absorbed the physical delimiter into
+        // the result before policy or injection rejected it.
+        let pending = engine
+            .process_deferred(InputEvent::Delimiter(' '))
+            .pop()
+            .unwrap();
+        let matched = pending.matched_text.clone();
+        assert_eq!(matched, ":sig ");
+        engine.restore_deferred_match(&matched);
+
+        let restored = engine
+            .process_deferred(InputEvent::EndOfInput)
+            .pop()
+            .unwrap();
+        assert_eq!(restored.matched_text, ":sig ");
     }
 
     #[test]
