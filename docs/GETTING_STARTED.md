@@ -110,8 +110,11 @@ session testing and is not certified by the current support matrix. Start
 here only after reviewing the backend tradeoffs:
 
 ```bash
-# Install
-sudo apt install wayexpand  # Ubuntu/Debian
+# Install from the Ubuntu PPA
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+# Debian users: use the vendored source/release route in PACKAGING.md.
 # or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
 
 # Start the explicit evdev route (after reviewing its raw-input tradeoff)
