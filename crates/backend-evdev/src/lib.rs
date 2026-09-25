@@ -84,6 +84,8 @@ pub enum EvdevError {
     Read { path: String, message: String },
     #[error("all keyboard devices were disconnected")]
     AllDevicesLost,
+    #[error("timed out waiting for all keyboard keys to be released")]
+    KeyReleaseTimeout,
 }
 
 impl EvdevError {
@@ -140,7 +142,7 @@ impl EvdevSource {
     /// stop/pause/reload requests at a steady cadence even while idle.
     fn poll_once(&mut self, timeout: Duration) -> Result<(), EvdevError> {
         if self.devices.is_empty() {
-            return Ok(());
+            return Err(EvdevError::AllDevicesLost);
         }
         let timeout = rustix::event::Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
@@ -182,6 +184,7 @@ impl EvdevSource {
         drop(fds);
         drop(borrowed);
         self.drain_ready(&ready)?;
+        let had_lost_devices = !lost.is_empty();
         for index in lost.into_iter().rev() {
             tracing::warn!(
                 path = %self.devices[index].path().display(),
@@ -189,6 +192,20 @@ impl EvdevSource {
             );
             self.devices.remove(index);
         }
+        if had_lost_devices {
+            self.reset_keyboard_state()?;
+        }
+        Ok(())
+    }
+
+    fn reset_keyboard_state(&mut self) -> Result<(), EvdevError> {
+        let context = Context::new(0).map_err(|error| EvdevError::Keymap(error.to_string()))?;
+        let keymap = Keymap::new_from_names(context, None, 0)
+            .map_err(|error| EvdevError::Keymap(error.to_string()))?;
+        self.state = State::new(keymap);
+        self.pressed.clear();
+        self.pending.push_back(InputEvent::Reset);
+        tracing::warn!("resetting evdev keyboard state after device disconnect");
         Ok(())
     }
 
@@ -296,6 +313,9 @@ impl EvdevSource {
     /// events, so callers should abandon an expansion when this returns false
     /// rather than modifying a moving cursor.
     pub fn wait_for_input_quiet(&mut self, timeout: Duration) -> Result<bool, InputSourceError> {
+        if self.has_pending_events() {
+            return Ok(false);
+        }
         let deadline = Instant::now() + timeout;
         let quiet_deadline = Instant::now() + DEFAULT_QUIET_PERIOD;
         while Instant::now() < quiet_deadline {
@@ -318,8 +338,9 @@ impl EvdevSource {
         Ok(true)
     }
 
-    /// Blocks until every physically held key has been released, or until
-    /// `timeout` elapses.
+    /// Blocks until every physically held key has been released. A timeout is
+    /// an unsafe state, not successful completion: callers must abandon the
+    /// expansion rather than injecting while a physical key may still be held.
     ///
     /// Callers must do this before injecting a replacement. A match fires on
     /// key-down, so the trigger's last key is still held at that moment;
@@ -336,9 +357,11 @@ impl EvdevSource {
         while self.keys_held() {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                // A key genuinely held down (or a missed release) must not
-                // stall expansion forever.
-                break;
+                return Err(InputSourceError {
+                    source: SOURCE_NAME,
+                    retryable: false,
+                    message: EvdevError::KeyReleaseTimeout.to_string(),
+                });
             }
             self.poll_once(remaining.min(POLL_TIMEOUT))
                 .map_err(|error| InputSourceError {
@@ -346,6 +369,17 @@ impl EvdevSource {
                     retryable: error.is_retryable(),
                     message: error.to_string(),
                 })?;
+            if self
+                .pending
+                .iter()
+                .any(|event| matches!(event, InputEvent::Reset))
+            {
+                return Err(InputSourceError {
+                    source: SOURCE_NAME,
+                    retryable: true,
+                    message: "keyboard state was reset while waiting for release".into(),
+                });
+            }
         }
         Ok(())
     }
@@ -531,5 +565,58 @@ mod tests {
         // Value 2 is kernel auto-repeat. It must not be mistaken for a release.
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 2));
         assert!(source.keys_held());
+    }
+
+    #[test]
+    fn disconnect_resets_held_keys_and_modifier_state() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashSet::new(),
+        };
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 29, 1));
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        assert!(source.keys_held());
+        source.reset_keyboard_state().unwrap();
+        assert!(!source.keys_held());
+        assert_eq!(source.pending.pop_back(), Some(InputEvent::Reset));
+        source.pending.clear();
+
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        assert!(matches!(
+            source.pending.pop_front(),
+            Some(InputEvent::Key(_))
+        ));
+        assert_eq!(
+            source.pending.pop_front(),
+            Some(InputEvent::Text("a".into()))
+        );
+    }
+
+    #[test]
+    fn held_key_at_release_deadline_is_rejected() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashSet::from([30]),
+        };
+        let error = source.wait_for_key_release(Duration::ZERO).unwrap_err();
+        assert!(error.message.contains("timed out"));
+    }
+
+    #[test]
+    fn empty_device_set_is_not_treated_as_a_successful_poll() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashSet::new(),
+        };
+        assert!(matches!(
+            source.poll_once(Duration::ZERO),
+            Err(EvdevError::AllDevicesLost)
+        ));
     }
 }
