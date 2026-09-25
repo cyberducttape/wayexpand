@@ -91,6 +91,11 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 
 %changelog
+* Thu Sep 24 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.2.0-1
+- Release v1.2.0: backend correctness, policy enforcement, and release hardening
+- Add bounded asynchronous command processing and input pass-through safeguards
+- Improve compositor capability reporting, fleet policy handling, and packaging
+
 * Thu Sep 19 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.1.2-1
 - Release v1.1.2: security hardening and correctness fixes
 - Fix P0: Cross-window buffer isolation, pause/sensitive-field state,
