@@ -428,20 +428,23 @@ fn main() -> Result<()> {
             // and no competing input arrived during command execution.
             // This prevents the race condition where fast commands finish
             // before the trigger key's physical release event is processed.
-            let completed_commands = if evdev_mode {
+            let gating = if evdev_mode {
                 apply_evdev_gating(completed_commands, &mut evdev)
             } else {
-                completed_commands
+                EvdevGatingOutcome {
+                    results: completed_commands,
+                    follow_up: Vec::new(),
+                }
             };
 
-            if !completed_commands.is_empty() {
+            if !gating.results.is_empty() {
                 if input_method_mode {
                     if let Some(source) = input_method.as_mut() {
-                        apply_results(completed_commands, Some(source), &policy, active_backend)?;
+                        apply_results(gating.results, Some(source), &policy, active_backend)?;
                     }
                 } else if let Some(mut backend) = injector.take() {
                     let result = apply_results(
-                        completed_commands,
+                        gating.results,
                         Some(backend.as_mut()),
                         &policy,
                         active_backend,
@@ -449,9 +452,15 @@ fn main() -> Result<()> {
                     injector = Some(backend);
                     result?;
                 } else {
-                    apply_results(completed_commands, None, &policy, active_backend)?;
+                    apply_results(gating.results, None, &policy, active_backend)?;
                 }
             }
+            replay_evdev_follow_up(
+                &mut config.engine,
+                gating.follow_up,
+                &policy,
+                active_backend,
+            )?;
         }
         set_daemon_status_with_metrics(
             &mut status_publisher,
@@ -656,10 +665,16 @@ fn main() -> Result<()> {
                             if results.is_empty() {
                                 Ok(())
                             } else {
-                                let results = apply_evdev_gating(results, &mut evdev);
+                                let gating = apply_evdev_gating(results, &mut evdev);
                                 apply_results(
-                                    results,
+                                    gating.results,
                                     Some(backend.as_mut()),
+                                    &policy,
+                                    active_backend,
+                                )?;
+                                replay_evdev_follow_up(
+                                    &mut config.engine,
+                                    gating.follow_up,
                                     &policy,
                                     active_backend,
                                 )
@@ -1444,16 +1459,26 @@ fn dispatch_pending_results(
 /// Apply evdev safety gating to expansion results before injection.
 /// Ensures physical key-up event is processed and no competing input arrived.
 /// Only applies when evdev source is available and in use.
+struct EvdevGatingOutcome {
+    results: Vec<ExpansionResult>,
+    follow_up: Vec<InputEvent>,
+}
+
 fn apply_evdev_gating(
     mut results: Vec<ExpansionResult>,
     evdev: &mut Option<EvdevSource>,
-) -> Vec<ExpansionResult> {
+) -> EvdevGatingOutcome {
+    let mut follow_up = Vec::new();
     if let Some(source) = evdev.as_mut() {
         // Wait for physical key release before injecting synthetic input.
         // Injecting while trigger key is held can make synthetic input appear
         // as auto-repeat or cancel the physical release.
         if !evdev_release_is_safe(source.wait_for_key_release(KEY_RELEASE_TIMEOUT)) {
-            return Vec::new();
+            follow_up = source.take_pending_events();
+            return EvdevGatingOutcome {
+                results: Vec::new(),
+                follow_up,
+            };
         }
 
         // Check if any input arrived during key release wait.
@@ -1461,13 +1486,19 @@ fn apply_evdev_gating(
             Ok(quiet) => quiet,
             Err(error) => {
                 warn!(%error, "evdev quiet-period check failed; abandoning expansion");
-                return Vec::new(); // Fail closed: don't inject if we can't verify safety
+                // Preserve anything captured before the polling error so the
+                // matcher sees the same stream as the focused application.
+                follow_up = source.take_pending_events();
+                return EvdevGatingOutcome {
+                    results: Vec::new(),
+                    follow_up,
+                };
             }
         };
 
         // If other input arrived, handle delimiter preservation or drop expansion
         if !input_quiet {
-            let follow_up = source.take_pending_events();
+            follow_up = source.take_pending_events();
             if follow_up.len() == 1 {
                 if let InputEvent::Delimiter(character) = &follow_up[0] {
                     // Single delimiter can be preserved: extend erase/reinsert to include it
@@ -1475,23 +1506,42 @@ fn apply_evdev_gating(
                         result.matched_text.push(*character);
                         result.insert.push(*character);
                     }
+                    // The delimiter is represented in the adjusted result and
+                    // must not be replayed a second time through the matcher.
+                    follow_up.clear();
                 } else {
                     // Other input arrived: don't inject (avoid cursor misplacement)
                     warn!(
                         "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                     );
-                    return Vec::new();
+                    results.clear();
                 }
             } else if follow_up.len() > 1 {
                 // Multiple inputs arrived: don't inject
                 warn!(
                     "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                 );
-                return Vec::new();
+                results.clear();
             }
         }
     }
-    results
+    EvdevGatingOutcome { results, follow_up }
+}
+
+/// Replay input captured during evdev gating through the matcher. The focused
+/// application receives these events through non-exclusive capture already;
+/// this keeps the engine's buffer and boundary state in sync without applying
+/// a second replacement for the same physical input.
+fn replay_evdev_follow_up(
+    engine: &mut ExpansionEngine,
+    follow_up: Vec<InputEvent>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> std::result::Result<(), Box<EventError>> {
+    for event in follow_up {
+        process_event(engine, event, None, policy, active_backend)?;
+    }
+    Ok(())
 }
 
 fn apply_results(
@@ -1741,6 +1791,47 @@ mod tests {
             injector.calls,
             ["erase::a", "insert:alpha", "erase::b", "insert:beta"]
         );
+    }
+
+    #[test]
+    fn evdev_follow_up_is_replayed_in_order_to_the_matcher() {
+        let config = Config::parse(
+            r#"
+                [[expansion]]
+                trigger = ":sigx "
+                replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(":sig".into()),
+            None,
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        replay_evdev_follow_up(
+            &mut engine,
+            vec![InputEvent::Text("x".into())],
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Delimiter(' '),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        assert_eq!(injector.calls, ["erase::sigx ", "insert:ok"]);
     }
 
     #[cfg(unix)]
