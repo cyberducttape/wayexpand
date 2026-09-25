@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Refuse to prepare a release while an unprefixed tag with the same version
+  exists, keeping public release references aligned with the `vX.Y.Z` workflow.
+
 - Require release tarball generation to use the locked Cargo dependency graph
   when vendoring dependencies.
 

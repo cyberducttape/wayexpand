@@ -35,9 +35,15 @@ fi
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-# Check if tag already exists
+# Check if either the canonical release tag or a legacy unprefixed alias exists.
+# Release automation only accepts vX.Y.Z, so leaving an unprefixed tag behind
+# would create an ambiguous public reference to a different source state.
 if git rev-parse "v$new_version" >/dev/null 2>&1; then
     printf '%s\n' "error: tag v$new_version already exists" >&2
+    exit 1
+fi
+if git rev-parse "refs/tags/$new_version" >/dev/null 2>&1; then
+    printf '%s\n' "error: unprefixed tag $new_version already exists; remove it deliberately before releasing" >&2
     exit 1
 fi
 
