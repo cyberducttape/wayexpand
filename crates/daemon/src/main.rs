@@ -440,10 +440,17 @@ fn main() -> Result<()> {
             if !gating.results.is_empty() {
                 if input_method_mode {
                     if let Some(source) = input_method.as_mut() {
-                        apply_results(gating.results, Some(source), &policy, active_backend)?;
+                        apply_results(
+                            &mut config.engine,
+                            gating.results,
+                            Some(source),
+                            &policy,
+                            active_backend,
+                        )?;
                     }
                 } else if let Some(mut backend) = injector.take() {
                     let result = apply_results(
+                        &mut config.engine,
                         gating.results,
                         Some(backend.as_mut()),
                         &policy,
@@ -452,7 +459,13 @@ fn main() -> Result<()> {
                     injector = Some(backend);
                     result?;
                 } else {
-                    apply_results(gating.results, None, &policy, active_backend)?;
+                    apply_results(
+                        &mut config.engine,
+                        gating.results,
+                        None,
+                        &policy,
+                        active_backend,
+                    )?;
                 }
             }
             replay_evdev_follow_up(
@@ -667,6 +680,7 @@ fn main() -> Result<()> {
                             } else {
                                 let gating = apply_evdev_gating(results, &mut evdev);
                                 apply_results(
+                                    &mut config.engine,
                                     gating.results,
                                     Some(backend.as_mut()),
                                     &policy,
@@ -1400,7 +1414,7 @@ fn apply_pending_results(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     let results = dispatch_pending_results(engine, pending, policy, active_backend);
-    apply_results(results, injector, policy, active_backend)
+    apply_results(engine, results, injector, policy, active_backend)
 }
 
 /// Apply policy and dispatch deferred expansions without injecting ready results.
@@ -1545,6 +1559,7 @@ fn replay_evdev_follow_up(
 }
 
 fn apply_results(
+    engine: &mut ExpansionEngine,
     results: Vec<ExpansionResult>,
     mut injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
@@ -1580,6 +1595,7 @@ fn apply_results(
             if let Err(source) = inject_result {
                 return Err(Box::new(EventError { result, source }));
             }
+            engine.commit_applied_expansion(&result);
             info!(
                 trigger_chars = result.trigger.chars().count(),
                 insert_bytes = result.insert.len(),

@@ -631,9 +631,6 @@ impl ExpansionEngine {
                 validated_output
             };
 
-            // Update undo state
-            self.last_expansion = Some((plan.matched_text.clone(), final_output.clone()));
-
             // Build final result
             let mut result = completion.result;
             result.insert = final_output;
@@ -643,7 +640,8 @@ impl ExpansionEngine {
     }
 
     /// Complete a deferred match after caller-side preflight policy approval.
-    /// Keeping execution and commit here preserves cache, case, and undo state.
+    /// Cache and case state are prepared here; undo state is committed only
+    /// after the caller successfully injects the returned result.
     /// `additional_max_size` is a separately loaded administrator limit;
     /// zero means that only the limit carried by the engine is applied.
     fn execute_pending_inline(
@@ -688,10 +686,6 @@ impl ExpansionEngine {
         } else {
             output
         };
-        if pending.cursor_offset.is_none() {
-            self.last_expansion = Some((pending.matched_text.clone(), insert.clone()));
-        }
-
         Ok(ExpansionResult {
             trigger: pending.trigger,
             matched_text: pending.matched_text,
@@ -751,8 +745,16 @@ impl ExpansionEngine {
             QueueSendError::Full => CommandError::QueueFull,
             QueueSendError::Disconnected => CommandError::WorkerUnavailable,
         })?;
-        self.last_expansion = None;
         Ok(PendingExpansionDispatch::Queued)
+    }
+
+    /// Commit undo state after an expansion result was successfully injected.
+    /// Deferred callers must not record undo state before their own safety and
+    /// output checks have completed.
+    pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
+        if result.cursor_offset.is_none() {
+            self.last_expansion = Some((result.matched_text.clone(), result.insert.clone()));
+        }
     }
 
     /// Queue a hotkey action for bounded asynchronous execution. The caller
@@ -1435,7 +1437,8 @@ impl ExpansionEngine {
 
     /// Deferred execution variant: returns pending results without executing commands.
     /// v1.3+ architecture: caller must check policy and complete through the
-    /// engine so cache, case propagation, and undo state are committed.
+    /// engine so cache and case propagation are prepared. Undo state is
+    /// committed by the caller only after successful injection.
     fn take_match_deferred(
         &mut self,
         config_index: usize,
@@ -1958,7 +1961,7 @@ mod tests {
         engine: &mut ExpansionEngine,
         pending: PendingExpansionResult,
     ) -> ExpansionResult {
-        match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
             PendingExpansionDispatch::Ready(result) => result,
             PendingExpansionDispatch::Queued => {
                 let deadline = Instant::now() + Duration::from_secs(2);
@@ -1970,7 +1973,11 @@ mod tests {
                     thread::sleep(Duration::from_millis(5));
                 }
             }
-        }
+        };
+        // The test helper models a successful injector. Production callers
+        // commit only after their own safety and injection checks pass.
+        engine.commit_applied_expansion(&result);
+        result
     }
 
     #[test]
@@ -4388,6 +4395,38 @@ replacement = "signature""#,
         assert_eq!(command_sync.matched_text, command_deferred.matched_text);
         assert_eq!(command_sync.insert, command_deferred.insert);
         assert!(command_sync.command_backed && command_deferred.command_backed);
+    }
+
+    #[test]
+    fn deferred_dispatch_commits_undo_only_after_injection() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":sig".into()))
+            .pop()
+            .unwrap();
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            PendingExpansionDispatch::Ready(result) => result,
+            PendingExpansionDispatch::Queued => panic!("static expansion was queued"),
+        };
+        let chord = KeyChord::parse("Ctrl+Z").unwrap();
+
+        assert!(
+            engine.try_undo(&chord).is_none(),
+            "pre-injection results must not create undo state"
+        );
+        engine.commit_applied_expansion(&result);
+        assert!(engine.try_undo(&chord).is_some());
     }
 
     #[test]
