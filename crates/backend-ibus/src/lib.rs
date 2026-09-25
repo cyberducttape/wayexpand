@@ -818,7 +818,10 @@ replacement = "signature"
     #[test]
     fn async_word_boundary_command_replaces_delivered_delimiter_transactionally() {
         let config: Config = toml::from_str(
-            r#"[[expansion]]
+            r#"[settings]
+undo_chord = "Ctrl+Z"
+
+[[expansion]]
 trigger = ":sig"
 replacement = ""
 match_mode = "word-boundary"
@@ -852,6 +855,12 @@ timeout_ms = 1000
                         IbusAction::CommitText("signature ".into()),
                     ]
                 );
+                let undo = adapter
+                    .engine()
+                    .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+                    .expect("completed IBus command should be undoable");
+                assert_eq!(undo.matched_text, "signature");
+                assert_eq!(undo.insert, ":sig");
                 break;
             }
             assert!(Instant::now() < deadline, "IBus command did not complete");
