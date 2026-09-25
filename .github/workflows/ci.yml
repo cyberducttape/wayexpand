@@ -278,13 +278,17 @@ jobs:
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cargo debhelper dh-cargo \
-            devscripts dpkg-dev rpm rustc libwayland-dev libxkbcommon-dev pkg-config
+          sudo apt-get install -y build-essential debhelper dh-cargo devscripts \
+            dpkg-dev rpm libwayland-dev libxkbcommon-dev pkg-config
+          rustc --version
+          cargo --version
       - name: Vendor dependencies for offline package builds
         run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml
       - name: Build Debian package
         run: |
-          dpkg-buildpackage -us -uc -b
+          # The pinned rust-toolchain supplies rustc/cargo; -d bypasses the
+          # runner's older Debian package metadata for those tools.
+          dpkg-buildpackage -us -uc -b -d
           deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
           test -n "$deb"
           for path in \
