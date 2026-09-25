@@ -4,27 +4,14 @@ This document outlines architectural improvements identified during the comprehe
 
 ## Priority: HIGH
 
-### 1. Command Queue Observability
+### 1. Command Queue Observability — RESOLVED
 
 **Problem:** Silent command failures when job queue saturates (16 capacity).
 
-**Symptoms:**
-- User types trigger, nothing happens
-- No error signal
-- Text state diverges from what app contains
-- No way to diagnose via logs/metrics
-
-**Root Cause:**
-```rust
-runtime.sender.try_send(job).ok()?;  // Line 690 in engine.rs
-```
-Silently swallows `SendError` when queue full.
-
-**Solution:**
-- Add tracing::warn! when try_send fails
-- Emit metrics: `command_queue_full_total`, `command_timeout_total`, `command_execution_failed_total`
-- Document in `wayexpand status` command
-- Consider multi-worker pool instead of single command worker (eliminates head-of-line blocking)
+**Resolution:** Queue rejection, timeout, and command failure counters are
+exposed through `wayexpand status`, and the daemon logs queue-rejection
+warnings. Queue failures also restore the pending match instead of silently
+losing it.
 
 **Impact:** Production debugging becomes possible; single 5-second command no longer blocks all other command-backed expansions.
 
@@ -46,40 +33,22 @@ execution paths.
 
 ---
 
-### 3. Config Reload Change Detection
+### 3. Config Reload Change Detection — RESOLVED
 
-**Status:** PARTIALLY FIXED in commit 28f247b
-
-**Remaining Issue:** Fingerprint uses simple additive checksum, not cryptographic hash.
-
-**Current:** `wrapping_add(u64)` summing 8-byte chunks
-**Proposed:** BLAKE3 for strong change fingerprint
-
-**Why:** On coarse-timestamp filesystems with malicious edits, simple checksum could theoretically have collisions. BLAKE3 is fast and cryptographically strong.
+**Resolution:** Reload fingerprints use deterministic FNV-1a over the complete
+file contents, alongside metadata checks. This avoids the old commutative
+additive checksum and detects same-size/content changes reliably without
+adding a cryptographic dependency.
 
 **Impact:** Negligible in practice (user would have to intentionally craft collisions), but better for high-assurance scenarios.
 
 ---
 
-### 4. Evdev Device Discovery Efficiency
+### 4. Evdev Device Discovery Efficiency — RESOLVED
 
-**Problem:** Re-enumerates `/dev/input/*` every 500ms polling cycle while idle.
-
-**Root Cause:**
-```rust
-// In evdev polling loop
-loop {
-    // Re-discovers devices every iteration
-    for entry in fs::read_dir("/dev/input/")? {
-        // Open, probe, add to device list
-    }
-}
-```
-
-**Solution:**
-- **Primary:** Use `udev` monitor for add/remove events
-- **Fallback:** Slow polling (minutes, not 500ms) with device path caching
-- **Skip:** Don't re-open already-known devices
+**Resolution:** Input polling is independent from device discovery. Known
+devices are refreshed on a 30-second fallback interval, rather than on every
+latency-sensitive poll. A udev monitor remains a possible future enhancement.
 
 **Impact:** Reduces syscall volume dramatically during idle periods.
 
@@ -87,31 +56,17 @@ loop {
 
 ## Lower Priority
 
-### 5. Config Reload Documentation/Behavior Mismatch
+### 5. Config Reload Documentation/Behavior Mismatch — RESOLVED
 
-Some docs claim devices are discovered at startup and retained, but polling loop rescans.
-
-**Solution:** Either update docs OR refactor to match promised behavior (likely the former).
+The evdev discovery documentation now describes periodic refresh behavior.
 
 ---
 
-### 6. Disable Title Matching Semantics
+### 6. Disable Title Matching Semantics — RESOLVED
 
-**Problem:** `disable_title_matching=true` doesn't just "disable titles" - it disables entire app_filter.
-
-**Current Behavior:** Matches ALL apps when this flag is set
-**Intuitive Behavior:** Match only app_id, fail-closed if unavailable
-
-**Solution (Breaking Change for v1.3+):**
-Replace single boolean with explicit modes:
-```toml
-[organization]
-app_filter_mode = "app_id_only"      # Fail-closed without app_id
-app_filter_mode = "app_id_or_title"  # Current default
-app_filter_mode = "disabled"         # Disable all app filtering
-```
-
-Requires migration docs for existing `disable_title_matching` users.
+`disable_title_matching=true` disables title fallback while retaining app-id
+matching and failing closed when no app-id is available. Regression tests cover
+both paths.
 
 ---
 
@@ -127,25 +82,8 @@ Requires migration docs for existing `disable_title_matching` users.
 
 ---
 
-## Implementation Priority for v1.3
+## Current follow-up candidates
 
-1. **Command queue observability** (HIGH) - unblocks production debugging
-2. **Process cleanup** (HIGH) - fixes regression test
-3. **Evdev efficiency** (MEDIUM) - improves idle behavior
-4. **App filter semantics** (MEDIUM) - breaking change, needs migration path
-5. **Config reload hash** (LOW) - theoretical improvement
-6. **Pack structure** (LOW) - documentation only
-
----
-
-## Metrics to Track (v1.3+ instrumentation)
-
-```
-command_queue_full_total: Counter of failed job submissions
-command_timeout_total: Counter of commands exceeding timeout
-command_execution_failed_total: Counter of subprocess failures
-command_execution_slow_total: Counter of commands > 1 second
-expansion_dropped_total: Counter of expansions lost to queue saturation
-```
-
-Dashboard: `wayexpand status --metrics-json` (future enhancement)
+- Add udev-backed evdev hot-plug notifications.
+- Clarify pack layout and provenance documentation.
+- Consider reducing the remaining synchronous/deferred matcher duplication.

@@ -71,6 +71,12 @@ dispatch and enter that tag in the `release_ref` field (for example,
 artifacts were not uploaded; it checks out and verifies the selected tag and
 produces the same vendored source archive required by Launchpad.
 
+Release archives must be created by the release workflow or with
+`git archive`/`scripts/generate-release-tarballs.sh`. Do not run `tar` on a
+working checkout: that can include `.git/` metadata and build outputs such as
+`target/`. The release workflow verifies that published archives contain no
+`.git/` directory.
+
 **Binary archive** (for end users):
 - `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
   systemd units, the desktop entry, application icon, example configuration,

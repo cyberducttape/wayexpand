@@ -146,8 +146,9 @@ The control socket lives at `$XDG_RUNTIME_DIR/wayexpand.sock` (or the explicit
 `WAYEXPAND_SOCKET` path), is resolved against a validated parent, created under
 a restrictive `umask`, and finalized at mode `0600`. Its immediate parent and
 all ancestors must be owned by the current user or root and must not be
-group/world-writable; a root-owned sticky ancestor such as `/tmp` is allowed,
-but never as the immediate socket parent. Stale-socket cleanup requires both
+group/world-writable unless the directory has the sticky bit set; this includes
+the immediate socket parent, so a sticky directory such as `/tmp` is allowed.
+Stale-socket cleanup requires both
 the current UID and the original device/inode identity. The daemon refuses to
 remove non-socket or differently owned paths. Service units also restrict
 memory, tasks, file descriptors, and restart frequency.
