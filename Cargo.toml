@@ -49,4 +49,4 @@ wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 xkbcommon-rs = { version = "0.1.2", features = ["client"] }
 unicode-segmentation = "1"
-shlex = "1"
+shlex = "2"
