@@ -326,11 +326,13 @@ The authoritative `EvdevSource::connect` path does inspect keyboard key
 capabilities before starting capture, so a failed connection remains fail-closed.
 
 **Hotplug and device tracking:**
-The evdev source refreshes its keyboard-device discovery on every bounded poll.
-New readable keyboards are opened automatically, and devices that disappear are
-removed from the active set. This supports USB keyboard hotplug without a daemon
-restart. Device identity is still limited to the discovered evdev nodes; there
-is no administrator-managed per-device allowlist or seat isolation.
+The evdev source refreshes its keyboard-device discovery on a 30-second fallback
+interval, independently of the latency-sensitive input poll. New readable
+keyboards are opened automatically, and devices that disappear are removed from
+the active set. This supports USB keyboard hotplug without a daemon restart,
+with up to one refresh interval of detection latency. Device identity is still
+limited to the discovered evdev nodes; there is no administrator-managed
+per-device allowlist or seat isolation.
 
 For more details on evdev implementation, architecture decisions, and integration
 testing, see the evdev backend crate source code.

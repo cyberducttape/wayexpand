@@ -494,6 +494,15 @@ impl ExpansionEngine {
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     };
+                    // A runtime can be dropped during a configuration reload
+                    // while work is still buffered in the channel. Do not
+                    // start another external command after shutdown begins;
+                    // only the command already executing at the boundary may
+                    // finish under its existing timeout.
+                    if command_shutdown.load(Ordering::Acquire) {
+                        worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                        break;
+                    }
                     worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let AsyncCommandJob::Expansion {
@@ -539,6 +548,13 @@ impl ExpansionEngine {
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     };
+                    // Match expansion workers: a hotkey still waiting in the
+                    // old runtime must not acquire new side effects after a
+                    // reload has requested shutdown.
+                    if hotkey_shutdown.load(Ordering::Acquire) {
+                        hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                        break;
+                    }
                     hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     hotkey_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let output = Self::execute_hotkey(&action);
@@ -4820,6 +4836,77 @@ replacement = "signature""#,
             Err(CommandError::StaleInput)
         ));
         assert!(!marker.exists(), "stale deferred commands must not run");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_async_runtime_discards_queued_commands() {
+        let first_marker =
+            std::env::temp_dir().join(format!("wayexpand-shutdown-first-{}", std::process::id()));
+        let second_marker =
+            std::env::temp_dir().join(format!("wayexpand-shutdown-second-{}", std::process::id()));
+        let _ = std::fs::remove_file(&first_marker);
+        let _ = std::fs::remove_file(&second_marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":one"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "sleep 0.4; printf first > '{}'"]
+            timeout_ms = 2000
+
+            [[expansion]]
+            trigger = ":two"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf second > '{}'"]
+            timeout_ms = 2000
+            "#,
+            first_marker.display(),
+            second_marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+
+        let first = engine
+            .process_deferred(InputEvent::Text(":one".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(
+            engine.dispatch_pending_with_policy(first, 0),
+            Ok(PendingExpansionDispatch::Queued)
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while engine.command_metrics().command_in_flight == 0 {
+            assert!(Instant::now() < deadline, "first command did not start");
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        // Clear the logical reservation before queuing a second command. The
+        // first command remains in flight while the second is buffered.
+        engine.process_deferred(InputEvent::Reset);
+        let second = engine
+            .process_deferred(InputEvent::Text(":two".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(
+            engine.dispatch_pending_with_policy(second, 0),
+            Ok(PendingExpansionDispatch::Queued)
+        );
+
+        drop(engine);
+        assert!(first_marker.exists(), "in-flight command should finish");
+        assert!(
+            !second_marker.exists(),
+            "queued command must be discarded during shutdown"
+        );
+        let _ = std::fs::remove_file(first_marker);
+        let _ = std::fs::remove_file(second_marker);
     }
 
     #[test]
