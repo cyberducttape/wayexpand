@@ -1644,6 +1644,25 @@ mod tests {
     }
 
     #[test]
+    fn forwarded_word_boundary_delimiter_is_replaced_atomically() {
+        // input-method-v2 forwards the delimiter before the engine reports
+        // the word-boundary match. The transaction must therefore validate
+        // and replace trigger + delimiter together; validating only `:sig`
+        // would reject the expansion because the surrounding text ends in
+        // `:sig `.
+        let mut surrounding = Some(SurroundingText {
+            text: ":sig ".into(),
+            cursor: 5,
+            anchor: 5,
+        });
+
+        assert!(surrounding_ends_with_trigger(surrounding.as_ref(), ":sig "));
+        optimistic_replace(&mut surrounding, ":sig ", "signature ").unwrap();
+        assert_eq!(surrounding.as_ref().unwrap().text, "signature ");
+        assert_eq!(surrounding.as_ref().unwrap().cursor, 10);
+    }
+
+    #[test]
     fn replacement_context_rejects_selection_and_invalid_cursor() {
         let selected = SurroundingText {
             text: ":x".into(),
