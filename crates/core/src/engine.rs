@@ -247,6 +247,31 @@ struct AsyncCommandRuntime {
     hotkey_worker: Option<JoinHandle<()>>,
 }
 
+/// Send a worker completion without making runtime shutdown dependent on a
+/// receiver draining the old configuration's queue. Normal operation keeps
+/// backpressure when the bounded completion channel is full; once shutdown is
+/// requested, the completion can be discarded because the owning engine is
+/// being replaced and must not wait indefinitely for stale output.
+fn send_completion_or_shutdown<T>(
+    sender: &mpsc::SyncSender<T>,
+    mut completion: T,
+    shutdown: &AtomicBool,
+) -> bool {
+    loop {
+        if shutdown.load(Ordering::Acquire) {
+            return false;
+        }
+        match sender.try_send(completion) {
+            Ok(()) => return true,
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(mpsc::TrySendError::Full(value)) => {
+                completion = value;
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+}
+
 impl Drop for AsyncCommandRuntime {
     fn drop(&mut self) {
         // Stop accepting queued work, then join both workers. In-flight
@@ -518,17 +543,18 @@ impl ExpansionEngine {
                     if let Err(error) = &output {
                         worker_metrics.record_error(matches!(error, CommandError::Timeout));
                     }
-                    if completion_sender
-                        .send(AsyncCommandCompletion {
+                    if !send_completion_or_shutdown(
+                        &completion_sender,
+                        AsyncCommandCompletion {
                             config_index,
                             generation,
                             cache_ms,
                             additional_max_size,
                             result,
                             output,
-                        })
-                        .is_err()
-                    {
+                        },
+                        &command_shutdown,
+                    ) {
                         break;
                     }
                 }
@@ -562,10 +588,11 @@ impl ExpansionEngine {
                     if let Err(error) = &output {
                         hotkey_metrics.record_error(matches!(error, HotkeyError::Timeout(_)));
                     }
-                    if hotkey_completion_sender
-                        .send(AsyncHotkeyCompletion { action, output })
-                        .is_err()
-                    {
+                    if !send_completion_or_shutdown(
+                        &hotkey_completion_sender,
+                        AsyncHotkeyCompletion { action, output },
+                        &hotkey_shutdown,
+                    ) {
                         break;
                     }
                 }
@@ -4907,6 +4934,21 @@ replacement = "signature""#,
         );
         let _ = std::fs::remove_file(first_marker);
         let _ = std::fs::remove_file(second_marker);
+    }
+
+    #[test]
+    fn completion_backpressure_yields_to_shutdown() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(1_u8).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker =
+            thread::spawn(move || !send_completion_or_shutdown(&sender, 2_u8, &worker_shutdown));
+
+        thread::sleep(Duration::from_millis(20));
+        shutdown.store(true, Ordering::Release);
+        assert!(worker.join().unwrap(), "completion helper should stop");
+        assert_eq!(receiver.try_recv().unwrap(), 1);
     }
 
     #[test]
