@@ -198,6 +198,28 @@ impl Default for OrganizationPolicy {
 }
 
 impl OrganizationPolicy {
+    /// Return the policy values that are allowed to block behavior.
+    ///
+    /// Audit mode deliberately retains the original policy for violation
+    /// reporting, but contributes no enforcement values to the engine. This
+    /// keeps policy detection and policy enforcement separate at every
+    /// backend boundary.
+    pub fn effective_enforcement_policy(&self) -> Self {
+        if self.safe_mode {
+            return self.clone();
+        }
+
+        let mut effective = self.clone();
+        effective.disable_commands = false;
+        effective.disable_hotkeys = false;
+        effective.require_absolute_commands = false;
+        effective.disable_title_matching = false;
+        effective.max_replacement_size = 0;
+        effective.allowed_backends.clear();
+        effective.allowed_packs.clear();
+        effective
+    }
+
     /// Check if any policies are active
     pub fn is_active(&self) -> bool {
         self.safe_mode
@@ -1093,7 +1115,13 @@ impl Config {
         policy: &OrganizationPolicy,
     ) -> Result<(), ConfigError> {
         if policy.is_active() {
-            self.organization = policy.clone();
+            // Validate the administrator input before projecting audit-only
+            // values away. Invalid policy files must remain fatal even when
+            // safe_mode is disabled.
+            let mut candidate = self.clone();
+            candidate.organization = policy.clone();
+            candidate.validate()?;
+            self.organization = policy.effective_enforcement_policy();
         }
         self.validate()
     }
@@ -1439,6 +1467,53 @@ mod tests {
         assert!(safe.command_path_violation("git").is_some());
         assert!(safe.command_path_is_blocked("git"));
         assert!(!safe.command_path_is_blocked("/usr/bin/git"));
+    }
+
+    #[test]
+    fn audit_policy_has_no_effective_enforcement_values() {
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            disable_commands: true,
+            disable_hotkeys: true,
+            require_absolute_commands: true,
+            disable_title_matching: true,
+            max_replacement_size: 256,
+            allowed_backends: vec!["none".into()],
+            allowed_packs: vec!["managed".into()],
+            ..OrganizationPolicy::default()
+        };
+        let effective = policy.effective_enforcement_policy();
+
+        assert!(!effective.disable_commands);
+        assert!(!effective.disable_hotkeys);
+        assert!(!effective.require_absolute_commands);
+        assert!(!effective.disable_title_matching);
+        assert_eq!(effective.max_replacement_size, 0);
+        assert!(effective.allowed_backends.is_empty());
+        assert!(effective.allowed_packs.is_empty());
+        assert!(policy
+            .expansion_policy_violation(512, false, "wayland")
+            .is_some());
+    }
+
+    #[test]
+    fn applying_audit_policy_keeps_engine_limits_unrestricted() {
+        let mut config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":ok"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            max_replacement_size: 256,
+            ..OrganizationPolicy::default()
+        };
+
+        config.apply_administrator_policy(&policy).unwrap();
+        assert_eq!(config.organization.max_replacement_size, 0);
     }
 
     #[test]

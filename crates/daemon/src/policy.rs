@@ -79,7 +79,7 @@ pub fn check_hotkey_allowed(policy: &OrganizationPolicy) -> Result<(), String> {
 }
 
 pub fn commands_enforced(policy: &OrganizationPolicy) -> bool {
-    policy.safe_mode && policy.disable_commands
+    policy.effective_enforcement_policy().disable_commands
 }
 
 /// Check expansion for policy violations and log them if present.
