@@ -62,7 +62,7 @@ cd "wayexpand-${version}"
 # Generate vendor/ and the source replacement config
 printf '%s\n' "  Generating vendor/ directory..."
 mkdir -p .cargo
-cargo vendor vendor/ > .cargo/config.toml
+cargo vendor --locked vendor/ > .cargo/config.toml
 
 # Create vendored tarball
 cd ..
