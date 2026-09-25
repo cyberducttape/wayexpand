@@ -31,8 +31,8 @@ out=$("$script" --dry-run)
 assert_contains default-header 'This will:' "$out"
 assert_contains default-dry-run '(dry run; no changes made)' "$out"
 assert_contains default-active-seat 'Active-seat mode relies on systemd-logind' "$out"
-seat_out=$($script --access=active-seat --dry-run)
-assert_contains explicit-active-seat 'active-seat' "$seat_out"
+seat_out=$("$script" --access=active-seat --dry-run)
+assert_contains explicit-active-seat 'Active-seat mode' "$seat_out"
 assert_contains explicit-active-seat-membership 'leave pre-existing input-group membership unchanged' "$seat_out"
 
 empty_dir=
