@@ -627,7 +627,13 @@ fn main() -> Result<()> {
                                 active_backend,
                             )
                         } else {
-                            let results = config.engine.process(event);
+                            let pending = config.engine.process_deferred(event);
+                            let results = dispatch_pending_results(
+                                &mut config.engine,
+                                pending,
+                                &policy,
+                                active_backend,
+                            );
                             if results.is_empty() {
                                 Ok(())
                             } else {
@@ -710,7 +716,13 @@ fn main() -> Result<()> {
                                 "evdev output failed; current expansion is not replayed"
                             );
                             drop(injector.take());
-                            config.engine.process(InputEvent::EndOfInput);
+                            process_event(
+                                &mut config.engine,
+                                InputEvent::EndOfInput,
+                                None,
+                                &policy,
+                                active_backend,
+                            )?;
                             connection_state = "reconnecting";
                             set_daemon_status(
                                 &mut status_publisher,
@@ -1404,10 +1416,26 @@ fn process_event(
 fn apply_pending_results(
     engine: &mut ExpansionEngine,
     pending: Vec<wayexpand_core::PendingExpansionResult>,
-    mut injector: Option<&mut dyn TextInjector>,
+    injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
+    let results = dispatch_pending_results(engine, pending, policy, active_backend);
+    apply_results(results, injector, policy, active_backend)
+}
+
+/// Apply policy and dispatch deferred expansions without injecting ready results.
+///
+/// Keeping this stage separate lets evdev perform its physical key-release and
+/// input-quiet checks before injection, while still guaranteeing that command
+/// expansions are dispatched through the bounded asynchronous worker.
+fn dispatch_pending_results(
+    engine: &mut ExpansionEngine,
+    pending: Vec<wayexpand_core::PendingExpansionResult>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> Vec<ExpansionResult> {
+    let mut results = Vec::new();
     for pending_result in pending {
         let has_command = pending_result.command.is_some();
 
@@ -1443,35 +1471,9 @@ fn apply_pending_results(
                 continue;
             }
         };
-
-        if let Some(backend) = injector.as_deref_mut() {
-            // P0 security fix: Never silently switch output transports.
-            if text_contains_newlines(&result.insert) {
-                warn!(
-                    backend = backend.name(),
-                    "expansion contains newlines; selected backend may not support multiline insertion"
-                );
-            }
-            let inject_result = ExpansionEngine::apply(backend, &result);
-
-            if let Err(source) = inject_result {
-                return Err(Box::new(EventError { result, source }));
-            }
-            info!(
-                trigger_chars = result.trigger.chars().count(),
-                insert_bytes = result.insert.len(),
-                "expansion injected"
-            );
-        } else {
-            info!(
-                trigger_chars = result.trigger.chars().count(),
-                matched_chars = result.matched_text.chars().count(),
-                insert_bytes = result.insert.len(),
-                "expansion matched"
-            );
-        }
+        results.push(result);
     }
-    Ok(())
+    results
 }
 
 /// Apply evdev safety gating to expansion results before injection.
@@ -1953,6 +1955,46 @@ mod tests {
             "libei",
         )
         .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deferred_command_without_worker_never_runs_synchronously() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-daemon-no-sync-command-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let config = Config::parse(&format!(
+            r#"
+            [[expansion]]
+            trigger = ":command"
+            replacement = ""
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "printf ran > '{marker}'"]
+            timeout_ms = 1000
+            "#,
+            marker = marker.display()
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy::default();
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(":command".into()),
+            Some(&mut injector),
+            &policy,
+            "evdev",
+        )
+        .unwrap();
+
+        assert!(!marker.exists());
+        assert!(injector.calls.is_empty());
+        assert_eq!(engine.command_metrics().command_in_flight, 0);
+        let _ = std::fs::remove_file(marker);
     }
 
     #[test]
