@@ -434,8 +434,10 @@ fn main() -> Result<()> {
                 EvdevGatingOutcome {
                     results: completed_commands,
                     follow_up: Vec::new(),
+                    abandoned: Vec::new(),
                 }
             };
+            restore_abandoned_results(&mut config.engine, gating.abandoned);
 
             if !gating.results.is_empty() {
                 if input_method_mode {
@@ -679,6 +681,7 @@ fn main() -> Result<()> {
                                 Ok(())
                             } else {
                                 let gating = apply_evdev_gating(results, &mut evdev);
+                                restore_abandoned_results(&mut config.engine, gating.abandoned);
                                 apply_results(
                                     &mut config.engine,
                                     gating.results,
@@ -1436,6 +1439,7 @@ fn dispatch_pending_results(
             if let Some(violation) = policy.command_path_violation(&command.program) {
                 policy::log_violation(policy, &violation);
                 if policy.command_path_is_blocked(&command.program) {
+                    engine.restore_deferred_match(&pending_result.matched_text);
                     continue;
                 }
             }
@@ -1449,6 +1453,7 @@ fn dispatch_pending_results(
             active_backend,
         ) {
             // In safe_mode, block the expansion
+            engine.restore_deferred_match(&pending_result.matched_text);
             continue;
         }
 
@@ -1476,6 +1481,7 @@ fn dispatch_pending_results(
 struct EvdevGatingOutcome {
     results: Vec<ExpansionResult>,
     follow_up: Vec<InputEvent>,
+    abandoned: Vec<ExpansionResult>,
 }
 
 fn apply_evdev_gating(
@@ -1492,6 +1498,7 @@ fn apply_evdev_gating(
             return EvdevGatingOutcome {
                 results: Vec::new(),
                 follow_up,
+                abandoned: results,
             };
         }
 
@@ -1506,6 +1513,7 @@ fn apply_evdev_gating(
                 return EvdevGatingOutcome {
                     results: Vec::new(),
                     follow_up,
+                    abandoned: results,
                 };
             }
         };
@@ -1528,18 +1536,34 @@ fn apply_evdev_gating(
                     warn!(
                         "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                     );
+                    let abandoned = results.clone();
                     results.clear();
+                    return EvdevGatingOutcome {
+                        results,
+                        follow_up,
+                        abandoned,
+                    };
                 }
             } else if follow_up.len() > 1 {
                 // Multiple inputs arrived: don't inject
                 warn!(
                     "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                 );
+                let abandoned = results.clone();
                 results.clear();
+                return EvdevGatingOutcome {
+                    results,
+                    follow_up,
+                    abandoned,
+                };
             }
         }
     }
-    EvdevGatingOutcome { results, follow_up }
+    EvdevGatingOutcome {
+        results,
+        follow_up,
+        abandoned: Vec::new(),
+    }
 }
 
 /// Replay input captured during evdev gating through the matcher. The focused
@@ -1556,6 +1580,12 @@ fn replay_evdev_follow_up(
         process_event(engine, event, None, policy, active_backend)?;
     }
     Ok(())
+}
+
+fn restore_abandoned_results(engine: &mut ExpansionEngine, results: Vec<ExpansionResult>) {
+    for result in results {
+        engine.restore_deferred_match(&result.matched_text);
+    }
 }
 
 fn apply_results(
@@ -1575,6 +1605,7 @@ fn apply_results(
             active_backend,
         ) {
             // In safe_mode, block the expansion
+            engine.restore_deferred_match(&result.matched_text);
             continue;
         }
 
@@ -1593,6 +1624,7 @@ fn apply_results(
             let inject_result = ExpansionEngine::apply(backend, &result);
 
             if let Err(source) = inject_result {
+                engine.restore_deferred_match(&result.matched_text);
                 return Err(Box::new(EventError { result, source }));
             }
             engine.commit_applied_expansion(&result);
@@ -1602,6 +1634,7 @@ fn apply_results(
                 "expansion injected"
             );
         } else {
+            engine.restore_deferred_match(&result.matched_text);
             info!(
                 trigger_chars = result.trigger.chars().count(),
                 matched_chars = result.matched_text.chars().count(),

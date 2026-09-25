@@ -217,6 +217,10 @@ pub struct ExpansionEngine {
     /// repositioned cursor has no single well-defined "erase N characters
     /// backward" meaning.
     last_expansion: Option<(String, String)>,
+    /// Trigger text removed while a deferred result is being prepared. The
+    /// reservation is released only after successful injection; otherwise it
+    /// is restored before subsequent input is matched.
+    deferred_matches: Vec<String>,
     input_generation: u64,
     async_commands: Option<AsyncCommandRuntime>,
     command_metrics: Arc<CommandMetricsState>,
@@ -413,6 +417,7 @@ impl ExpansionEngine {
             current_window: None,
             undo_chord,
             last_expansion: None,
+            deferred_matches: Vec::new(),
             input_generation: 0,
             async_commands: None,
             command_metrics: Arc::new(CommandMetricsState::new()),
@@ -608,11 +613,13 @@ impl ExpansionEngine {
 
             // Apply postflight policy: check generation, output size, state changes
             let Some(validated_output) = self.apply_postflight_policy(&plan, &output) else {
+                self.restore_deferred_match(&completion.result.matched_text);
                 continue;
             };
             if completion.additional_max_size > 0
                 && validated_output.len() > completion.additional_max_size
             {
+                self.restore_deferred_match(&completion.result.matched_text);
                 continue;
             }
 
@@ -704,28 +711,39 @@ impl ExpansionEngine {
         pending: PendingExpansionResult,
         additional_max_size: usize,
     ) -> Result<PendingExpansionDispatch, CommandError> {
+        let matched_text = pending.matched_text.clone();
         if pending.generation != self.input_generation || self.user_paused || self.sensitive_focus {
+            self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
         }
         if pending.command.is_some() && self.config.organization.disable_commands {
+            self.restore_deferred_match(&matched_text);
             return Err(CommandError::PolicyBlocked);
         }
 
         let Some(command) = pending.command.as_ref() else {
-            return self
-                .execute_pending_inline(pending, additional_max_size)
-                .map(PendingExpansionDispatch::Ready);
+            return match self.execute_pending_inline(pending, additional_max_size) {
+                Ok(result) => Ok(PendingExpansionDispatch::Ready(result)),
+                Err(error) => {
+                    self.restore_deferred_match(&matched_text);
+                    Err(error)
+                }
+            };
         };
         if pending.cached_output.is_some() {
-            return self
-                .execute_pending_inline(pending, additional_max_size)
-                .map(PendingExpansionDispatch::Ready);
+            return match self.execute_pending_inline(pending, additional_max_size) {
+                Ok(result) => Ok(PendingExpansionDispatch::Ready(result)),
+                Err(error) => {
+                    self.restore_deferred_match(&matched_text);
+                    Err(error)
+                }
+            };
         }
 
-        let runtime = self
-            .async_commands
-            .as_ref()
-            .ok_or(CommandError::WorkerUnavailable)?;
+        let Some(runtime) = self.async_commands.as_ref() else {
+            self.restore_deferred_match(&matched_text);
+            return Err(CommandError::WorkerUnavailable);
+        };
         let result = ExpansionResult {
             trigger: pending.trigger,
             matched_text: pending.matched_text,
@@ -741,10 +759,13 @@ impl ExpansionEngine {
             command: command.clone(),
             result,
         };
-        runtime.try_send_command(job).map_err(|error| match error {
-            QueueSendError::Full => CommandError::QueueFull,
-            QueueSendError::Disconnected => CommandError::WorkerUnavailable,
-        })?;
+        if let Err(error) = runtime.try_send_command(job) {
+            self.restore_deferred_match(&matched_text);
+            return Err(match error {
+                QueueSendError::Full => CommandError::QueueFull,
+                QueueSendError::Disconnected => CommandError::WorkerUnavailable,
+            });
+        }
         Ok(PendingExpansionDispatch::Queued)
     }
 
@@ -752,8 +773,52 @@ impl ExpansionEngine {
     /// Deferred callers must not record undo state before their own safety and
     /// output checks have completed.
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
+        self.release_deferred_match_for_result(result);
         if result.cursor_offset.is_none() {
             self.last_expansion = Some((result.matched_text.clone(), result.insert.clone()));
+        }
+    }
+
+    /// Restore a deferred trigger when its result will not be injected. The
+    /// trigger is put back before any later input so matcher order remains the
+    /// same as the non-exclusive application's input stream.
+    pub fn restore_deferred_match(&mut self, matched_text: &str) {
+        if self.release_deferred_match(matched_text) {
+            self.buffer.extend(matched_text.chars());
+        }
+    }
+
+    fn release_deferred_match(&mut self, matched_text: &str) -> bool {
+        if let Some(index) = self
+            .deferred_matches
+            .iter()
+            .position(|reserved| reserved == matched_text)
+        {
+            self.deferred_matches.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn release_deferred_match_for_result(&mut self, result: &ExpansionResult) {
+        if self.release_deferred_match(&result.matched_text) {
+            return;
+        }
+        if let Some(index) = self.deferred_matches.iter().position(|reserved| {
+            result
+                .matched_text
+                .strip_prefix(reserved)
+                .is_some_and(|suffix| suffix.chars().count() == 1)
+        }) {
+            self.deferred_matches.remove(index);
+        }
+    }
+
+    fn restore_deferred_matches(&mut self) {
+        let reservations = std::mem::take(&mut self.deferred_matches);
+        for matched_text in reservations {
+            self.buffer.extend(matched_text.chars());
         }
     }
 
@@ -1093,6 +1158,7 @@ impl ExpansionEngine {
     /// Commands are NOT executed; caller must check policy and complete results
     /// with `dispatch_pending_with_policy()` to preserve engine state.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
+        self.restore_deferred_matches();
         if !matches!(event, InputEvent::Key(_)) {
             self.last_expansion = None;
         }
@@ -1459,6 +1525,7 @@ impl ExpansionEngine {
         for _ in 0..length {
             self.buffer.pop_back();
         }
+        self.deferred_matches.push(plan.matched_text.clone());
 
         Some(PendingExpansionResult {
             trigger: plan.trigger_config,
