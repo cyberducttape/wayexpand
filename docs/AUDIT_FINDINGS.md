@@ -4,7 +4,7 @@ Date: 2026-09-22
 
 ## Executive Summary
 
-WayExpand's engineering foundation is strong: modular architecture, security-conscious design, comprehensive error handling, and honest documentation of Wayland limitations. The remaining gaps are not architectural flaws but execution challenges: real-world compositor certification, the unresolved secure-vs-fidelity capture trade-off, distribution/packaging reach, and IME support.
+WayExpand's engineering foundation is strong: modular architecture, security-conscious design, comprehensive error handling, and honest documentation of Wayland limitations. Remaining work includes real-world compositor certification, the unresolved secure-vs-fidelity capture trade-off, distribution/packaging reach, IME support, and a P1 architectural cleanup to make every live capture backend use the same deferred expansion transaction pipeline.
 
 ---
 
@@ -111,7 +111,7 @@ can restore authorization on reconnect. Setting
 - Careful reinsert_after logic for non-exclusive capture
 - Integration tests for timing-sensitive scenarios
 
-**Assessment:** Well-engineered for its scope, but the surface for subtle timing races is still real. Improvements are incremental (better async abstractions, more targeted tests) rather than architectural overhaul.
+**Assessment:** Well-engineered for its scope, but the surface for subtle timing races is still real. The live-backend split is an architectural P1: evdev must use the same deferred transaction pipeline as the newer daemon paths so command behavior cannot vary by capture backend.
 
 ### 4. Backend Diversity Complexity
 
@@ -130,7 +130,7 @@ can restore authorization on reconnect. Setting
 
 ### Distribution & Discoverability
 
-**Current:** Ubuntu PPA, Arch AUR; Fedora Copr not yet published
+**Current:** Ubuntu PPA; Arch packaging is prepared but has not been submitted to AUR; Fedora Copr is not yet published.
 
 **Missing:**
 - Official Fedora Copr repository
@@ -169,7 +169,7 @@ can restore authorization on reconnect. Setting
   and normalizes compositor-specific driver results.
 - [ ] Provision and execute compositor-specific GTK/Qt drivers on KDE, GNOME,
   Sway, and Hyprland sessions; the runner contract alone is not certification.
-- [ ] Run and publish results for v1.2+ release
+- [ ] Run and publish results for the current 1.2.x release line
 - [ ] Add to CI or scheduled job (weekly/monthly)
 
 ### Resolve the Secure-vs-Fidelity Capture Dilemma
@@ -236,12 +236,12 @@ can restore authorization on reconnect. Setting
 
 ## Recommended Priority Order
 
-### Immediate (v1.2, current release)
+### Immediate (current 1.2.x release line)
 1. Real-world testing of the shipped KDE window tracker and compositor capture paths
 2. Real-world validation of libei portal token persistence
 3. Certification matrix and first-run detection
 
-### Near-term (v1.2+)
+### Near-term (next 1.x milestone)
 4. Action Broker architecture (P1 security gate for enterprise)
 5. Fedora Copr publication
 6. Landing page + demo video

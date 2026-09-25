@@ -89,7 +89,7 @@ wayexpand explain-backend
 ```
 
 For an explicit input-method-v2 setup, first acknowledge the intentionally
-obnoxious warning (experimental; unsupported non-text keys may be lost):
+obnoxious warning (experimental; non-text pass-through is not yet certified):
 
 ```sh
 wayexpand setup --mode experimental

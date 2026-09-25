@@ -58,7 +58,7 @@ wayexpand status --json
 The status should report `state=connected`. If you do not acknowledge evdev,
 the automatic fallback is stdin and is intended for harnesses, not normal
 desktop capture. Input-method-v2 is an explicit experimental opt-in; read its
-key pass-through warning before starting
+experimental key pass-through and held-key/repeat limitations before starting
 `wayexpand-input-method.service`. For either route, read the security
 tradeoffs in [SECURITY.md](../SECURITY.md).
 
@@ -152,7 +152,9 @@ wayexpand doctor  # Shows what your session can use
 
 **Known limitations:**
 - Automatic mode leaves evdev disabled even when `/dev/input` is readable
-- Input-method-v2 is explicit/experimental: Escape, arrow keys, and F-keys may not pass through
+- Input-method-v2 is explicit/experimental: non-text pass-through depends on
+  the libei injector and remains uncertified for every compositor and shortcut
+  combination
 - Evdev requires `input` group membership, has no password-field signal, and is best-effort under rapid typing
 
 **Want to help test?**

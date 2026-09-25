@@ -477,8 +477,8 @@ category = "Web"
 Copy the TOML expansion blocks into your `~/.config/wayexpand/expansions.toml` file, or use the GUI to create them:
 
 ```bash
-# View your current config location
-wayexpand config --show
+# View the active configuration and its expansions
+wayexpand list
 
 # Or edit directly with your editor
 $EDITOR ~/.config/wayexpand/expansions.toml

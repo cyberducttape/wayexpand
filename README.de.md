@@ -47,7 +47,7 @@ stillschweigend nicht expandieren.
 
 ## Schnellstart
 
-**Ubuntu/Debian (PPA):**
+**Ubuntu (PPA):**
 
 ```bash
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -56,18 +56,10 @@ wayexpand doctor          # zeigt, was Ihr Compositor tatsächlich unterstützt
 wayexpand-gui             # Snippets grafisch verwalten
 ```
 
-**Arch Linux (AUR):**
-
-```bash
-yay -S wayexpand
-```
-
-> Prüfen Sie vor der Nutzung, ob das AUR-Paket aktuell ist — vergleichen
-> Sie `pkgver` im `PKGBUILD` mit dem [letzten
-> Release](https://github.com/cyberducttape/wayexpand/releases). Für
-> Fedora existiert noch kein Copr-Repository; bauen Sie aus den Quellen mit
-> der RPM-Spec-Datei im Repository oder nutzen Sie das Release-Tarball mit
-> `install-release.sh`.
+Auf Debian ist der Ubuntu-PPA nicht vorgesehen. Nutzen Sie dort den
+Quellcode- oder Release-Installationsweg. Für Arch ist ein PKGBUILD
+vorbereitet, aber noch nicht im AUR eingereicht; bauen Sie es aus dem
+Repository. Für Fedora existiert noch kein Copr-Repository.
 
 **Aus Quellen:**
 
@@ -150,7 +142,7 @@ kein Caching).
 | Compositor bietet `input-method-v2`/virtual-keyboard | `--source=input-method` | `wayexpand-input-method.service` | Experimentell (siehe [Support-Matrix](docs/SUPPORT_MATRIX.md)) |
 | Compositor bietet keins davon (z. B. KWin/KDE Plasma bis 6.6) | `--source=evdev --backend=libei` | `wayexpand-evdev.service` | Experimentell, benötigt `input`-Gruppenmitgliedschaft, **keine Sensible-Feld-Erkennung** |
 | wlroots-Compositor (Sway, Hyprland), wenn `--source=input-method` benötigte Tasten verliert | `--source=evdev --backend=wlroots` | — (Daemon manuell starten) | Experimentell, gleiche Einschränkungen wie oben |
-| Fenster-Tracking (`app_filter`) | KWin-Scripting-Bridge | — | Nur KDE Plasma (KWin 6.6+) verifiziert |
+| Fenster-Tracking (`app_filter`) | KWin-Scripting-Bridge | — | KDE/KWin implementiert, Zertifizierung noch ausstehend; siehe [Support-Matrix](docs/SUPPORT_MATRIX.md) |
 
 `--source=evdev` funktioniert compositor-unabhängig, liest aber
 Tastatur-Events direkt vom Kernel und erkennt daher **keine** Passwortfelder
@@ -182,8 +174,9 @@ Kurz zusammengefasst:
 
 - Keine Shell-Interpretation — konfigurierte Befehle sind ein Programm plus
   Argumentliste, keine Shell-Syntax
-- Konfigurationsdatei-Berechtigungen werden erzwungen (Modus 0600) und vor
-  jedem Laden/Speichern geprüft
+- Benutzer-eigene Konfigurationsdateien müssen Modus 0600 haben; verwaltete
+  root-eigene Dateien dürfen lesbar sein, aber nicht durch Gruppe/Andere
+  veränderbar werden
 - Control-Socket ist auf ein privates, eigentümer-verifiziertes Verzeichnis
   beschränkt
 - Matching wird automatisch in Passwortfeldern ausgesetzt — außer bei
