@@ -103,11 +103,21 @@ pub fn validate_organization_policy_file(
 }
 
 pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, String> {
-    let file: PolicyFile =
-        toml::from_str(content).map_err(|error| format!("invalid policy TOML: {error}"))?;
-    if let Some(policy) = file.organization {
-        return Ok(policy);
+    match toml::from_str::<PolicyFile>(content) {
+        Ok(file) => {
+            if let Some(policy) = file.organization {
+                return Ok(policy);
+            }
+        }
+        Err(wrapper_error) => {
+            return toml::from_str::<OrganizationPolicy>(content).map_err(|flat_error| {
+                format!(
+                    "policy file must contain either [organization] table or flat policy fields (wrapper: {wrapper_error}; flat: {flat_error})"
+                )
+            });
+        }
     }
+
     toml::from_str::<OrganizationPolicy>(content).map_err(|error| {
         format!(
             "policy file must contain either [organization] table or flat policy fields: {error}"
@@ -149,6 +159,14 @@ mod tests {
         .unwrap();
         assert!(policy.safe_mode);
         assert_eq!(policy.allowed_backends, ["libei"]);
+    }
+
+    #[test]
+    fn flat_policy_format_is_supported() {
+        let policy =
+            parse_organization_policy("safe_mode = true\ndisable_commands = true\n").unwrap();
+        assert!(policy.safe_mode);
+        assert!(policy.disable_commands);
     }
 
     #[test]
