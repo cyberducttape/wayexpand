@@ -306,6 +306,7 @@ jobs:
           source_dir="$top/sources/wayexpand-${version}"
           mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
           git archive --format=tar HEAD | tar -x -C "$source_dir"
+          test -f "$source_dir/docs/wayexpand.1"
           cp -a .cargo vendor "$source_dir/"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}.tar.gz" \
             "wayexpand-${version}"

@@ -7,6 +7,10 @@ URL:            https://github.com/cyberducttape/wayexpand
 
 Source0:        %{url}/releases/download/v%{version}/wayexpand-%{version}.tar.gz
 
+# Fedora provides this through systemd-rpm-macros. Keep the spec usable with
+# the plain RPM toolchain used by Debian/Ubuntu CI and other RPM builders.
+%{!?_userunitdir:%global _userunitdir %{_prefix}/lib/systemd/user}
+
 BuildRequires:  cargo
 BuildRequires:  rustc
 BuildRequires:  pkg-config
