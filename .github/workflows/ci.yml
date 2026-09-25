@@ -284,7 +284,12 @@ jobs:
           rustc --version
           cargo --version
       - name: Vendor dependencies for offline package builds
-        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml
+        run: |
+          # Never reuse an ignored vendor tree: stale crates can make frozen
+          # RPM builds resolve against a version that is absent from Cargo.lock.
+          rm -rf .cargo vendor
+          mkdir -p .cargo
+          cargo vendor vendor/ > .cargo/config.toml
       - name: Build Debian package
         run: |
           # The pinned rust-toolchain supplies rustc/cargo; -d bypasses the
