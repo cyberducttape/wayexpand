@@ -302,7 +302,7 @@ impl IbusEngineAdapter {
         } else {
             InputEvent::Text(character.to_string())
         };
-        // v1.3+ deferred execution: policy check BEFORE command execution
+        // Deferred execution: policy check BEFORE command execution
         // This prevents side effects from occurring before approval.
         let pending = self.engine.process_deferred(event);
         let mut actions = Vec::new();

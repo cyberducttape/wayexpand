@@ -14,7 +14,11 @@ Users install locally via available package managers or source:
 
 ```bash
 # Ubuntu (via PPA)
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
 sudo apt install wayexpand
+
+# Debian: build from the vendored source archive; the PPA is Ubuntu-only.
 
 # Arch (packaging prepared; build locally)
 git clone https://github.com/cyberducttape/wayexpand.git

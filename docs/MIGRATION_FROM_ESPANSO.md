@@ -254,7 +254,11 @@ systemctl --user disable espanso.service
 systemctl --user stop espanso.service
 
 # Install WayExpand (choose one)
-sudo apt install wayexpand        # Ubuntu/Debian
+# Ubuntu via the PPA:
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+# Debian: use the vendored source/release route in docs/PACKAGING.md.
 makepkg -si                       # Arch (preview)
 ./scripts/install-user.sh         # Any distro
 

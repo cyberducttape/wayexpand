@@ -4,7 +4,7 @@ Date: 2026-09-22
 
 ## Executive Summary
 
-WayExpand's engineering foundation is strong: modular architecture, security-conscious design, comprehensive error handling, and honest documentation of Wayland limitations. Remaining work includes real-world compositor certification, the unresolved secure-vs-fidelity capture trade-off, distribution/packaging reach, IME support, and a P1 architectural cleanup to make every live capture backend use the same deferred expansion transaction pipeline.
+WayExpand's engineering foundation is strong: modular architecture, security-conscious design, comprehensive error handling, and honest documentation of Wayland limitations. Remaining work includes real-world compositor certification, the unresolved secure-vs-fidelity capture trade-off, distribution/packaging reach, and IME support. The live daemon now routes capture backends through the shared deferred expansion transaction pipeline; remaining risk is in lifecycle and compositor-specific validation rather than a backend-specific execution architecture.
 
 ---
 
@@ -15,7 +15,7 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 **Impact:** Every new user must run `doctor` and hope; deployment on unfamiliar compositors is a gamble.
 
 **Current Status:**
-- Window tracking: solid on KDE via KWin scripting; wlroots tracking is not shipped for Sway, Hyprland, or river; GNOME has no usable protocol path
+- Window tracking: implemented on KDE via KWin scripting but not independently certified; wlroots tracking is not shipped for Sway, Hyprland, or river; GNOME has no usable protocol path
 - Capture/inject: tested at unit level; system-level behavior varies by compositor, kernel version, and display server implementation
 
 **What's needed:**
@@ -60,7 +60,7 @@ integration are not implemented.
 ### 4. Window Tracking Gaps
 
 **Status:**
-- KDE: ✅ Solid (KWin D-Bus scripting)
+- KDE: Implemented (KWin D-Bus scripting); broader independent certification is still pending
 - Sway/Hyprland/river: ❌ Not shipped (wlroots `wlr-foreign-toplevel-management-v1` remains future work)
 - GNOME/Mutter: ❌ No usable protocol path exists (see `docs/archive/GNOME_WINDOW_TRACKING.md`)
 
@@ -111,7 +111,7 @@ can restore authorization on reconnect. Setting
 - Careful reinsert_after logic for non-exclusive capture
 - Integration tests for timing-sensitive scenarios
 
-**Assessment:** Well-engineered for its scope, but the surface for subtle timing races is still real. The live-backend split is an architectural P1: evdev must use the same deferred transaction pipeline as the newer daemon paths so command behavior cannot vary by capture backend.
+**Assessment:** Well-engineered for its scope, but the surface for subtle timing races is still real. Live daemon capture paths now use the shared deferred transaction pipeline; real-device and compositor certification remain necessary to validate timing, reconnect, and focus-transition behavior.
 
 ### 4. Backend Diversity Complexity
 
