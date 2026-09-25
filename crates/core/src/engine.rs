@@ -1566,14 +1566,18 @@ impl ExpansionEngine {
         injector: &mut I,
         result: &ExpansionResult,
     ) -> Result<(), ExpansionError> {
-        // Input capture is non-exclusive, so a character that completed a
-        // delayed match has already reached the application. Replace that
-        // character together with the trigger and append it to the replacement
-        // in one backend operation. Use the text actually typed for exact
-        // surrounding-text validation and case-propagated triggers.
-        let erase = result.matched_text.clone();
+        // A character that completed a delayed match has already reached the
+        // application. Replace that character together with the trigger and
+        // append it to the replacement in one backend operation. Use the text
+        // actually typed for exact surrounding-text validation and
+        // case-propagated triggers. Keeping both sides of this transaction
+        // together is required for exclusive input-method backends too: they
+        // forward the delimiter before the engine sees the corresponding
+        // event.
+        let mut erase = result.matched_text.clone();
         let mut insert = result.insert.clone();
         if let Some(character) = result.reinsert_after {
+            erase.push(character);
             insert.push(character);
         }
         injector.replace(&erase, &insert)?;
@@ -2890,7 +2894,7 @@ replacement = "bad\u0000value""#;
         ExpansionEngine::apply(&mut injector, &result).unwrap();
         assert_eq!(
             injector.calls,
-            ["erase::SIG", "insert:Best regards, ", "left:3"]
+            ["erase::SIG ", "insert:Best regards, ", "left:3"]
         );
     }
 
