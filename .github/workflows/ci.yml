@@ -264,6 +264,50 @@ jobs:
       - name: Installer test (evdev permissions)
         run: bash scripts/test-install-evdev-permissions.sh
 
+  packaging:
+    name: Debian and RPM Package Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.96.0
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper dh-cargo devscripts dpkg-dev rpm \
+            libwayland-dev libxkbcommon-dev pkg-config
+      - name: Vendor dependencies for offline package builds
+        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -us -uc -b
+          deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
+          test -n "$deb"
+          dpkg-deb -c "$deb" | grep -F '/usr/bin/wayexpand-install-evdev-access'
+          dpkg-deb -c "$deb" | grep -F '/etc/wayexpand/expansions.toml.example'
+      - name: Build RPM package and inspect manifest
+        run: |
+          version=$(sed -n 's/^Version: *//p' wayexpand.spec)
+          top=$(mktemp -d)
+          source_dir="$top/sources/wayexpand-${version}"
+          mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
+          git archive --format=tar HEAD | tar -x -C "$source_dir"
+          cp -a .cargo vendor "$source_dir/"
+          tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}.tar.gz" \
+            "wayexpand-${version}"
+          rpmbuild -bb --nodeps \
+            --define "_topdir $top/rpmbuild" \
+            --define "_sourcedir $top/rpmbuild/SOURCES" \
+            wayexpand.spec
+          rpm=$(find "$top/rpmbuild/RPMS" -type f -name 'wayexpand-*.rpm' -print -quit)
+          test -n "$rpm"
+          rpm -qlp "$rpm" | grep -F '/usr/bin/wayexpand-install-evdev-access'
+          rpm -qlp "$rpm" | grep -F '/etc/wayexpand/expansions.toml.example'
+
   systemd:
     name: Systemd Unit Validation
     runs-on: ubuntu-latest

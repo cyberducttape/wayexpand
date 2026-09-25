@@ -52,5 +52,7 @@ override_dh_install:
 	# Keep evdev policies inert; the explicit helper activates one in /etc/udev/rules.d.
 	dh_install --package=wayexpand udev/71-wayexpand-evdev.rules usr/share/wayexpand/udev/
 	dh_install --package=wayexpand udev/69-wayexpand-evdev-uaccess.rules usr/share/wayexpand/udev/
-	dh_install --package=wayexpand scripts/install-evdev-permissions.sh usr/bin/wayexpand-install-evdev-access
-	dh_install --package=wayexpand expansions.toml etc/wayexpand/expansions.toml.example
+	install -Dm755 scripts/install-evdev-permissions.sh \
+		debian/wayexpand/usr/bin/wayexpand-install-evdev-access
+	install -Dm644 expansions.toml \
+		debian/wayexpand/etc/wayexpand/expansions.toml.example
