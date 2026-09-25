@@ -10,6 +10,16 @@ esac
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 
+# The source archive is used by release packaging and by PKGBUILD's checksum.
+# Keep gzip and archive entry timestamps fixed so rebuilding the same tree is
+# byte-for-byte reproducible.
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
+    --prefix=wayexpand-test/ HEAD | gzip -n > "$test_root/source-a.tar.gz"
+sleep 1
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
+    --prefix=wayexpand-test/ HEAD | gzip -n > "$test_root/source-b.tar.gz"
+cmp "$test_root/source-a.tar.gz" "$test_root/source-b.tar.gz"
+
 CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
     -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
