@@ -9,52 +9,19 @@ This document outlines P1 architectural debt that requires refactoring for full 
 
 ## Current P1 Issues
 
-### 1. Command Execution Policy Pre-Check (PARTIALLY FIXED v1.2)
+### 1. Command Execution Policy Pre-Check
 
-**Status:** Intermediate fix in place; full solution deferred to v1.3
+**Status:** Implemented; regression-tested in the v1.2 engine and daemon.
 
-**Current Behavior:**
-- Commands may execute before policy approval
-- Pre-flight checks now prevent determinable violations
-- Post-execution checks still needed for runtime constraints
+Command-backed matches are represented as `PendingExpansionResult` values and
+are not executed by the matcher. The daemon applies policy before calling the
+completion path, and both asynchronous and synchronous command paths enforce
+`disable_commands`. Static snippets remain available when only command-backed
+expansions are disabled.
 
-**Example Scenario:**
-```
-User types trigger → engine.process() executes command → policy checked → expansion blocked
-↑ Command has already run, side effects irreversible
-```
-
-**Intermediate Fix (v1.2):**
-- `pre_flight_check()` catches disable_commands before processing
-- Prevents some command execution before policy approval
-- Logs violations in audit mode
-
-**Proper Fix (v1.3+):**
-1. Make command execution optional/deferred in engine
-2. Return "pending" results without executing commands
-3. Caller checks policy before executing deferred commands
-4. Only commit expansion AFTER policy approval
-
-**Implementation Steps:**
-```rust
-// Proposed v1.3+ architecture
-pub struct PendingExpansionResult {
-    pub trigger: String,
-    pub matched_text: String,
-    pub command: Option<CommandConfig>, // Not yet executed
-    pub template: String,                 // Not yet rendered
-}
-
-// Engine returns pending results
-pub fn process(&mut self, event: InputEvent) -> Vec<PendingExpansionResult>
-
-// Caller decides execution:
-for pending in results {
-    if policy.allows(&pending) {
-        pending.execute() // Now safe to execute
-    }
-}
-```
+The remaining policy work is intentionally separate: the Action Broker design
+for per-action permissions is still planned and does not weaken the current
+pre-execution `disable_commands` gate.
 
 ---
 
