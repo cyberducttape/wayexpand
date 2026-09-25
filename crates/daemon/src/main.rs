@@ -47,6 +47,19 @@ const EVDEV_QUIET_TIMEOUT: Duration = Duration::from_millis(40);
 const MAX_STDIN_LINE_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_INPUT_LINES: usize = 64;
 
+fn evdev_release_is_safe<E: std::fmt::Display>(release: Result<(), E>) -> bool {
+    match release {
+        Ok(()) => true,
+        Err(error) => {
+            warn!(
+                %error,
+                "waiting for key release failed; dropping expansion because safe injection cannot be verified"
+            );
+            false
+        }
+    }
+}
+
 fn commands_disabled_for_startup(
     policy: &wayexpand_core::OrganizationPolicy,
     worker_start_failed: bool,
@@ -643,62 +656,7 @@ fn main() -> Result<()> {
                             if results.is_empty() {
                                 Ok(())
                             } else {
-                                // Capture is non-exclusive and a match fires
-                                // on key-down, so the trigger's last key is
-                                // still held right now. Injecting before it
-                                // comes up can make the compositor treat our
-                                // duplicate press as auto-repeat.
-                                if let Some(source) = evdev.as_mut() {
-                                    if let Err(error) =
-                                        source.wait_for_key_release(KEY_RELEASE_TIMEOUT)
-                                    {
-                                        warn!(%error, "waiting for key release failed; injecting anyway");
-                                    }
-                                }
-                                let input_quiet = evdev
-                                    .as_mut()
-                                    .map(|source| source.wait_for_input_quiet(EVDEV_QUIET_TIMEOUT))
-                                    .transpose();
-                                let input_quiet = match input_quiet {
-                                    Ok(value) => value.unwrap_or(false),
-                                    Err(error) => {
-                                        warn!(%error, "evdev quiet-period check failed; abandoning expansion");
-                                        false
-                                    }
-                                };
-                                let mut results = results;
-                                if !input_quiet {
-                                    // A single delimiter may already have
-                                    // reached the application while the
-                                    // trigger key was being released. Extend
-                                    // the atomic erase/reinsert operation so
-                                    // the delimiter is preserved at the new
-                                    // cursor position. Any text, navigation,
-                                    // or multiple follow-up events remain
-                                    // ambiguous and fail closed.
-                                    let follow_up = evdev
-                                        .as_mut()
-                                        .map(EvdevSource::take_pending_events)
-                                        .unwrap_or_default();
-                                    if follow_up.len() == 1 {
-                                        if let InputEvent::Delimiter(character) = &follow_up[0] {
-                                            for result in &mut results {
-                                                result.matched_text.push(*character);
-                                                result.insert.push(*character);
-                                            }
-                                        } else {
-                                            warn!(
-                                                "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
-                                            );
-                                            results.clear();
-                                        }
-                                    } else {
-                                        warn!(
-                                            "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
-                                        );
-                                        results.clear();
-                                    }
-                                }
+                                let results = apply_evdev_gating(results, &mut evdev);
                                 apply_results(
                                     results,
                                     Some(backend.as_mut()),
@@ -1494,8 +1452,8 @@ fn apply_evdev_gating(
         // Wait for physical key release before injecting synthetic input.
         // Injecting while trigger key is held can make synthetic input appear
         // as auto-repeat or cancel the physical release.
-        if let Err(error) = source.wait_for_key_release(KEY_RELEASE_TIMEOUT) {
-            warn!(%error, "waiting for key release failed; injecting anyway");
+        if !evdev_release_is_safe(source.wait_for_key_release(KEY_RELEASE_TIMEOUT)) {
+            return Vec::new();
         }
 
         // Check if any input arrived during key release wait.
@@ -1633,6 +1591,12 @@ mod tests {
     fn startup_worker_failure_remains_command_disabled_in_audit_mode() {
         let policy = wayexpand_core::OrganizationPolicy::default();
         assert!(commands_disabled_for_startup(&policy, true));
+    }
+
+    #[test]
+    fn evdev_release_failure_is_not_safe_to_inject() {
+        assert!(!evdev_release_is_safe(Err("device polling failed")));
+        assert!(evdev_release_is_safe::<&str>(Ok(())));
     }
 
     #[test]
