@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::TextInjector;
 
 // Legacy X11 clipboard injection backend retained for reference tests and
@@ -25,6 +26,10 @@ const BACKEND_NAME: &str = "clipboard";
 /// shutdown timeout. A local X11 round trip normally completes in single
 /// digit milliseconds; this exists specifically for when it does not.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn backspace_count(text: &str) -> usize {
+    text.graphemes(true).count()
+}
 
 /// Runs `command` to completion and returns its output, or a timeout error
 /// if it doesn't finish within `timeout`. `stdin_data`, if given, is
@@ -224,7 +229,7 @@ impl TextInjector for ClipboardInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), wayexpand_core::InjectorError> {
-        let backspace_count = trigger.chars().count();
+        let backspace_count = backspace_count(trigger);
         if backspace_count == 0 {
             return Ok(());
         }
@@ -374,5 +379,15 @@ mod tests {
         let output = run_bounded(command, Some("hello"), Duration::from_secs(2))
             .expect("`cat` should echo stdin to stdout");
         assert_eq!(output.stdout, b"hello");
+    }
+
+    #[test]
+    fn backspace_count_treats_decomposed_accent_as_one_grapheme() {
+        assert_eq!(backspace_count("e\u{301}"), 1);
+    }
+
+    #[test]
+    fn backspace_count_treats_devanagari_conjunct_as_one_grapheme() {
+        assert_eq!(backspace_count("क्ष"), 1);
     }
 }

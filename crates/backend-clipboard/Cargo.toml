@@ -15,3 +15,4 @@ categories.workspace = true
 wayexpand-core = { path = "../core" }
 x11-clipboard = "0.9"
 thiserror.workspace = true
+unicode-segmentation.workspace = true

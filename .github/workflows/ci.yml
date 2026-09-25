@@ -300,6 +300,7 @@ jobs:
           for path in \
             '/usr/bin/wayexpand-install-evdev-access' \
             '/etc/wayexpand/expansions.toml.example' \
+            '/usr/share/man/man1/wayexpand.1' \
             '/usr/lib/systemd/user/wayexpand-evdev.service' \
             '/usr/share/wayexpand/udev/71-wayexpand-evdev.rules' \
             '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
@@ -330,6 +331,7 @@ jobs:
             '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
             rpm -qlp "$rpm" | grep -F "$path"
           done
+          rpm -qlp "$rpm" | grep -E '^/usr/share/man/man1/wayexpand\.1(\.gz)?$'
 
   systemd:
     name: Systemd Unit Validation

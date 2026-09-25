@@ -87,7 +87,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
-%{_mandir}/man1/wayexpand.1
+%{_mandir}/man1/wayexpand.1*
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
 %{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules

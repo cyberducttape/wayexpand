@@ -2531,7 +2531,15 @@ mod tests {
 
     #[test]
     fn control_socket_health_rejects_missing_regular_and_insecure_paths() {
-        let root = std::env::temp_dir().join(format!("wx-sock-{}", std::process::id()));
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock must be after the Unix epoch")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(format!("wx-sock-{unique}"));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o700))
             .unwrap();

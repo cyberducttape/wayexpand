@@ -3890,6 +3890,7 @@ name = "wayexpand-backend-clipboard"
 version = "1.2.0"
 dependencies = [
  "thiserror 2.0.20",
+ "unicode-segmentation",
  "wayexpand-core",
  "x11-clipboard",
 ]
