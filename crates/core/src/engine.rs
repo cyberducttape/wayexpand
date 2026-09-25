@@ -187,6 +187,9 @@ pub struct CommandMetrics {
 
 pub struct ExpansionEngine {
     config: Config,
+    /// Case-folded app filters are immutable for the lifetime of an engine;
+    /// avoid allocating them on every candidate match.
+    app_filters_lower: Vec<Vec<String>>,
     matcher: Matcher,
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
@@ -364,6 +367,17 @@ impl ExpansionEngine {
             .collect();
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
+        let app_filters_lower = config
+            .expansion
+            .iter()
+            .map(|expansion| {
+                expansion
+                    .app_filter
+                    .iter()
+                    .map(|filter| filter.to_lowercase())
+                    .collect()
+            })
+            .collect();
         let max_buffer_chars = config.settings.max_buffer_chars;
         // `validate()` above already confirmed this parses; a config that
         // fails to load is never used to construct an engine.
@@ -386,6 +400,7 @@ impl ExpansionEngine {
             .collect();
         Ok(Self {
             config,
+            app_filters_lower,
             matcher,
             matcher_indices,
             buffer: VecDeque::new(),
@@ -1507,7 +1522,7 @@ impl ExpansionEngine {
 
     fn match_allowed(&self, config_index: usize, length: usize) -> bool {
         let expansion = &self.config.expansion[config_index];
-        if !self.app_filter_allows(expansion) {
+        if !self.app_filter_allows(config_index, expansion) {
             return false;
         }
         if expansion.match_mode != MatchMode::WordBoundary {
@@ -1532,20 +1547,19 @@ impl ExpansionEngine {
     ///
     /// App ID matching is preferred because it's more reliable than window
     /// titles, which can be user-editable or transient.
-    fn app_filter_allows(&self, expansion: &crate::ExpansionConfig) -> bool {
+    fn app_filter_allows(&self, config_index: usize, expansion: &crate::ExpansionConfig) -> bool {
         if expansion.app_filter.is_empty() {
             return true;
         }
         let Some(window) = &self.current_window else {
             return false;
         };
-        expansion.app_filter.iter().any(|filter| {
-            let filter = filter.to_lowercase();
+        self.app_filters_lower[config_index].iter().any(|filter| {
             // If app_id is available, ONLY match against it (never fall back to title).
             // Rationale: app_id is set by the compositor and reliable; title is
             // user-editable and can be spoofed to match sensitive filters.
             if let Some(app_id) = window.app_id.as_deref() {
-                app_id.to_lowercase().contains(&filter)
+                app_id.to_lowercase().contains(filter.as_str())
             } else if self.config.organization.disable_title_matching {
                 // Policy: disable_title_matching means no title fallback.
                 // Fail closed: don't match without app_id (per CLAUDE.md conventions).
@@ -1555,7 +1569,7 @@ impl ExpansionEngine {
                 window
                     .title
                     .as_deref()
-                    .is_some_and(|title| title.to_lowercase().contains(&filter))
+                    .is_some_and(|title| title.to_lowercase().contains(filter.as_str()))
             }
         })
     }

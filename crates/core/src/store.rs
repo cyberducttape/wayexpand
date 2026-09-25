@@ -3,7 +3,7 @@ use std::{
     fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
-    sync::{mpsc, Arc, Mutex, RwLock},
+    sync::{mpsc, Arc, Mutex, PoisonError, RwLock},
     time::SystemTime,
 };
 
@@ -40,17 +40,20 @@ impl ConfigStore {
     pub fn config(&self) -> Arc<Config> {
         self.config
             .read()
-            .expect("configuration lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
     pub fn generation(&self) -> u64 {
-        *self.generation.lock().expect("generation lock poisoned")
+        *self
+            .generation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
     pub fn status(&self) -> ConfigStoreStatus {
         let error = self
             .reload_error
             .lock()
-            .expect("reload error lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .clone();
         ConfigStoreStatus {
             state: if error.is_some() {
@@ -66,25 +69,28 @@ impl ConfigStore {
         let (sender, receiver) = mpsc::channel();
         self.subscribers
             .lock()
-            .expect("subscriber lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .push(sender);
         receiver
     }
     pub fn atomically_replace(&self, config: Config) -> u64 {
-        *self.config.write().expect("configuration lock poisoned") = Arc::new(config);
-        let mut generation = self.generation.lock().expect("generation lock poisoned");
+        *self.config.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(config);
+        let mut generation = self
+            .generation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         *generation = generation.wrapping_add(1);
         let value = *generation;
         self.subscribers
             .lock()
-            .expect("subscriber lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .retain(|subscriber| subscriber.send(value).is_ok());
         value
     }
     /// Invalid edits leave the last valid snapshot active.
     pub fn reload_if_changed(&self) -> Result<bool, ConfigError> {
         let current = metadata_stamp(&self.path);
-        let mut stamp = self.stamp.lock().expect("stamp lock poisoned");
+        let mut stamp = self.stamp.lock().unwrap_or_else(PoisonError::into_inner);
         if current == *stamp {
             return Ok(false);
         }
@@ -94,7 +100,7 @@ impl ConfigStore {
                 *self
                     .reload_error
                     .lock()
-                    .expect("reload error lock poisoned") = Some(error.safe_summary());
+                    .unwrap_or_else(PoisonError::into_inner) = Some(error.safe_summary());
                 return Err(error);
             }
         };
@@ -103,7 +109,7 @@ impl ConfigStore {
         *self
             .reload_error
             .lock()
-            .expect("reload error lock poisoned") = None;
+            .unwrap_or_else(PoisonError::into_inner) = None;
         Ok(true)
     }
 }
@@ -138,6 +144,7 @@ mod tests {
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
+        thread,
         time::{SystemTime, UNIX_EPOCH},
     };
     fn write_private(path: &Path, contents: &str) {
@@ -183,6 +190,25 @@ mod tests {
         write_private(&path, "replacement = [");
         assert!(store.reload_if_changed().is_err());
         assert_eq!(store.config().expansion[0].replacement, "old");
+        assert_eq!(store.generation(), 0);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn poisoned_generation_lock_is_recovered_without_panicking() {
+        let path = path();
+        write_private(
+            &path,
+            "[[expansion]]\ntrigger = ':x'\nreplacement = 'old'\n",
+        );
+        let store = ConfigStore::load(&path).unwrap();
+        let poisoned = Arc::clone(&store);
+        let join = thread::spawn(move || {
+            let _guard = poisoned.generation.lock().unwrap();
+            panic!("test poison");
+        })
+        .join();
+        assert!(join.is_err());
         assert_eq!(store.generation(), 0);
         let _ = fs::remove_file(path);
     }
