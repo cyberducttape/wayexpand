@@ -278,8 +278,8 @@ jobs:
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper dh-cargo devscripts dpkg-dev rpm \
-            libwayland-dev libxkbcommon-dev pkg-config
+          sudo apt-get install -y build-essential cargo debhelper dh-cargo \
+            devscripts dpkg-dev rpm rustc libwayland-dev libxkbcommon-dev pkg-config
       - name: Vendor dependencies for offline package builds
         run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml
       - name: Build Debian package

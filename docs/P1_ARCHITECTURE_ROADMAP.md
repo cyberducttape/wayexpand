@@ -131,45 +131,18 @@ impl InputMethodSource {
 
 ### 3. Release Script PKGBUILD Checksum Workflow (P1)
 
-**Status:** Documented; workaround in place; proper fix deferred to v1.3
+**Status:** Complete
 
-**Current Issue:**
-Release checksums are computed AFTER tagging, making the tag stale:
-```
-Commit & tag → Push to GitHub → Compute checksum → Update PKGBUILD (stale tag)
-```
+`scripts/prepare-release.sh` now stages the release metadata, creates the
+deterministic source archive from that staged tree, records its checksum in
+`PKGBUILD`, commits the complete release state, and verifies that the final
+commit reproduces the same archive before creating `vX.Y.Z`. The release
+workflow independently verifies the source archive against the checksum in
+`PKGBUILD`.
 
-**Proper Fix (v1.3+):**
-Decouple version-only commit from checksum-bearing release:
-
-```bash
-# Step 1: Version-only commit and tag
-git commit -m "release: version X.Y.Z"
-git tag vX.Y.Z
-
-# Step 2: Create source archive from tag
-git archive --format tar.gz --prefix wayexpand-X.Y.Z vX.Y.Z -o wayexpand-X.Y.Z.tar.gz
-
-# Step 3: Compute checksum
-sha256sum wayexpand-X.Y.Z.tar.gz > checksum.txt
-
-# Step 4: Update PKGBUILD with checksum
-sed -i "s/sha256sums=.*/sha256sums=('$(cat checksum.txt | cut -d' ' -f1)')/" PKGBUILD
-
-# Step 5: Create final release commit (includes checksum)
-git commit --amend -m "release: version X.Y.Z (with checksum)"
-# OR create separate commit
-git commit -m "release: PKGBUILD checksums for X.Y.Z"
-
-# Step 6: Push everything
-git push origin main vX.Y.Z
-```
-
-**Implementation Steps:**
-1. Modify `prepare-release.sh` to create source archive
-2. Compute checksum before finalizing tag
-3. Include checksum in release commit
-4. Update GitHub release workflow to verify checksum
+Packaging metadata is marked `export-ignore`, and Arch fetches the generated
+release asset rather than a GitHub-generated archive. This avoids a checksum
+cycle while keeping the release tag and published source archive reproducible.
 
 ---
 

@@ -269,11 +269,18 @@ impl IbusEngineAdapter {
 
         // IBus modifier flags use the same low bits as X11. Do not consume
         // shortcuts or navigation keys: clearing the matcher state is safer
-        // than allowing a trigger to span an unrelated command.
+        // than allowing a trigger to span an unrelated command. Mod4 is the
+        // normal X11 representation of Super, while IBUS_SUPER_MASK is a
+        // separate virtual modifier used by some clients. Mod5 is commonly
+        // AltGr, so it is intentionally not treated as a shortcut mask: IBus
+        // has already resolved the keyval and the resulting text must remain
+        // usable on AltGr layouts.
         const CONTROL_MASK: u32 = 1 << 2;
         const ALT_MASK: u32 = 1 << 3;
-        const SUPER_MASK: u32 = 1 << 26;
-        if state & (CONTROL_MASK | ALT_MASK | SUPER_MASK) != 0 {
+        const MOD3_MASK: u32 = 1 << 5;
+        const MOD4_MASK: u32 = 1 << 6;
+        const IBUS_SUPER_MASK: u32 = 1 << 26;
+        if state & (CONTROL_MASK | ALT_MASK | MOD3_MASK | MOD4_MASK | IBUS_SUPER_MASK) != 0 {
             self.engine.process(InputEvent::Reset);
             return IbusKeyResult::default();
         }
@@ -863,6 +870,54 @@ timeout_ms = 1000
         assert!(result
             .actions
             .contains(&IbusAction::CommitText("signature".into())));
+    }
+
+    #[test]
+    fn super_modifiers_do_not_consume_printable_shortcuts() {
+        const MOD4_MASK: u32 = 1 << 6;
+        const IBUS_SUPER_MASK: u32 = 1 << 26;
+
+        for state in [MOD4_MASK, IBUS_SUPER_MASK] {
+            let mut adapter = adapter();
+            let result = adapter.process_key_event('a' as u32, 0, state);
+            assert_eq!(result, IbusKeyResult::default());
+        }
+    }
+
+    #[test]
+    fn modifier_levels_do_not_consume_boundary_shortcuts() {
+        const MOD3_MASK: u32 = 1 << 5;
+        const MOD4_MASK: u32 = 1 << 6;
+        const MOD5_MASK: u32 = 1 << 7;
+
+        for state in [MOD3_MASK, MOD4_MASK] {
+            let mut adapter = boundary_adapter();
+            for character in ":sig".chars() {
+                adapter.process_key_event(character as u32, 0, 0);
+            }
+            assert_eq!(
+                adapter.process_key_event(' ' as u32, 0, state),
+                IbusKeyResult::default()
+            );
+            assert_eq!(
+                adapter.process_key_event('g' as u32, 0, 0).actions,
+                vec![IbusAction::CommitText("g".into())]
+            );
+        }
+
+        let mut altgr_adapter = boundary_adapter();
+        for character in ":sig".chars() {
+            altgr_adapter.process_key_event(character as u32, 0, 0);
+        }
+        assert_eq!(
+            altgr_adapter
+                .process_key_event(' ' as u32, 0, MOD5_MASK)
+                .actions,
+            vec![
+                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::CommitText("signature ".into())
+            ]
+        );
     }
 
     #[test]

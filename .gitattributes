@@ -1,0 +1,6 @@
+# Packaging metadata is not part of the source archive consumed by PKGBUILD.
+# This keeps the PKGBUILD checksum independent of the checksum field itself.
+PKGBUILD export-ignore
+wayexpand.spec export-ignore
+debian/ export-ignore
+.github/ export-ignore

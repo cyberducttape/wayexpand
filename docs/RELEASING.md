@@ -47,9 +47,10 @@ workflow pin deliberately when changing the release compiler.
 4. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
    section.
 5. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
-   changelogs, distro metadata, AppStream, and the IBus component, then creates
-   the maintainer-authored commit and tag. Review the generated release section
-   and recompute the `PKGBUILD` source checksum before publishing.
+   changelogs, distro metadata, AppStream, and the IBus component, computes the
+   source archive checksum from the staged release tree, and creates the
+   complete maintainer-authored commit and tag. Review the generated release
+   section before publishing; no post-tag metadata edits are expected.
 6. Regenerate `Cargo.lock` if dependency versions changed, then run the
    release checks again.
 
