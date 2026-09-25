@@ -147,8 +147,16 @@ else
     status_json=null
 fi
 doctor_json=$(cat "$tmp/doctor.json")
-wayexpand_version=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_version // "unknown"')
-wayexpand_commit=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_commit // "unknown"')
+if wayexpand_version=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_version // "unknown"' 2>/dev/null); then
+    :
+else
+    wayexpand_version=unknown
+fi
+if wayexpand_commit=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_commit // "unknown"' 2>/dev/null); then
+    :
+else
+    wayexpand_commit=unknown
+fi
 doctor_probe_valid=1
 if ! printf '%s' "$doctor_json" | jq -e 'type == "object" and (.healthy == true)' >/dev/null 2>&1; then
     doctor_json=null
