@@ -4,7 +4,7 @@
 
 ---
 
-> **Status:** Core feature implemented as of v1.1.1
+> **Status:** Core feature is implemented in the current 1.2.x release line.
 
 Organization policies enforce administrator-defined constraints on text expansions, protecting sensitive environments and preventing unsafe operations.
 
@@ -150,7 +150,8 @@ See [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) for fleet configuration.
 **Simple approach (recommended):** Root creates the policy file readable by all users.
 
 ```bash
-# 1. Create policy file
+# 1. Create the policy directory and file
+sudo install -d -o root -g root -m 0755 /etc/wayexpand
 sudo tee /etc/wayexpand/policy.toml > /dev/null << 'EOF'
 [organization]
 safe_mode = true
@@ -172,10 +173,12 @@ systemctl --user restart wayexpand-input-method.service
 
 **Alternative approach:** Use group-based access for restricted visibility.
 
-If you want the policy visible only to a specific group (e.g., `wheel` or `sudo`):
+If you want the policy visible only to a specific administrator group (replace
+`WAYEXPAND_ADMIN_GROUP` with a group that exists on the target distribution):
 
 ```bash
-# 1. Create policy file
+# 1. Create the policy directory and file
+sudo install -d -o root -g WAYEXPAND_ADMIN_GROUP -m 0750 /etc/wayexpand
 sudo tee /etc/wayexpand/policy.toml > /dev/null << 'EOF'
 [organization]
 safe_mode = true
@@ -183,21 +186,17 @@ disable_commands = true
 # ... other fields
 EOF
 
-# 2. Set group-readable permissions (e.g., wheel group)
+# 2. Set group-readable permissions
 sudo chmod 0440 /etc/wayexpand/policy.toml
-sudo chown root:wheel /etc/wayexpand/policy.toml
+sudo chown root:WAYEXPAND_ADMIN_GROUP /etc/wayexpand/policy.toml
 
-# 3. Ensure /etc/wayexpand directory is also accessible
-sudo chown root:wheel /etc/wayexpand
-sudo chmod 0750 /etc/wayexpand
+# 3. Add your user to the group
+sudo usermod -a -G WAYEXPAND_ADMIN_GROUP $USER
 
-# 4. Add your user to the group
-sudo usermod -a -G wheel $USER
+# 4. Start a new login session for group membership to take effect
+# (logout/login, or: newgrp WAYEXPAND_ADMIN_GROUP)
 
-# 5. Start a new login session for group membership to take effect
-# (logout/login, or: newgrp wheel; systemctl --user restart wayexpand-*.service)
-
-# 6. Verify
+# 5. Verify
 wayexpand doctor --json | jq '.policy.policy'
 ```
 

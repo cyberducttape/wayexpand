@@ -146,7 +146,8 @@ For stable JSON output and automation contracts, see
 - Unicode-aware trigger matching
 - Optional word-boundary matching
 - Case propagation
-- Template variables such as dates, username, and cursor placement
+- Template variables such as dates, username, and cursor placement when the
+  selected backend supports cursor positioning
 - Command-backed snippets without shell interpretation
 - App-filtered snippets where window tracking is available
 - Fleet configuration and organization policy

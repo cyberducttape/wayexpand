@@ -4,7 +4,7 @@
 > current implementation status. Consult `BACKENDS.md`, `SUPPORT_MATRIX.md`,
 > and `SECURITY.md` for current behavior and certification.
 
-This document summarizes the complete journey of identifying, documenting, and preparing for implementation of P1 architectural improvements.
+This document summarizes the historical journey of identifying, documenting, and preparing for implementation of P1 architectural improvements. Its “production-ready” language describes the planning snapshot, not a current certification claim.
 
 ## Problem Discovery (v1.2)
 
@@ -227,7 +227,7 @@ v1.3 developers have a complete blueprint with:
 - Timeline estimates
 - Risk mitigation
 
-The codebase is now production-ready with clear, documented improvements planned for the next version.
+The planning snapshot described the codebase as production-ready for its then-defined scope; current release readiness and certification status are defined by `SUPPORT_MATRIX.md` and the live evidence reports.
 
 ---
 

@@ -1,5 +1,9 @@
 # WayExpand Professional Roadmap
 
+> This roadmap contains historical v1.0/v1.2 planning language as well as
+> current open work. For present behavior and certification, use
+> `docs/SUPPORT_MATRIX.md`, `docs/COMPOSITOR_MATRIX.md`, and `wayexpand doctor`.
+
 The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
 
 ## Completed: v1.0.0 (2026-09-17)
@@ -14,7 +18,7 @@ Production release with:
 - Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
 - Stability guarantees documented in COMPATIBILITY.md
 
-## Completed: v1.1.x (2026-09-18)
+## Historical: v1.1.x (2026-09-18)
 
 Shipped as v1.1.0 through v1.1.2. Note this covered accessibility/GUI
 polish rather than the wlroots window tracking originally planned for this
@@ -27,7 +31,7 @@ slot (moved below to the next unscheduled milestone):
 
 ---
 
-## v1.2 follow-up
+## Historical v1.2 follow-up
 
 Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
 #19, app_filter preferring `app_id` over window title, are done.)
@@ -56,7 +60,7 @@ Open items that hold the v1.2 tag. (#15, doctor recognizing evdev+libei, and
       re-insert the terminator. Corrects `:sig ` → `signature ` instead of
       `:regards ` (missing space).
 
-### v1.2.1 (Implemented Concurrently)
+### Historical v1.2.1 (Implemented Concurrently)
 
 The following improvements were implemented in v1.2 alongside other work:
 
@@ -71,7 +75,7 @@ The following improvements were implemented in v1.2 alongside other work:
       behavior, explicit reset support, and fresh-consent fallback when tokens
       are disabled or invalid. Remaining work is compositor-specific validation.
 
-### Capture Path Improvements (v1.2)
+### Capture Path Improvements (historical v1.2 work)
 
 **Known tradeoff:** No capture mode is currently both secure and universal.
 
@@ -266,7 +270,7 @@ and composition support remain future work. Fcitx integration is still research.
 
 ---
 
-## Future Considerations (v1.2+)
+## Future Considerations (next 1.x milestone)
 
 ### Localization Expansion
 
@@ -332,20 +336,23 @@ Requires all of the above, plus:
 ## Release Schedule
 
 **v1.0.0:** Released 2026-09-17  
-**v1.1.x:** Released 2026-09-18 (GUI accessibility, themes, docs)  
-**v1.2+:** No committed date. wlroots window tracking is the leading
-candidate; otherwise driven by community feedback and contributions.
+**Historical v1.1.x:** Released 2026-09-18 (GUI accessibility, themes, docs)
+**Current 1.2.x line:** No compositor is certified by the automated evidence
+matrix yet. The next milestone prioritizes a golden KDE/KWin certification,
+the shared deferred pipeline for every live capture backend, and measured
+follow-up work such as wlroots window tracking.
 
 ---
 
 ## Contributing to the Roadmap
 
-Have an idea for v1.1+? Open an issue on GitHub or submit a pull request. See CONTRIBUTING.md for guidelines.
+Have an idea for a future 1.x release? Open an issue on GitHub or submit a
+pull request. See CONTRIBUTING.md for guidelines.
 
 Priority goes to:
 1. Bug fixes and security patches (any version)
-2. Compositor compatibility improvements (v1.1 focus)
-3. Community-requested features (v1.2+)
+2. Compositor compatibility and certification evidence
+3. Community-requested features for future 1.x releases
 4. Performance and localization enhancements
 
 ---

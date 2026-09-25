@@ -2,44 +2,6 @@
 
 All notable changes to WayExpand are documented here.
 
-## [1.2.0] - 2026-09-23
-
-### Backend & Keyboard Correctness
-- Configure libei token storage for input-method service with secure systemd hardening
-- Add CI contract test to verify all libei-using units have proper token persistence
-- Make libei key pass-through optional and non-blocking during input-method startup
-- Implement automatic graceful degradation when libei is unavailable
-- Fix child process cleanup to work on all error paths (OutputTooLarge, read errors, fd setup)
-- Add RAII guard to ensure process reaping regardless of return path
-- Add regression test verifying child process killed when output exceeds 1MiB limit
-
-### Quality & Testing
-- Add comprehensive pass-through contract tests (9 new regression tests)
-- Implement bounded pending_key_pass_through queue (MAX_PENDING_KEY_PASS_THROUGH=512)
-- Add queue overflow detection with retryable error reporting
-- Derive Debug and PartialEq for KeyAction to enable test assertions
-
-### User Experience
-- Parse EDITOR and VISUAL environment variables safely using shlex
-- Fix broken external editor integration for commands with arguments (e.g., `code --wait`)
-- Handle both single-word and multi-argument editor specifications
-
-### Documentation
-- Resolve contradictions in key pass-through capability documentation
-- Make conservative language authoritative: document as experimental pending certification
-- Update SUPPORT_MATRIX.md with explicit validation gaps
-- Update AUDIT_FINDINGS.md to clarify certification requirements
-- Update source code module docs and user-facing messages for consistency
-
-### Release Infrastructure
-- Reorder release workflow to generate SBOMs from actual artifacts, not CI workspace
-- Extract source tarballs before scanning for accurate supply chain attestation
-- Fix vendor SBOM generation to scan extracted tarball, not CI workspace vendor/
-- Improve supply chain story through accurate Software Bill of Materials
-
-### Deprecated
-- Delete v1.2 tag (non-SemVer, divergent from main branch history)
-
 ## [Unreleased]
 
 Changes not yet released.
@@ -301,6 +263,44 @@ Changes not yet released.
 - Run daemon command-backed expansions on a bounded background queue. Command
   output is applied only if no intervening input or focus-state change makes
   the original trigger location stale.
+
+## [1.2.0] - 2026-09-23
+
+### Backend & Keyboard Correctness
+- Configure libei token storage for input-method service with secure systemd hardening
+- Add CI contract test to verify all libei-using units have proper token persistence
+- Make libei key pass-through optional and non-blocking during input-method startup
+- Implement automatic graceful degradation when libei is unavailable
+- Fix child process cleanup to work on all error paths (OutputTooLarge, read errors, fd setup)
+- Add RAII guard to ensure process reaping regardless of return path
+- Add regression test verifying child process killed when output exceeds 1MiB limit
+
+### Quality & Testing
+- Add comprehensive pass-through contract tests (9 new regression tests)
+- Implement bounded pending_key_pass_through queue (MAX_PENDING_KEY_PASS_THROUGH=512)
+- Add queue overflow detection with retryable error reporting
+- Derive Debug and PartialEq for KeyAction to enable test assertions
+
+### User Experience
+- Parse EDITOR and VISUAL environment variables safely using shlex
+- Fix broken external editor integration for commands with arguments (e.g., `code --wait`)
+- Handle both single-word and multi-argument editor specifications
+
+### Documentation
+- Resolve contradictions in key pass-through capability documentation
+- Make conservative language authoritative: document as experimental pending certification
+- Update SUPPORT_MATRIX.md with explicit validation gaps
+- Update AUDIT_FINDINGS.md to clarify certification requirements
+- Update source code module docs and user-facing messages for consistency
+
+### Release Infrastructure
+- Reorder release workflow to generate SBOMs from actual artifacts, not CI workspace
+- Extract source tarballs before scanning for accurate supply chain attestation
+- Fix vendor SBOM generation to scan extracted tarball, not CI workspace vendor/
+- Improve supply chain story through accurate Software Bill of Materials
+
+### Deprecated
+- Delete v1.2 tag (non-SemVer, divergent from main branch history)
 
 ## [1.1.2] - 2026-09-18
 

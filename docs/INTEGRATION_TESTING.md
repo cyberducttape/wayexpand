@@ -146,10 +146,12 @@ toolkit application where available:
 4. Return and Tab clear the pending trigger buffer.
 5. Password and hidden-text fields do not capture or expand.
 6. Unsupported non-text keys are not interpreted as text, clear the pending
-   trigger, and do not restart the daemon. Because input-method-v2 gives the
-   backend an exclusive grab, the individual unsupported event may be lost;
-   this is a known limitation until compositor-specific pass-through is
-   implemented.
+   trigger, and do not restart the daemon. When a libei pass-through injector
+   is available, WayExpand forwards supported non-text presses with modifier
+   state and preserves held-key/repeat/release lifecycles. Pass-through remains
+   experimental: compositor-specific fidelity, reconnect behavior, and some
+   unsupported keys are not certified, and a failed pass-through operation is
+   surfaced rather than silently discarded.
 7. Compositor restart causes input-method recovery with bounded backoff; a
    non-retryable protocol failure still stops visibly and systemd applies its
    bounded restart policy.

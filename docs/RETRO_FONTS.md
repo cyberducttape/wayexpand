@@ -68,7 +68,7 @@ sudo zypper install google-noto-mono-fonts
 
 ## Using Fonts with WayExpand
 
-**Current limitation (v1.1.x):** WayExpand uses your system's default monospace and proportional fonts. Per-theme font selection is not yet implemented.
+**Current limitation:** WayExpand uses your system's default monospace and proportional fonts. Per-theme font selection is not implemented in the current release.
 
 **To use retro fonts with WayExpand:**
 
@@ -110,9 +110,9 @@ For best visual accuracy, install fonts in this order:
 3. **IBM Courier** or **Courier Prime** (theme-specific, optional)
 4. **OCR-A** (Amber theme only, optional)
 
-## Future: Font Per-Theme (v1.2+)
+## Future: Per-Theme Fonts
 
-Per-theme font support requires egui custom font loading, which is on the v1.2 roadmap:
+Per-theme font support requires egui custom font loading and remains future work:
 
 **Planned features:**
 - Font selector in Settings panel
@@ -121,7 +121,7 @@ Per-theme font support requires egui custom font loading, which is on the v1.2 r
 - Automatic font detection (warn if selected font isn't installed)
 - Custom .ttf/.otf font file support
 
-**Technical note:** egui doesn't support per-theme FontFamily selection natively; v1.2 will implement custom font loading to enable this feature.
+**Technical note:** egui doesn't support per-theme FontFamily selection natively; a future implementation would need custom font loading.
 
 ## Linux Font Resources
 
@@ -137,11 +137,11 @@ egui (the UI framework WayExpand uses) supports three font families:
 - `Monospace` - Fixed-width font for code
 - `Monospace` for code but Proportional for UI (current)
 
-In v1.2, we'll expand this to allow:
+Future work may expand this to allow:
 - Theme-specific font family selection
 - Custom font loading from .ttf/.otf files
 - Font fallback chains
 
 ## Accessibility Note
 
-When using retro fonts, ensure adequate color contrast is maintained. WayExpand's built-in high-contrast theme overrides font styling to ensure readability. All retro themes in v1.1+ meet WCAG 2.1 AA contrast standards.
+When using retro fonts, ensure adequate color contrast is maintained. WayExpand's built-in high-contrast theme overrides font styling to improve readability; this document is not a substitute for a formal WCAG audit.

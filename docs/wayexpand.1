@@ -1,4 +1,4 @@
-.TH WAYEXPAND 1 "September 2026" "WayExpand 1.1" "User Commands"
+.TH WAYEXPAND 1 "September 2026" "WayExpand 1.2.0" "User Commands"
 .SH NAME
 wayexpand \- validate and manage WayExpand text-expansion configuration
 .SH SYNOPSIS
@@ -32,10 +32,17 @@ is not treated as end-to-end certification; untested scenarios remain visible.
 .B fleet status [--json]
 Show the merged fleet configuration layers and their provenance.
 .TP
-.B portal status|reset
-Inspect or forget the stored libei portal restoration token. Resetting the
-local token may cause the portal to ask for access again; it does not revoke a
-portal grant already held by another session.
+.B import espanso FILE
+Import an Espanso YAML file and print the converted TOML configuration.
+.TP
+.B set-enabled TRIGGER on|off [CONFIG]
+Enable or disable an expansion and save the configuration atomically.
+.TP
+.B set-mode TRIGGER immediate|word-boundary [CONFIG]
+Set an expansion's matching mode and save the configuration atomically.
+.TP
+.B reload|pause|resume|stop [--json]
+Control a running daemon.
 .TP
 .B test TEXT [--json] [CONFIG]
 Simulate input and report matching expansions without starting the daemon.
