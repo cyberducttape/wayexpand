@@ -161,7 +161,7 @@ To resume auto-updates: `sudo apt-mark unhold wayexpand`
 # yay -S wayexpand --show
 
 # Downgrade to specific version (requires git history)
-cd /tmp && git clone https://github.com/itchyitchy123/wayexpand.git
+cd /tmp && git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand
 git checkout v1.1.1
 makepkg -si

@@ -704,53 +704,8 @@ impl GuiApp {
             Err(error) => self.message = format!("Control unavailable: {error}"),
         }
     }
-}
 
-impl eframe::App for GuiApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let palette = Palette::for_pack(self.colorpack, self.dark_mode);
-        let modal_open = self.diagnostics_open
-            || self.import_open
-            || self.settings_open
-            || self.pending_action.is_some();
-        let (want_save, want_new, want_escape, close_requested) = ui.ctx().input(|input| {
-            (
-                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
-                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
-                input.key_pressed(egui::Key::Escape),
-                input.viewport().close_requested(),
-            )
-        });
-        if close_requested && self.draft_is_dirty() {
-            // The user clicked the window's close button (or an OS-level
-            // quit) with an unsaved draft open. Every other action that can
-            // discard a draft (Select, Delete, Reload, Undo) already
-            // confirms first; closing the whole app was the one silent
-            // exit left. Cancel this close and route it through the same
-            // Save/Discard/Cancel dialog; if confirmed, close_after_confirm
-            // (below) re-issues the close next frame, by which point the
-            // draft is no longer dirty so it goes through uncancelled.
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.request_action(PendingAction::Close);
-        }
-        if self.close_after_confirm {
-            self.close_after_confirm = false;
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-        if want_save && self.selected.is_some() {
-            self.save_selected();
-        }
-        if want_new {
-            self.request_action(PendingAction::New);
-        }
-        if want_escape {
-            if self.diagnostics_open {
-                self.diagnostics_open = false;
-            } else if self.import_open && self.import_preview.is_none() {
-                self.import_open = false;
-            }
-        }
+    fn render_toolbar(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
@@ -858,6 +813,9 @@ impl eframe::App for GuiApp {
                     });
                 });
             });
+    }
+
+    fn render_diagnostics(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if self.diagnostics_open {
             let mut open = self.diagnostics_open;
             egui::Window::new(self.strings.diagnostics_title())
@@ -929,6 +887,9 @@ impl eframe::App for GuiApp {
                 });
             self.diagnostics_open = open;
         }
+    }
+
+    fn render_import_dialog(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if self.import_open {
             let mut open = self.import_open;
             egui::Window::new(self.strings.import_dialog_title())
@@ -949,8 +910,7 @@ impl eframe::App for GuiApp {
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if theme::primary_button(ui, &palette, self.strings.load_preview())
-                            .clicked()
+                        if theme::primary_button(ui, palette, self.strings.load_preview()).clicked()
                         {
                             self.preview_import();
                         }
@@ -966,7 +926,7 @@ impl eframe::App for GuiApp {
                             config.expansion.len(),
                             skipped
                         ));
-                        if theme::primary_button(ui, &palette, self.strings.replace_library())
+                        if theme::primary_button(ui, palette, self.strings.replace_library())
                             .clicked()
                         {
                             self.apply_import();
@@ -975,6 +935,9 @@ impl eframe::App for GuiApp {
                 });
             self.import_open = open && self.import_open;
         }
+    }
+
+    fn render_settings_dialog(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if self.settings_open {
             let mut open = self.settings_open;
             egui::Window::new(self.strings.settings_title())
@@ -1064,7 +1027,7 @@ impl eframe::App for GuiApp {
 
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if theme::primary_button(ui, &palette, self.strings.save_settings())
+                        if theme::primary_button(ui, palette, self.strings.save_settings())
                             .clicked()
                         {
                             self.save_settings();
@@ -1076,6 +1039,9 @@ impl eframe::App for GuiApp {
                 });
             self.settings_open = open && self.settings_open;
         }
+    }
+
+    fn render_language_selector(&mut self, ui: &mut egui::Ui, _palette: &Palette) {
         if self.language_selector_open {
             let mut open = self.language_selector_open;
             egui::Window::new("Language / Sprache")
@@ -1108,6 +1074,9 @@ impl eframe::App for GuiApp {
                 });
             self.language_selector_open = open && self.language_selector_open;
         }
+    }
+
+    fn render_colorpack_selector(&mut self, ui: &mut egui::Ui, _palette: &Palette) {
         if self.colorpack_selector_open {
             let mut open = self.colorpack_selector_open;
             egui::Window::new("Color Pack / Farbschema")
@@ -1145,6 +1114,9 @@ impl eframe::App for GuiApp {
                 });
             self.colorpack_selector_open = open && self.colorpack_selector_open;
         }
+    }
+
+    fn render_snippet_list(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         egui::Panel::left("snippets")
             .resizable(true)
             .default_size(340.0)
@@ -1165,7 +1137,7 @@ impl eframe::App for GuiApp {
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if theme::primary_button(ui, &palette, self.strings.new_button())
+                    if theme::primary_button(ui, palette, self.strings.new_button())
                         .on_hover_text(self.strings.new_tooltip())
                         .clicked()
                     {
@@ -1190,7 +1162,7 @@ impl eframe::App for GuiApp {
                     ui.horizontal_wrapped(|ui| {
                         if theme::chip_scaled(
                             ui,
-                            &palette,
+                            palette,
                             self.strings.all(),
                             self.category_filter.is_none(),
                             font_scale,
@@ -1202,7 +1174,7 @@ impl eframe::App for GuiApp {
                         for category in &categories {
                             let selected =
                                 self.category_filter.as_deref() == Some(category.as_str());
-                            if theme::chip_scaled(ui, &palette, category, selected, font_scale)
+                            if theme::chip_scaled(ui, palette, category, selected, font_scale)
                                 .clicked()
                             {
                                 self.category_filter = if selected {
@@ -1226,7 +1198,7 @@ impl eframe::App for GuiApp {
                         };
                         let response = theme::snippet_row_scaled(
                             ui,
-                            &palette,
+                            palette,
                             theme::SnippetRow {
                                 selected: self.selected == Some(index),
                                 enabled: expansion.enabled,
@@ -1251,7 +1223,7 @@ impl eframe::App for GuiApp {
                                 RichText::new(self.strings.no_snippets()).color(palette.muted),
                             );
                             ui.add_space(6.0);
-                            if theme::primary_button(ui, &palette, self.strings.create_first())
+                            if theme::primary_button(ui, palette, self.strings.create_first())
                                 .clicked()
                             {
                                 self.request_action(PendingAction::New);
@@ -1281,6 +1253,9 @@ impl eframe::App for GuiApp {
                     }
                 });
             });
+    }
+
+    fn render_editor(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -1298,7 +1273,7 @@ impl eframe::App for GuiApp {
                             RichText::new(self.strings.build_description()).color(palette.muted),
                         );
                         ui.add_space(10.0);
-                        if theme::primary_button(ui, &palette, self.strings.create_snippet())
+                        if theme::primary_button(ui, palette, self.strings.create_snippet())
                             .clicked()
                         {
                             self.request_action(PendingAction::New);
@@ -1637,13 +1612,13 @@ impl eframe::App for GuiApp {
                         });
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
-                            if theme::primary_button(ui, &palette, self.strings.save_changes())
+                            if theme::primary_button(ui, palette, self.strings.save_changes())
                                 .on_hover_text(self.strings.save_tooltip())
                                 .clicked()
                             {
                                 self.save_selected();
                             }
-                            if theme::danger_button(ui, &palette, self.strings.delete()).clicked() {
+                            if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
                                 self.request_action(PendingAction::Delete);
                             }
                         });
@@ -1737,7 +1712,7 @@ impl eframe::App for GuiApp {
                                 });
                         }
                         ui.add_space(12.0);
-                        let (message_color, message_bg) = status_tone(&self.message, &palette);
+                        let (message_color, message_bg) = status_tone(&self.message, palette);
                         egui::Frame::new()
                             .fill(message_bg)
                             .corner_radius(egui::CornerRadius::same(6))
@@ -1747,6 +1722,9 @@ impl eframe::App for GuiApp {
                             });
                     });
             });
+    }
+
+    fn render_pending_action(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         if self.pending_action.is_some() {
             egui::Window::new(self.strings.unsaved_title())
                 .collapsible(false)
@@ -1766,7 +1744,7 @@ impl eframe::App for GuiApp {
                         ui.label(self.strings.save_before(action));
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if theme::primary_button(ui, &palette, self.strings.save_continue())
+                            if theme::primary_button(ui, palette, self.strings.save_continue())
                                 .clicked()
                             {
                                 self.save_and_execute_pending();
@@ -1782,7 +1760,7 @@ impl eframe::App for GuiApp {
                         ui.label(self.strings.delete_confirm());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if theme::danger_button(ui, &palette, self.strings.delete_button())
+                            if theme::danger_button(ui, palette, self.strings.delete_button())
                                 .clicked()
                             {
                                 self.pending_action = None;
@@ -1795,6 +1773,63 @@ impl eframe::App for GuiApp {
                     }
                 });
         }
+    }
+}
+
+impl eframe::App for GuiApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let palette = Palette::for_pack(self.colorpack, self.dark_mode);
+        let modal_open = self.diagnostics_open
+            || self.import_open
+            || self.settings_open
+            || self.pending_action.is_some();
+        let (want_save, want_new, want_escape, close_requested) = ui.ctx().input(|input| {
+            (
+                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
+                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
+                input.key_pressed(egui::Key::Escape),
+                input.viewport().close_requested(),
+            )
+        });
+        if close_requested && self.draft_is_dirty() {
+            // The user clicked the window's close button (or an OS-level
+            // quit) with an unsaved draft open. Every other action that can
+            // discard a draft (Select, Delete, Reload, Undo) already
+            // confirms first; closing the whole app was the one silent
+            // exit left. Cancel this close and route it through the same
+            // Save/Discard/Cancel dialog; if confirmed, close_after_confirm
+            // (below) re-issues the close next frame, by which point the
+            // draft is no longer dirty so it goes through uncancelled.
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request_action(PendingAction::Close);
+        }
+        if self.close_after_confirm {
+            self.close_after_confirm = false;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if want_save && self.selected.is_some() {
+            self.save_selected();
+        }
+        if want_new {
+            self.request_action(PendingAction::New);
+        }
+        if want_escape {
+            if self.diagnostics_open {
+                self.diagnostics_open = false;
+            } else if self.import_open && self.import_preview.is_none() {
+                self.import_open = false;
+            }
+        }
+        self.render_toolbar(ui, &palette);
+        self.render_diagnostics(ui, &palette);
+        self.render_import_dialog(ui, &palette);
+        self.render_settings_dialog(ui, &palette);
+        self.render_language_selector(ui, &palette);
+        self.render_colorpack_selector(ui, &palette);
+        self.render_snippet_list(ui, &palette);
+        self.render_editor(ui, &palette);
+        self.render_pending_action(ui, &palette);
     }
 }
 

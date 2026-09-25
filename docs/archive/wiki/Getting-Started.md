@@ -31,7 +31,7 @@ starting any service.
 ## Build and test
 
 ```sh
-git clone https://github.com/itchyitchy123/wayexpand.git
+git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand
 cargo test --locked --workspace
 cargo build --locked --release --workspace

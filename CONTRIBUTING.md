@@ -23,7 +23,7 @@ Every change should preserve the project's operational guarantees:
 ### Setup and Testing
 
 ```bash
-git clone https://github.com/itchyitchy123/wayexpand
+git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 
 # Build
@@ -104,7 +104,7 @@ PRs are reviewed by maintainers for:
 
 ## Questions?
 
-- Open a [GitHub issue](https://github.com/itchyitchy123/wayexpand/issues) for questions
+- Open a [GitHub issue](https://github.com/cyberducttape/wayexpand/issues) for questions
 - Check [`docs/`](docs/) for detailed documentation
 - Review [`SECURITY.md`](SECURITY.md) for security concerns
 

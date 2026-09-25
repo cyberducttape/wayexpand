@@ -297,8 +297,8 @@ For current guidance, see the live documentation above. Archived docs are for re
 
 ## External Resources
 
-- **GitHub Issues:** https://github.com/itchyitchy123/wayexpand/issues
-- **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
+- **GitHub Issues:** https://github.com/cyberducttape/wayexpand/issues
+- **Questions and bug reports:** https://github.com/cyberducttape/wayexpand/issues
 - **Security:** See [THREAT_MODEL.md](../THREAT_MODEL.md) for the concise
   security boundary and [SECURITY.md](../SECURITY.md) for vulnerability reporting
 - **Changelog:** [CHANGELOG.md](../CHANGELOG.md)

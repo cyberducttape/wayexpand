@@ -78,7 +78,7 @@ if [ -e "$application_dir/wayexpand.desktop" ]; then
 fi
 
 for installed_file in \
-    "$metainfo_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
+    "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$man_dir/wayexpand.1"; do
     if [ -e "$installed_file" ]; then
         rm -f -- "$installed_file"

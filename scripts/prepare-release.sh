@@ -95,8 +95,8 @@ mv "$changelog_tmp" CHANGELOG.md
 links_tmp=$(mktemp)
 awk -v version="$new_version" -v previous="$previous_version" '
     !inserted && /^\[Unreleased\]:/ {
-        print "[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v" version "...HEAD"
-        print "[" version "]: https://github.com/itchyitchy123/wayexpand/compare/v" previous "...v" version
+        print "[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v" version "...HEAD"
+        print "[" version "]: https://github.com/cyberducttape/wayexpand/compare/v" previous "...v" version
         inserted = 1
         next
     }
@@ -123,8 +123,8 @@ awk -v version="$new_version" -v date="$release_date" '
         next
     }
     { print }
-' io.github.itchyitchy123.WayExpand.metainfo.xml > "$metainfo_tmp"
-mv "$metainfo_tmp" io.github.itchyitchy123.WayExpand.metainfo.xml
+' io.github.cyberducttape.WayExpand.metainfo.xml > "$metainfo_tmp"
+mv "$metainfo_tmp" io.github.cyberducttape.WayExpand.metainfo.xml
 sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
     desktop/wayexpand-ibus.xml
 rm -f desktop/wayexpand-ibus.xml.bak
@@ -161,7 +161,7 @@ test "$(sed -n 's/^pkgver=//p' PKGBUILD)" = "$new_version"
 test "$(sed -n 's/^Version: *//p' wayexpand.spec)" = "$new_version"
 test "$(sed -n "s/^wayexpand (\([^ -]*\)-.*/\1/p" debian/changelog | head -n1)" = "$new_version"
 test "$(sed -n 's/.*<release version=\"\([^\"]*\)\".*/\1/p' \
-    io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)" = "$new_version"
+    io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)" = "$new_version"
 test "$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' \
     desktop/wayexpand-ibus.xml | head -n1)" = "$new_version"
 grep -q "^## \[$new_version\]" CHANGELOG.md
@@ -169,7 +169,7 @@ grep -q "^## \[$new_version\]" CHANGELOG.md
 # 5. Commit changes with the project maintainer identity.
 printf '%s\n' "Committing version updates..."
 git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
-    io.github.itchyitchy123.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml
+    io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml
 git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
     commit -m "release: version $new_version"
 

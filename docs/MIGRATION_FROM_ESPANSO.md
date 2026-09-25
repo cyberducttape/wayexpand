@@ -438,6 +438,6 @@ rm -rf ~/.local/share/espanso/
 - **Full documentation:** [GETTING_STARTED.md](GETTING_STARTED.md)
 - **Configuration reference:** [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)
 - **Support matrix:** [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)
-- **Issues:** https://github.com/itchyitchy123/wayexpand/issues
+- **Issues:** https://github.com/cyberducttape/wayexpand/issues
 
 Welcome to WayExpand! If you have suggestions for improving the import process, please open an issue on GitHub.

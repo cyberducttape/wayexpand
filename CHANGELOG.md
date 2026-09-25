@@ -532,10 +532,11 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.2...HEAD
-[1.1.2]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.1...v1.1.2
-[1.1.1]: https://github.com/itchyitchy123/wayexpand/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/itchyitchy123/wayexpand/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v1.0.0
-[0.2.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.2.0
-[0.1.0]: https://github.com/itchyitchy123/wayexpand/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/cyberducttape/wayexpand/compare/v1.1.2...v1.2.0
+[1.1.2]: https://github.com/cyberducttape/wayexpand/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/cyberducttape/wayexpand/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/cyberducttape/wayexpand/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v1.0.0
+[0.2.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.2.0
+[0.1.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.1.0
