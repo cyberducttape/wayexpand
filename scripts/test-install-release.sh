@@ -27,8 +27,8 @@ install -m 0644 "$project_dir/udev/69-wayexpand-evdev-uaccess.rules" "$release_d
 "$release_dir/scripts/install-evdev-permissions.sh" --dry-run >/dev/null
 
 mkdir -p "$test_root/home" "$test_root/config"
-install -m 0644 "$project_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
-    "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml"
+install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
+    "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
 
 # Stub out systemctl so this test never touches the invoking user's real
@@ -59,7 +59,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ -f "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
+[ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
@@ -99,7 +99,7 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ ! -e "$test_root/home/.local/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml" ]
+[ ! -e "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]

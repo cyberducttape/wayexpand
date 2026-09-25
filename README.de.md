@@ -1,6 +1,6 @@
 # WayExpand
 
-[![Release](https://img.shields.io/github/v/release/itchyitchy123/wayexpand?label=release)](https://github.com/itchyitchy123/wayexpand/releases)
+[![Release](https://img.shields.io/github/v/release/cyberducttape/wayexpand?label=release)](https://github.com/cyberducttape/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Text-Expansion, gebaut für Wayland statt nachträglich daran angepasst.**
@@ -64,7 +64,7 @@ yay -S wayexpand
 
 > Prüfen Sie vor der Nutzung, ob das AUR-Paket aktuell ist — vergleichen
 > Sie `pkgver` im `PKGBUILD` mit dem [letzten
-> Release](https://github.com/itchyitchy123/wayexpand/releases). Für
+> Release](https://github.com/cyberducttape/wayexpand/releases). Für
 > Fedora existiert noch kein Copr-Repository; bauen Sie aus den Quellen mit
 > der RPM-Spec-Datei im Repository oder nutzen Sie das Release-Tarball mit
 > `install-release.sh`.
@@ -72,7 +72,7 @@ yay -S wayexpand
 **Aus Quellen:**
 
 ```bash
-git clone https://github.com/itchyitchy123/wayexpand
+git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh          # baut Release-Binaries, installiert nach ~/.local/bin
 wayexpand doctor
@@ -242,7 +242,7 @@ ausführen, die Sie nicht selbst geschrieben haben.
   libxkbcommon-dev`; Fedora: `wayland-devel libxkbcommon-devel`)
 
 ```bash
-git clone https://github.com/itchyitchy123/wayexpand
+git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 cargo build --release
 cargo test --workspace

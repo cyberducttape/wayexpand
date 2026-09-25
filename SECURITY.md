@@ -6,7 +6,7 @@ Please report suspected security vulnerabilities privately, not through a
 public GitHub issue.
 
 - Preferred: open a
-  [private security advisory](https://github.com/itchyitchy123/wayexpand/security/advisories/new)
+  [private security advisory](https://github.com/cyberducttape/wayexpand/security/advisories/new)
   on GitHub ("Security" tab → "Report a vulnerability"). This reaches
   maintainers directly without disclosing the issue publicly.
 - Include the affected version/commit, the backend(s) involved, reproduction

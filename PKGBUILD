@@ -4,7 +4,7 @@ pkgver=1.2.0
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64')
-url="https://github.com/itchyitchy123/wayexpand"
+url="https://github.com/cyberducttape/wayexpand"
 license=('MIT')
 depends=(
     'wayland'
@@ -20,7 +20,7 @@ optdepends=(
     'systemd: for user service support'
     'ibus: for native GNOME IBus input method integration'
 )
-source=("https://github.com/itchyitchy123/wayexpand/archive/v${pkgver}.tar.gz")
+source=("https://github.com/cyberducttape/wayexpand/archive/v${pkgver}.tar.gz")
 sha256sums=('db56609c2ba49d0fc9669e52a4f79dda6b59cb9fdd6b724987cf475487214f60')
 conflicts=('wayexpand-git')
 
@@ -52,8 +52,8 @@ package() {
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
     install -Dm644 desktop/wayexpand-ibus.xml "${pkgdir}/usr/share/ibus/component/wayexpand-ibus.xml"
-    install -Dm644 io.github.itchyitchy123.WayExpand.metainfo.xml \
-        "${pkgdir}/usr/share/metainfo/io.github.itchyitchy123.WayExpand.metainfo.xml"
+    install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml \
+        "${pkgdir}/usr/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml"
     install -Dm644 docs/wayexpand.1 "${pkgdir}/usr/share/man/man1/wayexpand.1"
 
     # Install application icon at every size the desktop entry's Icon=

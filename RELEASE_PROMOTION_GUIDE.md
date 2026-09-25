@@ -14,7 +14,7 @@ new release is published.
 ### Manual Steps
 
 1. **Open GitHub Releases**
-   - Go to https://github.com/itchyitchy123/wayexpand/releases
+   - Go to https://github.com/cyberducttape/wayexpand/releases
 
 2. **Find the current release**
    - Select the newest intended stable release
@@ -26,7 +26,7 @@ new release is published.
    - Click "Update release"
 
 4. **Verify**
-   - Visit https://github.com/itchyitchy123/wayexpand/releases/latest
+   - Visit https://github.com/cyberducttape/wayexpand/releases/latest
    - Confirm it redirects to the intended release tag
 
 ### Why This Matters
@@ -65,7 +65,7 @@ new release is published.
      --nowait \
      --enable-net=on \
      wayexpand \
-     "https://github.com/itchyitchy123/wayexpand/archive/v1.1.2.tar.gz"
+     "https://github.com/cyberducttape/wayexpand/archive/v1.1.2.tar.gz"
    ```
 
 3. **Monitor Build**
@@ -115,7 +115,7 @@ rustPlatform.buildRustPackage rec {
   version = "1.1.2";
 
   src = fetchFromGitHub {
-    owner = "itchyitchy123";
+    owner = "cyberducttape";
     repo = "wayexpand";
     rev = "v${version}";
     sha256 = "sha256-xxxxxxxxxxxxx="; # Run nix flake update to fill this
@@ -133,7 +133,7 @@ rustPlatform.buildRustPackage rec {
 
   meta = with lib; {
     description = "Text expansion for Wayland";
-    homepage = "https://github.com/itchyitchy123/wayexpand";
+    homepage = "https://github.com/cyberducttape/wayexpand";
     license = licenses.mit;
     maintainers = with maintainers; [ /* your nixpkgs maintainer ID */ ];
     platforms = platforms.linux;

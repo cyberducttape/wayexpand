@@ -340,7 +340,7 @@ wayexpand-daemon /tmp/test-expansions.toml  # Test without installing
 **Before reporting an issue:**
 1. Run `wayexpand doctor` and save the output
 2. Check the logs: `journalctl --user -u wayexpand-input-method.service -n 100`
-3. Search existing issues: https://github.com/itchyitchy123/wayexpand/issues
+3. Search existing issues: https://github.com/cyberducttape/wayexpand/issues
 4. Try the steps above in this guide
 
 **When reporting:**
@@ -354,4 +354,4 @@ wayexpand-daemon /tmp/test-expansions.toml  # Test without installing
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — What's tested vs. experimental
 - [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — Enterprise deployment and diagnostics
 - [OPERATIONS.md](OPERATIONS.md) — Daemon management and monitoring
-- GitHub Issues: https://github.com/itchyitchy123/wayexpand/issues
+- GitHub Issues: https://github.com/cyberducttape/wayexpand/issues

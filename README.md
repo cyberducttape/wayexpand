@@ -26,6 +26,9 @@ backend supports safe expansion.
 
 No cloud. No account. No telemetry.
 
+Built to be boring to operate: local by default, explicit about permissions,
+and conservative when configuration or command execution looks unsafe.
+
 It includes a GUI, a scriptable CLI, Espanso import, templates,
 command-backed snippets, and fleet policy support. The backend engineering is
 there when you need to inspect it, but the goal is simple: type less, paste
@@ -149,13 +152,18 @@ For stable JSON output and automation contracts, see
 - Fleet configuration and organization policy
 - Hardened daemon units and bounded resource limits
 
-## Security in one paragraph
+## Security and operational safety
 
 WayExpand is designed to run as the unprivileged desktop user, work offline,
 avoid telemetry, keep configuration files owner-checked, execute command
 snippets without a shell, and suspend matching in sensitive fields when the
 selected input backend can report them. The evdev fallback is different: it
 requires explicit raw input-event access and cannot detect password fields.
+
+The daemon also uses bounded command queues, output limits, timeouts, process
+group cleanup, and organization policy that can either audit or enforce
+restrictions. These controls are intended to make everyday operation
+predictable, not to claim that WayExpand is a security sandbox.
 
 Start here:
 

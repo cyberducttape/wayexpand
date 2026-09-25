@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.itchyitchy123.WayExpand</id>
+  <id>io.github.cyberducttape.WayExpand</id>
   <launchable type="desktop-id">wayexpand.desktop</launchable>
 
   <name>WayExpand</name>
@@ -34,10 +34,10 @@
   <metadata_license>CC0-1.0</metadata_license>
 
   <developer_name>Stephan Loesevitz</developer_name>
-  <url type="homepage">https://github.com/itchyitchy123/wayexpand</url>
-  <url type="bugtracker">https://github.com/itchyitchy123/wayexpand/issues</url>
-  <url type="help">https://github.com/itchyitchy123/wayexpand/discussions</url>
-  <url type="donation">https://github.com/sponsors/itchyitchy123</url>
+  <url type="homepage">https://github.com/cyberducttape/wayexpand</url>
+  <url type="bugtracker">https://github.com/cyberducttape/wayexpand/issues</url>
+  <url type="help">https://github.com/cyberducttape/wayexpand/discussions</url>
+  <url type="donation">https://github.com/sponsors/cyberducttape</url>
 
   <provides>
     <binary>wayexpand</binary>
@@ -64,11 +64,11 @@
 
   <screenshots>
     <screenshot type="default">
-      <image type="source">https://raw.githubusercontent.com/itchyitchy123/wayexpand/main/docs/archive/wiki/assets/snippets-dashboard.png</image>
+      <image type="source">https://raw.githubusercontent.com/cyberducttape/wayexpand/main/docs/archive/wiki/assets/snippets-dashboard.png</image>
       <caption>Snippet library dashboard with search and live preview</caption>
     </screenshot>
     <screenshot>
-      <image type="source">https://raw.githubusercontent.com/itchyitchy123/wayexpand/main/docs/archive/wiki/assets/diagnostics.png</image>
+      <image type="source">https://raw.githubusercontent.com/cyberducttape/wayexpand/main/docs/archive/wiki/assets/diagnostics.png</image>
       <caption>System diagnostics showing backend availability</caption>
     </screenshot>
   </screenshots>

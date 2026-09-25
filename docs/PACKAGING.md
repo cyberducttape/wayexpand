@@ -27,7 +27,7 @@ distribution backports or an isolated toolchain installation.
 
 ```bash
 # Clone and build
-git clone https://github.com/itchyitchy123/wayexpand.git
+git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand
 makepkg -si
 ```
@@ -84,7 +84,7 @@ mock wayexpand-${VERSION}-1.fc39.src.rpm
 
 **To build from the repository spec file:**
 ```bash
-git clone https://github.com/itchyitchy123/wayexpand
+git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 rpmbuild -ba wayexpand.spec
 ```

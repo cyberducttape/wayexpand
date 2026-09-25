@@ -69,9 +69,9 @@ install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
-if [ -f "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" ]; then
-    install -Dm644 "$release_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
-        "$metainfo_dir/io.github.itchyitchy123.WayExpand.metainfo.xml"
+if [ -f "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" ]; then
+    install -Dm644 "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
+        "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 fi
 if [ -f "$release_dir/docs/wayexpand.1" ]; then
     install -Dm644 "$release_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"

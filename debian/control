@@ -2,7 +2,7 @@ Source: wayexpand
 Section: utils
 Priority: optional
 Maintainer: Stephan Loesevitz <stephan.loesevitz@gmail.com>
-Homepage: https://github.com/itchyitchy123/wayexpand
+Homepage: https://github.com/cyberducttape/wayexpand
 Standards-Version: 4.6.0
 Build-Depends:
     debhelper-compat (= 13),

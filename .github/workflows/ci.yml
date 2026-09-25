@@ -39,7 +39,7 @@ jobs:
           debian_version=$(sed -n 's/^wayexpand (\([^ -]*\)-.*/\1/p' debian/changelog | head -n1)
           spec_version=$(sed -n 's/^Version: *//p' wayexpand.spec)
           ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
-          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)
+          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)
 
           echo "Version check:"
           echo "  Cargo.toml:            $cargo_version"
@@ -180,11 +180,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Reject legacy repository identity
+        run: |
+          legacy_identity=$(printf 'itchy%s' 'itchy123')
+          if rg -n --hidden --glob '!.git/**' --glob '!target/**' "$legacy_identity" .; then
+            echo "Legacy GitHub username found"
+            exit 1
+          fi
       - name: Install metadata validators
         run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils
       - name: Validate desktop metadata
         run: |
-          appstreamcli validate --no-net io.github.itchyitchy123.WayExpand.metainfo.xml
+          appstreamcli validate --no-net io.github.cyberducttape.WayExpand.metainfo.xml
           desktop-file-validate desktop/wayexpand.desktop
       - name: Check markdown links
         uses: lycheeverse/lychee-action@2b973e86fc7b1f6b36a93795fe2c9c6ae1118621 # v1

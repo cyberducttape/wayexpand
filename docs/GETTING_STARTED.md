@@ -156,7 +156,7 @@ wayexpand doctor  # Shows what your session can use
 - Evdev requires `input` group membership, has no password-field signal, and is best-effort under rapid typing
 
 **Want to help test?**
-- Run `wayexpand doctor` and share the output on our [GitHub issues](https://github.com/itchyitchy123/wayexpand/issues)
+- Run `wayexpand doctor` and share the output on our [GitHub issues](https://github.com/cyberducttape/wayexpand/issues)
 - Test snippets and report what works/breaks
 - See [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) for detailed testing
 

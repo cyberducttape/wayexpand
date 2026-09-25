@@ -72,7 +72,7 @@ table in a fleet layer is rejected. In daemon fleet mode, that root policy's
 
 **Example precedence:**
 - If organization defines `;sig` trigger and user also defines `;sig`, deployment fails with duplicate-trigger error.
-- Base config's existing snippets are appended to fleet snippets (no override, no error).
+- Base config's existing snippets are appended to fleet snippets, then the merged configuration is validated. Duplicate triggers or hotkeys across the base and fleet layers cause deployment to fail; there is no override behavior.
 
 **For Infrastructure:** Ensure distinct trigger/hotkey names across organizational, user, and pack layers. Validate `/etc/wayexpand/policy.toml` separately before deployment.
 

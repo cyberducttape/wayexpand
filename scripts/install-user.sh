@@ -87,8 +87,8 @@ install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$project_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
-install -Dm644 "$project_dir/io.github.itchyitchy123.WayExpand.metainfo.xml" \
-    "$metainfo_dir/io.github.itchyitchy123.WayExpand.metainfo.xml"
+install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
+    "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -Dm644 "$project_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
 
 icon_base="$HOME/.local/share/icons/hicolor"

@@ -17,7 +17,7 @@ Users install locally via available package managers or source:
 sudo apt install wayexpand
 
 # Arch (packaging prepared; build locally)
-git clone https://github.com/itchyitchy123/wayexpand.git
+git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand && makepkg -si
 
 # From source
@@ -663,9 +663,9 @@ No central server required.
 
 ## Feedback & Contributions
 
-- **Issues:** https://github.com/itchyitchy123/wayexpand/issues
-- **Questions and bug reports:** https://github.com/itchyitchy123/wayexpand/issues
-- **Pull Requests:** https://github.com/itchyitchy123/wayexpand/pulls
+- **Issues:** https://github.com/cyberducttape/wayexpand/issues
+- **Questions and bug reports:** https://github.com/cyberducttape/wayexpand/issues
+- **Pull Requests:** https://github.com/cyberducttape/wayexpand/pulls
 
 ---
 

@@ -120,7 +120,7 @@ grep '^version' crates/cli/src/../../../Cargo.toml
 
 ```bash
 cd /tmp/wayexpand-test
-git clone https://github.com/itchyitchy123/wayexpand.git
+git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand
 git checkout v1.0.0  # or main branch
 
@@ -235,7 +235,7 @@ the checksum matches what packagers expect:
 
 ```bash
 # After tag is pushed
-curl -L https://github.com/itchyitchy123/wayexpand/archive/refs/tags/v0.2.1.tar.gz \
+curl -L https://github.com/cyberducttape/wayexpand/archive/refs/tags/v0.2.1.tar.gz \
   | sha256sum
 ```
 
@@ -307,7 +307,7 @@ curl -L https://github.com/itchyitchy123/wayexpand/archive/refs/tags/v0.2.1.tar.
 
 - [`debian/rules`](../../debian/rules) — Current Debian build rules
 - [`Cargo.lock`](../../Cargo.lock) — Locked dependencies (vendored in `vendor/`)
-- [GitHub Releases](https://github.com/itchyitchy123/wayexpand/releases)
+- [GitHub Releases](https://github.com/cyberducttape/wayexpand/releases)
 - Launchpad recipe (if published)
 
 ---

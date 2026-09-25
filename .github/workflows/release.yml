@@ -73,7 +73,7 @@ jobs:
           }
 
           # Desktop integration metadata must ship the same release.
-          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.itchyitchy123.WayExpand.metainfo.xml | head -n1)
+          appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)
           test "$appstream_version" = "$expected" || {
             echo "❌ AppStream release version ($appstream_version) does not match tag ($expected)" >&2
             exit 1
@@ -106,7 +106,7 @@ jobs:
           install -m 0644 systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service "$root/systemd/"
           install -m 0644 desktop/wayexpand.desktop "$root/desktop/"
           install -m 0644 desktop/wayexpand-ibus.xml "$root/ibus/component/"
-          install -m 0644 io.github.itchyitchy123.WayExpand.metainfo.xml "$root/"
+          install -m 0644 io.github.cyberducttape.WayExpand.metainfo.xml "$root/"
           install -m 0644 docs/wayexpand.1 "$root/docs/"
           for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
             mkdir -p "$root/icons/hicolor/$size/apps"

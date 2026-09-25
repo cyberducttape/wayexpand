@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: wayexpand
 Upstream-Contact: Stephan Loesevitz <stephan.loesevitz@gmail.com>
-Source: https://github.com/itchyitchy123/wayexpand
+Source: https://github.com/cyberducttape/wayexpand
 
 Files: *
 Copyright: 2026 Stephan Loesevitz
