@@ -231,9 +231,15 @@ support IME preedit/composition state; CJK, dead-key, Compose, Fcitx, and IBus
 composition workflows must complete before a trigger is expected to match.
 The backend caps each generated replacement at 8192 characters because every
 character becomes synthetic keyboard traffic; larger replacements are rejected
-before the trigger is erased. Registry discovery is deadline-bounded at startup
-so an unresponsive compositor cannot leave a daemon connection attempt hanging
-forever.
+before the trigger is erased. There is also a separate XKB keycode limit: each
+distinct output character needs its own generated keycode, and the available
+range currently permits at most 245 unique characters in one operation. A
+replacement with repeated characters can therefore be long while remaining
+valid, but a replacement containing more than 245 distinct Unicode characters
+is rejected before the trigger is erased. The current implementation does not
+chunk such output across multiple keymaps; chunking is a future improvement.
+Registry discovery is deadline-bounded at startup so an unresponsive
+compositor cannot leave a daemon connection attempt hanging forever.
 
 ## evdev (direct kernel input capture)
 
