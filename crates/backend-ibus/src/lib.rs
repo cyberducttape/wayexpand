@@ -170,12 +170,7 @@ impl IbusEngineAdapter {
         self.engine
             .drain_completed_commands()
             .into_iter()
-            .flat_map(|mut result| {
-                // The key event was committed when its command was queued, so
-                // the delayed replacement must not commit the terminator twice.
-                result.reinsert_after = None;
-                expansion_actions(&result)
-            })
+            .flat_map(|result| expansion_actions(&result, true))
             .collect()
     }
 
@@ -343,7 +338,7 @@ impl IbusEngineAdapter {
 
             match dispatch {
                 PendingExpansionDispatch::Ready(result) => {
-                    actions.extend(expansion_actions(&result));
+                    actions.extend(expansion_actions(&result, false));
                 }
                 PendingExpansionDispatch::Queued => {
                     // The current key has not reached the client yet. Commit
@@ -385,9 +380,22 @@ impl IbusEngineAdapter {
     }
 }
 
-fn expansion_actions(result: &ExpansionResult) -> Vec<IbusAction> {
+fn expansion_actions(
+    result: &ExpansionResult,
+    terminator_already_delivered: bool,
+) -> Vec<IbusAction> {
+    // Static boundary matches arrive before IBus delivers the delimiter, so
+    // the deletion covers only the trigger. Async command matches are drained
+    // later, after the delimiter was committed when the command was queued;
+    // include that already-delivered character in the same delete/commit
+    // transaction or the deletion removes the trigger's final character plus
+    // the delimiter and leaves a leading fragment behind.
+    let mut delete_chars = result.matched_text.chars().count();
+    if terminator_already_delivered && result.reinsert_after.is_some() {
+        delete_chars = delete_chars.saturating_add(1);
+    }
     let mut actions = vec![IbusAction::DeleteSurroundingText {
-        nchars: result.matched_text.chars().count() as u32,
+        nchars: delete_chars as u32,
     }];
     let mut replacement = result.insert.clone();
     if let Some(character) = result.reinsert_after {
@@ -685,6 +693,51 @@ replacement = "signature"
                     ]
                 );
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn async_word_boundary_command_replaces_delivered_delimiter_transactionally() {
+        let config: Config = toml::from_str(
+            r#"[[expansion]]
+trigger = ":sig"
+replacement = ""
+match_mode = "word-boundary"
+[expansion.command]
+program = "/bin/sh"
+args = ["-c", "printf signature"]
+timeout_ms = 1000
+"#,
+        )
+        .unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        assert!(adapter.engine_mut().enable_async_commands());
+
+        let mut typed_actions = Vec::new();
+        for character in ":sig ".chars() {
+            typed_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
+        }
+        assert_eq!(
+            typed_actions.last(),
+            Some(&IbusAction::CommitText(" ".into()))
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let actions = adapter.drain_completed_commands();
+            if !actions.is_empty() {
+                assert_eq!(
+                    actions,
+                    vec![
+                        IbusAction::DeleteSurroundingText { nchars: 5 },
+                        IbusAction::CommitText("signature ".into()),
+                    ]
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "IBus command did not complete");
+            thread::sleep(Duration::from_millis(5));
         }
     }
 
