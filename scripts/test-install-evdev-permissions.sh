@@ -9,15 +9,31 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 script="$project_dir/scripts/install-evdev-permissions.sh"
 
+assert_contains() {
+    label=$1
+    expected=$2
+    actual=$3
+    case "$actual" in
+        *"$expected"*) ;;
+        *)
+            printf '%s\n' "assertion failed: $label" >&2
+            printf '%s\n' "expected substring: $expected" >&2
+            printf '%s\n' "actual output:" >&2
+            printf '%s\n' "$actual" >&2
+            exit 1
+            ;;
+    esac
+}
+
 "$script" --help >/dev/null
 
 out=$("$script" --dry-run)
-printf '%s' "$out" | grep -F 'This will:' >/dev/null
-printf '%s' "$out" | grep -F '(dry run; no changes made)' >/dev/null
-printf '%s' "$out" | grep -F 'Active-seat mode relies on systemd-logind' >/dev/null
+assert_contains default-header 'This will:' "$out"
+assert_contains default-dry-run '(dry run; no changes made)' "$out"
+assert_contains default-active-seat 'Active-seat mode relies on systemd-logind' "$out"
 seat_out=$($script --access=active-seat --dry-run)
-printf '%s' "$seat_out" | grep -F 'active-seat' >/dev/null
-printf '%s' "$seat_out" | grep -F 'leave pre-existing input-group membership unchanged' >/dev/null
+assert_contains explicit-active-seat 'active-seat' "$seat_out"
+assert_contains explicit-active-seat-membership 'leave pre-existing input-group membership unchanged' "$seat_out"
 
 empty_dir=
 policy_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-policy-test.XXXXXX")
@@ -29,12 +45,12 @@ printf '%s\n' 'stale input-group rule' >"$group_rule"
 exclusive_seat_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     "$script" --access=active-seat --dry-run)
-printf '%s' "$exclusive_seat_out" | grep -F "remove $group_rule" >/dev/null
+assert_contains remove-group-rule "remove $group_rule" "$exclusive_seat_out"
 printf '%s\n' 'stale active-seat rule' >"$seat_rule"
 exclusive_group_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     "$script" --access=input-group --dry-run)
-printf '%s' "$exclusive_group_out" | grep -F "remove $seat_rule" >/dev/null
+assert_contains remove-seat-rule "remove $seat_rule" "$exclusive_group_out"
 
 # A recorded membership grant is owned by WayExpand and is removed when an
 # existing installation is migrated to active-seat. An unrecorded membership
@@ -63,7 +79,7 @@ unowned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
     "$script" --access=active-seat --dry-run)
-printf '%s' "$unowned_migration_out" | grep -F 'leave pre-existing input-group membership unchanged' >/dev/null
+assert_contains unowned-membership 'leave pre-existing input-group membership unchanged' "$unowned_migration_out"
 
 if [ "$(id -u)" -eq 0 ]; then
     printf '%s\n' "skipping non-root-rejection checks: already running as root" >&2
@@ -93,6 +109,6 @@ if "$empty_dir/scripts/install-evdev-permissions.sh" --dry-run >"$empty_dir/out"
     printf '%s\n' "install-evdev-permissions.sh ran without its udev rule file present" >&2
     exit 1
 fi
-grep -F 'not found' "$empty_dir/out" >/dev/null
+assert_contains missing-rule 'not found' "$(cat "$empty_dir/out")"
 
 printf '%s\n' "install-evdev-permissions.sh test passed"
