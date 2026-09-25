@@ -79,6 +79,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_bindir}/wayexpand-gui
 %{_bindir}/wayexpand-ui
 %{_bindir}/wayexpand-ibus
+%{_bindir}/wayexpand-install-evdev-access
 %{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
