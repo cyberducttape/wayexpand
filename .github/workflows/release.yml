@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Existing tag or branch to build and publish"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,6 +18,8 @@ jobs:
   ci:
     name: Verify
     uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ inputs.release_ref || github.ref }}
 
   linux-x86_64:
     name: Linux x86_64 release
@@ -23,8 +30,12 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    env:
+      RELEASE_REF_NAME: ${{ inputs.release_ref || github.ref_name }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: 1.96.0
@@ -37,11 +48,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ release tags must use SemVer vX.Y.Z (got $GITHUB_REF_NAME)" >&2
+          if [[ ! "$RELEASE_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ release refs must use a SemVer tag vX.Y.Z (got $RELEASE_REF_NAME)" >&2
             exit 1
           fi
-          expected="${GITHUB_REF_NAME#v}"
+          expected="${RELEASE_REF_NAME#v}"
 
           # Check Cargo.toml
           cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
@@ -96,7 +107,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_REF_NAME#v}"
           root="wayexpand-${version}-linux-x86_64"
           mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" "$root/scripts" "$root/udev" "$root/ibus/component"
           install -m 0755 target/release/wayexpand "$root/bin/"
@@ -129,7 +140,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_REF_NAME#v}"
 
           # Clean source archive: lockfile included, no vendored source redirect.
           git archive --format=tar.gz \
@@ -172,7 +183,7 @@ jobs:
           printf '%s  %s\n' "$syft_sha256" "$syft_archive" | sha256sum --check --status
           tar --extract --gzip --file="$syft_archive" --directory="$RUNNER_TEMP"
           test -x "$syft_bin"
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_REF_NAME#v}"
           extract_dir="$RUNNER_TEMP/wayexpand-extract"
 
           # Extract clean source tarball and scan
