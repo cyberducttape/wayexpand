@@ -44,6 +44,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Require release tarball generation to use the locked Cargo dependency graph
+  when vendoring dependencies.
+
 - Make Debian builds fail clearly when the required vendored source archive is
   missing instead of retrying unavailable crates.io network access.
 
