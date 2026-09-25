@@ -195,9 +195,9 @@ cleanup() {
 }
 trap cleanup EXIT
 archive_path="$archive_dir/wayexpand-${new_version}.tar.gz"
-git archive --format=tar.gz \
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix="wayexpand-${new_version}/" \
-    --output="$archive_path" "$release_tree"
+    "$release_tree" | gzip -n > "$archive_path"
 checksum=$(sha256sum "$archive_path" | awk '{print $1}')
 sed -i.bak "s/^sha256sums=.*/sha256sums=('$checksum')/" PKGBUILD
 rm -f PKGBUILD.bak
@@ -212,9 +212,9 @@ git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com'
     commit -m "release: version $new_version"
 
 # Verify the committed tree produces the exact checksum recorded in PKGBUILD.
-git archive --format=tar.gz \
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix="wayexpand-${new_version}/" \
-    --output="$archive_path" HEAD
+    HEAD | gzip -n > "$archive_path"
 committed_checksum=$(sha256sum "$archive_path" | awk '{print $1}')
 test "$committed_checksum" = "$checksum"
 printf '%s\n' "✓ Final release archive checksum verified: $checksum"

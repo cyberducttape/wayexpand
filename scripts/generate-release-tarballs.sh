@@ -32,10 +32,9 @@ printf '%s\n' "Temporary directory: $tmpdir"
 # 1. Generate clean tarball (without vendor/)
 printf '%s\n' ""
 printf '%s\n' "Creating clean tarball (without vendor/)..."
-git archive --format=tar.gz \
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix="wayexpand-${version}/" \
-    --output="${tmpdir}/wayexpand-${version}.tar.gz" \
-    HEAD
+    HEAD | gzip -n > "${tmpdir}/wayexpand-${version}.tar.gz"
 
 if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" \
     | grep -E "^wayexpand-${version}/(\.cargo/config\.toml|vendor/)" >/dev/null; then

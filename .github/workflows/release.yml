@@ -143,10 +143,9 @@ jobs:
           version="${RELEASE_REF_NAME#v}"
 
           # Clean source archive: lockfile included, no vendored source redirect.
-          git archive --format=tar.gz \
+          git archive --format=tar --mtime='1970-01-01 00:00:00' \
             --prefix="wayexpand-${version}/" \
-            --output="wayexpand-${version}.tar.gz" \
-            HEAD
+            HEAD | gzip -n > "wayexpand-${version}.tar.gz"
           if tar -tzf "wayexpand-${version}.tar.gz" | grep -E '^wayexpand-[^/]+/(\.cargo/config\.toml|vendor/)' >/dev/null; then
             echo "clean source archive unexpectedly contains vendored Cargo configuration or vendor/" >&2
             exit 1
