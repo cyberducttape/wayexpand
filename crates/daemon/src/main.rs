@@ -47,6 +47,13 @@ const EVDEV_QUIET_TIMEOUT: Duration = Duration::from_millis(40);
 const MAX_STDIN_LINE_BYTES: usize = 1024 * 1024;
 const MAX_PENDING_INPUT_LINES: usize = 64;
 
+fn commands_disabled_for_startup(
+    policy: &wayexpand_core::OrganizationPolicy,
+    worker_start_failed: bool,
+) -> bool {
+    worker_start_failed || policy::commands_enforced(policy)
+}
+
 #[derive(Debug)]
 struct EventError {
     result: ExpansionResult,
@@ -185,17 +192,17 @@ fn main() -> Result<()> {
             path.display()
         )
     })?;
-    if !config.engine.enable_async_commands() {
+    let worker_start_failed = !config.engine.enable_async_commands();
+    if worker_start_failed {
         warn!(
             "asynchronous command/hotkey workers could not start; command-backed actions are disabled"
         );
-        config.engine.set_commands_disabled(true);
     }
 
     let enforcement_policy = policy.effective_enforcement_policy();
     config
         .engine
-        .set_commands_disabled(policy::commands_enforced(&policy));
+        .set_commands_disabled(commands_disabled_for_startup(&policy, worker_start_failed));
     config
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);
@@ -1621,6 +1628,23 @@ mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
     use wayexpand_core::{Config, InjectorError};
+
+    #[test]
+    fn startup_worker_failure_remains_command_disabled_in_audit_mode() {
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        assert!(commands_disabled_for_startup(&policy, true));
+    }
+
+    #[test]
+    fn startup_command_policy_and_worker_failure_are_combined() {
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            disable_commands: true,
+            ..Default::default()
+        };
+        assert!(commands_disabled_for_startup(&policy, true));
+        assert!(commands_disabled_for_startup(&policy, false));
+    }
 
     #[test]
     fn libei_backend_policy_only_blocks_in_safe_mode() {
