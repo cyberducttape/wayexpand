@@ -6,7 +6,6 @@ Homepage: https://github.com/cyberducttape/wayexpand
 Standards-Version: 4.6.0
 Build-Depends:
     debhelper-compat (= 13),
-    dh-cargo,
     rustc (>= 1.87),
     cargo (>= 1.87),
     pkg-config,
