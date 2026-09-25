@@ -15,7 +15,7 @@ mod template;
 
 pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorError, InputSource,
-    InputSourceError, TextInjector, WindowTracker, WindowTrackerError,
+    InputSourceError, KeyEventState, TextInjector, WindowTracker, WindowTrackerError,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{

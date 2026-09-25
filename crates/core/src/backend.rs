@@ -4,6 +4,15 @@ use std::{fs::OpenOptions, path::Path};
 
 use crate::{InputEvent, Modifiers, WindowContext};
 
+/// State of a low-level keyboard event sent through a pass-through injector.
+/// Keeping this distinct from the text-expansion API is what lets an input
+/// source preserve a physical key's complete press/release lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyEventState {
+    Pressed,
+    Released,
+}
+
 /// Reports which application is currently focused, for `app_filter`-scoped
 /// expansions. Unlike `InputSource`, a tracker is polled/subscribed
 /// independently of the typing stream -- there is no Wayland protocol that
@@ -126,6 +135,27 @@ pub trait TextInjector: Send {
         }
         self.inject_key(keycode)
     }
+
+    /// Inject one low-level keyboard event without synthesizing a tap.
+    /// Keyboard pass-through sources use this for held keys, repeats, and
+    /// modifier combinations. Existing injectors that only support taps keep
+    /// the safe default: presses use the legacy operation and releases fail
+    /// closed instead of silently leaving the target in an unknown state.
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        _modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError> {
+        match state {
+            KeyEventState::Pressed => self.inject_key(keycode),
+            KeyEventState::Released => Err(InjectorError {
+                backend: self.name(),
+                message: "backend cannot synthesize keyboard key releases".into(),
+                retryable: false,
+            }),
+        }
+    }
 }
 
 impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
@@ -159,6 +189,15 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
         modifiers: Modifiers,
     ) -> Result<(), InjectorError> {
         (**self).inject_key_with_modifiers(keycode, modifiers)
+    }
+
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError> {
+        (**self).inject_key_event(keycode, modifiers, state)
     }
 }
 
