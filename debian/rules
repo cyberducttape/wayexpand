@@ -3,10 +3,10 @@
 export CARGO_NET_OFFLINE=true
 
 %:
-	dh $@ --buildsystem=cargo
+	dh $@ --buildsystem=none
 
-# Vendored crates ship Cargo.toml.orig files that their .cargo-checksum.json
-# lists; dh_clean deletes *.orig by default, which breaks the offline build.
+# Keep Cargo's vendored Cargo.toml.orig files; dh_clean would otherwise remove
+# them before the offline build.
 override_dh_clean:
 	dh_clean -X.orig
 
@@ -16,13 +16,13 @@ override_dh_auto_configure:
 		echo "       the clean source archive cannot build without network access" >&2; \
 		exit 1; \
 	fi
-	dh_auto_configure
+	true
 
 override_dh_auto_build:
-	dh_auto_build -- --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+	cargo build --release --locked -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
 override_dh_auto_test:
-	dh_auto_test -- --locked --workspace
+	cargo test --locked --workspace
 
 override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand usr/bin/
