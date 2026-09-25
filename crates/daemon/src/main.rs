@@ -1392,12 +1392,18 @@ fn process_event(
                 );
             }
         }
-        if let Some(result) = engine.try_undo(&chord) {
-            if let Some(backend) = injector.as_deref_mut() {
-                if let Err(source) = ExpansionEngine::apply(backend, &result) {
-                    return Err(Box::new(EventError { result, source }));
+        // Undo is a transaction too: do not consume the undo record until
+        // there is an injector and the replacement has been applied. This
+        // preserves retryability across backend reconnects and failures.
+        if injector.is_some() {
+            if let Some(result) = engine.prepare_undo(&chord) {
+                if let Some(backend) = injector.as_deref_mut() {
+                    if let Err(source) = ExpansionEngine::apply(backend, &result) {
+                        return Err(Box::new(EventError { result, source }));
+                    }
+                    engine.commit_undo(&result);
+                    info!("expansion undone");
                 }
-                info!("expansion undone");
             }
         }
         return Ok(());
@@ -2119,6 +2125,101 @@ mod tests {
             "libei",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn undo_is_not_consumed_when_injector_is_unavailable() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            None,
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        assert_eq!(
+            injector.calls,
+            ["erase::x", "insert:ok", "erase:ok", "insert::x"]
+        );
+    }
+
+    #[test]
+    fn undo_is_not_consumed_when_injection_fails() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let mut initial_injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut initial_injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        let error = process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut FailingInjector),
+            &policy,
+            "libei",
+        )
+        .unwrap_err();
+        assert!(error.retryable());
+
+        let mut retry_injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut retry_injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        assert_eq!(retry_injector.calls, ["erase:ok", "insert::x"]);
     }
 
     #[test]

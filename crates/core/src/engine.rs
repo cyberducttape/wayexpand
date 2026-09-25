@@ -956,29 +956,51 @@ impl ExpansionEngine {
             .collect()
     }
 
-    /// If `chord` matches the configured `settings.undo_chord` and an
-    /// undoable expansion is still pending (see `last_expansion`), consumes
-    /// it and returns the `ExpansionResult` that reverts it: erase what was
-    /// inserted, type the original trigger back. The caller applies this
-    /// exactly like a normal expansion (`ExpansionEngine::apply`). Returns
-    /// `None` if undo is unconfigured, paused, the chord doesn't match, or
-    /// nothing is pending to undo.
-    pub fn try_undo(&mut self, chord: &KeyChord) -> Option<ExpansionResult> {
+    /// Prepare the `ExpansionResult` that would undo the most recent
+    /// expansion without consuming its undo record. The caller must call
+    /// [`Self::commit_undo`] only after the result has been injected.
+    pub fn prepare_undo(&self, chord: &KeyChord) -> Option<ExpansionResult> {
         if !self.is_capture_enabled() {
             return None;
         }
         if !self.undo_chord.as_ref()?.matches(chord) {
             return None;
         }
-        let (restore_text, erase_text) = self.last_expansion.take()?;
+        let (restore_text, erase_text) = self.last_expansion.as_ref()?;
         Some(ExpansionResult {
             trigger: String::new(),
             matched_text: erase_text.clone(),
-            insert: restore_text,
+            insert: restore_text.clone(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
         })
+    }
+
+    /// Commit a previously prepared undo after successful injection.
+    /// A mismatched result is ignored so a stale failure cannot consume a
+    /// newer undo record.
+    pub fn commit_undo(&mut self, result: &ExpansionResult) {
+        if self
+            .last_expansion
+            .as_ref()
+            .is_some_and(|(restore, erase)| {
+                restore == &result.insert && erase == &result.matched_text
+            })
+        {
+            self.last_expansion = None;
+        }
+    }
+
+    /// If `chord` matches the configured `settings.undo_chord` and an
+    /// undoable expansion is still pending, consumes it and returns the
+    /// `ExpansionResult` that reverts it. This convenience method is kept for
+    /// callers that apply the result synchronously; daemon code should use
+    /// [`Self::prepare_undo`] and [`Self::commit_undo`] around injection.
+    pub fn try_undo(&mut self, chord: &KeyChord) -> Option<ExpansionResult> {
+        let result = self.prepare_undo(chord)?;
+        self.commit_undo(&result);
+        Some(result)
     }
 
     /// Execute one validated hotkey action without invoking a shell. Output
