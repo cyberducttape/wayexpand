@@ -1776,6 +1776,54 @@ mod tests {
     }
 
     #[test]
+    fn alt_and_super_lifecycles_release_after_shortcuts() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        for (modifier, key) in [(56, 62), (125, 38)] {
+            state.queue_virtual_key_event(modifier, Modifiers::default(), KeyEventState::Pressed);
+            dispatch_one_queued_key(&mut state, &mut injector);
+            state.queue_virtual_key_event(
+                key,
+                if modifier == 56 {
+                    Modifiers {
+                        alt: true,
+                        ..Modifiers::default()
+                    }
+                } else {
+                    Modifiers {
+                        super_key: true,
+                        ..Modifiers::default()
+                    }
+                },
+                KeyEventState::Pressed,
+            );
+            dispatch_one_queued_key(&mut state, &mut injector);
+            state.queue_virtual_key_event(key, Modifiers::default(), KeyEventState::Released);
+            dispatch_one_queued_key(&mut state, &mut injector);
+            state.queue_virtual_key_event(modifier, Modifiers::default(), KeyEventState::Released);
+            dispatch_one_queued_key(&mut state, &mut injector);
+        }
+
+        assert_eq!(
+            injector.events,
+            vec![
+                (56, KeyEventState::Pressed),
+                (62, KeyEventState::Pressed),
+                (62, KeyEventState::Released),
+                (56, KeyEventState::Released),
+                (125, KeyEventState::Pressed),
+                (38, KeyEventState::Pressed),
+                (38, KeyEventState::Released),
+                (125, KeyEventState::Released),
+            ]
+        );
+    }
+
+    #[test]
     fn focus_loss_releases_all_virtual_keys_before_focus_event() {
         let mut state = StateData::new();
         let mut injector = RecordingInjector {
@@ -1830,6 +1878,31 @@ mod tests {
         );
         assert!(state.pending_key_pass_through.is_empty());
         assert!(state.virtual_held_keys.is_empty());
+    }
+
+    #[test]
+    fn reconnect_starts_without_stale_virtual_keys() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        state.queue_virtual_key_event(203, Modifiers::default(), KeyEventState::Pressed);
+        release_virtual_keys_from_state(&mut state, Some(&mut injector));
+
+        state.queue_virtual_key_event(203, Modifiers::default(), KeyEventState::Pressed);
+        dispatch_one_queued_key(&mut state, &mut injector);
+
+        assert_eq!(
+            injector.events,
+            vec![
+                (203, KeyEventState::Pressed),
+                (203, KeyEventState::Released),
+                (203, KeyEventState::Pressed),
+            ]
+        );
+        assert_eq!(state.virtual_held_keys, vec![203]);
     }
 
     #[test]
