@@ -50,6 +50,8 @@ Script-level checks run in CI (`.github/workflows/ci.yml`): `scripts/test-releas
 
 ## Packaging
 
-- The Ubuntu PPA is built by a Launchpad recipe from the `cyberducttape` git remote, not GitHub; pushing to `origin` alone does not update it.
+- The Ubuntu PPA is built by a Launchpad recipe from a vendored source upload;
+  a clean Git checkout is not sufficient because Launchpad builders do not
+  have reliable crates.io access. Pushing to `origin` alone does not update it.
 - `debian/rules` overrides `dh_clean` with `-X.orig`, because vendored crates' `Cargo.toml.orig` files are checksummed and dh_clean would delete them.
 - Versions must match across `Cargo.toml`, `debian/changelog`, `PKGBUILD` and the RPM spec (`scripts/prepare-release.sh`, `docs/RELEASING.md`).

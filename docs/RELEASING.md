@@ -76,6 +76,12 @@ x86_64 binaries with the locked dependency graph and publishes:
   - `CARGO_NET_OFFLINE=true` builds work without internet
   - SHA256: `wayexpand-<version>-vendored.tar.gz.sha256`
 
+The Launchpad recipe must build from the vendored source archive (or an
+equivalent source upload containing both `vendor/` and `.cargo/config.toml`).
+It must not build the clean Git checkout: Launchpad builders do not have
+reliable crates.io access, and Debian packaging fails closed rather than
+attempting a network dependency download.
+
 The workflow pins every GitHub Action to a full commit SHA. Do not replace
 those pins with moving version tags during release-workflow maintenance.
 

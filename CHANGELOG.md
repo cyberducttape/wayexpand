@@ -44,8 +44,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
-- Fix clean Debian source builds by creating the Cargo vendor configuration
-  directory before generating locked vendored dependencies.
+- Make Debian builds fail clearly when the required vendored source archive is
+  missing instead of retrying unavailable crates.io network access.
 
 - Make Launchpad synchronization use its decoded SSH key explicitly in the
   push step; GitHub Actions does not preserve an ssh-agent environment between
