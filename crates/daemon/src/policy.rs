@@ -65,15 +65,12 @@ pub fn check_expansion_allowed(
 }
 
 /// Check if a hotkey should be allowed under the current policy.
-/// When safe_mode is true, disabled hotkeys prevent execution.
-/// When safe_mode is false, disabled hotkeys are logged as warnings but execution proceeds.
+/// Returns a violation whenever hotkeys are disabled. The caller logs it and
+/// decides whether safe mode should block the action or audit mode should let
+/// it proceed.
 pub fn check_hotkey_allowed(policy: &OrganizationPolicy) -> Result<(), String> {
     if policy.disable_hotkeys {
-        let msg = "hotkeys are disabled by organization policy".to_string();
-        if policy.safe_mode {
-            return Err(msg);
-        }
-        // In audit mode, violation is logged but hotkey proceeds
+        return Err("hotkeys are disabled by organization policy".to_string());
     }
     Ok(())
 }
@@ -196,6 +193,13 @@ mod tests {
             ..Default::default()
         };
         assert!(check_hotkey_allowed(&policy).is_err());
+
+        let audit_policy = OrganizationPolicy {
+            safe_mode: false,
+            disable_hotkeys: true,
+            ..Default::default()
+        };
+        assert!(check_hotkey_allowed(&audit_policy).is_err());
     }
 
     #[test]

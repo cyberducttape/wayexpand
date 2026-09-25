@@ -1368,16 +1368,16 @@ fn process_event(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
-        // Check if hotkeys are allowed by policy
-        if let Err(violation) = policy::check_hotkey_allowed(policy) {
-            // Log the violation, but in safe_mode only block the hotkey
-            policy::log_violation(policy, &violation);
-            if policy.safe_mode {
-                return Ok(());
-            }
-        }
-
         for action in engine.process_key(&chord) {
+            // Apply the organization policy only to configured hotkey
+            // actions. Ordinary evdev key events must not be treated as
+            // hotkey violations, and undo is handled independently below.
+            if let Err(violation) = policy::check_hotkey_allowed(policy) {
+                policy::log_violation(policy, &violation);
+                if policy.safe_mode {
+                    continue;
+                }
+            }
             if let Some(violation) = policy.command_path_violation(&action.command.program) {
                 policy::log_violation(policy, &violation);
                 if policy.command_path_is_blocked(&action.command.program) {
@@ -2083,6 +2083,58 @@ mod tests {
             "libei",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn disabling_hotkeys_does_not_disable_undo_or_ordinary_keys() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            disable_hotkeys: true,
+            ..Default::default()
+        };
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("A").unwrap()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        assert_eq!(
+            injector.calls,
+            ["erase::x", "insert:ok", "erase:ok", "insert::x"]
+        );
     }
 
     #[cfg(unix)]

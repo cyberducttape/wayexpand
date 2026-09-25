@@ -656,7 +656,14 @@ impl ExpansionEngine {
         pending: PendingExpansionResult,
         additional_max_size: usize,
     ) -> Result<ExpansionResult, CommandError> {
-        if pending.generation != self.input_generation || self.user_paused || self.sensitive_focus {
+        // Static results are completed immediately after their input event has
+        // been parsed, so a later scalar in that same event may have advanced
+        // the per-scalar generation. Command-backed results must still match
+        // the current generation because they can complete asynchronously.
+        if (pending.command.is_some() && pending.generation != self.input_generation)
+            || self.user_paused
+            || self.sensitive_focus
+        {
             return Err(CommandError::StaleInput);
         }
         if pending.command.is_some() && self.config.organization.disable_commands {
@@ -712,7 +719,10 @@ impl ExpansionEngine {
         additional_max_size: usize,
     ) -> Result<PendingExpansionDispatch, CommandError> {
         let matched_text = pending.matched_text.clone();
-        if pending.generation != self.input_generation || self.user_paused || self.sensitive_focus {
+        if (pending.command.is_some() && pending.generation != self.input_generation)
+            || self.user_paused
+            || self.sensitive_focus
+        {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
         }
@@ -1012,6 +1022,11 @@ impl ExpansionEngine {
                     return results;
                 }
                 for character in text.chars() {
+                    // An undoable expansion is valid only when no later
+                    // scalar from this same text event follows it.
+                    if !results.is_empty() {
+                        self.last_expansion = None;
+                    }
                     self.input_generation = self.input_generation.wrapping_add(1);
                     let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
@@ -1251,9 +1266,6 @@ impl ExpansionEngine {
                         }
                         self.clear_buffer();
                     }
-                }
-                for result in &mut results {
-                    result.generation = self.input_generation;
                 }
                 results
             }
@@ -4233,6 +4245,7 @@ replacement = "signature""#,
             [[expansion]]
             trigger = ":date"
             replacement = "2024-01-15"
+            match_mode = "word-boundary"
             "#,
         )
         .unwrap();
@@ -4494,6 +4507,47 @@ replacement = "signature""#,
         );
         engine.commit_applied_expansion(&result);
         assert!(engine.try_undo(&chord).is_some());
+    }
+
+    #[test]
+    fn multi_scalar_text_invalidates_undo_after_a_mid_event_match() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let results = engine.process(InputEvent::Text(":sigx".into()));
+
+        assert_eq!(results.len(), 1);
+        assert!(engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn deferred_generation_is_captured_at_match_time() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":sigx".into()))
+            .pop()
+            .unwrap();
+
+        assert!(pending.generation < engine.input_generation);
     }
 
     #[test]
