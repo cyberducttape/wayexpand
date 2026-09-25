@@ -116,37 +116,18 @@ keys are not silently discarded. Modifier state is synthesized around the
 passed-through key, but left/right modifier identity and compositor-specific
 shortcut behavior are not yet certified.
 
-**Keyboard semantics limitation (P1 architectural debt):** The pass-through
-implementation has a fundamental design issue that breaks held-key semantics:
+**Held-key semantics:** Unsupported keys are passed through as lifecycle-aware
+press/release events. Repeated compositor press notifications do not create
+synthetic taps while a key is held; the virtual key remains down so the target
+application can perform its normal key repeat. Held keys are released during
+focus loss, deactivation, transport failure, and source teardown. If the
+secondary injector is unavailable or fails, the source reports an error rather
+than silently discarding the key.
 
-- Only KEY_PRESS events are captured for unsupported keys
-- KEY_RELEASE events are not tracked or forwarded
-- This converts held keys into synthetic single taps
-
-Example: physically holding Right Arrow for cursor navigation produces a single
-tap instead of a held key. Applications receive:
-```
-Key Down ↓ Up
-```
-Instead of:
-```
-Key Down ─────── Key Up
-```
-
-This breaks:
-- Held arrow navigation (single key vs. continuous cursor movement)
-- Held Delete (single vs. repeated deletion)
-- Duration-sensitive key interactions
-- Key-repeat workflows
-- Some modifier/key interaction timing
-
-**Proper fix (v1.3+):** Track press/release pairs as a state machine, preserve
-repeat events from the compositor, and maintain held-key state for cleanup on
-disconnect/deactivate. This requires architectural refactoring of the
-input-method source to defer key-state decisions until release events arrive.
-
-Treat this as experimental keyboard compatibility, not proof that unrelated keys
-can never be lost.
+This preserves key lifetimes in the source and injector, but
+compositor-specific repeat rates, modifier identity, and shortcut behavior
+still require real session certification. It is not evidence that every
+compositor/client pair handles input-method-v2 identically.
 
 Preedit handling and full compositor coverage remain open integration work,
 so this source is opt-in and intentionally hidden behind `wayexpand setup --mode experimental`.
