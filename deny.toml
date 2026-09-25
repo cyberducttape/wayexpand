@@ -9,7 +9,12 @@ all-features = true
 
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+# RUSTSEC-2026-0192 marks ttf-parser unmaintained. It is transitive through
+# eframe 0.31's bundled GUI fonts and has no safe upgrade in that MSRV line;
+# eframe 0.36 removes it but requires Rust 1.95, while WayExpand supports
+# Rust 1.87. Keep this exception narrow and revisit it when an MSRV-compatible
+# maintained eframe/font path becomes available.
+ignore = ["RUSTSEC-2026-0192"]
 
 [licenses]
 confidence-threshold = 0.8
