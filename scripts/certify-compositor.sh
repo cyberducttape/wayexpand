@@ -147,6 +147,8 @@ else
     status_json=null
 fi
 doctor_json=$(cat "$tmp/doctor.json")
+wayexpand_version=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_version // "unknown"')
+wayexpand_commit=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_commit // "unknown"')
 doctor_probe_valid=1
 if ! printf '%s' "$doctor_json" | jq -e 'type == "object" and (.healthy == true)' >/dev/null 2>&1; then
     doctor_json=null
@@ -219,6 +221,8 @@ if [ "$format" = json ]; then
         '.targets[] | select(.id == $compositor) | {application_filter, window_tracker}' "$matrix")
     required_layout_profiles_json=$(jq -c '.required_layout_profiles' "$matrix")
     jq -n \
+        --arg wayexpand_version "$wayexpand_version" \
+        --arg wayexpand_commit "$wayexpand_commit" \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
         --arg backend "$backend" \
@@ -240,7 +244,9 @@ if [ "$format" = json ]; then
         --argjson status_required "$status_required" \
         --argjson backend_probe_valid "$backend_probe_valid" \
         --arg certification_status "$certification_status" \
-        '{schema: 1, certified: $certified, compositor: $compositor,
+        '{schema: 1, certified: $certified,
+          wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
+          compositor: $compositor,
           status: $certification_status,
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
@@ -258,6 +264,8 @@ if [ "$format" = json ]; then
 else
 {
     printf '%s\n\n' "# WayExpand compositor certification evidence"
+    printf '%s\n' "- wayexpand_version: \`$wayexpand_version\`"
+    printf '%s\n' "- wayexpand_commit: \`$wayexpand_commit\`"
     printf '%s\n' "- compositor_version: $compositor_version"
     printf '%s\n' "- backend: $backend"
     printf '%s\n' "- keyboard_layout: $keyboard_layout"

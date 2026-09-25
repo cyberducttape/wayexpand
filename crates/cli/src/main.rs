@@ -1,4 +1,5 @@
 mod args;
+mod build_info;
 
 use anyhow::{bail, Context, Error, Result};
 use std::{
@@ -105,7 +106,11 @@ fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("--version") | Some("-V") | Some("version") => {
-            println!("wayexpand {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "wayexpand {} (commit {})",
+                build_info::VERSION,
+                build_info::COMMIT
+            );
         }
         Some("test") => {
             let trigger = args
@@ -613,6 +618,11 @@ fn run() -> Result<()> {
                 usage_bail!("setup accepts either --mode or expert --backend, not both");
             }
             println!("WayExpand setup");
+            println!(
+                "WayExpand {} (commit {})",
+                build_info::VERSION,
+                build_info::COMMIT
+            );
             println!("Session: {}", session_description());
             println!();
             let capabilities = probe_capabilities();
@@ -674,6 +684,11 @@ fn run() -> Result<()> {
                 }
                 return Ok(());
             }
+            println!(
+                "WayExpand {} (commit {})",
+                build_info::VERSION,
+                build_info::COMMIT
+            );
             println!("Session: {}", session_description());
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
@@ -1503,6 +1518,8 @@ fn print_certification(json: bool) -> Result<bool> {
     };
     let report = serde_json::json!({
         "schema": 1,
+        "wayexpand_version": build_info::VERSION,
+        "wayexpand_commit": build_info::COMMIT,
         "certified": certified,
         "desktop": capabilities.compositor.name(),
         "config_path": certification_config,
@@ -1515,6 +1532,11 @@ fn print_certification(json: bool) -> Result<bool> {
         println!("{report}");
     } else {
         println!("WayExpand Desktop Certification");
+        println!(
+            "  WayExpand: {} (commit {})",
+            build_info::VERSION,
+            build_info::COMMIT
+        );
         println!("  Desktop: {}", report["desktop"]);
         println!("  Selected mode: {}", report["selected_mode"]);
         for check in report["checks"].as_array().into_iter().flatten() {
@@ -1686,6 +1708,8 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     println!(
         "{}",
         serde_json::json!({
+            "wayexpand_version": build_info::VERSION,
+            "wayexpand_commit": build_info::COMMIT,
             "healthy": healthy,
             "wayland": std::env::var_os("WAYLAND_DISPLAY").is_some(),
             "config": {

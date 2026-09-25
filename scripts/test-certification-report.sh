@@ -20,6 +20,8 @@ command -v jq >/dev/null 2>&1 || {
 expected=$(jq -c '.required_scenarios | sort' "$matrix")
 jq -e --argjson expected "$expected" '
     .schema == 1 and
+    (.wayexpand_version | type == "string") and
+    (.wayexpand_commit | type == "string") and
     (.certified | type == "boolean") and
     (.required_scenarios | sort == $expected) and
     ([.checks[] | select(.status == "not-run") | .name] | sort == $expected) and
