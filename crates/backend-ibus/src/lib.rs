@@ -170,7 +170,29 @@ impl IbusEngineAdapter {
         self.engine
             .drain_completed_commands()
             .into_iter()
-            .flat_map(|result| expansion_actions(&result, true))
+            .filter_map(|result| {
+                if let Some(violation) = self.policy.expansion_policy_violation(
+                    result.insert.len(),
+                    result.command_backed,
+                    IBUS_BACKEND_NAME,
+                ) {
+                    if self.policy.safe_mode {
+                        error!(
+                            audit_prefix = %self.policy.audit_prefix,
+                            violation = %violation,
+                            "IBus completed expansion blocked by organization policy"
+                        );
+                        return None;
+                    }
+                    warn!(
+                        audit_prefix = %self.policy.audit_prefix,
+                        violation = %violation,
+                        "IBus completed expansion violates organization policy; audit mode permits it"
+                    );
+                }
+                Some(expansion_actions(&result, true))
+            })
+            .flatten()
             .collect()
     }
 
@@ -325,10 +347,11 @@ impl IbusEngineAdapter {
             // Policy-approved commands are queued so ProcessKeyEvent never
             // waits for command timeout. Static matches and cache hits commit
             // synchronously because they require no child process.
-            let dispatch = match self
-                .engine
-                .dispatch_pending_with_policy(pending_result, self.policy.max_replacement_size)
-            {
+            let enforcement_policy = self.policy.effective_enforcement_policy();
+            let dispatch = match self.engine.dispatch_pending_with_policy(
+                pending_result,
+                enforcement_policy.max_replacement_size,
+            ) {
                 Ok(dispatch) => dispatch,
                 Err(e) => {
                     warn!("IBus expansion could not be queued or completed: {}", e);
@@ -406,10 +429,9 @@ fn expansion_actions(
 }
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
-    // Only apply policy restrictions in safe_mode (enforcement mode).
-    // In audit mode (safe_mode=false), policy violations are logged but behavior is unchanged.
-    engine.set_commands_disabled(policy.safe_mode && policy.disable_commands);
-    engine.set_title_matching_disabled(policy.safe_mode && policy.disable_title_matching);
+    let enforcement = policy.effective_enforcement_policy();
+    engine.set_commands_disabled(enforcement.disable_commands);
+    engine.set_title_matching_disabled(enforcement.disable_title_matching);
 }
 
 /// Convert the printable XKB keysyms that IBus supplies to Unicode.
@@ -652,6 +674,56 @@ replacement = "signature"
             "oversized command output must not be committed"
         );
         let _ = std::fs::remove_file(marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn audit_mode_logs_but_commits_async_output_over_organization_limit() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":large"
+            replacement = ""
+            match_mode = "word-boundary"
+            [expansion.command]
+            program = "/bin/sh"
+            args = ["-c", "yes x | head -c 257"]
+            timeout_ms = 1000
+            "#,
+        )
+        .unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            max_replacement_size: 256,
+            ..OrganizationPolicy::default()
+        };
+        let mut adapter =
+            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+        assert!(adapter.engine_mut().enable_async_commands());
+
+        for character in ":large".chars() {
+            adapter.process_key_event(character as u32, 0, 0);
+        }
+        let queued = adapter.process_key_event(' ' as u32, 0, 0);
+        assert!(queued.actions.contains(&IbusAction::CommitText(" ".into())));
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let actions = adapter.drain_completed_commands();
+            if !actions.is_empty() {
+                assert_eq!(
+                    actions.first(),
+                    Some(&IbusAction::DeleteSurroundingText { nchars: 7 })
+                );
+                assert!(matches!(
+                    actions.get(1),
+                    Some(IbusAction::CommitText(text)) if text.len() == 258
+                ));
+                break;
+            }
+            assert!(Instant::now() < deadline, "the subprocess did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]

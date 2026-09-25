@@ -192,14 +192,13 @@ fn main() -> Result<()> {
         config.engine.set_commands_disabled(true);
     }
 
-    // Respect safe_mode semantics: only apply policy restrictions in enforcement mode.
-    // In audit mode (safe_mode=false), violations are logged but behavior is unchanged.
+    let enforcement_policy = policy.effective_enforcement_policy();
     config
         .engine
         .set_commands_disabled(policy::commands_enforced(&policy));
     config
         .engine
-        .set_title_matching_disabled(policy.safe_mode && policy.disable_title_matching);
+        .set_title_matching_disabled(enforcement_policy.disable_title_matching);
     // evdev observes keystrokes non-exclusively. The focused application will
     // receive the terminating punctuation itself, so do not erase and
     // synthesize that character as part of the replacement.
@@ -1461,8 +1460,9 @@ fn dispatch_pending_results(
 
         // Policy approved: command-backed expansions go to the bounded worker;
         // static replacements and cache hits are ready immediately.
+        let enforcement_policy = policy.effective_enforcement_policy();
         let result = match engine
-            .dispatch_pending_with_policy(pending_result, policy.max_replacement_size)
+            .dispatch_pending_with_policy(pending_result, enforcement_policy.max_replacement_size)
         {
             Ok(wayexpand_core::PendingExpansionDispatch::Ready(result)) => result,
             Ok(wayexpand_core::PendingExpansionDispatch::Queued) => continue,
