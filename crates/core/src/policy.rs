@@ -112,7 +112,7 @@ pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, St
         Err(wrapper_error) => {
             return toml::from_str::<OrganizationPolicy>(content).map_err(|flat_error| {
                 format!(
-                    "policy file must contain either [organization] table or flat policy fields (wrapper: {wrapper_error}; flat: {flat_error})"
+                    "invalid policy TOML: policy file must contain either [organization] table or flat policy fields (wrapper: {wrapper_error}; flat: {flat_error})"
                 )
             });
         }
