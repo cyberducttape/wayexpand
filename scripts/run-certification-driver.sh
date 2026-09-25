@@ -60,6 +60,18 @@ done <<EOF
 $required_client_markers
 EOF
 
+layout_profiles_lower=$(printf '%s' "$keyboard_layout" | tr '[:upper:]' '[:lower:]')
+required_layout_profiles=$(jq -r '.required_layout_profiles[]' "$matrix")
+while IFS= read -r profile; do
+    [ -n "$profile" ] || continue
+    case ",$layout_profiles_lower," in
+        *,"$profile",*) ;;
+        *) printf '%s\n' "error: --layout must include required profile '$profile'" >&2; exit 2 ;;
+    esac
+done <<EOF
+$required_layout_profiles
+EOF
+
 jq -e --arg compositor "$compositor" --arg backend "$backend" \
     'any(.targets[]; .id == $compositor and (.input_paths | index($backend) != null))' \
     "$matrix" >/dev/null || {

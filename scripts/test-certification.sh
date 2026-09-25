@@ -28,13 +28,13 @@ chmod 0755 "$certification_cli"
 run_certification() {
     PATH="$project_dir/target/debug:$PATH" \
         "$project_dir/scripts/certify-compositor.sh" \
-        --compositor kde --version 6.6.2 --backend ibus --layout us \
+        --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
         --target-apps gtk4-demo,qt6-demo,password-field \
         --cli "$certification_cli" "$@"
 }
 
 run_certification --results "$results" --output "$output"
-grep -F -- '- keyboard_layout: us' "$output" >/dev/null
+grep -F -- '- keyboard_layout: us,de,fr,altgr,multi-layout-switching' "$output" >/dev/null
     grep -F -- '- target_apps: gtk4-demo,qt6-demo,password-field' "$output" >/dev/null
 
 json_output="$test_root/certification.json"
@@ -42,7 +42,7 @@ run_certification --format json --results "$results" --output "$json_output"
 jq -e '
     .schema == 1 and .certified == true and .status == "certified" and
     .compositor == "kde" and .backend == "ibus" and
-    .keyboard_layout == "us" and
+    .keyboard_layout == "us,de,fr,altgr,multi-layout-switching" and
     .required_client_markers == ["gtk", "qt", "password"] and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
     .status_probe_valid == true and
@@ -57,7 +57,7 @@ cp "$certification_cli" "$spaced_cli_dir/wayexpand"
 chmod 0755 "$spaced_cli_dir/wayexpand"
 spaced_json="$test_root/spaced-cli.json"
 "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null
 jq -e '.certified == true and .doctor_probe_valid == true' "$spaced_json" >/dev/null
@@ -73,7 +73,7 @@ EOF
 chmod 0755 "$daemon_cli"
 daemon_json="$test_root/daemon-certification.json"
 "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend evdev+libei --layout us \
+    --compositor kde --version 6.6.2 --backend evdev+libei --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$daemon_cli" --output "$daemon_json" >/dev/null
 jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
@@ -89,7 +89,7 @@ EOF
 chmod 0755 "$input_method_cli"
 input_method_json="$test_root/input-method-certification.json"
 "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend input-method-v2 --layout us \
+    --compositor kde --version 6.6.2 --backend input-method-v2 --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$input_method_cli" --output "$input_method_json" >/dev/null
 jq -e '.certified == true and .backend_probe_valid == true' "$input_method_json" >/dev/null
@@ -105,7 +105,7 @@ chmod 0755 "$invalid_probe_bin/wayexpand"
 invalid_probe_json="$test_root/invalid-probe.json"
 if PATH="$invalid_probe_bin:$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$invalid_probe_bin/wayexpand" \
     --output "$invalid_probe_json"; then
@@ -125,7 +125,7 @@ EOF
 chmod 0755 "$unhealthy_probe"
 unhealthy_json="$test_root/unhealthy.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,password-field --results "$results" \
     --cli "$unhealthy_probe" --output "$unhealthy_json"; then
     printf '%s\n' 'certification accepted an unhealthy doctor probe' >&2
@@ -134,7 +134,7 @@ fi
 jq -e '.certified == false and .doctor_probe_valid == false' "$unhealthy_json" >/dev/null
 
 if "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend ibus --layout us \
+    --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo --results "$results" \
     --cli "$project_dir/target/debug/wayexpand" \
     --output "$test_root/missing-password-client.json"; then
@@ -201,7 +201,7 @@ fi
 
 if "$project_dir/scripts/certify-compositor.sh" \
     --compositor sway --version 1.10 --backend ibus \
-    --layout us --target-apps gtk >/dev/null 2>&1; then
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps gtk >/dev/null 2>&1; then
     printf '%s\n' 'certification accepted an incompatible compositor/backend path' >&2
     exit 1
 fi

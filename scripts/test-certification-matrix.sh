@@ -13,8 +13,11 @@ jq -e '
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 2) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
+  ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
+  ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and
   ([.required_scenarios | length] | all(. == 12)) and
-  ([.required_scenarios[]] | unique | length == 12)
+  ([.required_scenarios[]] | unique | length == 12) and
+  ([.required_layout_profiles[]] | unique | sort == ["altgr", "de", "fr", "multi-layout-switching", "us"])
 ' "$matrix" >/dev/null
 
 workflow="$project_dir/.github/workflows/certification.yml"

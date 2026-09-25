@@ -66,7 +66,7 @@ Use the evidence collector on a real compositor session:
 
 ```sh
 scripts/certify-compositor.sh --compositor kde --version 6.6.2 \
-  --backend ibus --layout us \
+  --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
   --output kde-run.md
 ```
@@ -75,7 +75,8 @@ Use `--format json` when a machine-readable evidence record is required:
 
 ```sh
 scripts/certify-compositor.sh --format json --compositor kde \
-  --version 6.6.2 --backend ibus --layout us \
+  --version 6.6.2 --backend ibus \
+  --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
   --results kde-results.txt --output kde-run.json
 ```
@@ -112,8 +113,10 @@ ime-preedit=fail
 Passing the script with `--results results.txt` requires an explicit `pass`
 result for every scenario. Any `fail` or `UNVERIFIED` result keeps the report
 uncertified. `--layout` and `--target-apps` are required so the report records
-the exact keyboard layout and client set used by the run; list every tested
-client as a comma-separated value. The collector requires at least one GTK
+the exact keyboard-layout profile set and client set used by the run.
+Certification drivers must include `us`, `de`, `fr`, `altgr`, and
+`multi-layout-switching`; list every tested client as a comma-separated value.
+The collector requires at least one GTK
 client, one Qt client, and one password/PIN-field client because those are
 mandatory coverage dimensions in the certification matrix.
 
