@@ -12,8 +12,9 @@ override_dh_clean:
 
 override_dh_auto_configure:
 	if [ ! -f .cargo/config.toml ]; then \
+		mkdir -p .cargo; \
 		echo "Generating vendored dependencies for offline build..."; \
-		cargo vendor vendor/ > .cargo/config.toml; \
+		CARGO_NET_OFFLINE=false cargo vendor --locked vendor/ > .cargo/config.toml; \
 	fi
 	dh_auto_configure
 
