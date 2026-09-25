@@ -60,6 +60,7 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 // Allow the focused compositor/application to commit the non-exclusive
 // physical keystrokes before the replacement backspaces are injected.
 const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
+const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
 pub enum EvdevError {
@@ -107,6 +108,7 @@ pub struct EvdevSource {
     /// keycode then collides with the physical one -- see
     /// `wait_for_key_release`.
     pressed: HashSet<u32>,
+    last_device_refresh: Instant,
 }
 
 impl EvdevSource {
@@ -133,6 +135,7 @@ impl EvdevSource {
             state: State::new(keymap),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         })
     }
 
@@ -396,11 +399,14 @@ impl EvdevSource {
         if let Some(event) = self.pending.pop_front() {
             return Ok(Some(event));
         }
-        // Device discovery can be comparatively expensive. Keep it on the
-        // ordinary event-loop path; release and quiet-period safety waits must
-        // remain bounded by their requested timeout or normal follow-up input
-        // can incorrectly cancel an expansion.
-        self.refresh_devices();
+        // Device discovery scans /dev/input and is intentionally decoupled
+        // from latency-sensitive polling. Existing descriptors remain active;
+        // this periodic pass is only the fallback for keyboards added after
+        // startup. Release and quiet-period safety waits never refresh.
+        if self.last_device_refresh.elapsed() >= DEVICE_REFRESH_INTERVAL {
+            self.refresh_devices();
+            self.last_device_refresh = Instant::now();
+        }
         self.poll_once(timeout).map_err(|error| InputSourceError {
             source: SOURCE_NAME,
             retryable: error.is_retryable(),
@@ -452,6 +458,7 @@ mod tests {
             state: std::mem::replace(state, test_state()),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         source.translate(event);
         *state = source.state;
@@ -492,6 +499,7 @@ mod tests {
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         source.translate(event);
         assert_eq!(
@@ -510,6 +518,7 @@ mod tests {
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), None);
@@ -523,6 +532,7 @@ mod tests {
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         assert!(!source.keys_held());
 
@@ -545,6 +555,7 @@ mod tests {
             state: test_state(),
             pending: VecDeque::from([InputEvent::Text("a".into())]),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
 
         assert!(!source
@@ -560,6 +571,7 @@ mod tests {
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
         // Value 2 is kernel auto-repeat. It must not be mistaken for a release.
@@ -574,6 +586,7 @@ mod tests {
             state: test_state(),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 29, 1));
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
@@ -601,6 +614,7 @@ mod tests {
             state: test_state(),
             pending: VecDeque::new(),
             pressed: HashSet::from([30]),
+            last_device_refresh: Instant::now(),
         };
         let error = source.wait_for_key_release(Duration::ZERO).unwrap_err();
         assert!(error.message.contains("timed out"));
@@ -613,6 +627,7 @@ mod tests {
             state: test_state(),
             pending: VecDeque::new(),
             pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
         };
         assert!(matches!(
             source.poll_once(Duration::ZERO),

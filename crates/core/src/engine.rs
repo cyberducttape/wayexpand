@@ -12,10 +12,10 @@ use std::{
     io::Read,
     process::{Child, ChildStdout, Command, Stdio},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -242,6 +242,25 @@ struct AsyncCommandRuntime {
     receiver: mpsc::Receiver<AsyncCommandCompletion>,
     hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
     metrics: Arc<CommandMetricsState>,
+    shutdown: Arc<AtomicBool>,
+    command_worker: Option<JoinHandle<()>>,
+    hotkey_worker: Option<JoinHandle<()>>,
+}
+
+impl Drop for AsyncCommandRuntime {
+    fn drop(&mut self) {
+        // Stop accepting queued work, then join both workers. In-flight
+        // commands are allowed to finish under their existing timeout, so a
+        // configuration reload cannot leave detached workers executing under
+        // the old configuration.
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(worker) = self.command_worker.take() {
+            let _ = worker.join();
+        }
+        if let Some(worker) = self.hotkey_worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 struct CommandMetricsState {
@@ -463,11 +482,18 @@ impl ExpansionEngine {
         let (hotkey_completion_sender, hotkey_completion_receiver) =
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let metrics = Arc::clone(&self.command_metrics);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let command_shutdown = Arc::clone(&shutdown);
         let worker_metrics = Arc::clone(&metrics);
         let command_worker = thread::Builder::new()
             .name("wayexpand-expansion-worker".into())
             .spawn(move || {
-                while let Ok(job) = command_receiver.recv() {
+                while !command_shutdown.load(Ordering::Acquire) {
+                    let job = match command_receiver.recv_timeout(Duration::from_millis(50)) {
+                        Ok(job) => job,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
                     worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let AsyncCommandJob::Expansion {
@@ -502,11 +528,17 @@ impl ExpansionEngine {
             Ok(worker) => worker,
             Err(_) => return false,
         };
+        let hotkey_shutdown = Arc::clone(&shutdown);
         let hotkey_metrics = Arc::clone(&metrics);
         let hotkey_worker = thread::Builder::new()
             .name("wayexpand-hotkey-worker".into())
             .spawn(move || {
-                while let Ok(action) = hotkey_receiver.recv() {
+                while !hotkey_shutdown.load(Ordering::Acquire) {
+                    let action = match hotkey_receiver.recv_timeout(Duration::from_millis(50)) {
+                        Ok(action) => action,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
                     hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     hotkey_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                     let output = Self::execute_hotkey(&action);
@@ -528,6 +560,7 @@ impl ExpansionEngine {
             // falling back, otherwise every partial startup leaks a thread
             // until the process exits (especially harmful during reloads or
             // under a tight systemd TasksMax).
+            shutdown.store(true, Ordering::Release);
             drop(command_sender);
             let _ = command_worker.join();
             return false;
@@ -538,6 +571,9 @@ impl ExpansionEngine {
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
             metrics,
+            shutdown,
+            command_worker: Some(command_worker),
+            hotkey_worker: Some(hotkey_worker.unwrap()),
         });
         true
     }
@@ -2421,6 +2457,9 @@ mod tests {
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
             metrics: Arc::clone(&engine.command_metrics),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            command_worker: None,
+            hotkey_worker: None,
         });
         engine.buffer.extend(":slow".chars());
         let before = engine.buffer.clone();
@@ -2465,6 +2504,9 @@ mod tests {
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
             metrics: Arc::clone(&engine.command_metrics),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            command_worker: None,
+            hotkey_worker: None,
         });
 
         let pending = engine
