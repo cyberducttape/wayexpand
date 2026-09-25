@@ -60,31 +60,22 @@ for pending in results {
 
 ### 2. Input-Method Key Press/Release Semantics (P1)
 
-**Status:** Documented limitation; full fix requires state machine refactor
+**Status:** Implemented in the input-method source; compositor/client
+certification remains outstanding.
 
-**Current Limitation:**
-Only KEY_PRESS events are captured for unsupported keys. KEY_RELEASE events are not tracked, converting held keys into synthetic taps.
+Unsupported keys now use a lifecycle-aware state machine. Press and release
+events are paired, repeat notifications do not synthesize extra taps while a
+key is held, and held virtual keys are released during focus loss,
+deactivation, transport failure, and source teardown.
 
-**Impact:**
-- Held arrow navigation produces single tap (cursor moves once instead of continuously)
-- Held Delete produces single deletion instead of repeated
-- Key-repeat workflows broken
-- Duration-sensitive applications affected
+The remaining risk is compositor-specific behavior: modifier identity,
+repeat rates, shortcut timing, and reconnect behavior still require real
+session certification.
 
-**Root Cause:**
-```rust
-// Current (line 452 of backend-input-method/src/lib.rs)
-if key_state == wl_keyboard::KeyState::Pressed {  // ← Only PRESS
-    state.pending_key_pass_through.push_back(...)
-}
-// RELEASE events ignored - not paired with PRESS
-```
-
-**Proper Fix (v1.3+):**
-Implement press/release state machine with held-key tracking:
+**Implemented state machine:**
 
 ```rust
-// Proposed state machine
+// Simplified shape of the implemented state machine
 struct HeldKey {
     keycode: u32,
     modifiers: Modifiers,
@@ -114,18 +105,13 @@ impl InputMethodSource {
 }
 ```
 
-**Implementation Steps:**
-1. Track press/release pairs as state machine
-2. Forward both PRESS and RELEASE to libei injector
-3. Handle compositor repeat-info events
-4. Force-release on disconnect/deactivate
-5. Add tests for held-key sequences
+The implementation uses `StateData::virtual_held_keys` and queues both
+`Pressed` and `Released` transitions for the libei injector. Contract tests
+cover held arrows, held Delete/Backspace, repeat notifications, and cleanup.
 
 **Verification:**
-- Test held arrow navigation in multiple apps
-- Test key-repeat with Delete key
-- Test modifier+key held sequences
-- Test cleanup on compositor loss
+- Contract tests cover the lifecycle and cleanup invariants.
+- Real compositor/client sessions are still required for release certification.
 
 ---
 

@@ -20,7 +20,7 @@ Wayland session alone does not imply that a backend is usable.
 | evdev capture (`--source=evdev`) | Experimental, best-effort | Compositor-agnostic compatibility fallback (e.g. KWin); requires explicit raw-input consent, has no sensitive-field signal, and cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [`P0_3_DECISION_REQUIRED.md`](P0_3_DECISION_REQUIRED.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
 | Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification | KWin tracker exists; wlroots and GNOME paths explicitly report application filters unavailable rather than guessing |
-| Key pass-through | Experimental | libei-assisted pass-through exists for input-method-v2, but keyboard fidelity is not yet certified; modifier chords, repetition, reconnect, and failure behavior remain under validation |
+| Key pass-through | Experimental | libei-assisted lifecycle-aware press/release pass-through exists for input-method-v2; modifier chords, repetition, reconnect, and compositor/client behavior still require certification |
 | Preedit/IME composition | **Not supported** | ⚠️ Affects CJK, dead-keys, composition (see below) |
 
 ## Desktop coverage

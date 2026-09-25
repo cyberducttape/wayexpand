@@ -89,7 +89,8 @@ wayexpand explain-backend
 ```
 
 For an explicit input-method-v2 setup, first acknowledge the intentionally
-obnoxious warning (experimental; non-text pass-through is not yet certified):
+obnoxious warning (experimental; non-text pass-through still requires
+compositor/client certification):
 
 ```sh
 wayexpand setup --mode experimental

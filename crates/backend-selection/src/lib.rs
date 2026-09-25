@@ -429,7 +429,7 @@ impl BackendSelection {
             ResolvedBackendPair::InputMethod => {
                 writeln!(
                     output,
-                    "  experimental opt-in only: libei key pass-through exists but is not yet certified"
+                    "  experimental opt-in only: libei key pass-through exists but still requires compositor certification"
                 )
                 .unwrap();
                 writeln!(
