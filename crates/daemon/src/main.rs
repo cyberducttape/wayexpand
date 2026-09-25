@@ -1523,11 +1523,11 @@ fn apply_evdev_gating(
             follow_up = source.take_pending_events();
             if follow_up.len() == 1 {
                 if let InputEvent::Delimiter(character) = &follow_up[0] {
-                    // Single delimiter can be preserved: extend erase/reinsert to include it
-                    for result in &mut results {
-                        result.matched_text.push(*character);
-                        result.insert.push(*character);
-                    }
+                    // A single delimiter belongs after the complete batch of
+                    // results, not after every result in it. Absorb it into
+                    // the final erase/reinsert transaction so it is removed
+                    // and restored exactly once.
+                    absorb_evdev_delimiter(&mut results, *character);
                     // The delimiter is represented in the adjusted result and
                     // must not be replayed a second time through the matcher.
                     follow_up.clear();
@@ -1563,6 +1563,13 @@ fn apply_evdev_gating(
         results,
         follow_up,
         abandoned: Vec::new(),
+    }
+}
+
+fn absorb_evdev_delimiter(results: &mut [ExpansionResult], character: char) {
+    if let Some(result) = results.last_mut() {
+        result.matched_text.push(character);
+        result.insert.push(character);
     }
 }
 
@@ -1881,6 +1888,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(injector.calls, ["erase::sigx ", "insert:ok"]);
+    }
+
+    #[test]
+    fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
+        let mut results = vec![
+            ExpansionResult {
+                trigger: ":a".into(),
+                matched_text: ":a".into(),
+                insert: "alpha".into(),
+                cursor_offset: None,
+                reinsert_after: None,
+                command_backed: false,
+            },
+            ExpansionResult {
+                trigger: ":b".into(),
+                matched_text: ":b".into(),
+                insert: "beta".into(),
+                cursor_offset: None,
+                reinsert_after: None,
+                command_backed: false,
+            },
+        ];
+
+        absorb_evdev_delimiter(&mut results, ' ');
+
+        assert_eq!(results[0].matched_text, ":a");
+        assert_eq!(results[0].insert, "alpha");
+        assert_eq!(results[1].matched_text, ":b ");
+        assert_eq!(results[1].insert, "beta ");
     }
 
     #[cfg(unix)]
