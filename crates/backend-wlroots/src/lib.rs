@@ -36,6 +36,10 @@ const MAX_OUTPUT_CHARS: usize = 8192;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
 static KEYMAP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn erase_grapheme_count(text: &str) -> usize {
+    text.graphemes(true).count()
+}
+
 #[derive(Debug, Error)]
 pub enum WlrootsError {
     #[error("could not connect to Wayland: {0}")]
@@ -403,7 +407,7 @@ impl TextInjector for WlrootsInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        self.send_keys(std::iter::repeat_n(8, trigger.graphemes(true).count()))
+        self.send_keys(std::iter::repeat_n(8, erase_grapheme_count(trigger)))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -439,7 +443,7 @@ impl TextInjector for WlrootsInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        let mut keycodes = vec![8; trigger.graphemes(true).count()];
+        let mut keycodes = vec![8; erase_grapheme_count(trigger)];
         keycodes.extend(text.chars().map(|character| self.mappings[&character]));
         self.send_keys(keycodes).map_err(|error| InjectorError {
             backend: BACKEND_NAME,
@@ -520,6 +524,12 @@ mod tests {
         os::unix::net::UnixStream,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn erase_count_treats_decomposed_accent_and_devanagari_as_one() {
+        assert_eq!(erase_grapheme_count("e\u{301}"), 1);
+        assert_eq!(erase_grapheme_count("क्ष"), 1);
+    }
 
     #[test]
     fn keymap_contains_unicode_and_control_symbols() {

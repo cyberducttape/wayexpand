@@ -65,6 +65,10 @@ const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// defaults to 12ms); below roughly this, compositors and toolkits start
 /// dropping keys out of a burst.
 const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
+
+fn erase_grapheme_count(text: &str) -> usize {
+    text.graphemes(true).count()
+}
 // XKB keycodes carry the legacy X11 offset of 8 over the Linux evdev codes
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
 // below, which is already evdev-numbered).
@@ -1208,7 +1212,7 @@ impl TextInjector for LibeiInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.send_backspaces(trigger.graphemes(true).count())
+        self.send_backspaces(erase_grapheme_count(trigger))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -1238,7 +1242,7 @@ impl TextInjector for LibeiInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        self.send_backspaces_unflushed(trigger.graphemes(true).count());
+        self.send_backspaces_unflushed(erase_grapheme_count(trigger));
         if matches!(self.mode, TextMode::Keysym(_)) {
             // Send the erase on its own and let it land before typing: in
             // keysym mode both halves are key events on the same device, so
@@ -1348,6 +1352,12 @@ mod tests {
         os::unix::{fs::PermissionsExt, net::UnixStream},
         time::Duration,
     };
+
+    #[test]
+    fn erase_count_treats_decomposed_accent_and_devanagari_as_one() {
+        assert_eq!(super::erase_grapheme_count("e\u{301}"), 1);
+        assert_eq!(super::erase_grapheme_count("क्ष"), 1);
+    }
 
     #[test]
     fn backend_name_is_stable() {
