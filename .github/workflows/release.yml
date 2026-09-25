@@ -134,7 +134,10 @@ jobs:
           install -m 0644 udev/69-wayexpand-evdev-uaccess.rules "$root/udev/"
           cp -R docs/. "$root/docs/"
           tar -czf "${root}.tar.gz" "$root"
-          ! tar -tzf "${root}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null
+          if tar -tzf "${root}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null; then
+            echo "release archive unexpectedly contains .git metadata" >&2
+            exit 1
+          fi
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
           cargo metadata --locked --format-version 1 > "${root}.cargo-metadata.json"
       - name: Generate source tarballs (clean + vendored)
@@ -147,7 +150,10 @@ jobs:
           git archive --format=tar --mtime='1970-01-01 00:00:00' \
             --prefix="wayexpand-${version}/" \
             HEAD | gzip -n > "wayexpand-${version}.tar.gz"
-          ! tar -tzf "wayexpand-${version}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null
+          if tar -tzf "wayexpand-${version}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null; then
+            echo "source archive unexpectedly contains .git metadata" >&2
+            exit 1
+          fi
           if tar -tzf "wayexpand-${version}.tar.gz" | grep -E '^wayexpand-[^/]+/(\.cargo/config\.toml|vendor/)' >/dev/null; then
             echo "clean source archive unexpectedly contains vendored Cargo configuration or vendor/" >&2
             exit 1
