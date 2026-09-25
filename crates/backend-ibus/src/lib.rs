@@ -177,6 +177,7 @@ impl IbusEngineAdapter {
                     IBUS_BACKEND_NAME,
                 ) {
                     if self.policy.safe_mode {
+                        self.engine.restore_deferred_match(&result.matched_text);
                         error!(
                             audit_prefix = %self.policy.audit_prefix,
                             violation = %violation,
@@ -190,7 +191,12 @@ impl IbusEngineAdapter {
                         "IBus completed expansion violates organization policy; audit mode permits it"
                     );
                 }
-                Some(expansion_actions(&result, true))
+                let actions = expansion_actions(&result, true);
+                // IBus has no injection acknowledgement. The protocol action
+                // batch is the adapter's commit point; the D-Bus service
+                // resets the engine if emitting it fails.
+                self.engine.commit_applied_expansion(&result);
+                Some(actions)
             })
             .flatten()
             .collect()
@@ -313,6 +319,8 @@ impl IbusEngineAdapter {
             if let Some(command) = &pending_result.command {
                 if let Some(violation) = self.policy.command_path_violation(&command.program) {
                     if self.policy.command_path_is_blocked(&command.program) {
+                        self.engine
+                            .restore_deferred_match(&pending_result.matched_text);
                         error!(
                             audit_prefix = %self.policy.audit_prefix,
                             violation = %violation,
@@ -336,6 +344,8 @@ impl IbusEngineAdapter {
                 IBUS_BACKEND_NAME,
             ) {
                 if self.policy.safe_mode {
+                    self.engine
+                        .restore_deferred_match(&pending_result.matched_text);
                     error!(
                         audit_prefix = %self.policy.audit_prefix,
                         violation = %violation,
@@ -369,6 +379,9 @@ impl IbusEngineAdapter {
             match dispatch {
                 PendingExpansionDispatch::Ready(result) => {
                     actions.extend(expansion_actions(&result, false));
+                    // The returned IBus actions are the successful output
+                    // transaction for this synchronous/static result.
+                    self.engine.commit_applied_expansion(&result);
                 }
                 PendingExpansionDispatch::Queued => {
                     // The current key has not reached the client yet. Commit
@@ -756,6 +769,32 @@ replacement = "signature"
                 );
             }
         }
+    }
+
+    #[test]
+    fn synchronous_ibus_expansion_commits_undo_after_actions_are_created() {
+        let config: Config = toml::from_str(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "signature"
+            "#,
+        )
+        .unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        for character in ":sig".chars() {
+            adapter.process_key_event(character as u32, 0, 0);
+        }
+
+        let undo = adapter
+            .engine()
+            .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("a successfully emitted IBus expansion should be undoable");
+        assert_eq!(undo.matched_text, "signature");
+        assert_eq!(undo.insert, ":sig");
     }
 
     #[test]

@@ -128,6 +128,14 @@ fn spawn_completion_dispatcher(
             };
             if let Err(error) = engine.emit_actions(&actions) {
                 warn!(%error, "could not deliver completed IBus expansion");
+                // The adapter commits a completed expansion when it builds
+                // the protocol action batch. If D-Bus rejects that batch, the
+                // application did not receive a reliable replacement; clear
+                // matcher and undo state so a later undo cannot target
+                // unrelated text at the cursor.
+                if let Ok(mut adapter) = adapter.lock() {
+                    adapter.reset();
+                }
             }
         })
         .map(|_| ())
