@@ -11,6 +11,12 @@ match all package metadata:
 - the AppStream release metadata
 - the IBus component metadata
 
+The CLI also embeds the commit identity. Clean builds from an exact `v<version>`
+tag report the release version; other Git builds report the package version with
+`-dev+<short-sha>`. Source archives without Git metadata retain the package
+version and report an `unknown` commit, so release evidence should always retain
+the generated artifact metadata.
+
 The second check exists because Launchpad's PPA builds key off
 `debian/changelog`, not the git tag or `Cargo.toml` — a tag that only
 bumped `Cargo.toml` shipped a stale Launchpad build more than once before
