@@ -23,7 +23,8 @@ the collector with `--format json` and a validated results file:
 
 ```sh
 scripts/certify-compositor.sh --format json --compositor kde \
-  --version 6.6.2 --backend ibus --layout us \
+  --version 6.6.2 --backend ibus \
+  --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
   --results kde-results.txt --output kde-certification.json
 ```
@@ -48,22 +49,27 @@ clients:
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
 CI validates that all four required desktop targets and all twelve scenarios
-remain present, and rejects evidence that pairs a compositor with a backend
-outside its declared certification paths.
+remain present, rejects evidence that pairs a compositor with a backend
+outside its declared certification paths, and requires the layout profiles
+`us`, `de`, `fr`, `altgr`, and `multi-layout-switching` from certification
+drivers. A layout profile is evidence metadata only until the driver records
+the actual keymap and observed behavior.
 
 | Environment | Required coverage |
 | --- | --- |
-| KDE Plasma / KWin | IBus, libei portal, input-method-v2 when exposed, Qt and GTK clients |
-| GNOME | IBus, libei portal, input-method-v2 when exposed, GTK and Qt clients |
-| Sway | evdev plus wlroots virtual keyboard, GTK and Qt clients |
-| Hyprland | evdev plus wlroots virtual keyboard, GTK and Qt clients |
+| KDE Plasma / KWin | IBus, libei portal, input-method-v2 when exposed, Qt and GTK clients; application filters supported through KWin tracking |
+| GNOME | IBus, libei portal, input-method-v2 when exposed, GTK and Qt clients; application filters unavailable |
+| Sway | evdev plus wlroots virtual keyboard, GTK and Qt clients; application filters unavailable |
+| Hyprland | evdev plus wlroots virtual keyboard, GTK and Qt clients; application filters unavailable |
 
 Each environment must cover printable press/release, auto-repeat, modifiers,
 Unicode and combining text, multiline replacement, password fields, focus
 transitions, cross-window isolation, configuration reload, daemon restart,
 compositor restart, and failed insertion. Unsupported capabilities remain
 explicit in the report; the harness must not convert an untested feature into
-a pass.
+a pass. On backends marked “application filters unavailable”, configured app
+filters must remain visibly unavailable rather than being inferred from
+unreliable window metadata.
 
 ## Compatibility modes
 

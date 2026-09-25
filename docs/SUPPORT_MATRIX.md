@@ -19,7 +19,7 @@ Wayland session alone does not imply that a backend is usable.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev`) | Experimental, best-effort | Compositor-agnostic compatibility fallback (e.g. KWin); requires explicit raw-input consent, has no sensitive-field signal, and cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [`P0_3_DECISION_REQUIRED.md`](P0_3_DECISION_REQUIRED.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Implemented on KDE; awaiting independent certification | KWin tracker exists; wlroots tracker is not shipped; GNOME/Mutter has no supported tracker |
+| Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification | KWin tracker exists; wlroots and GNOME paths explicitly report application filters unavailable rather than guessing |
 | Key pass-through | Experimental | libei-assisted pass-through exists for input-method-v2, but keyboard fidelity is not yet certified; modifier chords, repetition, reconnect, and failure behavior remain under validation |
 | Preedit/IME composition | **Not supported** | ⚠️ Affects CJK, dead-keys, composition (see below) |
 
@@ -32,6 +32,12 @@ deploying desktop capture, test and record the exact compositor and version:
 - Hyprland / wlroots
 - KDE Plasma Wayland
 - GNOME Shell Wayland
+
+Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
+AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not
+evidence for layout-independent text injection. CJK/IME and preedit remain
+unsupported categories until they receive a separate implementation and
+certification plan.
 
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,

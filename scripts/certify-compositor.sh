@@ -66,6 +66,17 @@ fi
     printf '%s\n' "error: --layout is required for reproducible evidence" >&2
     exit 2
 }
+layout_profiles_lower=$(printf '%s' "$keyboard_layout" | tr '[:upper:]' '[:lower:]')
+required_layout_profiles=$(jq -r '.required_layout_profiles[]' "$matrix")
+while IFS= read -r profile; do
+    [ -n "$profile" ] || continue
+    case ",$layout_profiles_lower," in
+        *,"$profile",*) ;;
+        *) printf '%s\n' "error: --layout must include required profile '$profile'" >&2; exit 2 ;;
+    esac
+done <<EOF
+$required_layout_profiles
+EOF
 [ -n "$target_apps" ] || {
     printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
     exit 2
@@ -204,6 +215,9 @@ if [ "$format" = json ]; then
     target_apps_json=$(printf '%s' "$target_apps" | jq -Rsc 'split(",") | map(select(length > 0))')
     required_client_markers_json=$(jq -c --arg compositor "$compositor" \
         '.targets[] | select(.id == $compositor) | .required_client_markers' "$matrix")
+    target_policy_json=$(jq -c --arg compositor "$compositor" \
+        '.targets[] | select(.id == $compositor) | {application_filter, window_tracker}' "$matrix")
+    required_layout_profiles_json=$(jq -c '.required_layout_profiles' "$matrix")
     jq -n \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
@@ -214,6 +228,8 @@ if [ "$format" = json ]; then
         --arg recorded_at_utc "$date_utc" \
         --argjson target_apps "$target_apps_json" \
         --argjson required_client_markers "$required_client_markers_json" \
+        --argjson target_policy "$target_policy_json" \
+        --argjson required_layout_profiles "$required_layout_profiles_json" \
         --argjson doctor "$doctor_json" \
         --argjson status "$status_json" \
         --argjson scenarios "$scenario_json" \
@@ -229,6 +245,9 @@ if [ "$format" = json ]; then
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
           required_client_markers: $required_client_markers,
+          required_layout_profiles: $required_layout_profiles,
+          application_filter: $target_policy.application_filter,
+          window_tracker: $target_policy.window_tracker,
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
           doctor_exit: $doctor_exit,
           doctor_probe_valid: ($doctor_probe_valid == 1),
@@ -242,6 +261,10 @@ else
     printf '%s\n' "- compositor_version: $compositor_version"
     printf '%s\n' "- backend: $backend"
     printf '%s\n' "- keyboard_layout: $keyboard_layout"
+    printf '%s\n' "- required_layout_profiles: \`us\`, \`de\`, \`fr\`, \`altgr\`, \`multi-layout-switching\`"
+    target_policy=$(jq -r --arg compositor "$compositor" \
+        '.targets[] | select(.id == $compositor) | "- application_filter: `" + .application_filter + "`\n- window_tracker: `" + .window_tracker + "`"' "$matrix")
+    printf '%s\n' "$target_policy"
     printf '%s\n' "- target_apps: $target_apps"
     printf '%s\n' '- compositor: `'"$compositor"'`'
     printf '%s\n' '- recorded_at_utc: `'"$date_utc"'`'

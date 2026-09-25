@@ -7,7 +7,9 @@
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "password"],
-      "requires_password_field_check": true
+      "requires_password_field_check": true,
+      "application_filter": "supported",
+      "window_tracker": "KWin application tracker"
     },
     {
       "id": "gnome",
@@ -15,7 +17,9 @@
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "password"],
-      "requires_password_field_check": true
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
     },
     {
       "id": "sway",
@@ -23,7 +27,9 @@
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "password"],
-      "requires_password_field_check": true
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
     },
     {
       "id": "hyprland",
@@ -31,7 +37,9 @@
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "password"],
-      "requires_password_field_check": true
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
     }
   ],
   "required_scenarios": [
@@ -47,5 +55,12 @@
     "compositor-restart",
     "failed-insertion",
     "ime-preedit"
+  ],
+  "required_layout_profiles": [
+    "us",
+    "de",
+    "fr",
+    "altgr",
+    "multi-layout-switching"
   ]
 }
