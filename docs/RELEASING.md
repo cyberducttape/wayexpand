@@ -57,9 +57,10 @@ packaging, and publishing is skipped if it fails. It then builds the Linux
 x86_64 binaries with the locked dependency graph and publishes:
 
 To republish artifacts for an existing tag, use the workflow's manual
-dispatch and select that tag as the workflow ref. This is the recovery path
-when a GitHub release exists but its artifacts were not uploaded; it produces
-the same vendored source archive required by Launchpad.
+dispatch and enter that tag in the `release_ref` field (for example,
+`v1.2.0`). This is the recovery path when a GitHub release exists but its
+artifacts were not uploaded; it checks out and verifies the selected tag and
+produces the same vendored source archive required by Launchpad.
 
 **Binary archive** (for end users):
 - `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
