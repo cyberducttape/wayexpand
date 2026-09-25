@@ -562,7 +562,9 @@ wayexpand reload
 
 ### Snippet Library Security
 
-1. **Access control:** Config files are mode 0600 (readable only by owner)
+1. **Access control:** User-owned config files are mode 0600 (readable only by
+   the owner). Root-owned organization config may be readable, including 0644,
+   but must not be writable by group or other users.
 2. **Audit:** Review who has commit access to shared snippet repos
 3. **Secrets management:** Never store credentials in snippets
    - Use password manager for credentials
