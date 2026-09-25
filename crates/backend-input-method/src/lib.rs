@@ -5,10 +5,11 @@
 //! compositor has activated the input method and grants its keyboard grab.
 //! Printable text, Backspace, Return, and Tab are forwarded through the
 //! input-method commit contract. Unsupported non-text keys and shortcut-like
-//! modified keys can optionally use a separate key-event injector for
-//! experimental plain pass-through via libei; keyboard fidelity is not yet
-//! certified. If that injector is missing or fails, this source reports an
-//! error rather than silently discarding keys.
+//! modified keys use a separate key-event injector for pass-through via libei;
+//! the source preserves virtual press/repeat/release state and releases any
+//! held keys during focus loss or transport teardown. If that injector is
+//! missing or fails, this source reports an error rather than silently
+//! discarding keys.
 
 use std::{
     collections::VecDeque,
@@ -245,6 +246,13 @@ impl StateData {
             // engine's normal non-sensitive capture policy.
             self.events.clear();
             self.pending_key_pass_through.clear();
+            self.error = Some(InputMethodError::PassThrough {
+                message: format!(
+                    "input-method event queue overflow (max {} events)",
+                    MAX_QUEUED_EVENTS
+                ),
+                retryable: true,
+            });
             self.events.push_back(InputEvent::Reset);
             return;
         }
@@ -770,9 +778,9 @@ fn matcher_event_for_deletion(before: u32, after: u32, selected: bool) -> InputE
 }
 
 fn matcher_event_for_unsupported_key() -> InputEvent {
-    // Unsupported keys (Escape, arrows, F-keys, modifiers) can be passed through
-    // via experimental libei injector, but keyboard fidelity is not yet certified.
-    // A Reset boundary prevents a partial trigger surviving a lost or dropped key event.
+    // Unsupported keys (Escape, arrows, F-keys, modifiers) are passed through
+    // via the lifecycle-aware libei injector. A Reset boundary prevents a
+    // partial trigger surviving a lost or dropped key event.
     InputEvent::Reset
 }
 
@@ -912,8 +920,8 @@ impl InputMethodSource {
     ///
     /// The compositor may give this object an exclusive keyboard grab after
     /// activation. Printable text and common editing keys are forwarded via
-    /// the input-method commit contract, and unsupported keys can now be
-    /// passed through via an optional separate injector (e.g., libei).
+    /// the input-method commit contract, and unsupported keys can be passed
+    /// through via an optional separate lifecycle-aware injector (e.g. libei).
     pub fn connect() -> Result<Self, InputMethodError> {
         let connection = Connection::connect_to_env()?;
         let mut event_queue = connection.new_event_queue();
@@ -948,8 +956,10 @@ impl InputMethodSource {
         })
     }
 
-    /// Attach an optional separate injector for passing through unsupported keys
-    /// (Escape, arrows, F-keys, etc.) from the input-method-v2 exclusive grab.
+    /// Attach a separate injector for passing through unsupported keys
+    /// (Escape, arrows, F-keys, modifiers, etc.) from the input-method-v2
+    /// exclusive grab. The injector must preserve individual press and release
+    /// events; the default trait implementation rejects releases safely.
     pub fn with_key_pass_through(mut self, injector: Box<dyn TextInjector>) -> Self {
         self.key_pass_through = Some(injector);
         self
@@ -984,13 +994,19 @@ impl InputMethodSource {
                     .key_pass_through
                     .as_mut()
                     .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
+                let result =
+                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector);
+                if result.is_err() {
+                    self.release_virtual_keys();
+                }
+                result?;
             }
             return Ok(Some(event));
         }
-        self.connection
-            .flush()
-            .map_err(|error| source_error(InputMethodError::Transport(error.to_string())))?;
+        if let Err(error) = self.connection.flush() {
+            self.release_virtual_keys();
+            return Err(source_error(InputMethodError::Transport(error.to_string())));
+        }
         let timeout = rustix::event::Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
             tv_nsec: timeout.subsec_nanos().into(),
@@ -1031,7 +1047,12 @@ impl InputMethodSource {
                     .key_pass_through
                     .as_mut()
                     .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
+                let result =
+                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector);
+                if result.is_err() {
+                    self.release_virtual_keys();
+                }
+                result?;
             }
             Ok(Some(event))
         } else {
@@ -1334,13 +1355,21 @@ impl InputSource for InputMethodSource {
                         .key_pass_through
                         .as_mut()
                         .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
+                    let result = pass_through_pending_key(
+                        &mut self.state.pending_key_pass_through,
+                        injector,
+                    );
+                    if result.is_err() {
+                        self.release_virtual_keys();
+                    }
+                    result?;
                 }
                 return Ok(event);
             }
-            self.event_queue
-                .blocking_dispatch(&mut self.state)
-                .map_err(|error| source_error(InputMethodError::Dispatch(error)))?;
+            if let Err(error) = self.event_queue.blocking_dispatch(&mut self.state) {
+                self.release_virtual_keys();
+                return Err(source_error(InputMethodError::Dispatch(error)));
+            }
         }
     }
 }
