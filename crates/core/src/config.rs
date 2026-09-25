@@ -430,7 +430,7 @@ pub enum ConfigError {
     },
     #[error("configuration {path} is not a regular file")]
     NotRegular { path: String },
-    #[error("configuration {path} is writable by group or other users (mode {mode:04o})")]
+    #[error("configuration {path} has insecure permissions (mode {mode:04o})")]
     InsecurePermissions { path: String, mode: u32 },
     #[error("configuration {path} is owned by uid {uid}; expected the current user or root")]
     InsecureOwner { path: String, uid: u32 },
@@ -640,7 +640,17 @@ impl Config {
             });
         }
         let mode = metadata.permissions().mode() & 0o777;
-        if mode & 0o022 != 0 {
+        // Personal configuration may contain private snippets, addresses, and
+        // command arguments, so require a private 0600 confidentiality
+        // boundary. Root-owned managed configuration is an administrator-
+        // controlled integrity boundary and may remain readable (for example
+        // 0644), provided no non-root user can modify it.
+        let permissions_insecure = if uid == current_uid {
+            mode != 0o600
+        } else {
+            mode & 0o022 != 0
+        };
+        if permissions_insecure {
             return Err(ConfigError::InsecurePermissions {
                 path: path.display().to_string(),
                 mode,

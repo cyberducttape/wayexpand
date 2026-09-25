@@ -165,12 +165,13 @@ reload memory and parsing cost bounded. Triggers and replacements containing
 NUL characters are rejected because text-injection protocols cannot represent
 them safely. The configured path must resolve to a regular file; directories,
 FIFOs, and device nodes are rejected so a service reload cannot block on or
-consume an unintended filesystem stream. Configuration files writable by group
-or other users are rejected because they could alter text injected into another
-application. Every ancestor directory must also be owned by the current user or
-root and non-group/world-writable, unless it has sticky protection (as with a
-root-owned `/tmp`), to prevent path replacement during reload. The file must be
-owned by the current user or root. Symlinked configuration paths are
+consume an unintended filesystem stream. Personal configuration files must be
+mode 0600 because snippets can contain private data. Root-owned managed
+configuration may be readable, such as mode 0644, but must not be writable by
+group or other users. Every ancestor directory must also be owned by the current
+user or root and non-group/world-writable, unless it has sticky protection (as
+with a root-owned `/tmp`), to prevent path replacement during reload. The file
+must be owned by the current user or root. Symlinked configuration paths are
 supported, but validation and loading use the resolved target path so the
 target's ancestor directories are held to the same rules.
 

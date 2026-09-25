@@ -3089,6 +3089,25 @@ replacement = "bad\u0000value""#;
     }
 
     #[test]
+    fn user_owned_configuration_requires_private_mode() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-config-user-private-{}",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            Config::load(&path),
+            Err(crate::ConfigError::InsecurePermissions { mode: 0o644, .. })
+        ));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn writable_non_sticky_configuration_parent_is_rejected() {
         let parent = std::env::temp_dir().join(format!(
             "wayexpand-config-parent-permissions-{}",
