@@ -20,7 +20,7 @@ optdepends=(
     'systemd: for user service support'
     'ibus: for native GNOME IBus input method integration'
 )
-source=("https://github.com/cyberducttape/wayexpand/archive/v${pkgver}.tar.gz")
+source=("https://github.com/cyberducttape/wayexpand/releases/download/v${pkgver}/wayexpand-${pkgver}.tar.gz")
 sha256sums=('9723b222eb717a15fb88b99526af99ad4d8a2c5ec538fa1b23bc17a6819b1056')
 conflicts=('wayexpand-git')
 
