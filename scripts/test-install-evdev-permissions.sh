@@ -44,16 +44,19 @@ owned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
     "$script" --access=active-seat --dry-run)
-if id -nG "$(id -un)" | tr ' ' '\n' | grep -qx input; then
-    printf '%s' "$owned_migration_out" \
-        | grep -F 'remove the input-group membership previously added by WayExpand' >/dev/null
-else
-    # A CI runner may not belong to the input group. In that case the helper
-    # correctly leaves the already-absent membership alone, so assert the
-    # corresponding safe branch rather than depending on runner group setup.
-    printf '%s' "$owned_migration_out" \
-        | grep -F 'leave pre-existing input-group membership unchanged' >/dev/null
-fi
+# The result is intentionally dependent on the runner's actual group list:
+# remove a membership only when it exists, otherwise leave it untouched. Do
+# not make CI depend on whether its image happens to define or grant `input`.
+case "$owned_migration_out" in
+    *'remove the input-group membership previously added by WayExpand'*|\
+    *'leave pre-existing input-group membership unchanged'*)
+        ;;
+    *)
+        printf '%s\n' "$owned_migration_out" >&2
+        printf '%s\n' 'unexpected owned-membership migration output' >&2
+        exit 1
+        ;;
+esac
 
 printf '%s\n' 'access_mode=input-group' "target_user=$(id -un)" 'added_input_group=0' >"$state_file"
 unowned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \

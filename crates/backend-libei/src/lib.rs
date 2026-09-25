@@ -45,7 +45,7 @@ use std::{
 };
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
-use wayexpand_core::{InjectorError, Modifiers, TextInjector};
+use wayexpand_core::{InjectorError, KeyEventState, Modifiers, TextInjector};
 use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
 
 const BACKEND_NAME: &str = "libei";
@@ -1293,6 +1293,33 @@ impl TextInjector for LibeiInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })
+    }
+
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        _modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError> {
+        let serial = self.connection.serial();
+        self.device.device().start_emulating(serial, self.sequence);
+        self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+        self.keyboard.key(
+            keycode,
+            match state {
+                KeyEventState::Pressed => ei::keyboard::KeyState::Press,
+                KeyEventState::Released => ei::keyboard::KeyState::Released,
+            },
+        );
+        self.device
+            .device()
+            .frame(serial, self.started_at.elapsed().as_micros() as u64);
+        self.device.device().stop_emulating(serial);
+        self.connection.flush().map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: LibeiError::Flush(error.to_string()).to_string(),
+            retryable: true,
+        })
     }
 }
 

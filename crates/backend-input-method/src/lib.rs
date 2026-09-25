@@ -19,7 +19,8 @@ use std::{
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{
-    InjectorError, InputEvent, InputSource, InputSourceError, KeyChord, Modifiers, TextInjector,
+    InjectorError, InputEvent, InputSource, InputSourceError, KeyChord, KeyEventState, Modifiers,
+    TextInjector,
 };
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
@@ -111,6 +112,7 @@ pub enum KeyAction {
 struct PendingKeyPassThrough {
     keycode: u32,
     modifiers: Modifiers,
+    state: KeyEventState,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +184,9 @@ struct StateData {
     /// Key events (Linux evdev numbering plus effective modifiers) from
     /// unsupported keys that must be passed through to a separate injector.
     pending_key_pass_through: VecDeque<PendingKeyPassThrough>,
+    /// Keys currently held by the separate virtual keyboard. Repeated
+    /// physical presses do not create another virtual press for these keys.
+    virtual_held_keys: Vec<u32>,
 }
 
 impl StateData {
@@ -199,6 +204,7 @@ impl StateData {
             initial_roundtrip_done: false,
             error: None,
             pending_key_pass_through: VecDeque::new(),
+            virtual_held_keys: Vec::new(),
         }
     }
 
@@ -208,7 +214,28 @@ impl StateData {
         // deactivation, or a sensitive-field transition.
         if matches!(event, InputEvent::FocusChanged { .. }) {
             self.events.clear();
-            self.pending_key_pass_through.clear();
+            // Preserve queued virtual transitions, then release every key
+            // still held before the focus transition reaches the daemon.
+            let pending_count = self.pending_key_pass_through.len();
+            for _ in 0..pending_count {
+                self.events.push_back(InputEvent::Reset);
+            }
+            let held = self
+                .virtual_held_keys
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>();
+            self.virtual_held_keys.clear();
+            for keycode in held {
+                self.pending_key_pass_through
+                    .push_back(PendingKeyPassThrough {
+                        keycode,
+                        modifiers: Modifiers::default(),
+                        state: KeyEventState::Released,
+                    });
+                self.events.push_back(InputEvent::Reset);
+            }
             self.events.push_back(event);
             return;
         }
@@ -222,6 +249,70 @@ impl StateData {
             return;
         }
         self.events.push_back(event);
+    }
+
+    fn queue_virtual_key_event(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+        key_state: KeyEventState,
+    ) {
+        let should_queue = match key_state {
+            KeyEventState::Pressed => {
+                if self.virtual_held_keys.contains(&keycode) {
+                    // A repeat is represented by the already-held virtual
+                    // key. Emitting another press would turn a hold into
+                    // synthetic taps.
+                    false
+                } else if self.virtual_held_keys.len() >= MAX_PENDING_KEY_PASS_THROUGH {
+                    self.error = Some(InputMethodError::PassThrough {
+                        message: format!(
+                            "too many virtual keys held (max {})",
+                            MAX_PENDING_KEY_PASS_THROUGH
+                        ),
+                        retryable: true,
+                    });
+                    false
+                } else {
+                    self.virtual_held_keys.push(keycode);
+                    true
+                }
+            }
+            KeyEventState::Released => {
+                if let Some(index) = self
+                    .virtual_held_keys
+                    .iter()
+                    .position(|held| *held == keycode)
+                {
+                    self.virtual_held_keys.remove(index);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_queue {
+            if self.pending_key_pass_through.len() >= MAX_PENDING_KEY_PASS_THROUGH {
+                self.error = Some(InputMethodError::PassThrough {
+                    message: format!(
+                        "key pass-through queue overflow (max {} keys pending)",
+                        MAX_PENDING_KEY_PASS_THROUGH
+                    ),
+                    retryable: true,
+                });
+                return;
+            }
+            self.pending_key_pass_through
+                .push_back(PendingKeyPassThrough {
+                    keycode,
+                    modifiers,
+                    state: key_state,
+                });
+        }
+        // Unsupported keys are always a matcher boundary, including repeat
+        // notifications that are represented by the held virtual key.
+        self.queue_event(InputEvent::Reset);
     }
 }
 
@@ -407,6 +498,15 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 state: WEnum::Value(key_state),
                 ..
             } => {
+                let is_modifier = state
+                    .keyboard_state
+                    .as_ref()
+                    .is_some_and(|keyboard_state| key_is_modifier(keyboard_state, key));
+                let modifiers = state
+                    .keyboard_state
+                    .as_ref()
+                    .map(active_modifiers)
+                    .unwrap_or_default();
                 if key_state == wl_keyboard::KeyState::Pressed {
                     if let Some(keyboard_state) = state.keyboard_state.as_ref() {
                         if let Some(chord) = key_chord(keyboard_state, key) {
@@ -414,12 +514,28 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                         }
                     }
                 }
+                let was_held = state.virtual_held_keys.contains(&key);
                 let action = state
                     .keyboard_state
                     .as_mut()
                     .map_or(Some(KeyAction::Unsupported), |keyboard_state| {
                         key_action_and_update(keyboard_state, key, key_state)
                     });
+                if is_modifier
+                    || matches!(action, Some(KeyAction::Unsupported))
+                    || (key_state == wl_keyboard::KeyState::Released && was_held)
+                {
+                    state.queue_virtual_key_event(
+                        key,
+                        modifiers,
+                        match key_state {
+                            wl_keyboard::KeyState::Pressed => KeyEventState::Pressed,
+                            wl_keyboard::KeyState::Released => KeyEventState::Released,
+                            _ => unreachable!("unknown key state is handled by a separate arm"),
+                        },
+                    );
+                    return;
+                }
                 match action {
                     Some(KeyAction::Delete) => {
                         let selected = surrounding_has_selection(state.surrounding_text.as_ref());
@@ -449,35 +565,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     }
                     Some(KeyAction::Ignore) => {}
                     Some(KeyAction::Unsupported) => {
-                        if key_state == wl_keyboard::KeyState::Pressed {
-                            let modifiers = state
-                                .keyboard_state
-                                .as_ref()
-                                .map(active_modifiers)
-                                .unwrap_or_default();
-                            if state.pending_key_pass_through.len() < MAX_PENDING_KEY_PASS_THROUGH {
-                                state
-                                    .pending_key_pass_through
-                                    .push_back(PendingKeyPassThrough {
-                                        keycode: key,
-                                        modifiers,
-                                    });
-                            } else {
-                                state.error = Some(InputMethodError::PassThrough {
-                                    message: format!(
-                                        "key pass-through queue overflow (max {} keys pending)",
-                                        MAX_PENDING_KEY_PASS_THROUGH
-                                    ),
-                                    retryable: true,
-                                });
-                            }
-                        }
-                        // ARCHITECTURAL LIMITATION (P1): Only PRESS events are passed through.
-                        // RELEASE events are not tracked, so held keys become synthetic taps.
-                        // Example: physically holding Right Arrow produces tap behavior.
-                        // This breaks: held navigation, held Delete, key-repeat workflows.
-                        // Proper fix requires tracking press/release pairs and held-key state.
-                        state.queue_event(matcher_event_for_unsupported_key());
+                        unreachable!("unsupported keys are handled above")
                     }
                     None => {}
                 }
@@ -615,6 +703,12 @@ pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
     }
 }
 
+fn key_is_modifier(keyboard_state: &State, key: u32) -> bool {
+    key.checked_add(8)
+        .and_then(|keycode| keyboard_state.key_get_one_sym(keycode))
+        .is_some_and(|keysym| is_modifier_keysym(keysym.raw()))
+}
+
 fn forward_commit(state: &mut StateData, connection: &Connection, text: &str) {
     if let Some(input_method) = state.input_method.as_ref() {
         input_method.commit_string(text.to_owned());
@@ -700,7 +794,7 @@ fn pass_through_pending_keys(
     };
     while let Some(pending) = pending_keys.pop_front() {
         injector
-            .inject_key_with_modifiers(pending.keycode, pending.modifiers)
+            .inject_key_event(pending.keycode, pending.modifiers, pending.state)
             .map_err(|error| {
                 source_error(InputMethodError::PassThrough {
                     message: error.to_string(),
@@ -709,6 +803,46 @@ fn pass_through_pending_keys(
             })?;
     }
     Ok(())
+}
+
+fn pass_through_pending_key(
+    pending_keys: &mut VecDeque<PendingKeyPassThrough>,
+    injector: Option<&mut dyn TextInjector>,
+) -> Result<(), InputSourceError> {
+    let Some(pending) = pending_keys.front().copied() else {
+        return Ok(());
+    };
+    let Some(injector) = injector else {
+        return Err(source_error(InputMethodError::PassThrough {
+            message: format!(
+                "unsupported key {} was captured but no key pass-through injector is attached",
+                pending.keycode
+            ),
+            retryable: true,
+        }));
+    };
+    injector
+        .inject_key_event(pending.keycode, pending.modifiers, pending.state)
+        .map_err(|error| {
+            source_error(InputMethodError::PassThrough {
+                message: error.to_string(),
+                retryable: error.retryable,
+            })
+        })?;
+    pending_keys.pop_front();
+    Ok(())
+}
+
+fn release_virtual_keys_from_state(state: &mut StateData, injector: Option<&mut dyn TextInjector>) {
+    let held = std::mem::take(&mut state.virtual_held_keys);
+    if let Some(injector) = injector {
+        let _ = pass_through_pending_keys(&mut state.pending_key_pass_through, Some(injector));
+        for keycode in held.into_iter().rev() {
+            let _ =
+                injector.inject_key_event(keycode, Modifiers::default(), KeyEventState::Released);
+        }
+    }
+    state.pending_key_pass_through.clear();
 }
 
 fn deactivation_event() -> InputEvent {
@@ -821,6 +955,18 @@ impl InputMethodSource {
         self
     }
 
+    /// Best-effort cleanup for a lost input-method or pass-through transport.
+    /// The input-method grab may disappear without delivering physical key-up
+    /// events, so every key the virtual injector believes is held must be
+    /// released before the injector is dropped or replaced.
+    fn release_virtual_keys(&mut self) {
+        let injector = self
+            .key_pass_through
+            .as_mut()
+            .map(|injector| injector.as_mut() as &mut dyn TextInjector);
+        release_virtual_keys_from_state(&mut self.state, injector);
+    }
+
     /// Poll for one event without indefinitely blocking lifecycle handling in
     /// a daemon. This is intentionally an additive API; `InputSource::next_event`
     /// remains the blocking interface for simple consumers.
@@ -829,6 +975,7 @@ impl InputMethodSource {
         timeout: Duration,
     ) -> Result<Option<InputEvent>, InputSourceError> {
         if let Some(error) = self.state.error.take() {
+            self.release_virtual_keys();
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
@@ -837,7 +984,7 @@ impl InputMethodSource {
                     .key_pass_through
                     .as_mut()
                     .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
+                pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
             }
             return Ok(Some(event));
         }
@@ -863,14 +1010,19 @@ impl InputMethodSource {
         }
         let revents = fds[0].revents();
         if connection_poll_failed(revents) {
+            self.release_virtual_keys();
             return Err(source_error(InputMethodError::Transport(format!(
                 "Wayland connection became unavailable ({revents:?})"
             ))));
         }
         self.event_queue
             .blocking_dispatch(&mut self.state)
-            .map_err(|error| source_error(InputMethodError::Dispatch(error)))?;
+            .map_err(|error| {
+                self.release_virtual_keys();
+                source_error(InputMethodError::Dispatch(error))
+            })?;
         if let Some(error) = self.state.error.take() {
+            self.release_virtual_keys();
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
@@ -879,12 +1031,18 @@ impl InputMethodSource {
                     .key_pass_through
                     .as_mut()
                     .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
+                pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
             }
             Ok(Some(event))
         } else {
             Ok(None)
         }
+    }
+}
+
+impl Drop for InputMethodSource {
+    fn drop(&mut self) {
+        self.release_virtual_keys();
     }
 }
 
@@ -1167,6 +1325,7 @@ impl InputSource for InputMethodSource {
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {
         loop {
             if let Some(error) = self.state.error.take() {
+                self.release_virtual_keys();
                 return Err(source_error(error));
             }
             if let Some(event) = self.state.events.pop_front() {
@@ -1175,7 +1334,7 @@ impl InputSource for InputMethodSource {
                         .key_pass_through
                         .as_mut()
                         .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                    pass_through_pending_keys(&mut self.state.pending_key_pass_through, injector)?;
+                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector)?;
                 }
                 return Ok(event);
             }
@@ -1193,6 +1352,7 @@ mod tests {
 
     struct RecordingInjector {
         calls: Vec<(u32, Modifiers)>,
+        events: Vec<(u32, KeyEventState)>,
         fail: bool,
     }
 
@@ -1234,6 +1394,24 @@ mod tests {
                 });
             }
             self.calls.push((keycode, modifiers));
+            Ok(())
+        }
+
+        fn inject_key_event(
+            &mut self,
+            keycode: u32,
+            modifiers: Modifiers,
+            state: KeyEventState,
+        ) -> Result<(), InjectorError> {
+            if self.fail {
+                return Err(InjectorError {
+                    backend: self.name(),
+                    message: "synthetic failure".into(),
+                    retryable: true,
+                });
+            }
+            self.calls.push((keycode, modifiers));
+            self.events.push((keycode, state));
             Ok(())
         }
     }
@@ -1407,9 +1585,11 @@ mod tests {
                 shift: true,
                 ..Modifiers::default()
             },
+            state: KeyEventState::Pressed,
         }]);
         let mut injector = RecordingInjector {
             calls: Vec::new(),
+            events: Vec::new(),
             fail: false,
         };
 
@@ -1429,11 +1609,206 @@ mod tests {
         );
     }
 
+    fn dispatch_one_queued_key(state: &mut StateData, injector: &mut RecordingInjector) {
+        assert_eq!(state.events.pop_front(), Some(InputEvent::Reset));
+        pass_through_pending_key(&mut state.pending_key_pass_through, Some(injector)).unwrap();
+    }
+
+    #[test]
+    fn held_left_arrow_is_press_repeat_release_not_taps() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+
+        state.queue_virtual_key_event(105, Modifiers::default(), KeyEventState::Pressed);
+        dispatch_one_queued_key(&mut state, &mut injector);
+        // A repeat is a physical press notification for the already-held
+        // key; the virtual key remains down and no second tap is emitted.
+        state.queue_virtual_key_event(105, Modifiers::default(), KeyEventState::Pressed);
+        assert!(state.pending_key_pass_through.is_empty());
+        assert_eq!(state.events.pop_front(), Some(InputEvent::Reset));
+        state.queue_virtual_key_event(105, Modifiers::default(), KeyEventState::Released);
+        dispatch_one_queued_key(&mut state, &mut injector);
+
+        assert_eq!(
+            injector.events,
+            vec![
+                (105, KeyEventState::Pressed),
+                (105, KeyEventState::Released),
+            ]
+        );
+        assert!(state.virtual_held_keys.is_empty());
+    }
+
+    #[test]
+    fn held_delete_and_backspace_retain_repeat_semantics() {
+        let mut keyboard = default_state();
+        assert_eq!(
+            key_action_and_update(&mut keyboard, 14, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Delete)
+        );
+        assert_eq!(
+            key_action_and_update(&mut keyboard, 14, wl_keyboard::KeyState::Pressed),
+            Some(KeyAction::Delete)
+        );
+        assert_eq!(
+            key_action_and_update(&mut keyboard, 14, wl_keyboard::KeyState::Released),
+            None
+        );
+
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        // Linux KEY_DELETE is unsupported by the commit contract and must
+        // use the same held-key lifecycle as navigation keys.
+        state.queue_virtual_key_event(111, Modifiers::default(), KeyEventState::Pressed);
+        dispatch_one_queued_key(&mut state, &mut injector);
+        state.queue_virtual_key_event(111, Modifiers::default(), KeyEventState::Pressed);
+        assert_eq!(state.events.pop_front(), Some(InputEvent::Reset));
+        state.queue_virtual_key_event(111, Modifiers::default(), KeyEventState::Released);
+        dispatch_one_queued_key(&mut state, &mut injector);
+        assert_eq!(
+            injector.events,
+            vec![
+                (111, KeyEventState::Pressed),
+                (111, KeyEventState::Released),
+            ]
+        );
+    }
+
+    #[test]
+    fn modifier_shortcut_preserves_physical_order() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        for (keycode, modifiers) in [
+            (29, Modifiers::default()),
+            (
+                42,
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (
+                203,
+                Modifiers {
+                    ctrl: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            ),
+        ] {
+            state.queue_virtual_key_event(keycode, modifiers, KeyEventState::Pressed);
+            dispatch_one_queued_key(&mut state, &mut injector);
+        }
+        for (keycode, modifiers) in [
+            (
+                203,
+                Modifiers {
+                    ctrl: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (
+                42,
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (29, Modifiers::default()),
+        ] {
+            state.queue_virtual_key_event(keycode, modifiers, KeyEventState::Released);
+            dispatch_one_queued_key(&mut state, &mut injector);
+        }
+
+        assert_eq!(
+            injector.events,
+            vec![
+                (29, KeyEventState::Pressed),
+                (42, KeyEventState::Pressed),
+                (203, KeyEventState::Pressed),
+                (203, KeyEventState::Released),
+                (42, KeyEventState::Released),
+                (29, KeyEventState::Released),
+            ]
+        );
+    }
+
+    #[test]
+    fn focus_loss_releases_all_virtual_keys_before_focus_event() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        state.queue_virtual_key_event(125, Modifiers::default(), KeyEventState::Pressed);
+        state.queue_virtual_key_event(
+            46,
+            Modifiers {
+                super_key: true,
+                ..Modifiers::default()
+            },
+            KeyEventState::Pressed,
+        );
+        state.queue_event(InputEvent::FocusChanged { sensitive: true });
+
+        while matches!(state.events.front(), Some(InputEvent::Reset)) {
+            dispatch_one_queued_key(&mut state, &mut injector);
+        }
+        assert_eq!(
+            state.events.pop_front(),
+            Some(InputEvent::FocusChanged { sensitive: true })
+        );
+        assert_eq!(
+            injector.events,
+            vec![
+                (125, KeyEventState::Pressed),
+                (46, KeyEventState::Pressed),
+                (46, KeyEventState::Released),
+                (125, KeyEventState::Released),
+            ]
+        );
+        assert!(state.virtual_held_keys.is_empty());
+    }
+
+    #[test]
+    fn disconnect_cleanup_releases_pending_and_held_virtual_keys() {
+        let mut state = StateData::new();
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        state.queue_virtual_key_event(56, Modifiers::default(), KeyEventState::Pressed);
+        release_virtual_keys_from_state(&mut state, Some(&mut injector));
+
+        assert_eq!(
+            injector.events,
+            vec![(56, KeyEventState::Pressed), (56, KeyEventState::Released),]
+        );
+        assert!(state.pending_key_pass_through.is_empty());
+        assert!(state.virtual_held_keys.is_empty());
+    }
+
     #[test]
     fn missing_pass_through_injector_is_reported_not_silent() {
         let mut pending = VecDeque::from([PendingKeyPassThrough {
             keycode: 1,
             modifiers: Modifiers::default(),
+            state: KeyEventState::Pressed,
         }]);
 
         let error = pass_through_pending_keys(&mut pending, None).unwrap_err();
@@ -1448,9 +1823,11 @@ mod tests {
         let mut pending = VecDeque::from([PendingKeyPassThrough {
             keycode: 1,
             modifiers: Modifiers::default(),
+            state: KeyEventState::Pressed,
         }]);
         let mut injector = RecordingInjector {
             calls: Vec::new(),
+            events: Vec::new(),
             fail: true,
         };
 
@@ -1709,6 +2086,7 @@ mod tests {
                 .push_back(PendingKeyPassThrough {
                     keycode: (i % 256) as u32,
                     modifiers: Modifiers::default(),
+                    state: KeyEventState::Pressed,
                 });
         }
 
@@ -1722,6 +2100,7 @@ mod tests {
             .push_back(PendingKeyPassThrough {
                 keycode: 1,
                 modifiers: Modifiers::default(),
+                state: KeyEventState::Pressed,
             });
 
         assert_eq!(
@@ -1807,6 +2186,7 @@ mod tests {
                     ctrl: true,
                     ..Modifiers::default()
                 },
+                state: KeyEventState::Pressed,
             },
             PendingKeyPassThrough {
                 keycode: 62,
@@ -1814,6 +2194,7 @@ mod tests {
                     alt: true,
                     ..Modifiers::default()
                 },
+                state: KeyEventState::Pressed,
             },
             PendingKeyPassThrough {
                 keycode: 203,
@@ -1821,10 +2202,12 @@ mod tests {
                     shift: true,
                     ..Modifiers::default()
                 },
+                state: KeyEventState::Pressed,
             },
         ]);
         let mut injector = RecordingInjector {
             calls: Vec::new(),
+            events: Vec::new(),
             fail: false,
         };
 
@@ -1870,14 +2253,17 @@ mod tests {
             PendingKeyPassThrough {
                 keycode: 105,
                 modifiers: Modifiers::default(),
+                state: KeyEventState::Pressed,
             },
             PendingKeyPassThrough {
                 keycode: 106,
                 modifiers: Modifiers::default(),
+                state: KeyEventState::Released,
             },
         ]);
         let mut injector = RecordingInjector {
             calls: Vec::new(),
+            events: Vec::new(),
             fail: true,
         };
 
@@ -1901,6 +2287,7 @@ mod tests {
             .push_back(PendingKeyPassThrough {
                 keycode: 203,
                 modifiers: Modifiers::default(),
+                state: KeyEventState::Pressed,
             });
 
         assert_eq!(state_data.pending_key_pass_through.len(), 1);
