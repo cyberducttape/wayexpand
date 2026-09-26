@@ -1,9 +1,11 @@
 # 1.0 release checklist
 
-This is the milestone-level bar for calling a release "1.0" -- distinct from
-[`docs/archive/wiki/Contributing.md`](wiki/Contributing.md)'s per-PR checklist and
-[`docs/RELEASING.md`](../RELEASING.md)'s per-tag mechanics, both of which still
-apply to every 1.0 release candidate on top of this.
+**Archived:** This was the 1.0 milestone checklist. Current release procedures
+are in [`docs/RELEASING.md`](../RELEASING.md).
+
+This document is provided for historical context. It is distinct from 
+[`docs/DEVELOPMENT.md`](../DEVELOPMENT.md)'s per-PR checklist and
+[`docs/RELEASING.md`](../RELEASING.md)'s per-tag mechanics.
 
 [`docs/RELEASING.md`](../RELEASING.md) already states the governing rule:
 
@@ -173,7 +175,7 @@ limitations.
       pre-1.0/experimental behavior as if final.
       Cross-check against whatever `SUPPORT_MATRIX.md` says after §1 above
       -- the two must agree.
-- [ ] `docs/wiki/` walked page-by-page against the actual running 1.0
+- [ ] `docs/` walked page-by-page against the actual running 1.0
       candidate build, not just the pages touched this session
       (`GUI.md`, screenshots).
 - [ ] `CHANGELOG.md`'s `Unreleased` section fully moved into a `1.0.0`
@@ -182,7 +184,7 @@ limitations.
 
 ## 7. Mechanical release gate (already defined elsewhere, listed for completeness)
 
-- [ ] Everything in [`docs/wiki/Contributing.md`](wiki/Contributing.md)'s
+- [ ] Everything in [`docs/DEVELOPMENT.md`](../DEVELOPMENT.md)'s
       "Release checklist" passes with `--locked --release`.
 - [ ] [`docs/RELEASING.md`](../RELEASING.md) followed exactly, including the
       isolated `scripts/test-release.sh` smoke test and the tag/version

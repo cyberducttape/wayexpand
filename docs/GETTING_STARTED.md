@@ -251,7 +251,7 @@ replacement = """def my_function(x):
     return x * 2"""
 ```
 
-See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view the [archived configuration reference](archive/wiki/Configuration.md) for variable examples.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, and [FOR_SYSADMINS.md](FOR_SYSADMINS.md) for 30+ real-world variable examples.
 
 ---
 

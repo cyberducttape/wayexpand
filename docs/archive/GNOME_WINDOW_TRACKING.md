@@ -79,4 +79,4 @@ If you'd like to help add GNOME support:
 
 - [SUPPORT_MATRIX.md](../SUPPORT_MATRIX.md) — Compositor feature matrix
 - [SECURITY.md](../../SECURITY.md) — Sensitive field handling
-- [docs/wiki/Configuration.md](wiki/Configuration.md#app-filtering) — app_filter configuration reference
+- [COMPATIBILITY.md](../COMPATIBILITY.md) — app_filter configuration reference
