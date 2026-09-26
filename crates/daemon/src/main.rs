@@ -1,9 +1,17 @@
+mod backend_lifecycle;
 mod control;
+mod input_loop;
+mod output_loop;
 mod policy;
 mod reload;
 mod status;
 
 use anyhow::Result;
+use input_loop::{
+    connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
+    input_poll_interval, libei_policy_blocks, next_retry_delay, wait_for_retry,
+};
+use output_loop::{connect_output_backend, connect_output_with_retry};
 use reload::ReloadableConfig;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
@@ -73,12 +81,6 @@ struct EventError {
     source: ExpansionError,
 }
 
-#[derive(Debug)]
-struct OutputConnectError {
-    message: String,
-    retryable: bool,
-}
-
 #[derive(Default)]
 struct StatusPublisher {
     last: Option<StatusSnapshot>,
@@ -133,14 +135,6 @@ impl StatusPublisher {
         self.last = Some(snapshot);
     }
 }
-
-impl std::fmt::Display for OutputConnectError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for OutputConnectError {}
 
 impl std::fmt::Display for EventError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -356,7 +350,7 @@ fn main() -> Result<()> {
         None
     };
 
-    let window_tracker = spawn_window_tracker();
+    let window_tracker = backend_lifecycle::spawn_window_tracker();
 
     let mut stdin_closed = false;
     let mut logged_queue_rejections = 0;
@@ -964,53 +958,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Starts the focused-window tracker in the background when one is
-/// available, feeding `WindowChanged` events into the main loop through a
-/// channel so `app_filter`-scoped expansions can gate on it. Returns `None`
-/// (not an error) when no tracker applies to this session -- window
-/// tracking is inherently compositor-specific. Today, only KDE Plasma (KWin)
-/// is integrated; wlroots tracking remains a future experimental project.
-/// `app_filter`-scoped expansions simply fail closed everywhere else, exactly
-/// as they would if this thread were never started.
-fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
-    // Try the integrated KDE Plasma backend. The wlroots toplevel prototype is
-    // deliberately not part of the production daemon until its event-loop,
-    // ownership, and compositor test coverage are complete.
-
-    // Try KWin first
-    if KwinWindowTracker::probe().is_ok() {
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let mut tracker = match KwinWindowTracker::new() {
-                Ok(tracker) => tracker,
-                Err(error) => {
-                    warn!(%error, "KWin window tracker failed to start after a successful probe");
-                    return;
-                }
-            };
-            info!("window tracker active (KWin scripting bridge)");
-            loop {
-                match tracker.next_window_timeout(Duration::from_secs(2)) {
-                    Ok(Some(window)) => {
-                        if sender.send(window).is_err() {
-                            break;
-                        }
-                    }
-                    // Nothing changed within the timeout: expected and frequent.
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!(%error, "KWin window tracker stopped");
-                        break;
-                    }
-                }
-            }
-        });
-        return Some(receiver);
-    }
-
-    info!("window tracking unavailable; app_filter-scoped expansions will not match");
-    None
-}
 
 /// Drain any pending window-change events from the tracker's receiver
 /// and apply them to the engine. This prevents app-filter races where a
@@ -1021,33 +968,16 @@ fn drain_pending_window_events(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> Result<()> {
-    if let Some(receiver) = window_tracker.as_ref() {
-        let mut latest = None;
-        loop {
-            match receiver.try_recv() {
-                Ok(window) => latest = Some(window),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    latest = Some(None);
-                    break;
-                }
-            }
-        }
-        if let Some(window) = latest {
-            process_event(
-                engine,
-                InputEvent::WindowChanged(window),
-                None,
-                policy,
-                active_backend,
-            )?;
-        }
+    if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(window_tracker) {
+        process_event(
+            engine,
+            InputEvent::WindowChanged(window_opt),
+            None,
+            policy,
+            active_backend,
+        )?;
     }
     Ok(())
-}
-
-fn next_retry_delay(delay: Duration) -> Duration {
-    delay.saturating_mul(2).min(Duration::from_secs(30))
 }
 
 fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
@@ -1156,256 +1086,6 @@ fn set_daemon_status_direct(
         config_healthy,
         CommandMetrics::default(),
     );
-}
-
-fn input_poll_interval(metrics: CommandMetrics) -> Duration {
-    if metrics.command_queue_depth > 0 || metrics.command_in_flight > 0 {
-        ACTIVE_COMPLETION_POLL_INTERVAL
-    } else {
-        IDLE_MAINTENANCE_INTERVAL
-    }
-}
-
-fn connect_input_method_session(
-    control: &control::ControlServer,
-    config_path: &Path,
-    config_healthy: bool,
-    persist_portal_token: bool,
-    portal_token_path: Option<&Path>,
-    policy: &wayexpand_core::OrganizationPolicy,
-) -> Result<InputMethodSource, InputMethodError> {
-    let mut source = InputMethodSource::connect()?;
-
-    if !policy.backend_allowed("libei") {
-        let violation = format!(
-            "backend 'libei' is not in allowed list: {:?}",
-            policy.allowed_backends
-        );
-        policy::log_violation(policy, &violation);
-        if libei_policy_blocks(policy) {
-            warn!(
-                "organization policy prohibits libei backend; \
-                unsupported keys will not pass through"
-            );
-            return Ok(source);
-        }
-        info!("audit mode permits libei key pass-through with a disallowed backend");
-    }
-
-    match connect_output_backend("libei", persist_portal_token, portal_token_path) {
-        Ok(key_injector) => {
-            set_daemon_status_direct(
-                control,
-                "input-method",
-                "libei",
-                "connected",
-                config_path,
-                config_healthy,
-            );
-            source = source.with_key_pass_through(key_injector);
-        }
-        Err(error) if error.retryable => {
-            warn!(
-                %error,
-                "libei unavailable at startup; unsupported keys will not pass through \
-                (connection will be retried asynchronously)"
-            );
-            set_daemon_status_direct(
-                control,
-                "input-method",
-                "libei",
-                "degraded",
-                config_path,
-                config_healthy,
-            );
-        }
-        Err(error) => {
-            return Err(InputMethodError::Protocol(format!(
-                "libei unavailable: {}",
-                error.message
-            )));
-        }
-    }
-
-    Ok(source)
-}
-
-fn libei_policy_blocks(policy: &wayexpand_core::OrganizationPolicy) -> bool {
-    policy.safe_mode && !policy.backend_allowed("libei")
-}
-
-fn connect_input_method_with_retry(
-    control: &control::ControlServer,
-    config_path: &Path,
-    config_healthy: bool,
-    persist_portal_token: bool,
-    portal_token_path: Option<&Path>,
-    policy: &wayexpand_core::OrganizationPolicy,
-) -> Result<InputMethodSource> {
-    let mut retry_delay = Duration::from_millis(250);
-    loop {
-        match connect_input_method_session(
-            control,
-            config_path,
-            config_healthy,
-            persist_portal_token,
-            portal_token_path,
-            policy,
-        ) {
-            Ok(source) => {
-                control.set_status(format!(
-                    "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\nconfig={}\nconfig_state=ok",
-                    config_path.display()
-                ));
-                return Ok(source);
-            }
-            Err(error) if error.is_retryable() => {
-                warn!(%error, ?retry_delay, "input-method unavailable at startup; retrying");
-                control.set_status(format!(
-                    "source=input-method\nbackend=input-method-v2\nstate=reconnecting\npaused=false\nconfig={}\nconfig_state=ok",
-                    config_path.display()
-                ));
-                if !wait_for_retry(&control.stop_requested, retry_delay) {
-                    anyhow::bail!("input-method startup cancelled while waiting to reconnect");
-                }
-                retry_delay = next_retry_delay(retry_delay);
-            }
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "connecting input-method-v2 source failed permanently: {error}"
-                ));
-            }
-        }
-    }
-}
-
-fn connect_evdev_with_retry(
-    control: &control::ControlServer,
-    config_path: &Path,
-    backend_name: &str,
-    config_healthy: bool,
-) -> Result<EvdevSource> {
-    let backend = backend_name;
-    let mut retry_delay = Duration::from_millis(250);
-    loop {
-        match EvdevSource::connect() {
-            Ok(source) => {
-                set_daemon_status_direct(
-                    control,
-                    "evdev",
-                    backend,
-                    "connected",
-                    config_path,
-                    config_healthy,
-                );
-                return Ok(source);
-            }
-            Err(error) if error.is_retryable() => {
-                warn!(%error, ?retry_delay, "evdev source unavailable at startup; retrying");
-                set_daemon_status_direct(
-                    control,
-                    "evdev",
-                    backend,
-                    "reconnecting",
-                    config_path,
-                    config_healthy,
-                );
-                if !wait_for_retry(&control.stop_requested, retry_delay) {
-                    anyhow::bail!("evdev startup cancelled while waiting to reconnect");
-                }
-                retry_delay = next_retry_delay(retry_delay);
-            }
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "connecting evdev source failed permanently: {error}"
-                ));
-            }
-        }
-    }
-}
-
-fn wait_for_retry(stop: &std::sync::atomic::AtomicBool, delay: Duration) -> bool {
-    let deadline = Instant::now() + delay;
-    while !stop.load(std::sync::atomic::Ordering::Acquire) {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return true;
-        }
-        thread::sleep(remaining.min(Duration::from_millis(250)));
-    }
-    false
-}
-
-fn connect_output_backend(
-    name: &str,
-    persist_portal_token: bool,
-    portal_token_path: Option<&Path>,
-) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
-    match name {
-        "wlroots" => WlrootsInjector::connect()
-            .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
-            .map_err(|error| OutputConnectError {
-                retryable: error.is_retryable(),
-                message: format!("connecting wlroots output backend: {error}"),
-            }),
-        "libei" => LibeiInjector::connect(LibeiOptions {
-            persist_portal_token,
-            portal_token_path: portal_token_path.map(Path::to_path_buf),
-        })
-        .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
-        .map_err(|error| OutputConnectError {
-            retryable: error.is_retryable(),
-            message: format!("connecting libei output backend: {error}"),
-        }),
-        other => Err(OutputConnectError {
-            retryable: false,
-            message: format!("unknown output backend {other:?}"),
-        }),
-    }
-}
-
-fn connect_output_with_retry(
-    control: &control::ControlServer,
-    source: &str,
-    backend: &str,
-    config_path: &Path,
-    config_healthy: bool,
-    persist_portal_token: bool,
-    portal_token_path: Option<&Path>,
-) -> Result<Option<Box<dyn TextInjector>>> {
-    let mut retry_delay = Duration::from_millis(250);
-    loop {
-        match connect_output_backend(backend, persist_portal_token, portal_token_path) {
-            Ok(injector) => {
-                set_daemon_status_direct(
-                    control,
-                    source,
-                    backend,
-                    "connected",
-                    config_path,
-                    config_healthy,
-                );
-                info!(backend, "output backend reconnected");
-                return Ok(Some(injector));
-            }
-            Err(error) if error.retryable => {
-                warn!(%error, backend, ?retry_delay, "output backend unavailable; retrying");
-                set_daemon_status_direct(
-                    control,
-                    source,
-                    backend,
-                    "reconnecting",
-                    config_path,
-                    config_healthy,
-                );
-                if !wait_for_retry(&control.stop_requested, retry_delay) {
-                    return Ok(None);
-                }
-                retry_delay = next_retry_delay(retry_delay);
-            }
-            Err(error) => return Err(anyhow::Error::new(error)),
-        }
-    }
 }
 
 fn process_event(

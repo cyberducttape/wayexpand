@@ -6,9 +6,8 @@
 //! 3. Apply organization policy
 //! 4. Inject results to output backend
 
-use std::sync::atomic::AtomicBool;
 use tracing::warn;
-use wayexpand_core::{ExpansionEngine, ExpansionResult, InputEvent, KeyChord, OrganizationPolicy, TextInjector};
+use wayexpand_core::{ExpansionEngine, ExpansionResult, InputEvent, OrganizationPolicy, TextInjector};
 
 #[derive(Debug)]
 pub struct EventError {

@@ -44,3 +44,22 @@ pub fn set_daemon_status(
         metrics,
     ));
 }
+
+pub fn set_daemon_status_direct(
+    control: &ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+) {
+    set_daemon_status(
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        config_healthy,
+        CommandMetrics::default(),
+    );
+}
