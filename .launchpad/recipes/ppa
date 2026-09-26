@@ -1,0 +1,5 @@
+# git-build-recipe format 0.4 deb-version {debupstream}-0~{revtime}
+# Auto-builds wayexpand PPA from vendored GitHub releases
+# Triggers on version tags (v1.2.0, v1.2.1, etc.)
+# Downloads vendored tarball for offline Launchpad builds
+https://github.com/cyberducttape/wayexpand/releases/download/v{upstream_version}/wayexpand-{upstream_version}-vendored.tar.gz debian/
