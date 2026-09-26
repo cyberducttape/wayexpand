@@ -1399,6 +1399,7 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>, bool)> {
 mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
+    use std::time::Instant;
     use wayexpand_core::{Config, InjectorError, KeyChord};
 
     #[test]
@@ -2124,7 +2125,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let injector = RecordingInjector { calls: Vec::new() };
+        let _injector = RecordingInjector { calls: Vec::new() };
         let policy = wayexpand_core::OrganizationPolicy {
             safe_mode: true,
             disable_hotkeys: true,
