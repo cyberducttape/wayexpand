@@ -2,9 +2,9 @@
 
 > This roadmap contains historical v1.0/v1.2 planning language as well as
 > current open work. For present behavior and certification, use
-> `docs/SUPPORT_MATRIX.md`, `docs/COMPOSITOR_MATRIX.md`, and `wayexpand doctor`.
+> `../../SUPPORT_MATRIX.md`, `../../COMPOSITOR_MATRIX.md`, and `wayexpand doctor`.
 
-The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
+The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [../../SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
 
 ## Completed: v1.0.0 (2026-09-17)
 
@@ -12,7 +12,7 @@ Production release with:
 - Stability guarantees for CLI, JSON, and config schema
 - Security audit and formal threat model documentation
 - Package distribution: Ubuntu PPA; Arch packaging is prepared but has not
-  been submitted to AUR (Fedora has no Copr repo yet -- see docs/PACKAGING.md)
+  been submitted to AUR (Fedora has no Copr repo yet -- see ../../PACKAGING.md)
 - Professional GUI with themes, language packs, and accessibility support
 - Experimental KDE-specific path (evdev capture + KWin window tracking; not certified)
 - Multiple backend coverage (input-method-v2, wlroots, libei/EIS, evdev)
@@ -99,8 +99,8 @@ desktop Linux users but does not prevent use in controlled environments
 The wlroots window-tracker prototype described in earlier planning notes was
 removed from the production workspace and is not shipped. `app_filter` window
 tracking is currently implemented for KDE only; see
-[`docs/BACKENDS.md`](docs/BACKENDS.md) and
-[`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md).
+[`docs/BACKENDS.md`](../../BACKENDS.md) and
+[`../../SUPPORT_MATRIX.md`](../../SUPPORT_MATRIX.md).
 
 No implementation or certification work for wlroots window tracking should be
 inferred from the historical checklist that follows in older revisions.
@@ -185,7 +185,7 @@ the shipped daemon unit or treat a wrapper script as a supported escape hatch.
 - [ ] Integration tests cover framing, auth, policy denial, timeout, output
       limits, and the absence of daemon network/home access.
 
-See [docs/ACTION_BROKER_DESIGN.md](docs/ACTION_BROKER_DESIGN.md) for the
+See [docs/ACTION_BROKER_DESIGN.md](../../ACTION_BROKER_DESIGN.md) for the
 protocol, threat boundary, and acceptance criteria.
 
 **Architecture:**
@@ -222,7 +222,7 @@ See [the archived audit findings](docs/archive/2026-09/AUDIT_FINDINGS.md) for hi
 **Status:** No compositor is certified. KWin window tracking is implemented;
 wlroots tracking is not shipped, and GNOME/Mutter has no supported tracker.
 Other backend support remains experimental where noted in
-[`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md).
+[`../../SUPPORT_MATRIX.md`](../../SUPPORT_MATRIX.md).
 
 **What's needed:**
 - [ ] Automated end-to-end tests for each compositor covering normal typing, Unicode (emoji, RTL), password fields, focus changes, rapid triggers, undo, and shortcut conflicts
@@ -230,7 +230,7 @@ Other backend support remains experimental where noted in
 - [ ] First-run experience detects compositor and recommends optimal backend with explicit trade-offs
 - [ ] CI matrix or scheduled job to catch regressions on new versions
 
-**Depends on:** wlroots window-tracking real-world testing; GNOME constraints documented in `docs/GNOME_WINDOW_TRACKING.md`
+**Depends on:** wlroots window-tracking real-world testing; GNOME constraints documented in `../../GNOME_WINDOW_TRACKING.md`
 
 #### Distribution & Discoverability
 
@@ -238,7 +238,7 @@ Other backend support remains experimental where noted in
 been submitted to AUR; Fedora Copr is not published.
 
 **What's needed:**
-- [ ] Publish Fedora Copr repository (see `docs/PACKAGING.md`)
+- [ ] Publish Fedora Copr repository (see `../../PACKAGING.md`)
 - [ ] Flatpak/Snap builds with portal support
 - [ ] Simple landing/demo site (GitHub README is good; visual proof points help)
 - [ ] 2-3 short demo videos: first-run, snippet creation, real-world use
@@ -288,7 +288,7 @@ Further work requires compositor- and toolkit-specific testing.
 
 ### Performance Optimization
 
-**Baseline established:** See docs/GUI.md
+**Baseline established:** See ../../GUI.md
 Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippets
 
 ### Release Architectures
@@ -296,7 +296,7 @@ Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippet
 The GitHub release workflow publishes a prebuilt Linux archive for x86_64
 only. There is no official aarch64 release archive yet; aarch64 users build
 from source. Arch packaging is prepared but has not been submitted to AUR.
-See [docs/PACKAGING.md](docs/PACKAGING.md) for current details.
+See [../../PACKAGING.md](../../PACKAGING.md) for current details.
 
 ### Enhanced Telemetry (Privacy-Respecting)
 
@@ -316,7 +316,7 @@ See [docs/PACKAGING.md](docs/PACKAGING.md) for current details.
 - ✅ Available via Ubuntu PPA
 - ◐ Arch PKGBUILD prepared; AUR publication is pending
 - ✅ Documented security policy with vulnerability disclosure process
-- ✅ Stability guarantees (COMPATIBILITY.md)
+- ✅ Stability guarantees (../../COMPATIBILITY.md)
 - Historical v1.0 milestone criterion; this is not a current defect-status
   assertion. See the current support matrix and regression tests for status.
 - ✅ Public changelog for releases
@@ -359,8 +359,8 @@ Priority goes to:
 
 ## References
 
-- [COMPATIBILITY.md](docs/COMPATIBILITY.md) — Stability guarantees and migration policy
-- [SECURITY.md](SECURITY.md) — Threat model and vulnerability disclosure
-- [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute code and ideas
-- [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) — Current backend status by compositor
-- [INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) — Testing and certification process
+- [COMPATIBILITY.md](../../COMPATIBILITY.md) — Stability guarantees and migration policy
+- [SECURITY.md](../../SECURITY.md) — Threat model and vulnerability disclosure
+- [CONTRIBUTING.md](../../CONTRIBUTING.md) — How to contribute code and ideas
+- [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) — Current backend status by compositor
+- [INTEGRATION_TESTING.md](../../INTEGRATION_TESTING.md) — Testing and certification process
