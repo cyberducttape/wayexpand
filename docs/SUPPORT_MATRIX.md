@@ -51,16 +51,16 @@ shortcuts, focus changes, compositor restart, and configuration reload. Known
 limitations must be visible in `wayexpand doctor`, the GUI, and the release
 notes.
 
-## Known Limitations: IME and Preedit Composition
+## Known Limitations: Active IME and Preedit Composition
 
-**WayExpand does not support Input Method Editor (IME) composition or preedit sequences.**
+**WayExpand does not support active Input Method Editor (IME) composition or preedit sequences.**
 
 This affects users who rely on:
 
-- **CJK input** (Chinese, Japanese, Korean) using IME systems
-- **Dead-key composition** (accented characters: é, ñ, ü, etc.)
+- **CJK input** (Chinese, Japanese, Korean) using active IME composition
+- **Dead-key composition** (accented characters: é, ñ, ü, etc.) during composition
 - **Multi-key sequences** (e.g., Compose key combinations)
-- **Input method-specific workflows** (Fcitx, IBus, Rime, etc.)
+- **Active IME/preedit composition workflows** (e.g., Fcitx, IBus engines, Rime, and similar systems actively composing text)
 
 ### Why Unsupported
 
@@ -76,13 +76,23 @@ Text expansion happens at the character/string level, after the input method has
 2. **Use global shortcuts instead:** Configure a hotkey that directly expands without typing
 3. **Separate tools:** Use your IME system's own abbreviation/phrase expansion (many have this built-in)
 
+### About WayExpand's IBus Support
+
+WayExpand ships its own **IBus engine backend** (`wayexpand-ibus`). This backend works alongside IBus for text expansion. The limitation documented above applies specifically to **active composition** — when the IME is actively composing (in preedit state). Text expansion works fine:
+- After composition is committed (Enter/Space)
+- Outside of active composition sessions
+- Via the native IBus engine that WayExpand provides
+
+This is different from saying "IBus is unsupported." Rather, WayExpand and IBus composition don't safely mix during active composition, but they coexist fine otherwise.
+
 ### For Package Maintainers / System Administrators
 
 When deploying WayExpand in regions or environments with heavy IME usage:
 
-- **Document the limitation clearly** in your deployment guides
+- **Document the limitation clearly** in your deployment guides (specifically: active composition incompatibility)
 - **Test with your local IME** before recommending to users
-- **Suggest alternatives:** Many input methods (Fcitx, IBus) have built-in phrase expansion that may be a better fit
+- **Highlight the IBus engine:** Users in IBus environments can use WayExpand's native IBus backend for seamless integration
+- **Suggest complementary tools:** Many input methods (Fcitx, IBus) have built-in phrase expansion that can complement WayExpand
 
 ### Future Possibility
 
