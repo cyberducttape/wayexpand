@@ -1553,13 +1553,18 @@ impl ExpansionEngine {
             self.buffer.iter().skip(start).collect()
         };
 
-        // Cursor behavior: commands have None (injected position), static expansion depends on template
-        let cursor_offset = if expansion.command.is_some() {
-            None
+        // Render static templates once at match time. The rendered text and
+        // cursor offset must come from the same context (and are reused by
+        // both immediate and deferred paths); commands are rendered later.
+        let (replacement_text, cursor_offset) = if expansion.command.is_some() {
+            (expansion.replacement.clone(), None)
         } else {
-            render_template_with_cursor(&expansion.replacement, &crate::TemplateContext::system())
-                .ok()
-                .and_then(|(_, offset)| offset)
+            let (rendered, cursor_offset) = render_template_with_cursor(
+                &expansion.replacement,
+                &crate::TemplateContext::system(),
+            )
+            .ok()?;
+            (rendered, cursor_offset)
         };
 
         Some(MatchPlan {
@@ -1570,7 +1575,7 @@ impl ExpansionEngine {
             sensitive_focus: self.sensitive_focus,
             user_paused: self.user_paused,
             trigger_config: expansion.trigger.clone(),
-            replacement_text: expansion.replacement.clone(),
+            replacement_text,
             command: expansion.command.as_ref().map(|c| Arc::new(c.clone())),
             propagate_case,
         })
@@ -1638,8 +1643,13 @@ impl ExpansionEngine {
             }
         }
 
-        // Sync fallback: render and commit
-        let (insert, _) = self.render_expansion(config_index).ok()?;
+        // Sync fallback: static templates were rendered as part of the plan;
+        // command output still executes here (or uses its cache above).
+        let insert = if expansion.command.is_some() {
+            self.render_expansion(config_index).ok()?
+        } else {
+            plan.replacement_text.clone()
+        };
         for _ in 0..length {
             self.buffer.pop_back();
         }
@@ -1661,10 +1671,9 @@ impl ExpansionEngine {
 
         // Policy is checked by the caller before deferred completion.
 
-        // Render template to get cursor_offset (without executing command)
-        let (template_text, _cursor_offset) =
-            render_template_with_cursor(&plan.replacement_text, &crate::TemplateContext::system())
-                .ok()?;
+        // Static templates were rendered once while creating the plan. For a
+        // command-backed match this field is unused until command completion.
+        let template_text = plan.replacement_text.clone();
 
         // Consume buffer
         for _ in 0..length {
@@ -1694,25 +1703,17 @@ impl ExpansionEngine {
         })
     }
 
-    /// Renders an expansion's text and, for a plain (non-command-backed)
-    /// template containing a `{{cursor}}` marker, the number of characters
-    /// from the end of the rendered text the cursor should land at.
-    /// Command output is used verbatim -- it is not hand-authored per
-    /// invocation the way a template is, so `{{cursor}}` is not recognized
-    /// in it.
-    fn render_expansion(&mut self, config_index: usize) -> Result<(String, Option<usize>), ()> {
+    /// Execute a command-backed expansion, using the short-lived cache when
+    /// configured. Static templates are rendered while creating `MatchPlan`.
+    fn render_expansion(&mut self, config_index: usize) -> Result<String, ()> {
         let expansion = &self.config.expansion[config_index];
         let Some(command) = &expansion.command else {
-            return render_template_with_cursor(
-                &expansion.replacement,
-                &crate::TemplateContext::system(),
-            )
-            .map_err(|_| ());
+            return Err(());
         };
         if command.cache_ms > 0 {
             if let Some(entry) = self.command_cache[config_index].as_ref() {
                 if entry.expires_at > Instant::now() {
-                    return Ok((entry.value.clone(), None));
+                    return Ok(entry.value.clone());
                 }
             }
         }
@@ -1723,7 +1724,7 @@ impl ExpansionEngine {
                 value: value.clone(),
             });
         }
-        Ok((value, None))
+        Ok(value)
     }
 
     /// Resets the matcher buffer to a known boundary. Always use this

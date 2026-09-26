@@ -1,8 +1,10 @@
-use std::{env, fs};
+use std::{env, fs, sync::OnceLock};
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_RENDERED_BYTES: usize = 1024 * 1024;
+static SYSTEM_USERNAME: OnceLock<String> = OnceLock::new();
+static SYSTEM_HOSTNAME: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
@@ -15,11 +17,17 @@ impl TemplateContext {
     /// Build the deliberately small, deterministic set of built-in values.
     /// External commands are not executed while rendering a snippet.
     pub fn system() -> Self {
-        let username = env::var("USER").unwrap_or_default();
-        let hostname = fs::read_to_string("/etc/hostname")
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
+        let username = SYSTEM_USERNAME
+            .get_or_init(|| env::var("USER").unwrap_or_default())
+            .clone();
+        let hostname = SYSTEM_HOSTNAME
+            .get_or_init(|| {
+                fs::read_to_string("/etc/hostname")
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            })
+            .clone();
         let unix_timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs());
