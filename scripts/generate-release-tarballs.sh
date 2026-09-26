@@ -18,6 +18,7 @@ if [ $# -ne 1 ]; then
 fi
 
 version="$1"
+output_dir=$(pwd -P)
 timestamp=$(date -u +%s)
 tmpdir=$(mktemp -d "/tmp/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
 
@@ -77,6 +78,7 @@ printf '%s\n' "  ✓ Verified .git not in vendored tarball"
 # Move tarballs to current directory
 printf '%s\n' ""
 printf '%s\n' "Moving tarballs to current directory..."
+cd "$output_dir"
 mv "${tmpdir}/wayexpand-${version}.tar.gz" .
 mv "${tmpdir}/wayexpand-${version}-vendored.tar.gz" .
 
