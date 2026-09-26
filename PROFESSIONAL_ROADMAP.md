@@ -215,7 +215,7 @@ independent proof points.
 
 **Scope:** Close the gap between a strong engineering foundation and a product users trust and recommend.
 
-See [docs/AUDIT_FINDINGS.md](docs/AUDIT_FINDINGS.md) for detailed findings and recommended priority order.
+See [the archived audit findings](docs/archive/2026-09/AUDIT_FINDINGS.md) for historical findings and priority context.
 
 #### Compositor Certification (Sway, Hyprland, KDE Plasma, GNOME)
 

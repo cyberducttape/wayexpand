@@ -27,7 +27,7 @@ matched expansion actually used a command.
 limits on worker completion before an injectable result is returned. The
 current path is `ExpansionEngine::dispatch_pending_with_policy()` followed by
 `ExpansionEngine::drain_completed_commands()` in
-[`crates/core/src/engine.rs`](../crates/core/src/engine.rs); daemon and IBus
+[`crates/core/src/engine.rs`](../../../crates/core/src/engine.rs); daemon and IBus
 boundary regressions cover the production injection/commit paths.
 
 ---
@@ -290,14 +290,18 @@ If fallback must exist (not recommended):
 command_backed: true,  // ← Fix: was false
 ```
 
-### Phase 3: Verify (NEXT REVIEW)
+### Phase 3: Verification at archival time
 
-- [ ] All three regression tests pass
-- [ ] `--locked` builds pass
-- [ ] `cargo fmt` passes
-- [ ] `cargo clippy` passes
-- [ ] Full test suite passes
-- [ ] No new security warnings
+- [x] All three regression tests pass
+- [x] `--locked` builds pass
+- [x] `cargo fmt` passes
+- [x] `cargo clippy` passes
+- [x] Full test suite passes
+- [x] No new security warnings
+
+These checks were completed when this historical finding was archived. They
+are retained as an archival record, not as the current release gate; use CI
+and [DEVELOPMENT.md](../../DEVELOPMENT.md) for current verification.
 
 ---
 

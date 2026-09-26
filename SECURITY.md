@@ -130,7 +130,7 @@ WayExpand can erase and replace the trigger. The current quiet-period and
 held-key mitigations are best-effort only; they do not make replacement atomic.
 Do not use evdev where a lossless replacement guarantee is required. The
 architectural boundary and the risks of an `EVIOCGRAB` proxy are documented in
-[docs/P0_3_DECISION_REQUIRED.md](docs/P0_3_DECISION_REQUIRED.md).
+[docs/adr/0001-evdev-best-effort-semantics.md](docs/adr/0001-evdev-best-effort-semantics.md).
 
 Backends must document their permission requirements explicitly:
 

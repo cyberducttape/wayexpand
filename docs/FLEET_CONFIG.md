@@ -65,7 +65,7 @@ table in a fleet layer is rejected. In daemon fleet mode, that root policy's
 |--------|-------------------|-------|
 | Expansion trigger | Hard error, rejected | Fail-closed: prevents accidental overwrites. Use distinct trigger names. |
 | Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
-| Settings (max_replacement_size, etc.) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins. |
+| Settings (`max_buffer_chars`, `undo_chord`, `font_scale`, `libei_token_persistence`) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins; disallowed pack settings are filtered before precedence is resolved. |
 | Organization policy | Root policy only | `/etc/wayexpand/policy.toml` is the administrator security-policy source. |
 | Curated packs | Filtered by root policy | `allowed_packs` restricts which packs are active in daemon fleet mode. |
 | Base config | Appended last (lowest priority) | Fleet layers are merged first, then base config expansions/hotkeys are appended. Base settings only override if fleet has no settings. |

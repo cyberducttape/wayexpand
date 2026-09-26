@@ -149,6 +149,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [IBUS_ENGINE.md](IBUS_ENGINE.md) | IBus users and contributors | IBus engine behavior and protocol boundary |
+| [adr/0001-evdev-best-effort-semantics.md](adr/0001-evdev-best-effort-semantics.md) | Maintainers and administrators | Accepted evdev semantics decision |
 | [RELEASE_PROMOTION_GUIDE.md](../RELEASE_PROMOTION_GUIDE.md) | Release maintainers | Release and package promotion checks |
 
 ### Historical Design and Audit Records
@@ -158,10 +159,12 @@ and status snapshots are not a substitute for the current contracts above.
 
 | Document | Purpose |
 |----------|---------|
-| [V13_CRITICAL_REGRESSIONS.md](V13_CRITICAL_REGRESSIONS.md) | Historical v1.3 regression findings and fixes |
-| [JOURNEY_TO_V13.md](JOURNEY_TO_V13.md) | Historical v1.2/v1.3 implementation narrative |
-| [P1_ARCHITECTURE_ROADMAP.md](P1_ARCHITECTURE_ROADMAP.md) | Historical P1 architecture roadmap |
-| [ROADMAP_P2_IMPROVEMENTS.md](../ROADMAP_P2_IMPROVEMENTS.md) | Historical P2 audit follow-up roadmap |
+| [V13_CRITICAL_REGRESSIONS.md](archive/2026-09/V13_CRITICAL_REGRESSIONS.md) | Historical v1.3 regression findings and fixes |
+| [JOURNEY_TO_V13.md](archive/2026-09/JOURNEY_TO_V13.md) | Historical v1.2/v1.3 implementation narrative |
+| [P1_ARCHITECTURE_ROADMAP.md](archive/2026-09/P1_ARCHITECTURE_ROADMAP.md) | Historical P1 architecture roadmap |
+| [ROADMAP_P2_IMPROVEMENTS.md](archive/2026-09/ROADMAP_P2_IMPROVEMENTS.md) | Historical P2 audit follow-up roadmap |
+| [P0_3_DECISION_REQUIRED.md](archive/2026-09/P0_3_DECISION_REQUIRED.md) | Superseded evdev decision draft |
+| [AUDIT_FINDINGS.md](archive/2026-09/AUDIT_FINDINGS.md) | Historical audit findings and priorities |
 
 ---
 

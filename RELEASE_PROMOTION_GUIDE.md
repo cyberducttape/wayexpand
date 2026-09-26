@@ -2,14 +2,10 @@
 
 This guide covers the manual steps needed to promote releases on GitHub and manage package repositories.
 
-## v1.1.2 promotion (superseded)
+## Current release promotion
 
-The original v1.1.2 promotion task is no longer actionable: GitHub's current
-`/releases/latest` URL resolves to the newer v1.2 release. There is no reason
-to mark v1.1.2 latest retroactively. Use the same five-minute check whenever a
-new release is published.
-
-**Root Cause:** GitHub's `/releases/latest` resolves to whichever release was marked "Set as the latest release" in the UI.
+Use this short check for each new stable release. The version-specific history
+of earlier promotions belongs in the changelog, not in the active procedure.
 
 ### Manual Steps
 
@@ -17,7 +13,7 @@ new release is published.
    - Go to https://github.com/cyberducttape/wayexpand/releases
 
 2. **Find the current release**
-   - Select the newest intended stable release
+   - Select the intended stable release for the current version
    - Click the three-dot menu icon next to the release title
 
 3. **Promote to Latest**
@@ -37,7 +33,7 @@ new release is published.
 
 **Time Required:** 5 minutes  
 **Effort:** Manual UI actions only  
-**When:** Today (before any new release announcements)
+**When:** Before announcing each release
 
 ---
 
@@ -65,7 +61,7 @@ new release is published.
      --nowait \
      --enable-net=on \
      wayexpand \
-     "https://github.com/cyberducttape/wayexpand/archive/v1.1.2.tar.gz"
+     "https://github.com/cyberducttape/wayexpand/archive/v1.2.0.tar.gz"
    ```
 
 3. **Monitor Build**
@@ -112,7 +108,7 @@ If you prefer not to maintain a Copr repo:
 
 rustPlatform.buildRustPackage rec {
   pname = "wayexpand";
-  version = "1.1.2";
+  version = "1.2.0";
 
   src = fetchFromGitHub {
     owner = "cyberducttape";

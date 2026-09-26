@@ -264,9 +264,9 @@ can restore authorization on reconnect. Setting
 
 ## References
 
-- [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md) — Detailed feature roadmap
-- [SECURITY.md](../SECURITY.md) — Threat model and vulnerability disclosure
-- [COMPATIBILITY.md](COMPATIBILITY.md) — Stability guarantees
-- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — Current backend/compositor status
-- [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) — Testing procedures
-- [ACTION_BROKER_DESIGN.md](ACTION_BROKER_DESIGN.md) — Security gate for v1.3
+- [PROFESSIONAL_ROADMAP.md](../../../PROFESSIONAL_ROADMAP.md) — Detailed feature roadmap
+- [SECURITY.md](../../../SECURITY.md) — Threat model and vulnerability disclosure
+- [COMPATIBILITY.md](../../COMPATIBILITY.md) — Stability guarantees
+- [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) — Current backend/compositor status
+- [INTEGRATION_TESTING.md](../../INTEGRATION_TESTING.md) — Testing procedures
+- [ACTION_BROKER_DESIGN.md](../../ACTION_BROKER_DESIGN.md) — Security gate for v1.3

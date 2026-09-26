@@ -2,8 +2,8 @@
 
 > Historical design roadmap. Proposed APIs and status statements below describe
 > the planning snapshot, not the current implementation. See
-> [`BACKENDS.md`](BACKENDS.md), [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md), and
-> [`SECURITY.md`](../SECURITY.md) for current status.
+> [`BACKENDS.md`](../../BACKENDS.md), [`SUPPORT_MATRIX.md`](../../SUPPORT_MATRIX.md), and
+> [`SECURITY.md`](../../../SECURITY.md) for current status.
 
 This document outlines P1 architectural debt that requires refactoring for full correctness and security.
 
@@ -174,6 +174,6 @@ Each P1 fix should include:
 
 ## See Also
 
-- [SECURITY.md](../SECURITY.md) - Security model and guarantees
-- [BACKENDS.md](BACKENDS.md) - Backend limitations and roadmap
-- [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md) - Full feature roadmap
+- [SECURITY.md](../../../SECURITY.md) - Security model and guarantees
+- [BACKENDS.md](../../BACKENDS.md) - Backend limitations and roadmap
+- [PROFESSIONAL_ROADMAP.md](../../../PROFESSIONAL_ROADMAP.md) - Full feature roadmap

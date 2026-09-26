@@ -271,7 +271,7 @@ evdev, ensure your deployment model accepts this tradeoff (see SECURITY.md).
 Evdev is also a best-effort timing backend: because capture is non-exclusive,
 the application may receive the terminating key before WayExpand can erase and
 replace the trigger. The quiet-period mitigation cannot make this atomic. See
-[P0_3_DECISION_REQUIRED.md](P0_3_DECISION_REQUIRED.md) for the architectural
+[ADR 0001](adr/0001-evdev-best-effort-semantics.md) for the architectural
 boundary and the risks of a future exclusive proxy.
 
 **Keyboard layout handling:**
