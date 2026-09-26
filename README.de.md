@@ -162,11 +162,12 @@ systemctl --user status wayexpand-evdev.service
 wayexpand status
 ```
 
-Der `wayexpand-evdev.service`-Dienst startet nach einem Fehler bewusst
-**nicht** automatisch neu: das `libei`-Backend verbindet sich über das
-RemoteDesktop-Portal ohne dauerhafte Zustimmung, jeder Verbindungsversuch
-zeigt also einen neuen Berechtigungsdialog. Nach einem Compositor-Neustart
-oder Portal-Problem: `systemctl --user restart wayexpand-evdev.service`.
+Der `wayexpand-evdev.service`-Dienst startet nach Fehlern mit
+`Restart=on-failure` automatisch neu. Das `libei`-Backend speichert das
+Portal-Einwilligungstoken; nach der ersten Freigabe benötigen Neustarts
+normalerweise keinen neuen Berechtigungsdialog. Nach einem Compositor-Neustart
+oder Portal-Problem kann ein manueller Neustart weiterhin hilfreich sein:
+`systemctl --user restart wayexpand-evdev.service`.
 
 Details zur Problembehebung: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

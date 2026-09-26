@@ -112,10 +112,12 @@ handling. Hotkey completion is logged asynchronously; a full action queue
 drops the action with a warning rather than making the input loop wait. Output
 is applied only while the trigger remains the newest processed input. If the
 user types, changes focus, pauses, or reloads configuration first, the output
-is discarded rather than risking deletion at a moved cursor. Successful stale
-invocations still populate a configured cache for the next match.
-The program inherits the daemon's user environment, receives no stdin, and
-has stderr discarded. Output is capped at 1 MiB, arguments are bounded, and
+is discarded rather than risking deletion at a moved cursor. Successful
+results from stale invocations are discarded before cache updates, so they do
+not populate the command cache. By default, the program receives the minimal
+environment described above, receives no stdin, and has stderr discarded. Only
+`environment = "inherit"` passes the daemon's user environment to the child.
+Output is capped at 1 MiB, arguments are bounded, and
 the timeout is limited to 1–5000 milliseconds. A missing program, non-zero
 exit, timeout, invalid UTF-8 result, or oversized result produces no
 expansion and is never retried as shell text. Commands are deliberately not
