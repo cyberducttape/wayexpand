@@ -55,4 +55,20 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" "$project_di
     fi
 done
 
+# License files must be declared at the same path where each package installs
+# them. This catches RPM's easy-to-miss distinction between the source file
+# name and the generated %{_licensedir}/%{name}/ path.
+grep -q -F '%license %{_licensedir}/%{name}/LICENSE' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' "RPM spec does not package the installed license path" >&2
+    exit 1
+}
+grep -q -F 'usr/share/licenses/wayexpand/LICENSE' "$project_dir/PKGBUILD" || {
+    printf '%s\n' "Arch package does not install the license" >&2
+    exit 1
+}
+test -f "$project_dir/debian/copyright" || {
+    printf '%s\n' "Debian package is missing debian/copyright" >&2
+    exit 1
+}
+
 printf '%s\n' "distribution manifest check passed"
