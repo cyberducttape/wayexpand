@@ -12,9 +12,10 @@ override_dh_clean:
 
 override_dh_auto_configure:
 	if [ ! -f .cargo/config.toml ] || [ ! -d vendor ]; then \
-		mkdir -p .cargo; \
-		echo "Generating vendored dependencies for offline build..."; \
-		CARGO_NET_OFFLINE=false cargo vendor --locked vendor/ > .cargo/config.toml; \
+		echo "error: Debian builds require the vendored source archive" >&2; \
+		echo "       build from wayexpand-<version>-vendored.tar.gz" >&2; \
+		echo "       clean Launchpad Git recipes cannot fetch crates.io dependencies" >&2; \
+		exit 1; \
 	fi
 	true
 

@@ -43,6 +43,7 @@ makepkg -si
 
 ```bash
 # Debian packaging expects the vendored release archive for offline builds.
+# Do not build the clean Git checkout: Launchpad builders cannot fetch crates.io.
 # Replace ${VERSION} with the current release version (e.g., 1.2.0)
 tar -xzf wayexpand-${VERSION}-vendored.tar.gz
 cd wayexpand-${VERSION}

@@ -15,6 +15,17 @@ for relative in \
     }
 done
 
+# Debian/Launchpad builds are network-isolated and must consume the vendored
+# source archive rather than trying to regenerate dependencies in the chroot.
+if grep -q -F 'CARGO_NET_OFFLINE=false cargo vendor' "$project_dir/debian/rules"; then
+    printf '%s\n' "Debian rules must not fetch crates during an offline build" >&2
+    exit 1
+fi
+grep -q -F 'require the vendored source archive' "$project_dir/debian/rules" || {
+    printf '%s\n' "Debian rules do not fail clearly when vendor/ is absent" >&2
+    exit 1
+}
+
 for rule in "$project_dir/udev/71-wayexpand-evdev.rules" \
     "$project_dir/udev/69-wayexpand-evdev-uaccess.rules"; do
     grep -q -F 'ENV{ID_INPUT_KEYBOARD}=="?*"' "$rule" || {
