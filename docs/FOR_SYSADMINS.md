@@ -596,11 +596,15 @@ RestrictAddressFamilies=AF_UNIX  # No network
 
 Commands that work manually may fail in expansions if they need write access.
 
-**Validation:** Test with `wayexpand-gui` Preview button, check logs:
+**Validation:** Exercise the expansion through the running daemon/service so
+the command is subject to the actual systemd sandbox, then check logs:
 ```bash
 journalctl --user -u wayexpand-input-method.service -f
 # Type a trigger with a program, observe result
 ```
+The GUI Preview button runs in the GUI process outside this sandbox; use it
+only to validate replacement output and command behavior independent of
+systemd restrictions.
 
 ## Scaling Considerations
 

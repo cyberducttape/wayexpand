@@ -50,8 +50,9 @@ Simulate input and report matching expansions without starting the daemon.
 .B test-hotkey CHORD [--json] [CONFIG]
 Resolve a hotkey without executing its action.
 .TP
-.B preview TRIGGER [--json] [CONFIG]
-Preview a replacement, optionally with an application context.
+.B preview TRIGGER [--preview-app APP|--preview-app=APP] [--json] [CONFIG]
+Preview a replacement. The optional application context is supplied with
+--preview-app APP or --preview-app=APP.
 .TP
 .B list [--json] [CONFIG]
 List configured expansions and hotkeys.
@@ -59,8 +60,9 @@ List configured expansions and hotkeys.
 .B search QUERY [--json] [CONFIG]
 Search configured triggers, descriptions, and tags.
 .TP
-.B validate CONFIG
-Parse and validate a configuration file without starting the daemon.
+.B validate [--fleet] [--json] [CONFIG]
+Parse and validate a configuration file without starting the daemon. With
+--fleet, validate the merged fleet configuration; --json selects machine-readable output.
 .TP
 .B backup [CONFIG] [DESTINATION]
 Create a private, non-overwriting configuration backup.
