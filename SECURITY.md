@@ -73,13 +73,21 @@ runs with `ProtectHome=read-only`, `ProtectSystem=strict`, memory write-execute
 protection, and other sandboxing. This means a command that works when typed
 manually may fail when invoked as a WayExpand expansion if it tries to:
 - Write to `$HOME` or system directories
-- Connect to the network or D-Bus
+- Connect to the network (IPv4, IPv6)
+- Access D-Bus services that require home-directory state or system-wide resources
 - Access files outside `/tmp` or `/run`
 - Perform other operations restricted by the systemd unit
 
 The systemd unit is deliberately restrictive to limit the blast radius of a
 compromised or misconfigured command. Do not relax the restrictions in
 `systemd/wayexpand.service` or use a wrapper script as a way to bypass them.
+
+The unit permits Unix domain sockets (`RestrictAddressFamilies=AF_UNIX`), which
+are required for portals, D-Bus, and systemd user sockets. However, most D-Bus
+services require access to the home directory or system-wide state, so they are
+still blocked by the filesystem isolation settings above. A command that works
+with D-Bus when run manually may fail under the daemon's constraints.
+
 There is currently no supported path for SRE commands that require network,
 home-directory, or broader filesystem access. The planned Action Broker is a
 separate privilege/environment boundary for that use case; it must receive an
