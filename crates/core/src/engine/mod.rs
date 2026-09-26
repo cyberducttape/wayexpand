@@ -1141,32 +1141,38 @@ impl ExpansionEngine {
             .stderr(Stdio::null());
         configure_process_group(&mut command);
         let mut child = command.spawn().map_err(HotkeyError::Spawn)?;
+        // Capture PID upfront to avoid use-after-reap issues. The child's PID is
+        // valid for the entire lifetime of this function, even after the process exits.
+        let pid = child.id();
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
-        let status = loop {
+        let (status, was_reaped) = loop {
             if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-                kill_process_group(&child);
+                kill_process_group_by_pid(pid);
                 let _ = child.wait();
                 return Err(HotkeyError::Timeout(result.command.timeout_ms));
             }
             match child.try_wait() {
-                Ok(Some(status)) => break status,
+                Ok(Some(status)) => break (status, true),
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
                 Ok(None) => {
-                    kill_process_group(&child);
+                    kill_process_group_by_pid(pid);
                     let _ = child.wait();
                     return Err(HotkeyError::Timeout(result.command.timeout_ms));
                 }
                 Err(error) => {
-                    kill_process_group(&child);
+                    kill_process_group_by_pid(pid);
                     let _ = child.wait();
                     return Err(HotkeyError::Spawn(error));
                 }
             }
         };
 
-        // Best-effort cleanup for ordinary descendants; direct commands are
-        // trusted executable content, not a service/cgroup containment model.
-        kill_process_group(&child);
+        // Best-effort cleanup for ordinary descendants. Only kill the process group
+        // if the child is still alive (wasn't reaped). For already-reaped processes,
+        // the kernel has already cleaned up the process group.
+        if !was_reaped {
+            kill_process_group_by_pid(pid);
+        }
 
         if status.success() {
             Ok(())
@@ -2098,13 +2104,16 @@ fn run_command_fallback(
 #[cfg(unix)]
 struct ChildGuard {
     child: Option<Child>,
+    pid: Option<u32>,
 }
 
 #[cfg(unix)]
 impl Drop for ChildGuard {
     fn drop(&mut self) {
+        if let Some(pid) = self.pid {
+            kill_process_group_by_pid(pid);
+        }
         if let Some(ref mut child) = self.child {
-            kill_process_group(child);
             let _ = child.wait();
         }
     }
@@ -2117,7 +2126,11 @@ fn run_command_unix(
     timeout_ms: u64,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
-    let mut guard = ChildGuard { child: Some(child) };
+    let pid = child.id();
+    let mut guard = ChildGuard {
+        child: Some(child),
+        pid: Some(pid),
+    };
     set_nonblocking_stdout(&stdout)?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut bytes = Vec::new();
@@ -2147,8 +2160,9 @@ fn run_command_unix(
     // setsid(), and keep stdout open. Nonblocking reads below prevent that
     // case from pinning a WayExpand reader thread; service/cgroup containment
     // belongs in the planned Action Broker.
-    if let Some(child) = &guard.child {
-        kill_process_group(child);
+    if let Some(pid) = guard.pid {
+        kill_process_group_by_pid(pid);
+        guard.pid = None; // Prevent duplicate killing in the Drop handler
     }
 
     let drain_deadline = Instant::now() + Duration::from_millis(100);
@@ -2238,7 +2252,12 @@ fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
 fn kill_process_group(child: &std::process::Child) {
-    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+    kill_process_group_by_pid(child.id());
+}
+
+#[cfg(unix)]
+fn kill_process_group_by_pid(pid: u32) {
+    if let Ok(pid) = libc::pid_t::try_from(pid) {
         unsafe {
             libc::kill(-pid, libc::SIGKILL);
         }
