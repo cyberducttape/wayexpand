@@ -1,0 +1,93 @@
+.TH WAYEXPAND 1 "September 2026" "WayExpand 1.2.0" "User Commands"
+.SH NAME
+wayexpand \- validate and manage WayExpand text-expansion configuration
+.SH SYNOPSIS
+.B wayexpand
+.I COMMAND
+\&[\fIOPTIONS\fR]
+.SH DESCRIPTION
+WayExpand is a local Wayland text expander. The daemon performs expansion;
+this command provides setup, status, editing, diagnostics, certification,
+configuration management, and configuration validation.
+.SH COMMANDS
+.TP
+.B setup
+Interactively choose a compatibility mode and activate the safest available
+path after displaying session capabilities and safety tradeoffs. Use
+--mode recommended|maximum|experimental and --yes for reviewed automation.
+.TP
+.B edit [CONFIG]
+Open the graphical snippet editor.
+.TP
+.B status [--json]
+Show the active daemon status. The JSON form is stable for automation.
+.TP
+.B doctor [--json] [CONFIG]
+Report available input and output backends and their compatibility.
+.TP
+.B certify [--json]
+Produce a machine-readable local certification report. Protocol availability
+is not treated as end-to-end certification; untested scenarios remain visible.
+.TP
+.B fleet status [--json]
+Show the merged fleet configuration layers and their provenance.
+.TP
+.B import espanso FILE
+Import an Espanso YAML file and print the converted TOML configuration.
+.TP
+.B set-enabled TRIGGER on|off [CONFIG]
+Enable or disable an expansion and save the configuration atomically.
+.TP
+.B set-mode TRIGGER immediate|word-boundary [CONFIG]
+Set an expansion's matching mode and save the configuration atomically.
+.TP
+.B reload|pause|resume|stop [--json]
+Control a running daemon.
+.TP
+.B test TEXT [--json] [CONFIG]
+Simulate input and report matching expansions without starting the daemon.
+.TP
+.B test-hotkey CHORD [--json] [CONFIG]
+Resolve a hotkey without executing its action.
+.TP
+.B preview TRIGGER [--preview-app APP|--preview-app=APP] [--json] [CONFIG]
+Preview a replacement. The optional application context is supplied with
+--preview-app APP or --preview-app=APP.
+.TP
+.B list [--json] [CONFIG]
+List configured expansions and hotkeys.
+.TP
+.B search QUERY [--json] [CONFIG]
+Search configured triggers, descriptions, and tags.
+.TP
+.B validate [--fleet] [--json] [CONFIG]
+Parse and validate a configuration file without starting the daemon. With
+--fleet, validate the merged fleet configuration; --json selects machine-readable output.
+.TP
+.B backup [CONFIG] [DESTINATION]
+Create a private, non-overwriting configuration backup.
+.TP
+.B backend
+Show implementation and environment status for backend paths.
+.TP
+.B explain-backend
+Explain the expert backend selection decision and its tradeoffs.
+.TP
+.B portal status|reset
+Inspect or forget the stored libei portal restoration token. Resetting the
+local token may cause the portal to ask for access again; it does not revoke a
+portal grant already held by another session.
+.TP
+.B help | version
+Show command help or print the installed version.
+.SH FILES
+.TP
+.I ~/.config/wayexpand/expansions.toml
+Per-user expansion configuration.
+.TP
+.I $XDG_RUNTIME_DIR/wayexpand.sock
+User control socket used by the daemon and GUI.
+.SH SEE ALSO
+.I /usr/share/doc/wayexpand/
+.SH REPORTING BUGS
+Report issues at https://github.com/cyberducttape/wayexpand/issues.

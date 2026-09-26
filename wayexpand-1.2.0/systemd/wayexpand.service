@@ -1,0 +1,76 @@
+[Unit]
+Description=WayExpand stdin test harness (not installed for ordinary users)
+After=graphical-session.target
+PartOf=graphical-session.target
+Conflicts=wayexpand-input-method.service wayexpand-evdev.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# ⚠️ WARNING: This unit runs with --source=stdin, a test harness that only
+# reads from standard input. It is not a working text expander for normal use.
+#
+# For production deployment, use one of these instead:
+#
+#   wayexpand-input-method.service
+#       (GNOME and compositors with input-method-v2 support)
+#
+#   wayexpand-evdev.service
+#       (KDE Plasma, Sway, Hyprland, and other compositors without
+#        input-method-v2 — read SECURITY.md and docs/OPERATIONS.md first)
+#
+# This unit exists only for testing the daemon configuration in isolation.
+
+[Service]
+Type=simple
+Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
+ExecStartPre=%h/.local/bin/wayexpand validate
+ExecStart=%h/.local/bin/wayexpand-daemon --source=stdin
+Restart=on-failure
+RestartSec=2s
+SuccessExitStatus=SIGTERM
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wayexpand
+NoNewPrivileges=yes
+UMask=0077
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
+# are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
+# CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
+# respectively) from the bounding set, which requires CAP_SETPCAP. A
+# `systemctl --user` service never has that, so any of these crash-loops the
+# unit with "Failed to drop capabilities: Operation not permitted" (exit
+# 218/CAPABILITIES) on an ordinary desktop login. The unprivileged uid this
+# runs as could never use those capabilities anyway.
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+# The daemon has a capture loop, control/reload workers, command and hotkey
+# workers, and backend threads. Keep a bounded ceiling with room for all of
+# them; 16 leaves no headroom for the hotkey worker under systemd.
+TasksMax=32
+LimitNOFILE=64
+LimitCORE=0
+
+# The stdin harness can use the same libei output path during integration
+# tests, which persists a portal restoration token under this directory.
+ReadWritePaths=%t %h/.config/wayexpand
+
+[Install]
+WantedBy=graphical-session.target

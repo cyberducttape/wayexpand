@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "targets": [
+    {
+      "id": "kde",
+      "display": "KDE Plasma / KWin",
+      "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
+      "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
+      "requires_password_field_check": true,
+      "application_filter": "supported",
+      "window_tracker": "KWin application tracker"
+    },
+    {
+      "id": "gnome",
+      "display": "GNOME Shell / Mutter",
+      "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
+      "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
+    },
+    {
+      "id": "sway",
+      "display": "Sway / wlroots",
+      "input_paths": ["evdev+wlroots"],
+      "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
+    },
+    {
+      "id": "hyprland",
+      "display": "Hyprland / wlroots",
+      "input_paths": ["evdev+wlroots"],
+      "toolkits": ["GTK", "Qt"],
+      "required_client_markers": ["gtk", "qt", "password"],
+      "requires_password_field_check": true,
+      "application_filter": "unavailable",
+      "window_tracker": "none"
+    }
+  ],
+  "required_scenarios": [
+    "printable-press-release",
+    "held-keys-repeat",
+    "modifier-navigation",
+    "unicode-combining",
+    "multiline-rapid",
+    "password-field",
+    "focus-cross-window",
+    "config-reload",
+    "daemon-restart",
+    "compositor-restart",
+    "failed-insertion",
+    "ime-preedit"
+  ],
+  "required_layout_profiles": [
+    "us",
+    "de",
+    "fr",
+    "altgr",
+    "multi-layout-switching"
+  ]
+}

@@ -1,0 +1,208 @@
+# Security policy
+
+## Reporting a vulnerability
+
+Please report suspected security vulnerabilities privately, not through a
+public GitHub issue.
+
+- Preferred: open a
+  [private security advisory](https://github.com/cyberducttape/wayexpand/security/advisories/new)
+  on GitHub ("Security" tab → "Report a vulnerability"). This reaches
+  maintainers directly without disclosing the issue publicly.
+- Include the affected version/commit, the backend(s) involved, reproduction
+  steps or a proof of concept, and the impact you believe it has.
+
+We aim to acknowledge new reports within 5 business days and to provide a
+status update (triage result, expected timeline) within 14 days. If a report
+is confirmed, we will coordinate a disclosure timeline with the reporter and
+credit them in the release notes unless they prefer to stay anonymous.
+Confirmed security fixes ship as patch releases as soon as they are ready
+rather than on a fixed embargo schedule.
+
+Do not report non-security bugs through the advisory process — use a regular
+GitHub issue for those.
+
+## Security model
+
+WayExpand is intended to run as the unprivileged desktop user. It must not be
+run as root.
+
+For a concise table of protected, partially protected, and out-of-scope
+threats, see [THREAT_MODEL.md](THREAT_MODEL.md).
+
+The engine supports `InputEvent::FocusChanged { sensitive: true }`. An input
+source that can identify password or other sensitive fields must emit that
+event. The engine then clears its rolling buffer and ignores text until the
+focus becomes non-sensitive again.
+
+The input-method source begins every activation in this disabled state and
+only enables capture after receiving a non-sensitive content type. Password,
+hidden-text, sensitive-data, and unknown values are treated as sensitive.
+
+The daemon never logs raw input, trigger names, or replacement contents. Normal
+expansion logs contain only trigger character counts, erase counts, and
+replacement byte counts. Diagnostic reports should still avoid including
+configuration contents or typed text.
+
+Configuration reload/startup failures are also logged without parser detail;
+use `wayexpand doctor` when detailed configuration diagnostics are needed.
+
+Configuration files must be regular files and must not be writable by group or
+other users. Every ancestor directory must be owned by the current user or root
+and must be non-group/world-writable unless it has sticky protection. Root-owned
+sticky directories such as `/tmp` are permitted because their deletion/rename
+policy protects entries. Sticky mode permits the standard `/tmp` permission
+pattern but does not waive the ancestor ownership requirement. Configuration
+files must be owned by the current user or root.
+
+Symlinked configuration paths are resolved before ancestor validation and file
+opening. This prevents a link swap from redirecting a trusted configuration
+path into an untrusted directory.
+
+Command expansions are opt-in executable user content. They invoke a named
+program directly, never through a shell, with no stdin, discarded stderr,
+bounded arguments, a maximum five-second runtime, and a 1 MiB UTF-8 stdout
+limit. Non-zero exits, timeouts, invalid output, and oversized output fail
+closed without emitting a replacement. A command can still have side effects
+as the desktop user, so command-enabled configuration must remain protected by
+the ownership and permission checks above.
+
+**Important:** Command-backed expansions run under the systemd user service's
+security hardening constraints (see `systemd/wayexpand.service`). The daemon
+runs with `ProtectHome=read-only`, `ProtectSystem=strict`, memory write-execute
+protection, and other sandboxing. This means a command that works when typed
+manually may fail when invoked as a WayExpand expansion if it tries to:
+- Write to `$HOME` or system directories
+- Connect to the network or D-Bus
+- Access files outside `/tmp` or `/run`
+- Perform other operations restricted by the systemd unit
+
+The systemd unit is deliberately restrictive to limit the blast radius of a
+compromised or misconfigured command. Do not relax the restrictions in
+`systemd/wayexpand.service` or use a wrapper script as a way to bypass them.
+There is currently no supported path for SRE commands that require network,
+home-directory, or broader filesystem access. The planned Action Broker is a
+separate privilege/environment boundary for that use case; it must receive an
+explicit action name and enforce its own allowlist, environment, cwd, network
+policy, timeout, output limit, and audit result. See
+[`docs/ACTION_BROKER_DESIGN.md`](docs/ACTION_BROKER_DESIGN.md).
+
+**Note:** The `wayexpand-gui` preview feature does NOT run commands under the
+daemon's systemd sandbox restrictions. For testing command behavior under actual
+daemon constraints, either manually trigger the expansion during typing or check
+the daemon's `journalctl --user` output for error details.
+
+The input-method source fails closed when it cannot safely pass through a
+non-text key, preserve shortcut modifiers, or determine a UTF-8-safe Backspace
+range from surrounding text. Unsupported non-text keys require the daemon's
+libei pass-through injector; if that injector is unavailable or fails, the
+source reports an error and reconnects rather than silently discarding keys.
+Malformed protocol state remains fatal rather than risking text corruption.
+
+The evdev source (`--source=evdev`) trades away a real security property the
+other sources have: it reads keyboard events directly from the kernel
+(`/dev/input/event*`) rather than through a Wayland protocol, so it has no way
+to learn which application field has focus. It therefore **never** suspends
+matching in password or other sensitive fields the way the input-method source
+does. Only enable it where that tradeoff is acceptable.
+
+Granting evdev access is a separate, explicit, root-requiring step
+(`scripts/install-evdev-permissions.sh`, `--dry-run` first), never run
+automatically by the user installers or base distro packages. WayExpand's udev
+templates target udev keyboard-class event nodes. The active-seat mode uses
+logind/uaccess ACLs and does not add the user to the broad `input` group. The
+legacy input-group mode also adds the invoking user to `input`; that group may
+grant broader raw input-event access depending on the distribution's default
+input-device policy. Run `sudo scripts/install-evdev-permissions.sh --uninstall`
+to reverse WayExpand's installed evdev policy and remove the invoking user from
+`input` when appropriate.
+
+This input-group path is the current legacy/simple access model, not the
+long-term preferred architecture. A small device broker remains an investigation
+candidate; session, seat, hotplug, and distribution behavior must be tested
+before it can replace the current path. See
+[docs/EVDEV_ACCESS_DESIGN.md](docs/EVDEV_ACCESS_DESIGN.md) for the
+investigation plan and acceptance criteria.
+
+Evdev also has a correctness limitation independent of permissions: capture is
+non-exclusive, so the application can receive a terminating key before
+WayExpand can erase and replace the trigger. The current quiet-period and
+held-key mitigations are best-effort only; they do not make replacement atomic.
+Do not use evdev where a lossless replacement guarantee is required. The
+architectural boundary and the risks of an `EVIOCGRAB` proxy are documented in
+[docs/adr/0001-evdev-best-effort-semantics.md](docs/adr/0001-evdev-best-effort-semantics.md).
+
+Backends must document their permission requirements explicitly:
+
+- direct libei/EIS requires an explicitly configured `LIBEI_SOCKET`; portal
+  libei requires explicit backend selection and an approved desktop
+  remote-desktop session;
+- wlroots virtual-keyboard is compositor-specific and requires the protocol
+  to be available;
+- uinput backend is not currently implemented;
+- plugin execution must be disabled by default and sandboxed if added.
+
+The control socket lives at `$XDG_RUNTIME_DIR/wayexpand.sock` (or the explicit
+`WAYEXPAND_SOCKET` path), is resolved against a validated parent, created under
+a restrictive `umask`, and finalized at mode `0600`. Its immediate parent and
+all ancestors must be owned by the current user or root and must not be
+group/world-writable unless the directory has the sticky bit set; this includes
+the immediate socket parent, so a sticky directory such as `/tmp` is allowed.
+Stale-socket cleanup requires both
+the current UID and the original device/inode identity. The daemon refuses to
+remove non-socket or differently owned paths. Service units also restrict
+memory, tasks, file descriptors, and restart frequency.
+They additionally isolate temporary files, devices, mounts, kernel interfaces,
+process visibility, realtime scheduling, and syscall architecture through the
+shipped systemd user units.
+
+## Command execution architecture limitations
+
+The current command-backed expansion architecture prioritizes safety at the cost
+of restrictive resource constraints. It is not an Action Broker and is not an
+SRE command-execution boundary:
+
+**Current design:**
+- Commands run directly in the daemon process, subject to systemd hardening
+- `ProtectHome=read-only`, `ProtectSystem=strict`, no network access
+- Prevents legitimate SRE tools from working: `kubectl`, `aws`, `vault`, `ssh`, etc.
+
+**Enterprise/SRE use case conflict:**
+A typical SRE might want:
+```toml
+[[expansion]]
+trigger = ":shortlist"
+[expansion.command]
+program = "kubectl"
+args = ["get", "svc", "-o", "wide"]
+```
+
+This command fails in the current sandbox and cannot be fixed without materially
+weakening the daemon's security posture for all users.
+
+**P1 mitigation: Action Broker architecture (not implemented)**
+
+Future versions will separate concerns:
+
+```
+Capture/Match/Injection Process (extremely locked down)
+         │
+         │ constrained IPC (command name + args only)
+         ▼
+Optional Action Broker (per-user policy engine)
+         └─ allowed executables whitelist
+         └─ network access policy
+         └─ filesystem access policy
+         └─ environment variable allowlist
+         └─ command timeouts and resource limits
+```
+
+Benefits:
+- Capture daemon stays extremely hardened, never touches the network or home dir
+- Action broker runs with exactly the permissions needed for each environment
+- Organization deploys `safe_mode = true` in config to completely disable command execution
+- Command policies are inspectable and auditable
+- Legitimate commands can be whitelisted by organization policy
+
+This approach is particularly valuable for the target audience: SREs and system
+administrators who need to trust WayExpand in hardened environments.

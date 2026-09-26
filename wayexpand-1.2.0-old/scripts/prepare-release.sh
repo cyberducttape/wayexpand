@@ -1,0 +1,238 @@
+#!/bin/sh
+# Prepare a WayExpand release by syncing version across all sources.
+# This script updates Cargo.toml/Cargo.lock, CHANGELOG.md, debian/changelog,
+# distro and desktop metadata, computes the PKGBUILD checksum from the staged
+# release tree, and creates a git tag.
+#
+# Usage:
+#   ./scripts/prepare-release.sh 1.2.0
+#
+# The script will:
+#   1. Verify the new version format (X.Y.Z)
+#   2. Update Cargo.toml/Cargo.lock, CHANGELOG.md, distro and desktop metadata
+#   3. Update debian/changelog with a new entry
+#   4. Create the deterministic source archive and checksum
+#   5. Commit the complete release metadata as Stephan Loesevitz
+#   6. Create a git tag
+#
+# After running, review the commit/tag, then push:
+#   git push origin main v1.2.0
+
+set -eu
+
+if [ $# -ne 1 ]; then
+    printf '%s\n' "usage: $0 <version>" >&2
+    printf '%s\n' "example: $0 1.2.0" >&2
+    exit 2
+fi
+
+new_version="$1"
+
+# Validate version format (X.Y.Z)
+if ! printf '%s' "$new_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    printf '%s\n' "error: version must be in format X.Y.Z (got: $new_version)" >&2
+    exit 2
+fi
+
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$project_dir"
+
+# Check if either the canonical release tag or a legacy unprefixed alias exists.
+# Release automation only accepts vX.Y.Z, so leaving an unprefixed tag behind
+# would create an ambiguous public reference to a different source state.
+if git rev-parse "v$new_version" >/dev/null 2>&1; then
+    printf '%s\n' "error: tag v$new_version already exists" >&2
+    exit 1
+fi
+if git rev-parse "refs/tags/$new_version" >/dev/null 2>&1; then
+    printf '%s\n' "error: unprefixed tag $new_version already exists; remove it deliberately before releasing" >&2
+    exit 1
+fi
+
+# Check for uncommitted changes
+if ! git diff-index --quiet HEAD --; then
+    printf '%s\n' "error: working directory has uncommitted changes" >&2
+    printf '%s\n' "stage and commit them first" >&2
+    exit 1
+fi
+
+printf '%s\n' "Preparing release v$new_version..."
+
+previous_version=$(sed -n 's/^## \[\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\].*/\1/p' CHANGELOG.md | head -n1)
+if [ -z "$previous_version" ]; then
+    printf '%s\n' "error: could not determine the previous version from CHANGELOG.md" >&2
+    exit 1
+fi
+
+release_date=$(LANG=en_US.UTF-8 date '+%Y-%m-%d')
+debian_date=$(LANG=en_US.UTF-8 date '+%a, %d %b %Y %H:%M:%S %z')
+
+# 1. Update Cargo.toml
+printf '%s\n' "Updating Cargo.toml..."
+sed -i.bak "s/^version = \"[^\"]*\"/version = \"$new_version\"/" Cargo.toml
+rm -f Cargo.toml.bak
+
+printf '%s\n' "Updating Cargo.lock workspace package versions..."
+lock_tmp=$(mktemp)
+awk -v version="$new_version" '
+    /^\[\[package\]\]$/ { wayexpand_package = 0 }
+    /^name = "wayexpand(-|\")/ { wayexpand_package = 1 }
+    wayexpand_package && /^version = "/ {
+        sub(/^version = "[^"]*"/, "version = \"" version "\"")
+        wayexpand_package = 0
+    }
+    { print }
+' Cargo.lock > "$lock_tmp"
+mv "$lock_tmp" Cargo.lock
+
+# 2. Update the human and distro changelogs.
+printf '%s\n' "Updating CHANGELOG.md..."
+changelog_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /^## \[[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\]/ {
+        print "## [" version "] - " date
+        print ""
+        print "Release v" version ". Move the unreleased entries above into this section before publishing."
+        print ""
+        inserted = 1
+    }
+    { print }
+' CHANGELOG.md > "$changelog_tmp"
+mv "$changelog_tmp" CHANGELOG.md
+
+links_tmp=$(mktemp)
+awk -v version="$new_version" -v previous="$previous_version" '
+    !inserted && /^\[Unreleased\]:/ {
+        print "[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v" version "...HEAD"
+        print "[" version "]: https://github.com/cyberducttape/wayexpand/compare/v" previous "...v" version
+        inserted = 1
+        next
+    }
+    { print }
+' CHANGELOG.md > "$links_tmp"
+mv "$links_tmp" CHANGELOG.md
+
+# 3. Update package metadata.
+printf '%s\n' "Updating PKGBUILD and wayexpand.spec..."
+sed -i.bak "s/^pkgver=.*/pkgver=$new_version/" PKGBUILD
+rm -f PKGBUILD.bak
+sed -i.bak \
+    "s#^source=.*#source=(\"https://github.com/cyberducttape/wayexpand/releases/download/v${new_version}/wayexpand-${new_version}.tar.gz\")#" \
+    PKGBUILD
+rm -f PKGBUILD.bak
+sed -i.bak "s/^Version:        .*/Version:        $new_version/" wayexpand.spec
+rm -f wayexpand.spec.bak
+metainfo_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /<releases>/ {
+        print
+        print "    <release version=\"" version "\" date=\"" date "\">"
+        print "      <description>"
+        print "        <p>Release v" version ". See CHANGELOG.md for details.</p>"
+        print "      </description>"
+        print "    </release>"
+        inserted = 1
+        next
+    }
+    { print }
+' io.github.cyberducttape.WayExpand.metainfo.xml > "$metainfo_tmp"
+mv "$metainfo_tmp" io.github.cyberducttape.WayExpand.metainfo.xml
+sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
+    desktop/wayexpand-ibus.xml
+rm -f desktop/wayexpand-ibus.xml.bak
+spec_tmp=$(mktemp)
+awk -v version="$new_version" -v date="$release_date" '
+    !inserted && /^%changelog$/ {
+        print
+        print "* " date " Stephan Loesevitz <stephan.loesevitz@gmail.com> - " version "-1"
+        print "- Release v" version
+        print ""
+        inserted = 1
+        next
+    }
+    { print }
+' wayexpand.spec > "$spec_tmp"
+mv "$spec_tmp" wayexpand.spec
+
+# 4. Update debian/changelog.
+printf '%s\n' "Updating debian/changelog..."
+(
+    printf '%s\n' "wayexpand ($new_version-1) focal; urgency=medium"
+    printf '%s\n' ""
+    printf '%s\n' "  * Release v$new_version"
+    printf '%s\n' ""
+    printf '%s\n' " -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  $debian_date"
+    printf '%s\n' ""
+    cat debian/changelog
+) > debian/changelog.tmp
+mv debian/changelog.tmp debian/changelog
+
+# Verify the version-bearing fields before making the commit.
+test "$(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | head -n1)" = "$new_version"
+test "$(sed -n 's/^pkgver=//p' PKGBUILD)" = "$new_version"
+test "$(sed -n 's/^Version: *//p' wayexpand.spec)" = "$new_version"
+test "$(sed -n "s/^wayexpand (\([^ -]*\)-.*/\1/p" debian/changelog | head -n1)" = "$new_version"
+test "$(sed -n 's/.*<release version=\"\([^\"]*\)\".*/\1/p' \
+    io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)" = "$new_version"
+test "$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' \
+    desktop/wayexpand-ibus.xml | head -n1)" = "$new_version"
+grep -q "^## \[$new_version\]" CHANGELOG.md
+
+# 5. Compute the source archive checksum before committing or tagging.
+#
+# PKGBUILD is excluded from the archive by .gitattributes, so its checksum
+# cannot change the bytes it verifies. The archive is built from the staged
+# release tree and the release workflow recreates the same archive from the
+# resulting tag.
+printf '%s\n' "Creating deterministic source archive and PKGBUILD checksum..."
+git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
+    io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
+    .gitattributes
+release_tree=$(git write-tree)
+archive_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release.XXXXXX")
+cleanup() {
+    rm -rf "$archive_dir"
+}
+trap cleanup EXIT
+archive_path="$archive_dir/wayexpand-${new_version}.tar.gz"
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
+    --prefix="wayexpand-${new_version}/" \
+    "$release_tree" | gzip -n > "$archive_path"
+checksum=$(sha256sum "$archive_path" | awk '{print $1}')
+sed -i.bak "s/^sha256sums=.*/sha256sums=('$checksum')/" PKGBUILD
+rm -f PKGBUILD.bak
+test "$(awk -F"'" '/^sha256sums=/ { print $2; exit }' PKGBUILD)" = "$checksum"
+
+# 6. Commit changes with the project maintainer identity.
+printf '%s\n' "Committing version updates..."
+git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
+    io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
+    .gitattributes
+git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
+    commit -m "release: version $new_version"
+
+# Verify the committed tree produces the exact checksum recorded in PKGBUILD.
+git archive --format=tar --mtime='1970-01-01 00:00:00' \
+    --prefix="wayexpand-${new_version}/" \
+    HEAD | gzip -n > "$archive_path"
+committed_checksum=$(sha256sum "$archive_path" | awk '{print $1}')
+test "$committed_checksum" = "$checksum"
+printf '%s\n' "✓ Final release archive checksum verified: $checksum"
+
+# 7. Create tag
+printf '%s\n' "Creating git tag v$new_version..."
+git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
+    tag -a "v$new_version" -m "Release v$new_version"
+
+printf '%s\n' ""
+printf '%s\n' "✓ Release v$new_version prepared successfully"
+printf '%s\n' ""
+printf '%s\n' "Next steps:"
+printf '%s\n' "  1. Review the commit: git log -1"
+printf '%s\n' "  2. Review the tag: git show v$new_version"
+printf '%s\n' "  3. Push to GitHub: git push origin main v$new_version"
+printf '%s\n' ""
+printf '%s\n' "The release workflow will then:"
+printf '%s\n' "  - Verify all versions match"
+printf '%s\n' "  - Build release binaries"
+printf '%s\n' "  - Create a GitHub release with prebuilt binaries"

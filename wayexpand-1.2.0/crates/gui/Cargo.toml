@@ -1,0 +1,21 @@
+[package]
+name = "wayexpand-gui"
+description = "Native Wayland graphical editor for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+eframe = { version = "0.31.1", default-features = false, features = ["wayland", "default_fonts", "glow"] }
+wayexpand-core = { path = "../core" }
+wayexpand-backend-ibus = { path = "../backend-ibus" }
+wayexpand-backend-input-method = { path = "../backend-input-method" }
+wayexpand-backend-wlroots = { path = "../backend-wlroots" }
+wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }

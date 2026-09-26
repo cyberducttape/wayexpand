@@ -1,0 +1,22 @@
+[package]
+name = "wayexpand-backend-wlroots"
+description = "wlroots virtual-keyboard output backend for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+wayland-client.workspace = true
+wayland-protocols-misc.workspace = true
+rustix = { version = "1", features = ["event"] }
+xkbcommon-rs.workspace = true
+unicode-segmentation.workspace = true
+wayexpand-core = { path = "../core" }

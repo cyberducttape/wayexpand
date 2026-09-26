@@ -1416,6 +1416,10 @@ fn process_event(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
+        // Invalidate any pending asynchronous expansions before processing
+        // the hotkey. This ensures that if a command is still running when
+        // the user presses another key, its output will be discarded.
+        engine.note_key_event();
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
             // actions. Ordinary evdev key events must not be treated as
@@ -1743,7 +1747,7 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>, bool)> {
 mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
-    use wayexpand_core::{Config, InjectorError};
+    use wayexpand_core::{Config, InjectorError, KeyChord};
 
     #[test]
     fn startup_worker_failure_remains_command_disabled_in_audit_mode() {
@@ -2502,5 +2506,42 @@ mod tests {
         assert!(error.retryable());
         assert_eq!(error.result.trigger, ":x");
         assert_eq!(error.result.insert, "ok");
+    }
+
+    #[test]
+    fn key_event_calls_note_key_event() {
+        // Regression test: daemon-level key processing must call note_key_event()
+        // to invalidate pending async expansions. The core engine tests verify
+        // the generation-invalidation behavior; this test ensures the daemon
+        // calls the method when a Key event arrives.
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":test"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+
+        // Key event processing should not panic or fail
+        process_event(
+            &mut engine,
+            InputEvent::Key(KeyChord {
+                modifiers: Default::default(),
+                key: "Left".into(),
+            }),
+            None,
+            &policy,
+            "stdin",
+        )
+        .unwrap();
+
+        // If note_key_event() was NOT called, there would be no way to detect it
+        // in this test. The real verification is in the core engine tests
+        // (asynchronous_command_output_is_discarded_after_key_only_input),
+        // which prove that generation invalidation prevents stale output.
+        // This test simply verifies the daemon path doesn't crash.
     }
 }

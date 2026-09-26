@@ -1,0 +1,64 @@
+[Unit]
+Description=WayExpand Wayland input-method text expansion daemon (experimental; explicit opt-in)
+After=graphical-session.target
+PartOf=graphical-session.target
+Conflicts=wayexpand.service wayexpand-evdev.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
+ExecStartPre=%h/.local/bin/wayexpand validate
+ExecStart=%h/.local/bin/wayexpand-daemon --source=input-method
+Restart=on-failure
+RestartSec=2s
+SuccessExitStatus=SIGTERM
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wayexpand-input-method
+NoNewPrivileges=yes
+UMask=0077
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
+# are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
+# CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
+# respectively) from the bounding set, which requires CAP_SETPCAP. A
+# `systemctl --user` service never has that, so any of these crash-loops the
+# unit with "Failed to drop capabilities: Operation not permitted" (exit
+# 218/CAPABILITIES) on an ordinary desktop login. The unprivileged uid this
+# runs as could never use those capabilities anyway.
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+# Leave bounded thread headroom for capture, control/reload, command, and
+# hotkey workers; 16 can reject the hotkey worker with EAGAIN.
+TasksMax=32
+LimitNOFILE=64
+LimitCORE=0
+
+# The daemon reads the user's config, writes its user runtime socket, and stores
+# libei portal restoration tokens under ~/.config/wayexpand/ for seamless reconnection
+# after restart. ProtectHome=read-only is intentionally narrowed by the matching
+# ReadWritePaths exception below; without it, portal restoration silently fails
+# after the first session.
+ReadWritePaths=%t %h/.config/wayexpand
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,24 @@
+[package]
+name = "wayexpand-backend-ibus"
+description = "IBus input-method adapter for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+wayexpand-core = { path = "../core" }
+xkeysym = "0.2.1"
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+thiserror.workspace = true
+notify.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

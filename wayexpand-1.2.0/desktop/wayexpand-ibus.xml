@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component>
+  <name>org.freedesktop.IBus.WayExpand</name>
+  <description>WayExpand text expansion</description>
+  <exec>wayexpand-ibus</exec>
+  <version>1.2.0</version>
+  <author>Stephan Loesevitz &lt;stephan.loesevitz@gmail.com&gt;</author>
+  <license>MIT</license>
+  <textdomain>wayexpand</textdomain>
+  <engines>
+    <engine>
+      <name>wayexpand</name>
+      <longname>WayExpand</longname>
+      <description>Privacy-first text expansion</description>
+      <language>en</language>
+      <layout>default</layout>
+      <rank>0</rank>
+    </engine>
+  </engines>
+</component>

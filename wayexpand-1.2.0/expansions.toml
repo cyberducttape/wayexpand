@@ -1,0 +1,31 @@
+[[expansion]]
+trigger = ";;hello"
+replacement = "Hello from Wayland!"
+description = "A friendly greeting"
+tags = [
+    "common",
+    "greeting",
+]
+enabled = true
+
+[[expansion]]
+trigger = ":sig"
+replacement = """
+Regards,
+Stephan"""
+description = "Professional sign-off"
+tags = ["email"]
+enabled = true
+
+[[expansion]]
+trigger = ":today"
+replacement = "Today is {{date}} ({{time}} UTC)."
+description = "Current UTC date and time"
+tags = [
+    "date",
+    "time",
+]
+enabled = true
+
+[settings]
+max_buffer_chars = 128

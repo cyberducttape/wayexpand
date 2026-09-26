@@ -1,0 +1,28 @@
+[package]
+name = "wayexpand-core"
+description = "Core matching and configuration engine for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+rustix = { workspace = true, features = ["fs"] }
+libc.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "matcher"
+harness = false

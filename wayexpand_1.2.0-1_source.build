@@ -1,0 +1,42 @@
+ dpkg-buildpackage -us -uc -ui -S -sa
+dpkg-buildpackage: info: source package wayexpand
+dpkg-buildpackage: info: source version 1.2.0-1
+dpkg-buildpackage: info: source distribution focal
+dpkg-buildpackage: info: source changed by Stephan Loesevitz <stephan.loesevitz@gmail.com>
+ dpkg-source --before-build .
+ debian/rules clean
+dh clean --buildsystem=none
+   dh_auto_clean -O--buildsystem=none
+   dh_autoreconf_clean -O--buildsystem=none
+   debian/rules override_dh_clean
+make[1]: Entering directory '/home/stephanl/wayexpand/wayexpand-1.2.0'
+dh_clean -X.orig
+make[1]: Leaving directory '/home/stephanl/wayexpand/wayexpand-1.2.0'
+ dpkg-source -b .
+dpkg-source: info: using source format '3.0 (quilt)'
+dpkg-source: info: building wayexpand using existing ../wayexpand_1.2.0.orig.tar.gz
+dpkg-source: info: building wayexpand in ../wayexpand_1.2.0-1.debian.tar.xz
+dpkg-source: info: building wayexpand in ../wayexpand_1.2.0-1.dsc
+ dpkg-genbuildinfo --build=source -O../wayexpand_1.2.0-1_source.buildinfo
+ dpkg-genchanges -sa --build=source -O../wayexpand_1.2.0-1_source.changes
+dpkg-genchanges: info: including full source code in upload
+ dpkg-source --after-build .
+dpkg-buildpackage: info: source-only upload (original source is included)
+Now running lintian wayexpand_1.2.0-1_source.changes ...
+W: wayexpand source: build-depends-on-obsolete-package Build-Depends: pkg-config => pkgconf
+W: wayexpand source: inconsistent-appstream-metadata-license io.github.cyberducttape.WayExpand.metainfo.xml (cc0-1.0 != mit) [debian/copyright]
+W: wayexpand source: no-debian-changes
+W: wayexpand source: source-contains-prebuilt-windows-binary [vendor/libloading/tests/nagisa32.dll]
+W: wayexpand source: source-contains-prebuilt-windows-binary [vendor/libloading/tests/nagisa64.dll]
+Finished running lintian.
+Now signing changes and any dsc files...
+ signfile dsc wayexpand_1.2.0-1.dsc Stephan Loesevitz <stephan.loesevitz@gmail.com>
+
+ fixup_buildinfo wayexpand_1.2.0-1.dsc wayexpand_1.2.0-1_source.buildinfo
+ signfile buildinfo wayexpand_1.2.0-1_source.buildinfo Stephan Loesevitz <stephan.loesevitz@gmail.com>
+
+ fixup_changes dsc wayexpand_1.2.0-1.dsc wayexpand_1.2.0-1_source.changes
+ fixup_changes buildinfo wayexpand_1.2.0-1_source.buildinfo wayexpand_1.2.0-1_source.changes
+ signfile changes wayexpand_1.2.0-1_source.changes Stephan Loesevitz <stephan.loesevitz@gmail.com>
+
+Successfully signed dsc, buildinfo, changes files

@@ -1,0 +1,78 @@
+[Unit]
+Description=WayExpand evdev capture text expansion daemon (experimental)
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+Conflicts=wayexpand.service wayexpand-input-method.service
+
+[Service]
+Type=simple
+Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
+ExecStartPre=%h/.local/bin/wayexpand validate
+# --backend=libei is the default pairing: it goes through the desktop portal,
+# which is broadly available even on compositors (e.g. KWin) that do not
+# advertise zwp_input_method_manager_v2 or a wlroots virtual-keyboard
+# protocol. Edit this line to --backend=wlroots if your compositor supports
+# the wlroots virtual-keyboard protocol instead.
+ExecStart=%h/.local/bin/wayexpand-daemon --source=evdev --backend=libei
+# Restart=on-failure enables auto-restart: the evdev+libei backend now
+# persists portal consent tokens, so daemon reconnections skip the consent
+# dialog after the first connection. The daemon's internal backoff
+# (crates/daemon/src/main.rs) handles output loss gracefully.
+# Rate limiting prevents restart loops if evdev persistently fails
+# (max 5 restarts within 60 seconds before unit enters failed state).
+Restart=on-failure
+RestartSec=2s
+SuccessExitStatus=SIGTERM
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wayexpand-evdev
+NoNewPrivileges=yes
+UMask=0077
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
+# are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
+# CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
+# respectively) from the bounding set, which requires CAP_SETPCAP. A
+# `systemctl --user` service never has that, so any of these crash-loops the
+# unit with "Failed to drop capabilities: Operation not permitted" (exit
+# 218/CAPABILITIES) on an ordinary desktop login. The unprivileged uid this
+# runs as could never use those capabilities anyway. PrivateDevices= would
+# additionally block the very /dev/input/event* access this source needs.
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+# Leave bounded thread headroom for capture, control/reload, command, and
+# hotkey workers; 16 can reject the hotkey worker with EAGAIN.
+TasksMax=32
+LimitNOFILE=64
+LimitCORE=0
+
+# The daemon reads the user's config, reads keyboard event nodes under
+# /dev/input (granted via scripts/install-evdev-permissions.sh, not by this
+# unit), writes its user runtime socket, and stores libei portal restoration
+# tokens under ~/.config/wayexpand/ for seamless reconnection after restart.
+# ProtectHome=read-only is intentionally narrowed by the matching
+# ReadWritePaths exception below; without it, portal restoration silently
+# fails after the first session.
+ReadWritePaths=%t %h/.config/wayexpand
+
+[Install]
+WantedBy=graphical-session.target

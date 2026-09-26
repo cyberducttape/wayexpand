@@ -1,0 +1,18 @@
+[package]
+name = "wayexpand-backend-selection"
+description = "Shared capability probing and backend resolution for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tracing.workspace = true
+wayexpand-backend-input-method = { path = "../backend-input-method" }
+wayexpand-backend-wlroots = { path = "../backend-wlroots" }
+wayexpand-backend-evdev = { path = "../backend-evdev" }

@@ -1,0 +1,5 @@
+# Optional seat-aware evdev access for WayExpand keyboard capture.
+# This rule runs before systemd's 70-uaccess.rules so logind can apply the
+# ACL for active-seat keyboard event nodes. It does not grant the broad
+# `input` group.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="?*", TAG+="uaccess", MODE="0600"

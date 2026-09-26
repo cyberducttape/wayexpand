@@ -1,0 +1,345 @@
+# v1.3 Implementation Status & Completion Report
+
+> Historical planning report from the v1.2/v1.3 transition. It is not a
+> statement of current implementation or test status. For current backend and
+> security status, see `docs/BACKENDS.md`, `docs/SUPPORT_MATRIX.md`, and
+> `SECURITY.md`.
+
+## Executive Summary
+
+This report was written during early v1.3 planning. Its completion claims and
+test counts were not maintained as the architecture changed; the deferred API
+was not adopted by every runtime path, and the input-method key state machine
+was never implemented.
+
+**Status:** Archived; not a current release or implementation status report.
+
+## Historical Notes
+
+### 1. Deferred Command API (Historical Status)
+
+**What the original report claimed:**
+- Added `PendingExpansionResult` type to engine.rs
+- Implemented `process_deferred()` method (mirrors `process()` without executing)
+- Implemented `take_match_deferred()` helper for deferred matching
+- Updated daemon to use `apply_pending_results()`
+- Updated IBus backend to use deferred flow
+- Exported `PendingExpansionResult` from core crate
+- The original test-count claim below is retained as a historical report only.
+
+**Security Impact:**
+`process_deferred()` provides deferred command execution for callers that use
+that API. The legacy `ExpansionEngine::process()` path can execute commands
+synchronously, and output-dependent policy checks necessarily happen after the
+command runs. Do not interpret this API as a universal pre-execution policy
+boundary.
+
+**Files Modified:**
+- `crates/core/src/engine.rs` (191+ lines added)
+- `crates/daemon/src/main.rs` (61+ lines updated)
+- `crates/backend-ibus/src/lib.rs` (30+ lines updated)
+- `crates/core/src/lib.rs` (exports updated)
+
+**Historical verification claim (not current verification):**
+```bash
+cargo test --locked --workspace
+# Result: 150 core tests ✅, 44 daemon tests ✅, 15 CLI tests ✅
+```
+
+### 2. Input-Method Key State Machine (Unimplemented)
+
+**What was documented:**
+- Described the required KeyStateMachine state machine
+- Described integration with InputMethodSource
+- Described handler patterns for press/release/repeat
+- Described disconnect cleanup and the test strategy
+
+The standalone scratchpad implementation referenced by an earlier draft of this
+report is not present in this snapshot. The input-method-v2 backend therefore
+remains experimental and incomplete; see `docs/BACKENDS.md` for the current
+held-key limitation.
+
+**Ready for v1.3:**
+v1.3 developers still need to implement and desktop-test the state machine in
+`backend-input-method`. Total effort remains an estimate, not a completed
+implementation.
+
+### 3. Release Script PKGBUILD Checksum ✅ ARCHITECTURE DOCUMENTED
+
+**What was done:**
+- Analyzed current checksum workflow (compute after tagging = stale tags)
+- Designed proper workflow: archive → checksum → tag
+- Created step-by-step implementation guide
+- Included bash pseudo-code for each step
+- Added verification checklist
+- Identified workflow as "1 day" effort
+
+**Files:**
+- `docs/V13_MIGRATION_GUIDE.md` (Section 3)
+
+**Ready for v1.3:**
+Copy section 3 code into prepare-release.sh. Straightforward shell script changes. Total effort: 1 day.
+
+### 4. Pack Filtering Migration ✅ ARCHITECTURE DESIGNED
+
+**What was done:**
+- Documented current architecture (filtering in fleet.rs)
+- Designed daemon-level filtering (cleaner separation)
+- Created before/after code examples
+- Added integration point diagram
+- Included testing strategy for audit/safe mode
+- Identified effort as "1 day"
+
+**Files:**
+- `docs/V13_MIGRATION_GUIDE.md` (Section 4)
+
+**Ready for v1.3:**
+Move filtering code from fleet.rs to daemon/main.rs. Improve audit visibility. Total effort: 1 day.
+
+---
+
+## Planning & Documentation ✅ COMPLETE
+
+### Roadmaps Created
+
+1. **P1_ARCHITECTURE_ROADMAP.md** (250+ lines)
+   - Problem statements with examples
+   - Current vs. target architecture
+   - Pros/cons analysis
+   - Implementation sequences
+   - Test specifications
+   - Effort estimates
+
+2. **V13_MIGRATION_GUIDE.md** (466+ lines)
+   - Phase-by-phase instructions for all 4 items
+   - Code examples for each phase
+   - Before/after API signatures
+   - Completion checklists
+   - Testing strategy
+   - Rollback procedures
+   - Implementation timeline
+
+3. **JOURNEY_TO_V13.md** (235+ lines)
+   - Complete journey summary
+   - Problem discovery → solutions → implementation
+   - Evidence of completeness
+   - Quality assurance checklist
+   - Success metrics
+   - Files for v1.3 development
+
+4. **V13_COMPLETION_STATUS.md** (this file)
+   - Implementation status
+   - What's completed vs. ready for v1.3
+   - Integration guides
+   - Quick start for v1.3 teams
+
+### Architecture Documentation
+
+- Comprehensive specifications in V13_MIGRATION_GUIDE.md
+- Key state machine integration guidance (in the migration documentation)
+- Pseudocode examples for all implementations
+- Risk mitigation strategies
+- Rollback procedures
+
+---
+
+## Foundation Code Ready for v1.3
+
+### Already in Codebase
+
+```
+✅ PendingExpansionResult type
+✅ process_deferred() method
+✅ take_match_deferred() helper
+✅ Pre-flight policy checks
+✅ Deferred execution flow
+✅ Core exports configured
+```
+
+### Not Implemented in This Snapshot
+
+```
+The standalone key-state-machine scratchpad referenced by older versions of
+this report is absent. The input-method-v2 implementation remains experimental.
+```
+
+---
+
+## Testing Readiness
+
+### Unit Test Specifications
+
+✅ All 4 P1 items have detailed unit test specs
+✅ TestAble pseudocode provided
+✅ Coverage areas identified
+✅ Edge cases documented
+
+### Integration Test Specifications
+
+✅ Policy enforcement scenarios
+✅ Held key sequences
+✅ Multi-key operations
+✅ Disconnect/cleanup flows
+
+### End-to-End Test Specifications
+
+✅ Real app scenarios (file navigation, text deletion, etc.)
+✅ Stress testing scenarios
+✅ Regression testing matrix
+✅ Release verification procedures
+
+---
+
+## v1.3 Quick Start Checklist
+
+### For v1.3 Development Team
+
+**Week 1: Command Execution Deferral**
+- Already fully implemented ✅
+- Run `cargo test --locked --workspace` to verify
+- Update documentation if API changed
+- Consider: deprecation timeline for old API
+
+**Week 2: Input-Method Key State Machine**
+- Implement press/release/repeat tracking in `backend-input-method`
+- Add real desktop coverage for held keys and disconnect cleanup
+- Reference: `V13_MIGRATION_GUIDE.md` Section 2 for overview
+- Effort: 1-2 days
+
+**Week 3: Release & Filtering (parallel)**
+- Release: Update `prepare-release.sh` (follow Section 3)
+- Filtering: Move code per Section 4 guidance
+- Effort: 1 day each
+
+### Resources for v1.3
+
+1. **Start Here:** `docs/V13_MIGRATION_GUIDE.md`
+   - Read full document first
+   - Phases are sequential
+   - Checklists ensure completeness
+
+2. **Architecture Reference:** `docs/P1_ARCHITECTURE_ROADMAP.md`
+   - Design decisions explained
+   - Trade-offs documented
+   - Future considerations noted
+
+3. **Journey Summary:** `docs/JOURNEY_TO_V13.md`
+   - Understand what was discovered in v1.2
+   - See complete problem→solution path
+   - Understand why each fix matters
+
+4. **Input-method limitation:** `docs/BACKENDS.md`
+   - Current held-key behavior and experimental status
+
+---
+
+## Quality Assurance
+
+### v1.2 Testing Coverage
+
+```
+✅ 150 core tests (engine, config, policy, templates, etc.)
+✅ 44 daemon tests (event handling, policy enforcement)
+✅ 15 CLI tests (text matching, command integration)
+✅ 9 backend tests (protocol handling)
+✅ Zero regressions identified
+✅ All new APIs tested
+```
+
+### v1.3 Testing Readiness
+
+```
+✅ Unit test specifications provided
+✅ Integration test scenarios detailed
+✅ E2E test cases documented
+✅ Stress test procedures included
+✅ Regression test matrix provided
+✅ Test coverage targets identified
+```
+
+### Security Validation
+
+✅ Policy enforcement pre-execution (cannot be bypassed)
+✅ Command side effects deferred until approval
+✅ Safe-mode can block all violations determinably
+✅ Audit-mode provides full visibility
+✅ No security gaps in deferred flow
+
+---
+
+## File Manifest
+
+### Documentation (Ready for v1.3)
+
+- `docs/P1_ARCHITECTURE_ROADMAP.md` - Design specifications
+- `docs/V13_MIGRATION_GUIDE.md` - Implementation guide
+- `docs/JOURNEY_TO_V13.md` - Journey summary
+- `docs/V13_COMPLETION_STATUS.md` - This status report
+
+### Code (Ready for v1.3)
+
+- `crates/core/src/engine.rs` - PendingExpansionResult + deferred methods
+- `crates/daemon/src/main.rs` - apply_pending_results()
+- `crates/backend-ibus/src/lib.rs` - process_deferred() integration
+- `crates/core/src/lib.rs` - Updated exports
+
+### Input-method-v2 Status
+
+The held-key state machine is still future work and requires desktop testing.
+
+---
+
+## Historical Success Metrics
+
+The following were goals in the original plan, not verified outcomes. In
+particular, held-key fidelity is incomplete in input-method-v2, and command
+policy enforcement is not universally pre-execution.
+
+---
+
+## Historical Blockers & Risks
+
+The original “None identified” assessment was incorrect. Current unresolved
+backend and command-execution limitations are documented in `docs/BACKENDS.md`,
+`docs/SUPPORT_MATRIX.md`, and `SECURITY.md`.
+
+---
+
+## Original Proposed Next Steps (Superseded)
+
+1. **Review** this status report and V13_MIGRATION_GUIDE.md
+2. **Plan** v1.3 sprint using the 1-2 week timeline
+3. **Assign** work per priority:
+   - Command Execution: Already done, verify & document
+   - Key State Machine: 1-2 days, follow integration guide
+   - Release/Filtering: 1 day each (can be parallel)
+4. **Test** using provided test strategies
+5. **Deploy** with zero regressions
+
+---
+
+## Conclusion
+
+v1.2 has delivered a complete blueprint for v1.3 architectural improvements. The codebase is:
+
+- ✅ Production-ready with all P0 fixes
+- ✅ Security-hardened (command execution pre-approval)
+- ✅ Comprehensively documented
+- ✅ Fully testable with provided test specs
+- ✅ Ready for v1.3 development
+
+**v1.3 teams have everything needed to implement, test, and deploy all P1 improvements in 2-3 weeks.**
+
+---
+
+## Contact & Questions
+
+For questions about this implementation:
+- Review the specific V13_MIGRATION_GUIDE.md section
+- Check JOURNEY_TO_V13.md for context
+- Reference commit messages for change rationale
+- See code comments for implementation details
+
+All v1.3 work is systematic, documented, and ready to execute.
+
+**✅ Ready for v1.3 development team to proceed.**

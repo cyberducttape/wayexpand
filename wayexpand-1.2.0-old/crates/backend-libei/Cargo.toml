@@ -1,0 +1,24 @@
+[package]
+name = "wayexpand-backend-libei"
+description = "libei/EIS output backend for WayExpand"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+ashpd = { version = "0.13", features = ["remote_desktop", "screencast"] }
+libc.workspace = true
+reis = "0.7.1"
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "time"] }
+rustix = { version = "1", features = ["event", "process"] }
+unicode-segmentation.workspace = true
+xkbcommon-rs = { workspace = true, features = ["server"] }
+xkeysym = "0.2.1"
+wayexpand-core = { path = "../core" }

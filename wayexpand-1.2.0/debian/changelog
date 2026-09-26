@@ -1,0 +1,86 @@
+wayexpand (1.2.0-2~ppa1~ubuntu26.04.1) resolute; urgency=medium
+
+  * Build WayExpand 1.2.0 for Ubuntu 26.04.
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Fri, 25 Sep 2026 22:35:00 -0600
+
+wayexpand (1.2.0-1) focal; urgency=high
+
+  * Backend & keyboard correctness: fix child process cleanup on all error paths
+  * Fix libei token persistence configuration for input-method systemd service
+  * Make libei key pass-through optional and non-blocking during startup
+  * Add 9 new pass-through regression tests and bounded queue implementation
+  * Fix external editor integration for commands with arguments (e.g., code --wait)
+  * Resolve documentation contradictions about experimental key pass-through
+  * Reorder release workflow for accurate SBOM generation from artifacts
+  * Delete divergent v1.2 tag to restore release history consistency
+  * All 330+ unit tests passing with comprehensive test coverage
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Mon, 23 Sep 2026 20:35:00 +0000
+
+wayexpand (1.1.2-2) focal; urgency=high
+
+  * Fix P0 blockers for v1.2 release candidate
+  * Fix #15: doctor now recognizes evdev+libei as valid deployment (user-blocking)
+  * Fix #19: app-filter security issue - window title no longer overrides app_id mismatch
+  * Add CLAUDE.md with comprehensive development guidance
+  * Fix CI workflow - replace unavailable rustsec action with cargo audit
+  * All 179 unit tests passing with new app-filter security tests
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 19 Sep 2026 02:30:00 +0000
+
+wayexpand (1.1.2-1) focal; urgency=high
+
+  * Release v1.1.2: Security hardening and correctness fixes
+  * Fix P0: Cross-window buffer isolation - prevent text deletion in wrong application
+  * Fix P0: Separate pause and sensitive-field state - resume cannot bypass password field protection
+  * Fix P0: Complete ancestor path validation - writable parent cannot replace secure config
+  * Fix P0: Remove silent clipboard fallback - multiline text routing is now explicit
+  * Fix P0: input-method-v2 key loss - add clear warning about unsupported key pass-through limitation
+  * 170+ regression tests added for security fixes
+  * All CI checks passing: formatting, linting, tests, builds
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 19 Sep 2026 01:00:00 +0000
+
+wayexpand (1.1.1-1) focal; urgency=medium
+
+  * Release v1.1.1: Accessibility, themes, and sysadmin documentation
+  * Add comprehensive SYSADMIN_EXAMPLES.md with 30+ production-ready snippets
+  * Improve WCAG AA contrast compliance in retro themes (Classic White, Terminal Blue, Commodore 64)
+  * Fix color contrast issues for accessibility: Terminal Blue muted text now uses white, Commodore 64 orange brightened
+  * Add GUI font scaling (0.8x - 2.0x) with 5-option selector in Settings
+  * Complete GUI v1.1 polish: keyboard focus indicators, typography hierarchy, enhanced shadows, improved input fields
+  * Add 8 color packs including retro Terminal Blue (IBM 3270) and Commodore 64 (1982) themes
+  * All themes now meet 4.5:1 contrast ratio requirement for WCAG 2.1 Level AA compliance
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Thu, 18 Sep 2026 12:00:00 +0000
+
+wayexpand (1.0.0-1) focal; urgency=medium
+
+  * Release v1.0.0: Production-ready with stability guarantees
+  * Add stability guarantees for CLI exit codes, JSON outputs, config schema
+  * Complete security audit against threat model (no vulnerabilities found)
+  * Comprehensive documentation: COMPATIBILITY.md, SECURITY_AUDIT.md, roadmaps
+  * Known limitations documented with clear 1.1 roadmap
+  * Build system hardened: vendored dependencies, fixed CI on GitHub and Launchpad
+  * Verified new crates (backend-clipboard, backend-kwin-window)
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Wed, 17 Sep 2026 13:00:00 +0000
+
+wayexpand (0.2.0-1) focal; urgency=medium
+
+  * Release v0.2.0: evdev backend, GUI redesign, character-drop fix
+  * Add experimental evdev capture backend for KWin/KDE Plasma support
+  * Refresh GUI with theme system, custom snippet rows, dark/light modes
+  * Fix character dropping in keysym synthesis with per-character pacing
+  * Add ei_keyboard fallback for EIS servers without ei_text interface
+  * Fix systemd user service startup failures (218/CAPABILITIES)
+  * Replace unavailable emoji with font-verified alternatives
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Mon, 16 Sep 2026 01:00:00 +0000
+
+wayexpand (0.1.0-1) focal; urgency=medium
+
+  * Initial Debian package release
+
+ -- Stephan Loesevitz <stephan.loesevitz@gmail.com>  Tue, 10 Sep 2026 01:00:00 +0000

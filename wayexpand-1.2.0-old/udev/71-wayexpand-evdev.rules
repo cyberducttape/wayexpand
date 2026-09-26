@@ -1,0 +1,17 @@
+# WayExpand evdev capture backend (--source=evdev) reads keyboard-capable
+# /dev/input/event* nodes directly. Most systemd-based distributions already
+# grant GROUP="input" MODE="0660" to input devices via their own default rules
+# (see /usr/lib/udev/rules.d/50-udev-default.rules); this file only reasserts
+# that same default explicitly for udev's keyboard-class event nodes, so
+# WayExpand does not silently depend on it being present. It does not grant
+# anything beyond what a standard systemd installation already grants members
+# of the `input` group.
+#
+# This is the current legacy/simple permission model. It is installed by
+# scripts/install-evdev-permissions.sh, which also adds the
+# invoking user to the `input` group. Read SECURITY.md for what that
+# membership grants before enabling --source=evdev: it may let a process read
+# raw input event devices beyond WayExpand's matcher, depending on the rest of
+# the distribution's input group policy. See docs/EVDEV_ACCESS_DESIGN.md for
+# the active-seat default and remaining device-broker investigation.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="?*", GROUP="input", MODE="0660"

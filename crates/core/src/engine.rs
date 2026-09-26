@@ -1028,6 +1028,18 @@ impl ExpansionEngine {
     /// Resolve a normalized key chord into configured actions. This method is
     /// side-effect free; the daemon or script runtime owns execution policy,
     /// cancellation, and capability checks.
+    /// Invalidate pending asynchronous expansions by incrementing the generation
+    /// counter. Called when any key event arrives, before processing the hotkey
+    /// action. This ensures running commands are discarded when the user presses
+    /// another key, preventing output injection at the wrong cursor position.
+    ///
+    /// Note: does not clear `last_expansion` (the undo transaction) because
+    /// the undo chord itself arrives as a Key event, and clearing it would make
+    /// undo impossible to trigger.
+    pub fn note_key_event(&mut self) {
+        self.input_generation = self.input_generation.wrapping_add(1);
+    }
+
     pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {
         if !self.is_capture_enabled() {
             return Vec::new();
@@ -1163,7 +1175,7 @@ impl ExpansionEngine {
         }
         match event {
             InputEvent::Key(_) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
+                self.note_key_event();
                 Vec::new()
             }
             InputEvent::Text(text) => {
@@ -1338,7 +1350,7 @@ impl ExpansionEngine {
         }
         match event {
             InputEvent::Key(_) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
+                self.note_key_event();
                 Vec::new()
             }
             InputEvent::Text(text) => {

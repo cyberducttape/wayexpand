@@ -1,0 +1,28 @@
+ dpkg-buildpackage -us -uc -ui -S -sa
+dpkg-buildpackage: info: source package wayexpand
+dpkg-buildpackage: info: source version 1.2.0-1~ppa2~ubuntu26.04.1
+dpkg-buildpackage: info: source distribution resolute
+dpkg-buildpackage: info: source changed by Stephan Loesevitz <stephan.loesevitz@gmail.com>
+ dpkg-source --before-build .
+ debian/rules clean
+dh clean --buildsystem=none
+   dh_auto_clean -O--buildsystem=none
+   dh_autoreconf_clean -O--buildsystem=none
+   debian/rules override_dh_clean
+make[1]: Entering directory '/home/stephanl/wayexpand/wayexpand-1.2.0'
+dh_clean -X.orig
+make[1]: Leaving directory '/home/stephanl/wayexpand/wayexpand-1.2.0'
+ dpkg-source -b .
+dpkg-source: warning: version number suggests Ubuntu vendor changes, but the Maintainer field does not have Ubuntu vendor address
+dpkg-source: warning: version number suggests Ubuntu vendor changes, but there is no XSBC-Original-Maintainer field
+dpkg-source: info: using source format '3.0 (quilt)'
+dpkg-source: info: building wayexpand using existing ../wayexpand_1.2.0.orig.tar.gz
+dpkg-source: info: building wayexpand in ../wayexpand_1.2.0-1~ppa2~ubuntu26.04.1.debian.tar.xz
+dpkg-source: info: building wayexpand in ../wayexpand_1.2.0-1~ppa2~ubuntu26.04.1.dsc
+ dpkg-genbuildinfo --build=source -O../wayexpand_1.2.0-1~ppa2~ubuntu26.04.1_source.buildinfo
+ dpkg-genchanges -sa --build=source -O../wayexpand_1.2.0-1~ppa2~ubuntu26.04.1_source.changes
+dpkg-genchanges: warning: the current version (1.2.0-1~ppa2~ubuntu26.04.1) is earlier than the previous one (1.2.0-1)
+dpkg-genchanges: info: including full source code in upload
+ dpkg-source --after-build .
+dpkg-buildpackage: info: source-only upload (original source is included)
+Now running lintian wayexpand_1.2.0-1~ppa2~ubuntu26.04.1_source.changes ...

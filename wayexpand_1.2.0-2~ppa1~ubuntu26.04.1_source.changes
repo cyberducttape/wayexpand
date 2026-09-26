@@ -1,0 +1,29 @@
+Format: 1.8
+Date: Fri, 25 Sep 2026 22:35:00 -0600
+Source: wayexpand
+Built-For-Profiles: derivative.ubuntu noudeb
+Architecture: source
+Version: 1.2.0-2~ppa1~ubuntu26.04.1
+Distribution: resolute
+Urgency: medium
+Maintainer: Stephan Loesevitz <stephan.loesevitz@gmail.com>
+Changed-By: Stephan Loesevitz <stephan.loesevitz@gmail.com>
+Changes:
+ wayexpand (1.2.0-2~ppa1~ubuntu26.04.1) resolute; urgency=medium
+ .
+   * Build WayExpand 1.2.0 for Ubuntu 26.04.
+Checksums-Sha1:
+ ba2dbd3bde751c401cca698bbc268242b3cc0eeb 1030 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.dsc
+ 527ea858851beb9c6bf78dcdd71bed5c787e8af8 98614900 wayexpand_1.2.0.orig.tar.gz
+ d046162647ce8979cc6548867d3b6cc7fa7ea8a0 922932 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.debian.tar.xz
+ f1ed86d88f91f6711946846298fe78620cb26692 7727 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1_source.buildinfo
+Checksums-Sha256:
+ f1258007b1a7827c98a2d61f5eb9b7e01122eb280e874aa8fc11532b1522e708 1030 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.dsc
+ d8bd7b44622107ce6468d443488caebb1ae6e2b70e34c345f03764871c5cd214 98614900 wayexpand_1.2.0.orig.tar.gz
+ 7397addce70c073a9de606bbd1dcfe18dbbff54f125ba6d42bf5c7617e1c05c4 922932 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.debian.tar.xz
+ 4321f2fdbe5e18bc705d79206148c4b04065db1fa65140b517a51e1f57333823 7727 wayexpand_1.2.0-2~ppa1~ubuntu26.04.1_source.buildinfo
+Files:
+ cb3437e5726a4ea5243690f0c12c14c7 1030 utils optional wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.dsc
+ de24ca7d8f0358fde1b80db00e6da2da 98614900 utils optional wayexpand_1.2.0.orig.tar.gz
+ f1a55bbafa6453a1414107be613abb7a 922932 utils optional wayexpand_1.2.0-2~ppa1~ubuntu26.04.1.debian.tar.xz
+ 98ade6188e84eb439f5e5a63871ff3ea 7727 utils optional wayexpand_1.2.0-2~ppa1~ubuntu26.04.1_source.buildinfo
