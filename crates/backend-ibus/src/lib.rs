@@ -503,7 +503,10 @@ replacement = "signature"
 
     fn boundary_adapter() -> IbusEngineAdapter {
         let config: Config = toml::from_str(
-            r#"[[expansion]]
+            r#"[settings]
+undo_chord = "Ctrl+Z"
+
+[[expansion]]
 trigger = ":sig"
 replacement = "signature"
 match_mode = "word-boundary"
@@ -812,6 +815,12 @@ replacement = "signature"
                 );
             }
         }
+        let undo = adapter
+            .engine()
+            .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("a boundary expansion should be undoable");
+        assert_eq!(undo.matched_text, "signature ");
+        assert_eq!(undo.insert, ":sig ");
     }
 
     #[cfg(unix)]
@@ -859,8 +868,8 @@ timeout_ms = 1000
                     .engine()
                     .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
                     .expect("completed IBus command should be undoable");
-                assert_eq!(undo.matched_text, "signature");
-                assert_eq!(undo.insert, ":sig");
+                assert_eq!(undo.matched_text, "signature ");
+                assert_eq!(undo.insert, ":sig ");
                 break;
             }
             assert!(Instant::now() < deadline, "IBus command did not complete");

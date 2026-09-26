@@ -386,6 +386,25 @@ struct AsyncHotkeyCompletion {
     output: Result<(), HotkeyError>,
 }
 
+/// Return the exact erase/insert strings for an expansion transaction.
+///
+/// A non-exclusive word-boundary match has already delivered its terminating
+/// character to the application. Since `apply` replaces that character along
+/// with the trigger, undo must include it as well.
+fn transaction_texts(
+    restore: &str,
+    replacement: &str,
+    reinsert_after: Option<char>,
+) -> (String, String) {
+    let mut restore_text = restore.to_owned();
+    let mut replacement_text = replacement.to_owned();
+    if let Some(character) = reinsert_after {
+        restore_text.push(character);
+        replacement_text.push(character);
+    }
+    (restore_text, replacement_text)
+}
+
 impl ExpansionEngine {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         config.validate()?;
@@ -864,7 +883,11 @@ impl ExpansionEngine {
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
         self.release_deferred_match_for_result(result);
         if result.cursor_offset.is_none() {
-            self.last_expansion = Some((result.matched_text.clone(), result.insert.clone()));
+            self.last_expansion = Some(transaction_texts(
+                &result.matched_text,
+                &result.insert,
+                result.reinsert_after,
+            ));
         }
     }
 
@@ -1472,12 +1495,18 @@ impl ExpansionEngine {
             final_insert = apply_case_style(&plan.matched_text, &final_insert);
         }
 
+        let reinsert_after = plan.terminating_char.filter(|_| self.reinsert_terminators);
+
         // Save undo state (only if no cursor offset - cursor marker expansions don't support undo)
         // Skip undo for async commands since they return empty immediately
         if plan.cursor_offset.is_none()
             && (!plan.is_command_backed() || self.async_commands.is_none())
         {
-            self.last_expansion = Some((plan.matched_text.clone(), final_insert.clone()));
+            self.last_expansion = Some(transaction_texts(
+                &plan.matched_text,
+                &final_insert,
+                reinsert_after,
+            ));
         }
 
         ExpansionResult {
@@ -1485,7 +1514,7 @@ impl ExpansionEngine {
             matched_text: plan.matched_text.clone(),
             insert: final_insert,
             cursor_offset: plan.cursor_offset,
-            reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
+            reinsert_after,
             command_backed: plan.is_command_backed(),
         }
     }
@@ -3522,6 +3551,74 @@ replacement = "bad\u0000value""#;
                 "insert::sig"
             ]
         );
+    }
+
+    #[test]
+    fn undo_round_trip_includes_reinserted_word_boundary() {
+        let config = Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Regards\"\nmatch_mode = \"word-boundary\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let expansion = engine
+            .process(InputEvent::Text(":sig ".into()))
+            .pop()
+            .unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+
+        let undo = engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("a boundary expansion should be undoable");
+        assert_eq!(undo.matched_text, "Regards ");
+        assert_eq!(undo.insert, ":sig ");
+        ExpansionEngine::apply(&mut injector, &undo).unwrap();
+
+        assert_eq!(
+            injector.calls,
+            [
+                "erase::sig ",
+                "insert:Regards ",
+                "erase:Regards ",
+                "insert::sig ",
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn async_command_undo_round_trip_includes_reinserted_word_boundary() {
+        let config = Config::parse(
+            r#"[settings]
+undo_chord = "Ctrl+Z"
+
+[[expansion]]
+trigger = ":sig"
+replacement = ""
+match_mode = "word-boundary"
+[expansion.command]
+program = "/bin/sh"
+args = ["-c", "printf Regards"]
+timeout_ms = 500
+"#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        let pending = engine
+            .process_deferred(InputEvent::Text(":sig ".into()))
+            .pop()
+            .unwrap();
+        let expansion = dispatch_and_wait(&mut engine, pending);
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+
+        let undo = engine
+            .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+            .expect("an async boundary expansion should be undoable");
+        assert_eq!(undo.matched_text, "Regards ");
+        assert_eq!(undo.insert, ":sig ");
+        ExpansionEngine::apply(&mut injector, &undo).unwrap();
     }
 
     #[test]

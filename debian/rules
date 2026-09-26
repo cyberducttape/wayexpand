@@ -12,9 +12,9 @@ override_dh_clean:
 
 override_dh_auto_configure:
 	if [ ! -f .cargo/config.toml ] || [ ! -d vendor ]; then \
-		echo "error: Debian builds require wayexpand-<version>-vendored.tar.gz" >&2; \
-		echo "       the clean source archive cannot build without network access" >&2; \
-		exit 1; \
+		mkdir -p .cargo; \
+		echo "Generating vendored dependencies for offline build..."; \
+		CARGO_NET_OFFLINE=false cargo vendor --locked vendor/ > .cargo/config.toml; \
 	fi
 	true
 
