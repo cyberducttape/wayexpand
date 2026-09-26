@@ -101,7 +101,6 @@ Then see [SECURITY.md](../SECURITY.md)
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
-| [CUSTOMIZATION.md](CUSTOMIZATION.md) | GUI users | Themes, language support, colors |
 | [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) | All users | Resource and safety boundaries |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Advanced users | Exact CLI/JSON/config contracts |
 | [GUI.md](GUI.md) | GUI users | Interface, themes, languages, fonts, and performance |
@@ -172,7 +171,7 @@ and status snapshots are not a substitute for the current contracts above.
 - [OPERATIONS.md](OPERATIONS.md) — daemon management
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — fixing issues
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — what works where
-- [CUSTOMIZATION.md](CUSTOMIZATION.md) — GUI customization
+- [GUI.md](GUI.md) — interface and customization
 - [COMPATIBILITY.md](COMPATIBILITY.md) — guarantees
 
 #### System Administrators
