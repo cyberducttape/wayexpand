@@ -1,3 +1,8 @@
+pub mod command_runtime;
+pub mod matching;
+pub mod transaction;
+pub mod expansion;
+
 use crate::{
     config::capitalize_first_letter, render_template_with_cursor, CommandConfig,
     CommandEnvironment, Config, ConfigError, HotkeyConfig, KeyChord, MatchMode, Matcher,
@@ -2246,5 +2251,4 @@ fn kill_process_group(child: &mut std::process::Child) {
 }
 
 #[cfg(test)]
-#[path = "engine_tests.rs"]
 mod tests;
