@@ -80,7 +80,9 @@ working checkout: that can include `.git/` metadata and build outputs such as
 **Binary archive** (for end users):
 - `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
   systemd units, the desktop entry, application icon, example configuration,
-  documentation, license, security policy, and installation scripts
+  current operational documentation, license, security policy, and installation
+  scripts. Historical material under `docs/archive/` remains in Git but is not
+  shipped in this end-user archive.
 - SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
 - Cargo dependency inventory: `wayexpand-<version>-linux-x86_64.cargo-metadata.json`
 

@@ -132,10 +132,22 @@ jobs:
           install -m 0755 scripts/install-evdev-permissions.sh "$root/scripts/"
           install -m 0644 udev/71-wayexpand-evdev.rules "$root/udev/"
           install -m 0644 udev/69-wayexpand-evdev-uaccess.rules "$root/udev/"
+          # Ship current operational documentation to end users. Historical
+          # audits, roadmaps, and wiki snapshots remain in Git under
+          # docs/archive/ but are not part of the binary release artifact.
           cp -R docs/. "$root/docs/"
+          rm -rf "$root/docs/archive"
+          if [ -e "$root/docs/archive" ]; then
+            echo "binary release unexpectedly contains docs/archive" >&2
+            exit 1
+          fi
           tar -czf "${root}.tar.gz" "$root"
           if tar -tzf "${root}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null; then
             echo "release archive unexpectedly contains .git metadata" >&2
+            exit 1
+          fi
+          if tar -tzf "${root}.tar.gz" | grep -E '(^|/)docs/archive(/|$)' >/dev/null; then
+            echo "release archive unexpectedly contains docs/archive" >&2
             exit 1
           fi
           sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256"
