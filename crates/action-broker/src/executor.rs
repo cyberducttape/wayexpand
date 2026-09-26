@@ -6,9 +6,9 @@ use crate::{
     config::BrokerConfig,
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
 };
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use std::collections::HashMap;
 
 pub struct ActionExecutor {
     config: BrokerConfig,
@@ -25,11 +25,12 @@ impl ActionExecutor {
     /// Execute an action synchronously with timeout and policy enforcement.
     pub async fn execute(&self, request: ActionRequest) -> Result<ActionResponse, ActionError> {
         // Validate the action exists and is enabled
-        let action_config = self.config.get_action(&request.action_id).ok_or(
-            ActionError::ActionNotFound {
-                action_id: request.action_id.clone(),
-            },
-        )?;
+        let action_config =
+            self.config
+                .get_action(&request.action_id)
+                .ok_or(ActionError::ActionNotFound {
+                    action_id: request.action_id.clone(),
+                })?;
 
         if !action_config.is_enabled() {
             return Err(ActionError::ActionBlocked {
@@ -102,9 +103,11 @@ impl ActionExecutor {
                 .map_err(|e| ActionError::Internal {
                     reason: format!("task join error: {}", e),
                 })
-                .and_then(|res| res.map_err(|e| ActionError::Internal {
-                    reason: format!("child process error: {}", e),
-                }))
+                .and_then(|res| {
+                    res.map_err(|e| ActionError::Internal {
+                        reason: format!("child process error: {}", e),
+                    })
+                })
         })
         .await;
 
@@ -140,7 +143,11 @@ impl ActionExecutor {
     }
 
     /// Build environment map from request variables and allowed list.
-    fn build_env_map(&self, request_vars: &[String], allowed_vars: &[String]) -> HashMap<String, String> {
+    fn build_env_map(
+        &self,
+        request_vars: &[String],
+        allowed_vars: &[String],
+    ) -> HashMap<String, String> {
         let mut map = HashMap::new();
 
         // Parse request variables (format: KEY=value)

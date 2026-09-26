@@ -10,8 +10,8 @@ use anyhow::Result;
 use std::{
     path::Path,
     sync::atomic::AtomicBool,
-    time::{Duration, Instant},
     thread,
+    time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;

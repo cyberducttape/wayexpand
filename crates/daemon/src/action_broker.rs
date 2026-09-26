@@ -90,9 +90,6 @@ mod tests {
     #[test]
     fn action_broker_manager_creation() {
         let manager = ActionBrokerManager::new(PathBuf::from("/tmp/test_broker.sock"));
-        assert_eq!(
-            manager.socket_path,
-            PathBuf::from("/tmp/test_broker.sock")
-        );
+        assert_eq!(manager.socket_path, PathBuf::from("/tmp/test_broker.sock"));
     }
 }

@@ -1,7 +1,7 @@
 pub mod command_runtime;
+pub mod expansion;
 pub mod matching;
 pub mod transaction;
-pub mod expansion;
 
 use crate::{
     config::capitalize_first_letter, render_template_with_cursor, CommandConfig,
@@ -1048,9 +1048,9 @@ impl ExpansionEngine {
     /// Check if a key chord is the configured undo chord. Used to preserve
     /// undo validity across the chord that triggers it.
     pub fn is_undo_chord(&self, chord: &KeyChord) -> bool {
-        self.undo_chord.as_ref().is_some_and(|undo| {
-            chord.modifiers == undo.modifiers && chord.key == undo.key
-        })
+        self.undo_chord
+            .as_ref()
+            .is_some_and(|undo| chord.modifiers == undo.modifiers && chord.key == undo.key)
     }
 
     pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {

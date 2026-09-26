@@ -125,7 +125,9 @@ fn load_config(path: &PathBuf) -> Result<BrokerConfig> {
     let config = BrokerConfig::from_toml(&content)
         .map_err(|e| anyhow!("Failed to parse config file: {}", e))?;
 
-    config.validate().map_err(|e| anyhow!("Config validation failed: {}", e))?;
+    config
+        .validate()
+        .map_err(|e| anyhow!("Config validation failed: {}", e))?;
 
     Ok(config)
 }
@@ -157,8 +159,8 @@ async fn main() -> Result<()> {
     );
 
     // Create executor with loaded config
-    let executor = ActionExecutor::new(&config)
-        .map_err(|e| anyhow!("Failed to create executor: {}", e))?;
+    let executor =
+        ActionExecutor::new(&config).map_err(|e| anyhow!("Failed to create executor: {}", e))?;
 
     // Create server socket
     let server = BrokerServer::bind(&options.socket_path)

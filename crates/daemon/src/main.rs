@@ -959,7 +959,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-
 /// Drain any pending window-change events from the tracker's receiver
 /// and apply them to the engine. This prevents app-filter races where a
 /// focus change arrives between input-event wait and processing.

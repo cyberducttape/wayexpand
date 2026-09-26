@@ -45,7 +45,8 @@ async fn broker_client_server_echo_request_response() {
             stderr: String::new(),
             duration_ms: 100,
         });
-        conn.write_response(&response).expect("Failed to write response");
+        conn.write_response(&response)
+            .expect("Failed to write response");
     });
 
     // Give server time to bind
@@ -169,12 +170,13 @@ async fn action_request_with_environment_variables() {
 
     // Should serialize/deserialize correctly
     let json = serde_json::to_string(&request).expect("Failed to serialize");
-    let deserialized: ActionRequest =
-        serde_json::from_str(&json).expect("Failed to deserialize");
+    let deserialized: ActionRequest = serde_json::from_str(&json).expect("Failed to deserialize");
 
     assert_eq!(deserialized.action_id, "test");
     assert_eq!(deserialized.env_vars.len(), 2);
-    assert!(deserialized.env_vars.contains(&"HOME=/home/user".to_string()));
+    assert!(deserialized
+        .env_vars
+        .contains(&"HOME=/home/user".to_string()));
 }
 
 #[tokio::test]

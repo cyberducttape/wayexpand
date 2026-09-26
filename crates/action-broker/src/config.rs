@@ -131,7 +131,9 @@ impl BrokerConfig {
     /// Validate entire configuration.
     pub fn validate(&self) -> Result<(), String> {
         for (id, action) in &self.actions {
-            action.validate().map_err(|e| format!("action '{}': {}", id, e))?;
+            action
+                .validate()
+                .map_err(|e| format!("action '{}': {}", id, e))?;
 
             if self.require_absolute_paths && !action.program.starts_with('/') {
                 return Err(format!(

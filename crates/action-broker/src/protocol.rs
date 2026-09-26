@@ -77,21 +77,13 @@ impl ActionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActionError {
     /// Action not found in broker configuration.
-    ActionNotFound {
-        action_id: String,
-    },
+    ActionNotFound { action_id: String },
 
     /// Action is disabled or blocked by policy.
-    ActionBlocked {
-        action_id: String,
-        reason: String,
-    },
+    ActionBlocked { action_id: String, reason: String },
 
     /// Execution timed out.
-    Timeout {
-        action_id: String,
-        timeout_ms: u64,
-    },
+    Timeout { action_id: String, timeout_ms: u64 },
 
     /// Failed to spawn the process.
     SpawnFailed {
@@ -108,14 +100,10 @@ pub enum ActionError {
     },
 
     /// Communication error (IPC failure).
-    CommunicationError {
-        reason: String,
-    },
+    CommunicationError { reason: String },
 
     /// Internal broker error.
-    Internal {
-        reason: String,
-    },
+    Internal { reason: String },
 }
 
 impl std::fmt::Display for ActionError {
@@ -127,14 +115,37 @@ impl std::fmt::Display for ActionError {
             ActionError::ActionBlocked { action_id, reason } => {
                 write!(f, "action '{}' blocked: {}", action_id, reason)
             }
-            ActionError::Timeout { action_id, timeout_ms } => {
-                write!(f, "action '{}' timed out after {} ms", action_id, timeout_ms)
+            ActionError::Timeout {
+                action_id,
+                timeout_ms,
+            } => {
+                write!(
+                    f,
+                    "action '{}' timed out after {} ms",
+                    action_id, timeout_ms
+                )
             }
-            ActionError::SpawnFailed { action_id, program, reason } => {
-                write!(f, "action '{}' (program: {}) spawn failed: {}", action_id, program, reason)
+            ActionError::SpawnFailed {
+                action_id,
+                program,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "action '{}' (program: {}) spawn failed: {}",
+                    action_id, program, reason
+                )
             }
-            ActionError::ExitFailure { action_id, exit_code, stderr } => {
-                write!(f, "action '{}' exited with code {}: {}", action_id, exit_code, stderr)
+            ActionError::ExitFailure {
+                action_id,
+                exit_code,
+                stderr,
+            } => {
+                write!(
+                    f,
+                    "action '{}' exited with code {}: {}",
+                    action_id, exit_code, stderr
+                )
             }
             ActionError::CommunicationError { reason } => {
                 write!(f, "communication error: {}", reason)

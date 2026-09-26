@@ -21,15 +21,15 @@
 //! └─────────────────────────────┘
 //! ```
 
-pub mod protocol;
 pub mod config;
 pub mod executor;
 pub mod ipc;
+pub mod protocol;
 
-pub use protocol::{ActionRequest, ActionResponse, ActionError, ActionOutput};
 pub use config::{ActionConfig, BrokerConfig};
 pub use executor::ActionExecutor;
 pub use ipc::{BrokerClient, BrokerServer};
+pub use protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse};
 
 #[cfg(test)]
 mod tests {
