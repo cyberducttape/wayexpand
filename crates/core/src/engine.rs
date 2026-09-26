@@ -1182,9 +1182,17 @@ impl ExpansionEngine {
                     let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
                         if let Some(config_index) = self.matcher_indices.get(index).copied() {
-                            let trigger = &self.config.expansion[config_index].trigger;
                             let match_mode = self.config.expansion[config_index].match_mode;
-                            if !self.matcher.can_continue(trigger, character) {
+                            // `trigger` is the configured lowercase form.
+                            // With propagate_case, the pending suffix may
+                            // instead be `:A` or `:AB`; continuation must be
+                            // checked against the text the user actually
+                            // typed, not the generated trie sibling.
+                            let typed: String = {
+                                let start = self.buffer.len().saturating_sub(length);
+                                self.buffer.iter().skip(start).collect()
+                            };
+                            if !self.matcher.can_continue(&typed, character) {
                                 let trailing_word_character = match_mode == MatchMode::WordBoundary
                                     && is_word_character(character);
                                 if !trailing_word_character {
@@ -1352,9 +1360,12 @@ impl ExpansionEngine {
                     let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
                         if let Some(config_index) = self.matcher_indices.get(index).copied() {
-                            let trigger = &self.config.expansion[config_index].trigger;
                             let match_mode = self.config.expansion[config_index].match_mode;
-                            if !self.matcher.can_continue(trigger, character) {
+                            let typed: String = {
+                                let start = self.buffer.len().saturating_sub(length);
+                                self.buffer.iter().skip(start).collect()
+                            };
+                            if !self.matcher.can_continue(&typed, character) {
                                 let trailing_word_character = match_mode == MatchMode::WordBoundary
                                     && is_word_character(character);
                                 if !trailing_word_character {
@@ -3497,6 +3508,21 @@ replacement = "bad\u0000value""#;
             engine.process(InputEvent::Text(":Sig".into()))[0].insert,
             "Regards"
         );
+    }
+
+    #[test]
+    fn propagate_case_prefix_matching_uses_the_typed_variant() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\npropagate_case = true\n[[expansion]]\ntrigger = \":ab\"\nreplacement = \"alphabet\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+
+        let results = engine.process(InputEvent::Text(":Ab".into()));
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_text, ":A");
+        assert_eq!(results[0].insert, "Alpha");
     }
 
     #[test]
