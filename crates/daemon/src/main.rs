@@ -1906,6 +1906,7 @@ mod tests {
                 cursor_offset: None,
                 reinsert_after: None,
                 command_backed: false,
+                undoable: true,
             },
             ExpansionResult {
                 trigger: ":b".into(),
@@ -1914,6 +1915,7 @@ mod tests {
                 cursor_offset: None,
                 reinsert_after: None,
                 command_backed: false,
+                undoable: true,
             },
         ];
 

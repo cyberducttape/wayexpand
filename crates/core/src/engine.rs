@@ -94,6 +94,10 @@ pub struct ExpansionResult {
     /// from template-based expansions. No heuristics—this is set explicitly
     /// when the engine processes the command result.
     pub command_backed: bool,
+    /// Whether this result is still immediately undoable. A deferred result
+    /// can be completed after a later scalar from the same text event, which
+    /// has the same undo invalidation semantics as immediate processing.
+    pub undoable: bool,
 }
 
 /// Expansion result with deferred command execution (v1.3+ architecture).
@@ -112,6 +116,7 @@ pub struct PendingExpansionResult {
     propagate_case: bool,
     cache_ms: u64,
     cached_output: Option<String>,
+    undoable: bool,
     /// Command to execute (if any). Not yet executed; caller decides.
     pub command: Option<CommandConfig>,
 }
@@ -814,6 +819,7 @@ impl ExpansionEngine {
             cursor_offset: pending.cursor_offset,
             reinsert_after: pending.reinsert_after,
             command_backed,
+            undoable: pending.undoable,
         })
     }
 
@@ -868,6 +874,7 @@ impl ExpansionEngine {
             cursor_offset: pending.cursor_offset,
             reinsert_after: pending.reinsert_after,
             command_backed: true,
+            undoable: pending.undoable,
         };
         let job = AsyncCommandJob::Expansion {
             config_index: pending.config_index,
@@ -891,7 +898,7 @@ impl ExpansionEngine {
     /// output checks have completed.
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
         self.release_deferred_match_for_result(result);
-        if result.cursor_offset.is_none() {
+        if result.undoable && result.cursor_offset.is_none() {
             self.last_expansion = Some(transaction_texts(
                 &result.matched_text,
                 &result.insert,
@@ -1057,6 +1064,7 @@ impl ExpansionEngine {
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
+            undoable: false,
         })
     }
 
@@ -1332,6 +1340,14 @@ impl ExpansionEngine {
                     return results;
                 }
                 for character in text.chars() {
+                    // Match the immediate processor's undo semantics: once
+                    // another scalar follows a match in the same event, that
+                    // earlier expansion is no longer immediately undoable.
+                    if !results.is_empty() {
+                        for result in &mut results {
+                            result.undoable = false;
+                        }
+                    }
                     self.input_generation = self.input_generation.wrapping_add(1);
                     let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
                     if let Some((index, length)) = pending {
@@ -1545,6 +1561,7 @@ impl ExpansionEngine {
             cursor_offset: plan.cursor_offset,
             reinsert_after,
             command_backed: plan.is_command_backed(),
+            undoable: true,
         }
     }
 
@@ -1639,6 +1656,7 @@ impl ExpansionEngine {
                     cursor_offset: None,
                     reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
                     command_backed: true,
+                    undoable: true,
                 };
                 let job = AsyncCommandJob::Expansion {
                     config_index,
@@ -1715,6 +1733,7 @@ impl ExpansionEngine {
                     .filter(|entry| entry.expires_at > Instant::now())
                     .map(|entry| entry.value.clone())
             }),
+            undoable: true,
             command: plan.command.as_ref().map(|c| (**c).clone()),
         })
     }
@@ -3109,6 +3128,7 @@ replacement = "bad\u0000value""#;
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
+            undoable: true,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -3147,6 +3167,7 @@ replacement = "bad\u0000value""#;
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
+            undoable: true,
         };
         let mut injector = AtomicInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -3162,6 +3183,7 @@ replacement = "bad\u0000value""#;
             cursor_offset: Some(2),
             reinsert_after: Some(' '),
             command_backed: false,
+            undoable: true,
         };
         let mut injector = RecordingInjector { calls: Vec::new() };
         ExpansionEngine::apply(&mut injector, &result).unwrap();
@@ -4850,6 +4872,39 @@ replacement = "signature""#,
             .unwrap();
 
         assert!(pending.generation < engine.input_generation);
+    }
+
+    #[test]
+    fn deferred_multi_scalar_text_invalidates_undo_after_a_mid_event_match() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "regards"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":sigx".into()))
+            .pop()
+            .unwrap();
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            PendingExpansionDispatch::Ready(result) => result,
+            PendingExpansionDispatch::Queued => panic!("static expansion was queued"),
+        };
+
+        engine.commit_applied_expansion(&result);
+
+        assert!(
+            engine
+                .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
+                .is_none(),
+            "a later scalar in the same text event must invalidate deferred undo"
+        );
     }
 
     #[test]
