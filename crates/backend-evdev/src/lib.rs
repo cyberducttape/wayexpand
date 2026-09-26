@@ -14,9 +14,9 @@
 //!   `InputEvent::FocusChanged { sensitive: true }` -- matching is never
 //!   suspended in password fields. Deploy it only where that tradeoff is
 //!   acceptable, and see `docs/SECURITY.md`.
-//! - **Requires `input` group membership** (or an equivalent udev rule) to
-//!   read `/dev/input/event*`, a broader grant than the Wayland sources
-//!   need.
+//! - **Requires explicit `/dev/input` authorization.** The installer defaults
+//!   to active-seat logind/uaccess ACLs; `--access=input-group` remains an
+//!   explicitly selected legacy fallback with broader permanent visibility.
 //!
 //! Capture is deliberately **non-exclusive** (no `EVIOCGRAB`): the
 //! compositor keeps delivering every key to the focused application
@@ -73,8 +73,9 @@ pub enum EvdevError {
     NoKeyboard,
     #[error(
         "no readable keyboard was found; {count} unreadable /dev/input/event* node(s) also exist, \
-         and one or more may be a keyboard. Check input permissions and group membership (see \
-         docs/SECURITY.md). If this still fails after logging out and back in, your systemd \
+         and one or more may be a keyboard. Check active-seat /dev/input ACLs, or the explicit \
+         legacy input-group fallback (see docs/SECURITY.md). If this still fails after logging \
+         out and back in, your systemd \
          --user manager may still have the old group list -- run `loginctl terminate-user $USER` \
          (ends all your sessions) or reboot, then retry"
     )]

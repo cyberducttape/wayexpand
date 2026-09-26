@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+> Developer-only guidance for Claude Code. This file is not product
+> documentation and is intentionally excluded from the public documentation
+> hierarchy.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
@@ -36,7 +40,7 @@ Script-level checks run in CI (`.github/workflows/ci.yml`): `scripts/test-releas
 ## Architecture
 
 - `wayexpand-core` is the engine and has no backend dependencies. `ExpansionEngine::process(InputEvent)` returns `ExpansionResult`s. Matching is a reversed char trie (`matcher.rs`) over a bounded rolling buffer; `propagate_case` works by inserting case variants as extra triggers. `backend.rs` defines the `InputSource`, `TextInjector` and `WindowTracker` traits and `discover_backends()`, which is an environment-only guess (env vars, `/dev` nodes). It never talks to the compositor.
-- Backends are separate crates implementing those traits: input-method-v2 (capture and output), evdev (capture only, needs the `input` group), libei and wlroots virtual-keyboard (output only), and KWin scripting over D-Bus (window tracking, KDE only). The shared resolver makes a conservative automatic choice when possible; explicit `--source=` / `--backend=` overrides remain available, and `wayexpand setup` selects a policy-aware compatibility mode.
+- Backends are separate crates implementing those traits: input-method-v2 (capture and output), evdev (capture only; explicit `/dev/input` authorization, with active-seat uaccess by default and the `input` group as a legacy fallback), libei and wlroots virtual-keyboard (output only), and KWin scripting over D-Bus (window tracking, KDE only). The shared resolver makes a conservative automatic choice when possible; explicit `--source=` / `--backend=` overrides remain available, and `wayexpand setup` selects a policy-aware compatibility mode.
 - `wayexpand-daemon` runs the event loop. The control socket (`control.rs`) runs on its own thread and talks to the loop through atomics; `reload.rs` watches the config and swaps it only after the new one validates.
 - `wayexpand` (CLI), `wayexpand-ui` (crossterm TUI) and `wayexpand-gui` (egui) are front ends that use the core directly. The CLI's `doctor` also runs live protocol probes from the backend crates.
 
