@@ -2251,11 +2251,6 @@ fn configure_process_group(command: &mut Command) {
 fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
-fn kill_process_group(child: &std::process::Child) {
-    kill_process_group_by_pid(child.id());
-}
-
-#[cfg(unix)]
 fn kill_process_group_by_pid(pid: u32) {
     if let Ok(pid) = libc::pid_t::try_from(pid) {
         unsafe {

@@ -71,7 +71,7 @@ impl ActionBrokerManager {
 
     /// Check if broker is available (attempt low-overhead probe).
     pub async fn is_available(&self) -> bool {
-        if let Ok(client) = BrokerClient::connect(&self.socket_path) {
+        if let Ok(_client) = BrokerClient::connect(&self.socket_path) {
             debug!("action broker is available");
             return true;
         }

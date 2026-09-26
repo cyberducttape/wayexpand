@@ -10,9 +10,9 @@ mod status;
 use anyhow::Result;
 use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
-    input_poll_interval, libei_policy_blocks, next_retry_delay, wait_for_retry,
+    input_poll_interval, next_retry_delay, wait_for_retry,
 };
-use output_loop::{connect_output_backend, connect_output_with_retry};
+use output_loop::connect_output_with_retry;
 use reload::ReloadableConfig;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
@@ -24,31 +24,21 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
-use wayexpand_backend_input_method::{InputMethodError, InputMethodSource};
-use wayexpand_backend_kwin_window::KwinWindowTracker;
-use wayexpand_backend_libei::{portal_token_path, LibeiInjector, LibeiOptions};
+use wayexpand_backend_libei::portal_token_path;
 use wayexpand_backend_selection::auto_select;
-use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    InputEvent, TextInjector, WindowContext, WindowTracker,
+    InputEvent, TextInjector, WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
 /// an expansion in evdev mode. Generous enough to cover a deliberate
 /// keypress, bounded so a genuinely held key cannot stall expansion.
 const KEY_RELEASE_TIMEOUT: Duration = Duration::from_millis(400);
-/// Low-latency polling while command/hotkey work is queued or running.
-/// Long-term, command completion should wake the input loop directly; until
-/// then, keep the fast cadence only while there is async work to collect.
-const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
-/// Idle maintenance cadence for reload/pause/stop checks and completed command
-/// collection when no command or hotkey job is known to be pending.
-const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 /// Extra settling time for non-exclusive evdev capture. If another physical
 /// event arrives during this window, the pending expansion is abandoned to
 /// avoid deleting text from a cursor that has already moved.
@@ -1066,25 +1056,6 @@ fn set_daemon_status_with_metrics(
         config_path,
         config_healthy,
         metrics,
-    );
-}
-
-fn set_daemon_status_direct(
-    control: &control::ControlServer,
-    source: &str,
-    backend: &str,
-    state: &str,
-    config_path: &Path,
-    config_healthy: bool,
-) {
-    status::set_daemon_status(
-        control,
-        source,
-        backend,
-        state,
-        config_path,
-        config_healthy,
-        CommandMetrics::default(),
     );
 }
 
