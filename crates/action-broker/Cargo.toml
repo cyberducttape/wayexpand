@@ -23,5 +23,10 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
 libc = { workspace = true }
 rustix = { workspace = true, features = ["process"] }
+shellexpand = "3"
+
+[[bin]]
+name = "wayexpand-action-broker"
+path = "src/bin/wayexpand-action-broker.rs"
 
 [dev-dependencies]
