@@ -274,10 +274,10 @@ fn send_completion_or_shutdown<T>(
 
 impl Drop for AsyncCommandRuntime {
     fn drop(&mut self) {
-        // Stop accepting queued work, then join both workers. In-flight
-        // commands are allowed to finish under their existing timeout, so a
-        // configuration reload cannot leave detached workers executing under
-        // the old configuration.
+        // Stop accepting queued work and cancel any child currently running
+        // on either worker before joining. Reloads happen on the daemon's
+        // input loop, so waiting for an old command's normal timeout here
+        // would briefly freeze capture and control handling.
         self.shutdown.store(true, Ordering::Release);
         if let Some(worker) = self.command_worker.take() {
             let _ = worker.join();
@@ -557,7 +557,7 @@ impl ExpansionEngine {
                         result,
                     } = job;
                     let cache_ms = command.cache_ms;
-                    let output = run_command(&command);
+                    let output = run_command_with_shutdown(&command, Some(&command_shutdown));
                     worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                     if let Err(error) = &output {
                         worker_metrics.record_error(matches!(error, CommandError::Timeout));
@@ -602,7 +602,8 @@ impl ExpansionEngine {
                     }
                     hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
                     hotkey_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
-                    let output = Self::execute_hotkey(&action);
+                    let output =
+                        Self::execute_hotkey_with_shutdown(&action, Some(&hotkey_shutdown));
                     hotkey_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                     if let Err(error) = &output {
                         hotkey_metrics.record_error(matches!(error, HotkeyError::Timeout(_)));
@@ -1075,6 +1076,13 @@ impl ExpansionEngine {
     /// callers; the daemon must use [`Self::queue_hotkey`] so its capture loop
     /// never waits for a child process.
     pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
+        Self::execute_hotkey_with_shutdown(result, None)
+    }
+
+    fn execute_hotkey_with_shutdown(
+        result: &HotkeyResult,
+        shutdown: Option<&AtomicBool>,
+    ) -> Result<(), HotkeyError> {
         let mut command = Command::new(&result.command.program);
         configure_command_environment(&mut command, &result.command);
         command
@@ -1086,6 +1094,11 @@ impl ExpansionEngine {
         let mut child = command.spawn().map_err(HotkeyError::Spawn)?;
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
         let status = loop {
+            if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                kill_process_group(&child);
+                let _ = child.wait();
+                return Err(HotkeyError::Timeout(result.command.timeout_ms));
+            }
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
@@ -1907,6 +1920,13 @@ impl std::error::Error for CommandError {}
 /// invoke this from a rendering/repaint loop, since it spawns a real process
 /// with real side effects on every call.
 pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
+    run_command_with_shutdown(command, None)
+}
+
+fn run_command_with_shutdown(
+    command: &CommandConfig,
+    shutdown: Option<&AtomicBool>,
+) -> Result<String, CommandError> {
     let mut process = Command::new(&command.program);
     configure_command_environment(&mut process, command);
     process
@@ -1920,12 +1940,12 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
 
     #[cfg(unix)]
     {
-        run_command_unix(child, stdout, command.timeout_ms)
+        run_command_unix(child, stdout, command.timeout_ms, shutdown)
     }
 
     #[cfg(not(unix))]
     {
-        run_command_fallback(child, stdout, command.timeout_ms)
+        run_command_fallback(child, stdout, command.timeout_ms, shutdown)
     }
 }
 
@@ -1934,6 +1954,7 @@ fn run_command_fallback(
     mut child: Child,
     stdout: ChildStdout,
     timeout_ms: u64,
+    shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
@@ -1947,6 +1968,11 @@ fn run_command_fallback(
 
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let status = loop {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            kill_process_group(&child);
+            let _ = child.wait();
+            return Err(CommandError::StaleInput);
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
@@ -2000,6 +2026,7 @@ fn run_command_unix(
     child: Child,
     mut stdout: ChildStdout,
     timeout_ms: u64,
+    shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
     let mut guard = ChildGuard { child: Some(child) };
     set_nonblocking_stdout(&stdout)?;
@@ -2008,6 +2035,9 @@ fn run_command_unix(
     let mut stdout_eof = false;
 
     let status = loop {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(CommandError::StaleInput);
+        }
         if !stdout_eof {
             stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
         }
@@ -4475,6 +4505,34 @@ replacement = "signature""#,
 
     #[test]
     #[cfg(unix)]
+    fn cancelling_a_running_command_returns_without_waiting_for_timeout() {
+        let command = CommandConfig {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "sleep 60".to_string()],
+            timeout_ms: 60_000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: vec![],
+        };
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let started = Instant::now();
+        let worker =
+            thread::spawn(move || run_command_with_shutdown(&command, Some(&worker_shutdown)));
+
+        thread::sleep(Duration::from_millis(100));
+        shutdown.store(true, Ordering::Release);
+        let result = worker.join().unwrap();
+
+        assert_eq!(result, Err(CommandError::StaleInput));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "cancellation waited for the command timeout"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn child_process_is_cleaned_up_when_output_exceeds_limit() {
         // CRITICAL: Ensure that when a child process writes oversized output,
         // the process is actually killed and reaped, not left running.
@@ -5024,7 +5082,10 @@ replacement = "signature""#,
         );
 
         drop(engine);
-        assert!(first_marker.exists(), "in-flight command should finish");
+        assert!(
+            !first_marker.exists(),
+            "in-flight command must be cancelled during shutdown"
+        );
         assert!(
             !second_marker.exists(),
             "queued command must be discarded during shutdown"
