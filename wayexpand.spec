@@ -76,7 +76,7 @@ install -Dm644 expansions.toml %{buildroot}%{_sysconfdir}/wayexpand/expansions.t
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 
 %files
-%license LICENSE
+%license %{_licensedir}/%{name}/LICENSE
 %doc README.md
 %{_bindir}/wayexpand
 %{_bindir}/wayexpand-daemon
