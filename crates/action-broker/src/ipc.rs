@@ -78,7 +78,7 @@ impl ServerConnection {
         if self.reader.read_line(&mut line)? == 0 {
             return Err(IpcError::ConnectionClosed);
         }
-        serde_json::from_str(line.trim()).map_err(|e| IpcError::Json(e))
+        serde_json::from_str(line.trim()).map_err(IpcError::Json)
     }
 
     /// Send an action response to the client.
@@ -118,7 +118,7 @@ impl BrokerClient {
         if self.reader.read_line(&mut line)? == 0 {
             return Err(IpcError::ConnectionClosed);
         }
-        serde_json::from_str(line.trim()).map_err(|e| IpcError::Json(e))
+        serde_json::from_str(line.trim()).map_err(IpcError::Json)
     }
 }
 

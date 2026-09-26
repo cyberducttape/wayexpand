@@ -202,8 +202,10 @@ allow_network = false
 
     #[test]
     fn broker_config_validation() {
-        let mut config = BrokerConfig::default();
-        config.require_absolute_paths = true;
+        let mut config = BrokerConfig {
+            require_absolute_paths: true,
+            ..Default::default()
+        };
         config.actions.insert(
             "test".to_string(),
             ActionConfig {
