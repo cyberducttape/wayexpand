@@ -18,6 +18,7 @@ if [ $# -ne 1 ]; then
 fi
 
 version="$1"
+project_dir=$(pwd -P)
 output_dir=$(pwd -P)
 timestamp=$(date -u +%s)
 tmpdir=$(mktemp -d "/tmp/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
@@ -57,6 +58,10 @@ cd "${tmpdir}/wayexpand-${version}-vendored"
 
 # Extract clean tarball
 tar -xzf "${tmpdir}/wayexpand-${version}.tar.gz"
+# Debian packaging metadata is export-ignored from the generic Git archive,
+# but the vendored archive is also the input for offline Debian/Launchpad
+# builds, so include it explicitly.
+cp -a "$project_dir/debian" "wayexpand-${version}/"
 cd "wayexpand-${version}"
 
 # Generate vendor/ and the source replacement config
@@ -71,6 +76,11 @@ tar -czf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" "wayexpand-${version}"
 # Verify .git is not in vendored archive
 if tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" | grep -q '\.git/'; then
     printf '%s\n' "ERROR: .git directory found in vendored tarball" >&2
+    exit 1
+fi
+if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
+    | grep -F "wayexpand-${version}/debian/rules" >/dev/null; then
+    printf '%s\n' "ERROR: Debian packaging metadata missing from vendored tarball" >&2
     exit 1
 fi
 printf '%s\n' "  ✓ Verified .git not in vendored tarball"
