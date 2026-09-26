@@ -61,6 +61,12 @@ pub struct WindowContext {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct NormalizedWindowContext {
+    app_id: Option<String>,
+    title: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpansionResult {
     pub trigger: String,
@@ -209,6 +215,7 @@ pub struct ExpansionEngine {
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
     current_window: Option<WindowContext>,
+    normalized_window: Option<NormalizedWindowContext>,
     undo_chord: Option<KeyChord>,
     /// The most recent successful expansion, kept only until the very next
     /// event of any other kind (see `process`): `(text to type back,
@@ -478,6 +485,7 @@ impl ExpansionEngine {
             command_cache,
             hotkeys,
             current_window: None,
+            normalized_window: None,
             undo_chord,
             last_expansion: None,
             deferred_matches: Vec::new(),
@@ -969,6 +977,14 @@ impl ExpansionEngine {
     /// matching `InputEvent::WindowChanged`'s own behavior (see its
     /// handler for why that clear is unnecessary).
     pub fn set_current_window(&mut self, window: Option<WindowContext>) {
+        self.set_window_context(window);
+    }
+
+    fn set_window_context(&mut self, window: Option<WindowContext>) {
+        self.normalized_window = window.as_ref().map(|window| NormalizedWindowContext {
+            app_id: window.app_id.as_ref().map(|value| value.to_lowercase()),
+            title: window.title.as_ref().map(|value| value.to_lowercase()),
+        });
         self.current_window = window;
     }
 
@@ -1289,7 +1305,7 @@ impl ExpansionEngine {
                 // old application and must not be used to compute replacements
                 // for the new one. This prevents cross-window trigger matches
                 // that can cause unrelated text deletion.
-                self.current_window = window;
+                self.set_window_context(window);
                 self.clear_buffer();
                 Vec::new()
             }
@@ -1445,7 +1461,7 @@ impl ExpansionEngine {
             }
             InputEvent::WindowChanged(window) => {
                 self.input_generation = self.input_generation.wrapping_add(1);
-                self.current_window = window;
+                self.set_window_context(window);
                 self.clear_buffer();
                 Vec::new()
             }
@@ -1767,7 +1783,7 @@ impl ExpansionEngine {
         if expansion.app_filter.is_empty() {
             return true;
         }
-        let Some(window) = &self.current_window else {
+        let Some(window) = &self.normalized_window else {
             return false;
         };
         self.app_filters_lower[config_index].iter().any(|filter| {
@@ -1775,7 +1791,7 @@ impl ExpansionEngine {
             // Rationale: app_id is set by the compositor and reliable; title is
             // user-editable and can be spoofed to match sensitive filters.
             if let Some(app_id) = window.app_id.as_deref() {
-                app_id.to_lowercase().contains(filter.as_str())
+                app_id.contains(filter.as_str())
             } else if self.config.organization.disable_title_matching {
                 // Policy: disable_title_matching means no title fallback.
                 // Fail closed: don't match without app_id (per CLAUDE.md conventions).
@@ -1785,7 +1801,7 @@ impl ExpansionEngine {
                 window
                     .title
                     .as_deref()
-                    .is_some_and(|title| title.to_lowercase().contains(filter.as_str()))
+                    .is_some_and(|title| title.contains(filter.as_str()))
             }
         })
     }
