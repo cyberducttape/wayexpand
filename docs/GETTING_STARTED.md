@@ -239,7 +239,7 @@ Your Name"""
 ```toml
 [[expansion]]
 trigger = ";;date"
-replacement = "{{date}}"  # Will be today's date
+replacement = "{{date}}"  # Today's date in UTC
 ```
 
 **Code snippet:**

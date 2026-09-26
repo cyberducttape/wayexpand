@@ -103,6 +103,8 @@ Verfügbare Variablen: `{{date}}`, `{{time}}`, `{{datetime}}`,
 `{{date+3d}}` (relative Offsets: Tage/Wochen/Stunden/Minuten),
 `{{username}}`, `{{hostname}}`, `{{unix_timestamp}}`, `{{newline}}`,
 `{{tab}}`, `{{cursor}}` (Cursor-Platzierung nach der Expansion).
+`{{date}}`, `{{time}}` und `{{datetime}}` werden in UTC berechnet, nicht in
+der lokalen Zeitzone.
 
 ### App-Filter
 
