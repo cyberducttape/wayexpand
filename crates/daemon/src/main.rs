@@ -2458,6 +2458,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn undo_is_invalidated_by_navigation_keys() {
+        // Regression test: undo must be invalidated by navigation keys
+        // (Left, Right, Home, End) because they move the cursor.
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            disable_hotkeys: true,
+            ..Default::default()
+        };
+
+        for nav_key in &["Left", "Right", "Home", "End"] {
+            let mut injector = RecordingInjector { calls: Vec::new() };
+            let mut engine = ExpansionEngine::new(config.clone()).unwrap();
+
+            // Expand :x to "ok"
+            process_event(
+                &mut engine,
+                InputEvent::Text(":x".into()),
+                Some(&mut injector),
+                &policy,
+                "libei",
+            )
+            .unwrap();
+
+            // Press navigation key - should invalidate undo
+            process_event(
+                &mut engine,
+                InputEvent::Key(wayexpand_core::KeyChord::parse(nav_key).unwrap()),
+                Some(&mut injector),
+                &policy,
+                "libei",
+            )
+            .unwrap();
+
+            // Try undo - should NOT work because transaction was invalidated
+            process_event(
+                &mut engine,
+                InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+                Some(&mut injector),
+                &policy,
+                "libei",
+            )
+            .unwrap();
+
+            // Should only have expansion, not undo (no erase/insert of second pair)
+            assert_eq!(
+                injector.calls.len(),
+                2,
+                "{} key should invalidate undo transaction",
+                nav_key
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn deferred_command_without_worker_never_runs_synchronously() {
