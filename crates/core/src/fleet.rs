@@ -279,8 +279,11 @@ impl FleetConfig {
         }
         config.validate().map_err(FleetError::Config)?;
         fleet.config = config;
-        fleet.stats.total_expansions += base_expansions;
-        fleet.stats.total_hotkeys += base_hotkeys;
+        // These fields are reported alongside the active arrays by the CLI;
+        // recompute them after policy filtering and base-layer composition so
+        // status output cannot describe entries that are no longer active.
+        fleet.stats.total_expansions = fleet.config.expansion.len();
+        fleet.stats.total_hotkeys = fleet.config.hotkey.len();
         fleet.stats.total_files_loaded += usize::from(base_expansions > 0 || base_hotkeys > 0);
         fleet
             .stats
@@ -541,36 +544,55 @@ fn discover_layer_files(dir: &Path, is_organization: bool) -> Result<Vec<PathBuf
         }
         require_root_owned(dir, &metadata)?;
     }
-    let mut files: Vec<_> = fs::read_dir(dir)
-        .map_err(|source| {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|source| {
+        FleetError::Config(ConfigError::Read {
+            path: dir.display().to_string(),
+            source,
+        })
+    })? {
+        let entry = entry.map_err(|source| {
             FleetError::Config(ConfigError::Read {
                 path: dir.display().to_string(),
                 source,
             })
-        })?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".toml"))
-        .map(|entry| entry.path())
-        .collect();
+        })?;
+        if entry.file_name().to_string_lossy().ends_with(".toml") {
+            files.push(entry.path());
+        }
+    }
     files.sort();
     Ok(files)
 }
 
 fn discover_pack_dirs(dir: &Path) -> Result<Vec<(PathBuf, String)>, FleetError> {
-    let mut pack_dirs: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| {
+    let mut pack_dirs = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|source| {
+        FleetError::Config(ConfigError::Read {
+            path: dir.display().to_string(),
+            source,
+        })
+    })? {
+        let entry = entry.map_err(|source| {
             FleetError::Config(ConfigError::Read {
                 path: dir.display().to_string(),
-                source: e,
+                source,
             })
-        })?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_dir())
-        .map(|entry| {
+        })?;
+        if entry
+            .file_type()
+            .map_err(|source| {
+                FleetError::Config(ConfigError::Read {
+                    path: entry.path().display().to_string(),
+                    source,
+                })
+            })?
+            .is_dir()
+        {
             let name = entry.file_name().to_string_lossy().into_owned();
-            (entry.path(), name)
-        })
-        .collect();
+            pack_dirs.push((entry.path(), name));
+        }
+    }
     pack_dirs.sort_by(|left, right| left.1.cmp(&right.1));
     Ok(pack_dirs)
 }
@@ -778,6 +800,7 @@ replacement = "third"
         assert!(triggers.contains(&":org"));
         assert!(triggers.contains(&":approved"));
         assert!(!triggers.contains(&":blocked"));
+        assert_eq!(merged.stats.total_expansions, triggers.len());
         assert_eq!(
             merged.policy_violations,
             ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
