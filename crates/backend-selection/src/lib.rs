@@ -173,6 +173,13 @@ impl Compositor {
             }
         }
 
+        // Check for Wayland before X11. Modern Wayland sessions often have
+        // both WAYLAND_DISPLAY and DISPLAY set (XWayland), so checking DISPLAY
+        // first would incorrectly label Wayland+XWayland as pure X11.
+        if env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("WAYLAND_SOCKET").is_some() {
+            return Self::Unknown;
+        }
+
         // A Wayland session identifies the display protocol, not the
         // compositor or its implementation family. Do not turn an
         // unrecognized compositor into Sway/wlroots based on environment
