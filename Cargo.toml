@@ -12,7 +12,7 @@ members = [
     "crates/backend-evdev",
     "crates/backend-kwin-window",
     "crates/backend-selection",
-    "crates/backend-ibus",
+    "crates/backend-ibus", "crates/action-broker",
 ]
 
 [workspace.package]
