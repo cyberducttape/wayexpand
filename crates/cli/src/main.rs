@@ -903,14 +903,18 @@ fn create_backup(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn print_help() {
-    println!(
+    let help = format!(
         "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  setup [--mode recommended|maximum|experimental] [--yes] Configure a safe compatibility mode\n  status|reload|pause|resume|stop [--json]                 Control a running daemon\n  edit [config]                                            Open the graphical snippet editor\n  doctor [--json] [config]                                 Diagnose configuration and backends\n  certify [--json]                                         Run local compatibility certification\n  test <text> [--json] [config]                            Simulate input and print a match\n  test-hotkey <chord> [--json] [config]                   Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]                      Preview a replacement\n  list [--json] [config]                                   List configured expansions and hotkeys\n  search <query> [--json] [config]                         Search triggers, descriptions, and tags\n  validate [config]                                        Validate configuration\n  import espanso <file>                                    Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]                 Enable or disable an expansion\n  set-mode <trigger> <mode> [config]                       Set immediate or word-boundary matching\n  backup [config] [destination]                            Create a non-overwriting config backup\n  backend                                                  Show backend availability\n  explain-backend                                          Explain expert backend selection\n  help                                                     Show this help\n  version                                                  Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
         env!("CARGO_PKG_VERSION"),
         default_config_path().display()
     );
-    println!(
-        "\nDetailed usage:\n  preview <trigger> [--preview-app APP|--preview-app=APP] [--json] [config]\n  validate [--fleet] [--json] [config]"
-    );
+    let help = help
+        .replace(
+            "preview <trigger> [--json] [config]",
+            "preview <trigger> [--preview-app APP] [--json] [config]",
+        )
+        .replace("validate [config]", "validate [--fleet] [--json] [config]");
+    println!("{help}");
     println!(
         "\nOperational commands:\n  fleet status [--json]                                    Show merged fleet configuration status\n  portal status|reset                                      Inspect or remove the libei portal token"
     );
