@@ -60,11 +60,12 @@ documented `0644` mode.
 Fleet layer files contain snippets, hotkeys, and settings only. Security policy
 is loaded from the root-owned `/etc/wayexpand/policy.toml`; an `[organization]`
 table in a fleet layer is rejected. In daemon fleet mode, that root policy's
-`allowed_packs` list filters curated packs.
+`allowed_packs` list is enforced when `safe_mode = true`; with safe mode off,
+disallowed packs are retained and reported as audit-only policy violations.
 
 ## Layer Precedence and Conflict Resolution
 
-**Layer Loading Order:** Organization → User → Packs → Base config (primary config appended last, lowest priority)
+**Layer Loading Order:** Base config → Organization → User → Packs (base config is prepended and has the lowest priority)
 
 **Duplicate/Conflict Behavior:**
 
@@ -74,12 +75,12 @@ table in a fleet layer is rejected. In daemon fleet mode, that root policy's
 | Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
 | Settings (`max_buffer_chars`, `undo_chord`, `font_scale`, `libei_token_persistence`) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins; disallowed pack settings are filtered before precedence is resolved. |
 | Organization policy | Root policy only | `/etc/wayexpand/policy.toml` is the administrator security-policy source. |
-| Curated packs | Filtered by root policy | `allowed_packs` restricts which packs are active in daemon fleet mode. |
-| Base config | Appended last (lowest priority) | Fleet layers are merged first, then base config expansions/hotkeys are appended. Base settings only override if fleet has no settings. |
+| Curated packs | Filtered by root policy in safe mode | `allowed_packs` restricts which packs are active in daemon fleet mode only when enforcement is enabled. |
+| Base config | Prepended first (lowest priority) | Base config expansions/hotkeys precede fleet layers. Base settings only override if fleet has no settings. |
 
 **Example precedence:**
 - If organization defines `;sig` trigger and user also defines `;sig`, deployment fails with duplicate-trigger error.
-- Base config's existing snippets are appended to fleet snippets, then the merged configuration is validated. Duplicate triggers or hotkeys across the base and fleet layers cause deployment to fail; there is no override behavior.
+- Base config's existing snippets precede fleet snippets, then the merged configuration is validated. Duplicate triggers or hotkeys across the base and fleet layers cause deployment to fail; there is no override behavior.
 
 **For Infrastructure:** Ensure distinct trigger/hotkey names across organizational, user, and pack layers. Validate `/etc/wayexpand/policy.toml` separately before deployment.
 

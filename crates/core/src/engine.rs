@@ -100,7 +100,7 @@ pub struct ExpansionResult {
     pub undoable: bool,
 }
 
-/// Expansion result with deferred command execution (v1.3+ architecture).
+/// Expansion result with deferred command execution.
 /// Commands are not executed until caller approves via policy check.
 #[derive(Debug, Clone)]
 pub struct PendingExpansionResult {
@@ -1328,7 +1328,7 @@ impl ExpansionEngine {
         }
     }
 
-    /// Process input and return pending expansion results (v1.3+ deferred execution).
+    /// Process input and return pending expansion results for deferred execution.
     /// Commands are NOT executed; caller must check policy and complete results
     /// with `dispatch_pending_with_policy()` to preserve engine state.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
@@ -1702,7 +1702,7 @@ impl ExpansionEngine {
     }
 
     /// Deferred execution variant: returns pending results without executing commands.
-    /// v1.3+ architecture: caller must check policy and complete through the
+    /// Caller must check policy and complete through the
     /// engine so cache and case propagation are prepared. Undo state is
     /// committed by the caller only after successful injection.
     fn take_match_deferred(

@@ -1433,12 +1433,12 @@ fn process_event(
         }
         return Ok(());
     }
-    // v1.3+ deferred execution: check policy BEFORE executing commands
+    // Check policy before executing deferred commands.
     let pending = engine.process_deferred(event);
     apply_pending_results(engine, pending, injector, policy, active_backend)
 }
 
-/// Apply deferred expansion results with policy pre-approval (v1.3+ architecture).
+/// Apply deferred expansion results after policy pre-approval.
 /// Checks policy before executing commands, preventing irreversible side effects.
 fn apply_pending_results(
     engine: &mut ExpansionEngine,

@@ -327,13 +327,6 @@ For current guidance, see the live documentation above. Archived docs are for re
 
 ---
 
-## Documentation Statistics
-
-- **Total public docs:** 28 files
-- **Archived docs:** 11 files
-- **Total lines:** ~8,500 lines of documentation
-- **Last updated:** 2026-09-23
-
 ---
 
 ## Navigation Tips

@@ -22,7 +22,7 @@
 /// **Organization policy:** Security policy is not part of fleet layers. The
 /// daemon loads it exclusively from `/etc/wayexpand/policy.toml`.
 ///
-/// **Base config:** Appended last (lowest priority for expansions/hotkeys).
+/// **Base config:** Prepended first (lowest priority for expansions/hotkeys).
 /// Base settings only override if no layer provides settings.
 use crate::{Config, ConfigError, OrganizationPolicy};
 use serde::{Deserialize, Serialize};
