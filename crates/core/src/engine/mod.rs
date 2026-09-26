@@ -1048,7 +1048,7 @@ impl ExpansionEngine {
     /// Check if a key chord is the configured undo chord. Used to preserve
     /// undo validity across the chord that triggers it.
     pub fn is_undo_chord(&self, chord: &KeyChord) -> bool {
-        self.undo_chord.as_ref().map_or(false, |undo| {
+        self.undo_chord.as_ref().is_some_and(|undo| {
             chord.modifiers == undo.modifiers && chord.key == undo.key
         })
     }
