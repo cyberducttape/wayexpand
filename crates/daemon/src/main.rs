@@ -1419,7 +1419,7 @@ fn process_event(
         // Invalidate any pending asynchronous expansions before processing
         // the hotkey. This also updates undo validity: undo is only preserved
         // for the undo chord itself; all other keys invalidate it.
-        engine.process(event);
+        let _ = engine.process(event);
 
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
