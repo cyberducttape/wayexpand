@@ -5,7 +5,7 @@ use std::{
     env,
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc, Mutex, Weak,
+        mpsc, Arc, Mutex,
     },
     time::Duration,
 };
@@ -39,8 +39,13 @@ struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     config: Arc<Mutex<wayexpand_core::Config>>,
     policy: Arc<OrganizationPolicy>,
-    instances: Arc<Mutex<Vec<Weak<Mutex<IbusEngineAdapter>>>>>,
+    instances: Arc<Mutex<Vec<EngineInstance>>>,
     next_id: AtomicU64,
+}
+
+struct EngineInstance {
+    adapter: Arc<Mutex<IbusEngineAdapter>>,
+    path: OwnedObjectPath,
 }
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
@@ -91,50 +96,52 @@ impl Factory {
         self.instances
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
-            .push(Arc::downgrade(&adapter));
-        spawn_completion_dispatcher(
-            Arc::downgrade(&adapter),
-            Arc::clone(&self.connection),
-            path.clone(),
-        )
-        .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))?;
+            .push(EngineInstance {
+                adapter,
+                path: path.clone(),
+            });
         Ok(path)
     }
 }
 
 fn spawn_completion_dispatcher(
-    adapter: Weak<Mutex<IbusEngineAdapter>>,
+    instances: Arc<Mutex<Vec<EngineInstance>>>,
     connection: Arc<Mutex<Option<Connection>>>,
-    path: OwnedObjectPath,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("wayexpand-ibus-completion".into())
         .spawn(move || loop {
             std::thread::sleep(Duration::from_millis(10));
-            let Some(adapter) = adapter.upgrade() else {
-                break;
-            };
-            let actions = match adapter.lock() {
-                Ok(mut adapter) => adapter.drain_completed_commands(),
+            let instances = match instances.lock() {
+                Ok(instances) => instances
+                    .iter()
+                    .map(|instance| (Arc::clone(&instance.adapter), instance.path.clone()))
+                    .collect::<Vec<_>>(),
                 Err(_) => break,
             };
-            if actions.is_empty() {
-                continue;
-            }
-            let engine = EngineObject {
-                adapter: Arc::clone(&adapter),
-                connection: Arc::clone(&connection),
-                path: path.clone(),
-            };
-            if let Err(error) = engine.emit_actions(&actions) {
-                warn!(%error, "could not deliver completed IBus expansion");
-                // The adapter commits a completed expansion when it builds
-                // the protocol action batch. If D-Bus rejects that batch, the
-                // application did not receive a reliable replacement; clear
-                // matcher and undo state so a later undo cannot target
-                // unrelated text at the cursor.
-                if let Ok(mut adapter) = adapter.lock() {
-                    adapter.reset();
+            for (adapter, path) in instances {
+                let actions = match adapter.lock() {
+                    Ok(mut adapter) => adapter.drain_completed_commands(),
+                    Err(_) => continue,
+                };
+                if actions.is_empty() {
+                    continue;
+                }
+                let engine = EngineObject {
+                    adapter: Arc::clone(&adapter),
+                    connection: Arc::clone(&connection),
+                    path,
+                };
+                if let Err(error) = engine.emit_actions(&actions) {
+                    warn!(%error, "could not deliver completed IBus expansion");
+                    // The adapter commits a completed expansion when it builds
+                    // the protocol action batch. If D-Bus rejects that batch, the
+                    // application did not receive a reliable replacement; clear
+                    // matcher and undo state so a later undo cannot target
+                    // unrelated text at the cursor.
+                    if let Ok(mut adapter) = adapter.lock() {
+                        adapter.reset();
+                    }
                 }
             }
         })
@@ -263,8 +270,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
-    let instances: Arc<Mutex<Vec<Weak<Mutex<IbusEngineAdapter>>>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let instances: Arc<Mutex<Vec<EngineInstance>>> = Arc::new(Mutex::new(Vec::new()));
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         config: Arc::clone(&factory_config),
@@ -275,6 +281,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let reload_receiver = store.subscribe();
     let reload_store = Arc::clone(&store);
     let reload_config = Arc::clone(&factory_config);
+    let reload_instances = Arc::clone(&instances);
     let config_watch_path = path.clone();
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
@@ -338,12 +345,9 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                     if let Ok(mut current) = reload_config.lock() {
                         *current = config.clone();
                     }
-                    if let Ok(mut instances) = instances.lock() {
-                        instances.retain(|weak| {
-                            let Some(adapter) = weak.upgrade() else {
-                                return false;
-                            };
-                            if let Ok(mut adapter) = adapter.lock() {
+                    if let Ok(instances) = reload_instances.lock() {
+                        for instance in instances.iter() {
+                            if let Ok(mut adapter) = instance.adapter.lock() {
                                 if let Err(error) = adapter.replace_config(config.clone()) {
                                     let summary = error.safe_summary();
                                     if adapter_error.as_deref() != Some(summary.as_str()) {
@@ -360,8 +364,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                                     adapter_error = None;
                                 }
                             }
-                            true
-                        });
+                        }
                     }
                 }
             }
@@ -379,6 +382,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .serve_at(FACTORY_PATH, factory)?
         .build()?;
     *connection_slot.lock().expect("connection slot") = Some(connection.clone());
+    spawn_completion_dispatcher(Arc::clone(&instances), Arc::clone(&connection_slot))
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     loop {
         std::thread::park();
     }
