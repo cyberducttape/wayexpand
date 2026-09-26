@@ -24,10 +24,12 @@
 pub mod protocol;
 pub mod config;
 pub mod executor;
+pub mod ipc;
 
 pub use protocol::{ActionRequest, ActionResponse, ActionError};
 pub use config::{ActionConfig, BrokerConfig};
 pub use executor::ActionExecutor;
+pub use ipc::{BrokerClient, BrokerServer};
 
 #[cfg(test)]
 mod tests {
