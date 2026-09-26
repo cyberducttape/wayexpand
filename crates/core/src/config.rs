@@ -497,6 +497,8 @@ pub enum ConfigError {
         first: usize,
         second: usize,
     },
+    #[error("hotkey {index} collides with settings.undo_chord ({chord:?})")]
+    UndoHotkeyCollision { chord: String, index: usize },
     #[error("enabled triggers contain {length} characters; maximum is {maximum}")]
     TriggerDataTooLarge { length: usize, maximum: usize },
     #[error("configuration is too large ({length} bytes; maximum is {maximum})")]
@@ -579,6 +581,9 @@ impl ConfigError {
             }
             Self::DuplicateHotkey { first, second, .. } => {
                 format!("duplicate hotkey in entries {first} and {second}")
+            }
+            Self::UndoHotkeyCollision { index, .. } => {
+                format!("hotkey {index} collides with settings.undo_chord")
             }
             Self::TriggerDataTooLarge { length, maximum } => {
                 format!("enabled trigger data is too large ({length}; maximum {maximum})")
@@ -819,9 +824,13 @@ impl Config {
         if !(1..=4096).contains(&self.settings.max_buffer_chars) {
             return Err(ConfigError::InvalidBufferLimit);
         }
-        if let Some(undo_chord) = &self.settings.undo_chord {
-            KeyChord::parse(undo_chord).map_err(|_| ConfigError::InvalidUndoChord)?;
-        }
+        let undo_chord = self
+            .settings
+            .undo_chord
+            .as_deref()
+            .map(KeyChord::parse)
+            .transpose()
+            .map_err(|_| ConfigError::InvalidUndoChord)?;
         if self.hotkey.len() > MAX_HOTKEYS {
             return Err(ConfigError::TooManyHotkeys {
                 count: self.hotkey.len(),
@@ -835,6 +844,12 @@ impl Config {
                     index,
                     reason: "chord is empty, ambiguous, or contains an unknown modifier",
                 })?;
+            if binding.enabled && undo_chord.as_ref().is_some_and(|undo| undo == &chord) {
+                return Err(ConfigError::UndoHotkeyCollision {
+                    chord: chord.to_string(),
+                    index,
+                });
+            }
             if binding.description.chars().count() > MAX_HOTKEY_DESCRIPTION_CHARS
                 || binding.description.contains('\0')
             {
@@ -1436,6 +1451,44 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ConfigError::InvalidHotkey { index: 0, .. }));
+    }
+
+    #[test]
+    fn undo_chord_cannot_collide_with_an_enabled_hotkey() {
+        let error = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "control + z"
+
+            [[hotkey]]
+            chord = "Ctrl+Z"
+            command = { program = "/bin/true" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::UndoHotkeyCollision { index: 0, chord } if chord == "Ctrl+Z"
+        ));
+    }
+
+    #[test]
+    fn disabled_hotkey_may_match_the_undo_chord() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[hotkey]]
+            enabled = false
+            chord = "control+z"
+            command = { program = "/bin/true" }
+            "#,
+        )
+        .unwrap();
+
+        assert!(!config.hotkey[0].enabled);
     }
 
     #[test]
