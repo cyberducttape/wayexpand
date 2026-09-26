@@ -92,7 +92,7 @@ Then see [SECURITY.md](../SECURITY.md)
 
 | Document | Audience | Purpose |
 |----------|----------|---------|
-| [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, logs, config reload |
+| [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, tested systemd lifecycle, logs, config reload; desktop functionality inherits backend certification |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
 | [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
