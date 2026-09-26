@@ -12,7 +12,10 @@ pub struct ConfigStore {
     path: PathBuf,
     config: RwLock<Arc<Config>>,
     generation: Mutex<u64>,
-    stamp: Mutex<Option<FileStamp>>,
+    /// Metadata observed on the most recent poll, whether or not it parsed.
+    /// Keeping this separate from `applied_stamp` prevents unchanged invalid
+    /// content from being reparsed on every fallback-poll cycle.
+    observed_stamp: Mutex<Option<FileStamp>>,
     reload_error: Mutex<Option<String>>,
     subscribers: Mutex<Vec<mpsc::Sender<u64>>>,
 }
@@ -29,7 +32,7 @@ impl ConfigStore {
         let path = path.into();
         let config = Config::load(&path)?;
         Ok(Arc::new(Self {
-            stamp: Mutex::new(metadata_stamp(&path)),
+            observed_stamp: Mutex::new(metadata_stamp(&path)),
             path,
             config: RwLock::new(Arc::new(config)),
             generation: Mutex::new(0),
@@ -90,10 +93,17 @@ impl ConfigStore {
     /// Invalid edits leave the last valid snapshot active.
     pub fn reload_if_changed(&self) -> Result<bool, ConfigError> {
         let current = metadata_stamp(&self.path);
-        let mut stamp = self.stamp.lock().unwrap_or_else(PoisonError::into_inner);
-        if current == *stamp {
+        let mut observed_stamp = self
+            .observed_stamp
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if current == *observed_stamp {
             return Ok(false);
         }
+        // Record the observation even when parsing fails. The active config
+        // remains untouched, but an unchanged invalid file is not a new
+        // reload attempt on the next poll.
+        *observed_stamp = current;
         let config = match Config::load(&self.path) {
             Ok(config) => config,
             Err(error) => {
@@ -104,7 +114,6 @@ impl ConfigStore {
                 return Err(error);
             }
         };
-        *stamp = current;
         self.atomically_replace(config);
         *self
             .reload_error
@@ -191,6 +200,10 @@ mod tests {
         assert!(store.reload_if_changed().is_err());
         assert_eq!(store.config().expansion[0].replacement, "old");
         assert_eq!(store.generation(), 0);
+        assert!(
+            !store.reload_if_changed().unwrap(),
+            "unchanged invalid content must not be reparsed"
+        );
         let _ = fs::remove_file(path);
     }
 
