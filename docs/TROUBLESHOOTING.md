@@ -325,6 +325,7 @@ journalctl --user -u wayexpand-input-method.service -n 100 > /tmp/wayexpand-logs
 
 Create a minimal test config:
 ```sh
+umask 077
 cat > /tmp/test-expansions.toml << 'EOF'
 [[expansion]]
 trigger = ";hello"

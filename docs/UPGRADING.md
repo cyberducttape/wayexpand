@@ -74,7 +74,8 @@ No daemon behavior changes.
 Back up your current configuration:
 
 ```bash
-cp ~/.config/wayexpand/expansions.toml ~/wayexpand-backup-$(date +%Y%m%d).toml
+install -m 600 ~/.config/wayexpand/expansions.toml \
+  ~/wayexpand-backup-$(date +%Y%m%d).toml
 ```
 
 ### After Upgrade (If Something Breaks)
@@ -82,7 +83,8 @@ cp ~/.config/wayexpand/expansions.toml ~/wayexpand-backup-$(date +%Y%m%d).toml
 Restore from backup:
 
 ```bash
-cp ~/wayexpand-backup-20260918.toml ~/.config/wayexpand/expansions.toml
+install -m 600 ~/wayexpand-backup-20260918.toml \
+  ~/.config/wayexpand/expansions.toml
 systemctl --user restart wayexpand-input-method.service
 ```
 
@@ -214,7 +216,8 @@ Via configuration management (Ansible, Puppet, etc.):
 set -e
 
 # Backup
-cp ~/.config/wayexpand/expansions.toml ~/wayexpand-backup.toml
+install -m 600 ~/.config/wayexpand/expansions.toml \
+  ~/wayexpand-backup.toml
 
 # Upgrade
 cd ~/wayexpand
@@ -224,7 +227,8 @@ git pull
 # Verify
 wayexpand validate ~/.config/wayexpand/expansions.toml || {
   # Restore backup if validation fails
-  cp ~/wayexpand-backup.toml ~/.config/wayexpand/expansions.toml
+  install -m 600 ~/wayexpand-backup.toml \
+    ~/.config/wayexpand/expansions.toml
   exit 1
 }
 

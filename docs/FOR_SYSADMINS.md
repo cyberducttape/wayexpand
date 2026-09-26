@@ -120,7 +120,8 @@ For teams with shared machines or controlled environments:
 ```bash
 # Each team has a repo with expansions.toml
 git clone https://internal-git/team-wayexpand-snippets
-cp team-wayexpand-snippets/expansions.toml ~/.config/wayexpand/
+install -m 600 team-wayexpand-snippets/expansions.toml \
+  ~/.config/wayexpand/expansions.toml
 ```
 
 **Option 2: Config management tool** (Ansible, Puppet)
@@ -130,7 +131,8 @@ roles/wayexpand/files/expansions.toml
 
 **Option 3: Central file server**
 ```bash
-cp /mnt/shared-config/wayexpand/expansions.toml ~/.config/wayexpand/
+install -m 600 /mnt/shared-config/wayexpand/expansions.toml \
+  ~/.config/wayexpand/expansions.toml
 ```
 
 ### Snippet Library Audit

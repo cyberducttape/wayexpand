@@ -96,7 +96,13 @@ Other paths:
 
 ## Create your first snippet
 
-Add this to `~/.config/wayexpand/expansions.toml`:
+Create the file privately before adding this to it:
+
+```sh
+install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
+```
+
+Then add this to `~/.config/wayexpand/expansions.toml`:
 
 ```toml
 [[expansion]]

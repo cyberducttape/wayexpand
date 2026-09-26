@@ -34,6 +34,7 @@ sudo chmod 644 /etc/wayexpand/snippets.d/org-snippets.toml
 
 ### User Layer
 ```sh
+umask 077
 mkdir -p ~/.config/wayexpand/snippets.d
 tee ~/.config/wayexpand/snippets.d/personal.toml > /dev/null << 'EOF'
 [[expansion]]
@@ -44,9 +45,15 @@ EOF
 
 ### Using Curated Packs
 ```sh
+umask 077
 mkdir -p ~/.local/share/wayexpand/packs/my-pack
 # Add TOML files to my-pack/
 ```
+
+User-owned TOML files must be mode `0600`; the `umask` above keeps personal
+snippets and pack files private when they are created with a text editor or
+shell redirection. Organization-layer files are root-owned and may use the
+documented `0644` mode.
 
 ## Policy Control
 

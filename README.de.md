@@ -85,8 +85,13 @@ replacement = "Hello, world!"
 description = "A friendly greeting"
 ```
 
-Bearbeiten Sie `~/.config/wayexpand/expansions.toml` direkt oder über
+Legen Sie die Datei mit den privaten Berechtigungen `0600` an und bearbeiten
+Sie `~/.config/wayexpand/expansions.toml` direkt oder über
 `wayexpand-gui`.
+
+```sh
+install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
+```
 
 ### Template-Variablen
 

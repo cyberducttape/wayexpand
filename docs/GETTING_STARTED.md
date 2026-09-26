@@ -213,6 +213,7 @@ Click Save, then type `;;hello` in any text field.
 
 **Via CLI:**
 ```bash
+install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
 $EDITOR ~/.config/wayexpand/expansions.toml
 ```
 
