@@ -1035,9 +1035,17 @@ impl ExpansionEngine {
     ///
     /// Note: does not clear `last_expansion` (the undo transaction) because
     /// the undo chord itself arrives as a Key event, and clearing it would make
-    /// undo impossible to trigger.
+    /// undo impossible to trigger. Undo validity is checked separately.
     pub fn note_key_event(&mut self) {
         self.input_generation = self.input_generation.wrapping_add(1);
+    }
+
+    /// Check if a key chord is the configured undo chord. Used to preserve
+    /// undo validity across the chord that triggers it.
+    pub fn is_undo_chord(&self, chord: &KeyChord) -> bool {
+        self.undo_chord.as_ref().map_or(false, |undo| {
+            chord.modifiers == undo.modifiers && chord.key == undo.key
+        })
     }
 
     pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {
@@ -1166,12 +1174,20 @@ impl ExpansionEngine {
     /// scalar values; matching is performed after each one.
     pub fn process(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
         // A pending undo is valid only immediately after the expansion it
-        // would revert, with no other event in between. `InputEvent::Key`
-        // is exempt: it never touches the buffer or produces a result here
-        // (see below), and is how the undo chord itself arrives -- clearing
-        // on it would make undo impossible to ever trigger.
-        if !matches!(event, InputEvent::Key(_)) {
-            self.last_expansion = None;
+        // would revert, with no other event in between. Undo is preserved only
+        // if the key event is the undo chord itself; any other key (navigation,
+        // text, application shortcuts, etc.) invalidates it because the cursor
+        // position may have changed.
+        match &event {
+            InputEvent::Key(chord) if !self.is_undo_chord(chord) => {
+                self.last_expansion = None;
+            }
+            InputEvent::Key(_) => {
+                // Undo chord preserves last_expansion (if any)
+            }
+            _ => {
+                self.last_expansion = None;
+            }
         }
         match event {
             InputEvent::Key(_) => {
@@ -1345,8 +1361,17 @@ impl ExpansionEngine {
     /// with `dispatch_pending_with_policy()` to preserve engine state.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
         self.restore_deferred_matches();
-        if !matches!(event, InputEvent::Key(_)) {
-            self.last_expansion = None;
+        // Same undo validity rules as process(): only the undo chord preserves undo.
+        match &event {
+            InputEvent::Key(chord) if !self.is_undo_chord(chord) => {
+                self.last_expansion = None;
+            }
+            InputEvent::Key(_) => {
+                // Undo chord preserves last_expansion (if any)
+            }
+            _ => {
+                self.last_expansion = None;
+            }
         }
         match event {
             InputEvent::Key(_) => {

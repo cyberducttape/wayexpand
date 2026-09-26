@@ -1415,11 +1415,12 @@ fn process_event(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
-    if let InputEvent::Key(chord) = event {
+    if let InputEvent::Key(chord) = event.clone() {
         // Invalidate any pending asynchronous expansions before processing
-        // the hotkey. This ensures that if a command is still running when
-        // the user presses another key, its output will be discarded.
-        engine.note_key_event();
+        // the hotkey. This also updates undo validity: undo is only preserved
+        // for the undo chord itself; all other keys invalidate it.
+        engine.process(event);
+
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
             // actions. Ordinary evdev key events must not be treated as
@@ -2356,7 +2357,7 @@ mod tests {
     }
 
     #[test]
-    fn disabling_hotkeys_does_not_disable_undo_or_ordinary_keys() {
+    fn undo_is_preserved_only_by_undo_chord() {
         let config = Config::parse(
             r#"
             [settings]
@@ -2376,6 +2377,7 @@ mod tests {
             ..Default::default()
         };
 
+        // Expand :x to "ok"
         process_event(
             &mut engine,
             InputEvent::Text(":x".into()),
@@ -2384,6 +2386,8 @@ mod tests {
             "libei",
         )
         .unwrap();
+        // Non-undo key presses (A) should invalidate undo transaction
+        // because they may move the cursor or change text
         process_event(
             &mut engine,
             InputEvent::Key(wayexpand_core::KeyChord::parse("A").unwrap()),
@@ -2392,6 +2396,7 @@ mod tests {
             "libei",
         )
         .unwrap();
+        // Ctrl+Z should NOT undo now because the undo transaction was invalidated
         process_event(
             &mut engine,
             InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
@@ -2401,9 +2406,55 @@ mod tests {
         )
         .unwrap();
 
+        // Should only have the expansion, no undo
         assert_eq!(
             injector.calls,
-            ["erase::x", "insert:ok", "erase:ok", "insert::x"]
+            ["erase::x", "insert:ok"],
+            "non-undo key should invalidate undo transaction"
+        );
+    }
+
+    #[test]
+    fn undo_works_immediately_after_expansion() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        let policy = wayexpand_core::OrganizationPolicy::default();
+
+        // Expand :x to "ok"
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        // Immediately press Ctrl+Z (the undo chord)
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        // Should have both expansion and undo
+        assert_eq!(
+            injector.calls,
+            ["erase::x", "insert:ok", "erase:ok", "insert::x"],
+            "undo chord should preserve undo transaction immediately after expansion"
         );
     }
 
