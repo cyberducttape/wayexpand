@@ -44,7 +44,8 @@ jobs:
           cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           pkgbuild_version=$(sed -n 's/^pkgver=//p' PKGBUILD)
           debian_version=$(sed -n 's/^wayexpand (\([^ -]*\)-.*/\1/p' debian/changelog | head -n1)
-          spec_version=$(sed -n 's/^Version: *//p' wayexpand.spec)
+          # wayexpand.spec is optional (packaging artifact, not in source repo)
+          spec_version=$(if [ -f wayexpand.spec ]; then sed -n 's/^Version: *//p' wayexpand.spec; fi)
           ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
           appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)
 
@@ -52,14 +53,18 @@ jobs:
           echo "  Cargo.toml:            $cargo_version"
           echo "  PKGBUILD:              $pkgbuild_version"
           echo "  debian/changelog:      $debian_version"
-          echo "  wayexpand.spec:        $spec_version"
+          if [ -f wayexpand.spec ]; then
+            echo "  wayexpand.spec:        $spec_version"
+          fi
           echo "  IBus XML:              $ibus_version"
           echo "  AppStream metadata:    $appstream_version"
 
           # Verify all match
           test "$cargo_version" = "$pkgbuild_version" || exit 1
           test "$cargo_version" = "$debian_version" || exit 1
-          test "$cargo_version" = "$spec_version" || exit 1
+          if [ -f wayexpand.spec ]; then
+            test "$cargo_version" = "$spec_version" || exit 1
+          fi
           test "$cargo_version" = "$ibus_version" || exit 1
           test "$cargo_version" = "$appstream_version" || exit 1
 
