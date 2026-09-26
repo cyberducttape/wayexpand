@@ -2,7 +2,17 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-e2e.XXXXXX")
+# Keep the fixture below a user-owned, private directory.  The daemon's
+# production trust checks intentionally reject configuration and socket paths
+# traversing an untrusted shared temporary directory.
+target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
+case "$target_dir" in
+    /*) ;;
+    *) target_dir="$project_dir/$target_dir" ;;
+esac
+mkdir -p "$target_dir"
+chmod 700 "$target_dir"
+runtime_dir=$(mktemp -d "$target_dir/wayexpand-e2e.XXXXXX")
 daemon_pid=
 config_path="$runtime_dir/expansions.toml"
 
