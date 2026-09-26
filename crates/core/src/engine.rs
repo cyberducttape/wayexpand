@@ -3932,7 +3932,7 @@ timeout_ms = 500
     }
 
     #[test]
-    fn nonexclusive_input_leaves_terminating_character_to_application() {
+    fn terminator_reinsertion_can_be_disabled_explicitly() {
         let config = Config::parse(
             r#"[[expansion]]
 trigger = ":sig"

@@ -61,6 +61,7 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 // physical keystrokes before the replacement backspaces are injected.
 const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
 const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_PENDING_EVENTS: usize = 4096;
 
 #[derive(Debug, Error)]
 pub enum EvdevError {
@@ -207,9 +208,26 @@ impl EvdevSource {
             .map_err(|error| EvdevError::Keymap(error.to_string()))?;
         self.state = State::new(keymap);
         self.pressed.clear();
-        self.pending.push_back(InputEvent::Reset);
+        self.queue_event(InputEvent::Reset);
         tracing::warn!("resetting evdev keyboard state after device disconnect");
         Ok(())
+    }
+
+    /// Keep translated input bounded while the daemon is waiting for a safe
+    /// replacement point. Dropping only the newest event could leave the
+    /// matcher/application streams out of sync, so overflow abandons the
+    /// pending transaction and emits one reset boundary instead.
+    fn queue_event(&mut self, event: InputEvent) {
+        if self.pending.len() >= MAX_PENDING_EVENTS {
+            self.pending.clear();
+            self.pending.push_back(InputEvent::Reset);
+            tracing::warn!(
+                maximum = MAX_PENDING_EVENTS,
+                "evdev input queue overflow; resetting matcher state"
+            );
+            return;
+        }
+        self.pending.push_back(event);
     }
 
     fn refresh_devices(&mut self) {
@@ -272,7 +290,7 @@ impl EvdevSource {
         }
         if key_state == KeyState::Pressed {
             if let Some(chord) = key_chord(&self.state, keycode) {
-                self.pending.push_back(InputEvent::Key(chord));
+                self.queue_event(InputEvent::Key(chord));
             }
         }
         let action = key_action_and_update(&mut self.state, keycode, key_state);
@@ -290,7 +308,7 @@ impl EvdevSource {
             Some(KeyAction::Unsupported) => Some(InputEvent::Reset),
         };
         if let Some(event) = translated {
-            self.pending.push_back(event);
+            self.queue_event(event);
         }
     }
 
@@ -633,5 +651,23 @@ mod tests {
             source.poll_once(Duration::ZERO),
             Err(EvdevError::AllDevicesLost)
         ));
+    }
+
+    #[test]
+    fn pending_event_overflow_resets_the_queue() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashSet::new(),
+            last_device_refresh: Instant::now(),
+        };
+
+        for _ in 0..=MAX_PENDING_EVENTS {
+            source.queue_event(InputEvent::Text("a".into()));
+        }
+
+        assert_eq!(source.pending.len(), 1);
+        assert_eq!(source.pending.front(), Some(&InputEvent::Reset));
     }
 }

@@ -79,7 +79,9 @@ in it uses this path automatically.
 
 ## Implementation Details
 
-See `crates/backend-clipboard/src/lib.rs` for the implementation of the `ClipboardInjector` struct, which implements the `TextInjector` trait.
+The experimental implementation was removed from the active workspace. This
+document is retained as historical design context only; clipboard injection is
+not a production backend.
 
 ### How It Works
 

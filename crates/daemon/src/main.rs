@@ -160,6 +160,14 @@ impl EventError {
             ExpansionError::Injection(error) => error.retryable,
         }
     }
+
+    fn expansion_rejected(&self) -> bool {
+        matches!(
+            &self.source,
+            ExpansionError::Injection(error)
+                if error.kind() == wayexpand_core::InjectorErrorKind::ExpansionRejected
+        )
+    }
 }
 
 fn main() -> Result<()> {
@@ -219,12 +227,6 @@ fn main() -> Result<()> {
     config
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);
-    // evdev observes keystrokes non-exclusively. The focused application will
-    // receive the terminating punctuation itself, so do not erase and
-    // synthesize that character as part of the replacement.
-    config
-        .engine
-        .set_reinsert_terminators(source_name != "evdev");
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -555,6 +557,15 @@ fn main() -> Result<()> {
                     };
                     match result {
                         Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Err(error) if error.expansion_rejected() => {
+                            warn!(
+                                error = %error,
+                                trigger_chars = error.result.trigger.chars().count(),
+                                insert_bytes = error.result.insert.len(),
+                                "input-method rejected expansion; continuing"
+                            );
+                            reconnect_delay = Duration::from_millis(250);
+                        }
                         Err(error) if error.retryable() => {
                             warn!(
                                 error = %error,
@@ -704,6 +715,15 @@ fn main() -> Result<()> {
                     };
                     match result {
                         Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Err(error) if error.expansion_rejected() => {
+                            warn!(
+                                error = %error,
+                                trigger_chars = error.result.trigger.chars().count(),
+                                insert_bytes = error.result.insert.len(),
+                                "evdev rejected expansion; continuing"
+                            );
+                            reconnect_delay = Duration::from_millis(250);
+                        }
                         Err(error) if error.retryable() => {
                             warn!(
                                 error = %error,
@@ -816,6 +836,15 @@ fn main() -> Result<()> {
                         };
                         injector = backend;
                         if let Err(error) = result {
+                            if error.expansion_rejected() {
+                                warn!(
+                                    error = %error,
+                                    trigger_chars = error.result.trigger.chars().count(),
+                                    insert_bytes = error.result.insert.len(),
+                                    "output backend rejected expansion; continuing"
+                                );
+                                continue;
+                            }
                             if !error.retryable() {
                                 return Err(error.into());
                             }
@@ -1356,10 +1385,6 @@ fn connect_output_with_retry(
     }
 }
 
-fn text_contains_newlines(text: &str) -> bool {
-    text.contains('\n') || text.contains('\r')
-}
-
 fn process_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
@@ -1574,6 +1599,15 @@ fn apply_evdev_gating(
 
 fn absorb_evdev_delimiter(results: &mut [ExpansionResult], character: char) {
     if let Some(result) = results.last_mut() {
+        // The current delimiter may already be represented separately in
+        // `reinsert_after`. Once another delimiter arrives while evdev is
+        // waiting for a safe injection point, fold that first delimiter into
+        // the transaction before appending the follow-up character. This
+        // preserves the exact order already present in the application.
+        if let Some(first) = result.reinsert_after.take() {
+            result.matched_text.push(first);
+            result.insert.push(first);
+        }
         result.matched_text.push(character);
         result.insert.push(character);
     }
@@ -1623,17 +1657,6 @@ fn apply_results(
         }
 
         if let Some(backend) = injector.as_deref_mut() {
-            // P0 security fix: Never silently switch output transports.
-            // If a replacement contains newlines and the selected backend
-            // doesn't support them, the expansion will fail with a clear error.
-            // This is vastly better than guessing and potentially sending text
-            // to an unintended XWayland window.
-            if text_contains_newlines(&result.insert) {
-                warn!(
-                    backend = backend.name(),
-                    "expansion contains newlines; selected backend may not support multiline insertion"
-                );
-            }
             let inject_result = ExpansionEngine::apply(backend, &result);
 
             if let Err(source) = inject_result {
@@ -1822,6 +1845,87 @@ mod tests {
         fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
             unreachable!("erase fails first")
         }
+    }
+
+    struct TextBufferInjector {
+        text: String,
+    }
+
+    impl TextInjector for TextBufferInjector {
+        fn name(&self) -> &'static str {
+            "text-buffer-test"
+        }
+
+        fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+            assert!(
+                self.text.ends_with(trigger),
+                "erase {trigger:?} was requested for {:?}",
+                self.text
+            );
+            let new_len = self.text.len() - trigger.len();
+            self.text.truncate(new_len);
+            Ok(())
+        }
+
+        fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+            self.text.push_str(text);
+            Ok(())
+        }
+    }
+
+    fn assert_evdev_boundary_replacement(
+        config_text: &str,
+        typed_prefix: &str,
+        delimiter: char,
+        expected: &str,
+    ) {
+        let config = Config::parse(config_text).unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut injector = TextBufferInjector {
+            text: format!("{typed_prefix}{delimiter}"),
+        };
+        let policy = wayexpand_core::OrganizationPolicy::default();
+
+        process_event(
+            &mut engine,
+            InputEvent::Text(typed_prefix.into()),
+            None,
+            &policy,
+            "evdev",
+        )
+        .unwrap();
+        process_event(
+            &mut engine,
+            InputEvent::Delimiter(delimiter),
+            Some(&mut injector),
+            &policy,
+            "evdev",
+        )
+        .unwrap();
+
+        assert_eq!(injector.text, expected);
+    }
+
+    #[test]
+    fn evdev_delayed_boundary_replacement_preserves_delimiters_in_text() {
+        assert_evdev_boundary_replacement(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+            ":sig",
+            ' ',
+            "signature ",
+        );
+        assert_evdev_boundary_replacement(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+            ":sig",
+            '.',
+            "signature.",
+        );
+        assert_evdev_boundary_replacement(
+            "[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n[[expansion]]\ntrigger = \":address\"\nreplacement = \"address\"",
+            ":a",
+            ':',
+            "alpha:",
+        );
     }
 
     #[test]

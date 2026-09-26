@@ -211,6 +211,31 @@ pub struct InjectorError {
     pub retryable: bool,
 }
 
+/// Classifies an injector failure for the daemon's recovery policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectorErrorKind {
+    /// The backend/session may succeed after it is recreated.
+    TransportFailure,
+    /// This expansion cannot be represented by the current backend. The
+    /// input session remains healthy and the expansion should be dropped.
+    ExpansionRejected,
+    /// The backend implementation itself cannot perform the requested
+    /// operation. This is a daemon/backend failure, not bad snippet data.
+    FatalBackendFailure,
+}
+
+impl InjectorError {
+    pub fn kind(&self) -> InjectorErrorKind {
+        if self.retryable {
+            InjectorErrorKind::TransportFailure
+        } else if self.message.starts_with("backend cannot synthesize") {
+            InjectorErrorKind::FatalBackendFailure
+        } else {
+            InjectorErrorKind::ExpansionRejected
+        }
+    }
+}
+
 impl fmt::Display for InjectorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.backend, self.message)
