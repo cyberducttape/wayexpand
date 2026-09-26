@@ -44,8 +44,9 @@ pub fn readable_keyboard_available() -> bool {
 }
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     os::fd::BorrowedFd,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -108,7 +109,9 @@ pub struct EvdevSource {
     /// while the trigger's last key is still down. Injecting that same
     /// keycode then collides with the physical one -- see
     /// `wait_for_key_release`.
-    pressed: HashSet<u32>,
+    /// Keycodes held on each device. Keycodes are only unique within one
+    /// evdev device; two keyboards may legitimately hold the same keycode.
+    pressed: HashMap<PathBuf, HashSet<u32>>,
     last_device_refresh: Instant,
 }
 
@@ -131,11 +134,16 @@ impl EvdevSource {
             "evdev capture active: no per-field sensitive-content signal is available, so \
              matching is never suspended in password or other sensitive fields (docs/SECURITY.md)"
         );
+        let pressed = discovery
+            .keyboards
+            .iter()
+            .map(|keyboard| (keyboard.path().to_path_buf(), HashSet::new()))
+            .collect();
         Ok(Self {
             devices: discovery.keyboards,
             state: State::new(keymap),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed,
             last_device_refresh: Instant::now(),
         })
     }
@@ -189,6 +197,14 @@ impl EvdevSource {
         drop(borrowed);
         self.drain_ready(&ready)?;
         let had_lost_devices = !lost.is_empty();
+        let lost_paths = lost
+            .iter()
+            .filter_map(|&index| {
+                self.devices
+                    .get(index)
+                    .map(|device| device.path().to_path_buf())
+            })
+            .collect::<Vec<_>>();
         for index in lost.into_iter().rev() {
             tracing::warn!(
                 path = %self.devices[index].path().display(),
@@ -197,11 +213,12 @@ impl EvdevSource {
             self.devices.remove(index);
         }
         if had_lost_devices {
-            self.reset_keyboard_state()?;
+            self.reset_keyboard_state_for_devices(&lost_paths)?;
         }
         Ok(())
     }
 
+    #[cfg(test)]
     fn reset_keyboard_state(&mut self) -> Result<(), EvdevError> {
         let context = Context::new(0).map_err(|error| EvdevError::Keymap(error.to_string()))?;
         let keymap = Keymap::new_from_names(context, None, 0)
@@ -210,6 +227,29 @@ impl EvdevSource {
         self.pressed.clear();
         self.queue_event(InputEvent::Reset);
         tracing::warn!("resetting evdev keyboard state after device disconnect");
+        Ok(())
+    }
+
+    fn reset_keyboard_state_for_devices(
+        &mut self,
+        lost_paths: &[PathBuf],
+    ) -> Result<(), EvdevError> {
+        for path in lost_paths {
+            self.pressed.remove(path);
+        }
+        // XKB state is kept global for cross-device modifier/chord handling.
+        // Rebuild it after a disconnect because the release events for that
+        // device can no longer arrive; held-key ownership itself remains
+        // per-device above.
+        let context = Context::new(0).map_err(|error| EvdevError::Keymap(error.to_string()))?;
+        let keymap = Keymap::new_from_names(context, None, 0)
+            .map_err(|error| EvdevError::Keymap(error.to_string()))?;
+        self.state = State::new(keymap);
+        self.queue_event(InputEvent::Reset);
+        tracing::warn!(
+            count = lost_paths.len(),
+            "resetting evdev keyboard state after device disconnect"
+        );
         Ok(())
     }
 
@@ -241,6 +281,9 @@ impl EvdevSource {
                 continue;
             }
             tracing::info!(path = %keyboard.path().display(), "keyboard device connected");
+            self.pressed
+                .entry(keyboard.path().to_path_buf())
+                .or_default();
             self.devices.push(keyboard);
         }
     }
@@ -254,8 +297,9 @@ impl EvdevSource {
                     message: error.to_string(),
                 })?
             };
+            let path = self.devices[index].path().to_path_buf();
             for event in events {
-                self.translate(event);
+                self.translate_for_device(&path, event);
             }
         }
         Ok(())
@@ -265,7 +309,12 @@ impl EvdevSource {
     /// pushed directly onto `self.pending`. A key press can yield both a
     /// hotkey chord and an ordinary matcher event (mirrors how
     /// `backend-input-method` reports both from the same key press).
+    #[cfg(test)]
     fn translate(&mut self, event: evdev::InputEvent) {
+        self.translate_for_device(Path::new("__test__"), event);
+    }
+
+    fn translate_for_device(&mut self, device_path: &Path, event: evdev::InputEvent) {
         let evdev::EventSummary::Key(_, key_code, value) = event.destructure() else {
             return;
         };
@@ -282,10 +331,15 @@ impl EvdevSource {
         };
         match key_state {
             KeyState::Pressed => {
-                self.pressed.insert(keycode);
+                self.pressed
+                    .entry(device_path.to_path_buf())
+                    .or_default()
+                    .insert(keycode);
             }
             _ => {
-                self.pressed.remove(&keycode);
+                if let Some(pressed) = self.pressed.get_mut(device_path) {
+                    pressed.remove(&keycode);
+                }
             }
         }
         if key_state == KeyState::Pressed {
@@ -314,7 +368,7 @@ impl EvdevSource {
 
     /// Whether any key is physically held right now.
     pub fn keys_held(&self) -> bool {
-        !self.pressed.is_empty()
+        self.pressed.values().any(|keys| !keys.is_empty())
     }
 
     pub fn has_pending_events(&self) -> bool {
@@ -475,7 +529,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         source.translate(event);
@@ -516,7 +570,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         source.translate(event);
@@ -535,7 +589,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         source.translate(event);
@@ -549,7 +603,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         assert!(!source.keys_held());
@@ -567,12 +621,39 @@ mod tests {
     }
 
     #[test]
+    fn identical_keycodes_remain_held_across_devices() {
+        let mut source = EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashMap::new(),
+            last_device_refresh: Instant::now(),
+        };
+        let keyboard_a = Path::new("/dev/input/event-a");
+        let keyboard_b = Path::new("/dev/input/event-b");
+        let press_a = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1);
+        let press_b = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1);
+        let release_a = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0);
+
+        source.translate_for_device(keyboard_a, press_a);
+        source.translate_for_device(keyboard_b, press_b);
+        source.translate_for_device(keyboard_a, release_a);
+
+        assert!(source.keys_held(), "keyboard B still holds keycode 30");
+        assert_eq!(source.pressed[keyboard_b], HashSet::from([30]));
+        source
+            .reset_keyboard_state_for_devices(&[keyboard_a.to_path_buf()])
+            .unwrap();
+        assert!(source.keys_held(), "disconnecting A must not clear B");
+    }
+
+    #[test]
     fn quiet_period_rejects_already_queued_input() {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::from([InputEvent::Text("a".into())]),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
 
@@ -588,7 +669,7 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
@@ -603,7 +684,7 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 29, 1));
@@ -631,7 +712,7 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashSet::from([30]),
+            pressed: HashMap::from([(PathBuf::from("__test__"), HashSet::from([30]))]),
             last_device_refresh: Instant::now(),
         };
         let error = source.wait_for_key_release(Duration::ZERO).unwrap_err();
@@ -644,7 +725,7 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
         assert!(matches!(
@@ -659,7 +740,7 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashSet::new(),
+            pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
         };
 
