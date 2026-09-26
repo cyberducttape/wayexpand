@@ -936,7 +936,30 @@ fn main() -> Result<()> {
     // restart) or the daemon's own exit; the whole process going away
     // reclaims that thread regardless of whether its drop ever finishes.
     if let Some(injector) = injector.take() {
-        thread::spawn(move || drop(injector));
+        let backend = injector.name();
+        info!(
+            backend,
+            event = "detached_injector_drop_started",
+            "detaching backend shutdown so daemon exit cannot be blocked"
+        );
+        let spawn = thread::Builder::new()
+            .name("wayexpand-injector-drop".into())
+            .spawn(move || {
+                drop(injector);
+                info!(
+                    backend,
+                    event = "detached_injector_drop_finished",
+                    "detached backend shutdown completed"
+                );
+            });
+        if let Err(error) = spawn {
+            warn!(
+                backend,
+                %error,
+                event = "detached_injector_drop_spawn_failed",
+                "could not start detached backend shutdown thread"
+            );
+        }
     }
     Ok(())
 }

@@ -43,6 +43,29 @@ captured reference run is in [`docs/BENCHMARKS.md`](BENCHMARKS.md).
 Record the compositor, desktop session, keyboard layout, and output of
 `wayexpand doctor` for every integration run.
 
+## Long-duration lifecycle soak
+
+The daemon uses bounded blocking polls and real worker threads rather than an
+async runtime. Before calling a backend production-ready, run a representative
+24-hour soak; repeat for 72 hours or 7 days before a major release. During the
+run, exercise configuration edits and reloads, compositor restarts,
+lock/unlock, suspend/resume, keyboard disconnect/reconnect (including two
+simultaneous keyboards), failing command snippets, portal-session revocation,
+and hundreds of window changes.
+
+Record at regular intervals and after each lifecycle event:
+
+- RSS, thread count, open file descriptors, and CPU usage;
+- control-socket request latency and daemon restart time;
+- expansion latency and counts of rejected, retried, or abandoned expansions;
+- systemd restart count, journal warnings, and portal reconnect behavior.
+
+The daemon logs `detached_injector_drop_started` when an injector destructor is
+isolated from shutdown and `detached_injector_drop_finished` if it returns. A
+missing completion event is evidence that backend or portal teardown blocked;
+it must be investigated before certification. Do not include typed secrets or
+replacement text in soak logs.
+
 ## Certification evidence
 
 Compositor-independent CI cannot certify real keyboard behavior. Release
