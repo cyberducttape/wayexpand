@@ -135,6 +135,9 @@ pub struct FleetConfig {
     pub expansions_source: HashMap<String, Provenance>,
     /// Provenance for each hotkey (by chord)
     pub hotkeys_source: HashMap<String, Provenance>,
+    /// Settings candidates in layer order, retaining provenance so pack policy
+    /// can be applied before resolving the last-wins value.
+    pub settings_sources: Vec<(crate::Settings, Provenance)>,
     /// Merge statistics
     pub stats: MergeStats,
     /// Administrator policy violations discovered while merging pack sources.
@@ -209,7 +212,13 @@ impl FleetConfig {
         base: Config,
         policy: &OrganizationPolicy,
     ) -> Result<Self, FleetError> {
-        let fleet_settings = fleet.config.settings.clone();
+        let fleet_settings = fleet
+            .settings_sources
+            .iter()
+            .rev()
+            .find(|(_, provenance)| settings_source_allowed(provenance, policy))
+            .map(|(settings, _)| settings.clone())
+            .unwrap_or_default();
         let base_expansions = base.expansion.len();
         let base_hotkeys = base.hotkey.len();
 
@@ -220,6 +229,12 @@ impl FleetConfig {
             .expansions_source
             .values()
             .chain(fleet.hotkeys_source.values())
+            .chain(
+                fleet
+                    .settings_sources
+                    .iter()
+                    .map(|(_, provenance)| provenance),
+            )
             .filter(|provenance| provenance.layer.starts_with("pack:"))
             .map(pack_name)
             .filter(|name| !policy.pack_allowed(name))
@@ -311,7 +326,7 @@ struct ConfigMerger {
     // Stores (item, provenance) to report exact source on conflict.
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
-    settings: Option<(crate::Settings, Provenance)>,
+    settings: Vec<(crate::Settings, Provenance)>,
     stats: MergeStats,
 }
 
@@ -320,7 +335,7 @@ impl ConfigMerger {
         Self {
             expansions: BTreeMap::new(),
             hotkeys: BTreeMap::new(),
-            settings: None,
+            settings: Vec::new(),
             stats: MergeStats::default(),
         }
     }
@@ -411,14 +426,15 @@ impl ConfigMerger {
 
             // Settings (last one wins, with warning on conflict)
             if !config.settings.is_default() {
-                if self.settings.is_some() {
+                if !self.settings.is_empty() {
                     // Settings already defined, later one wins (log this)
                     eprintln!(
                         "warning: settings from {} override previous layer",
                         provenance.file
                     );
                 }
-                self.settings = Some((config.settings.clone(), provenance.clone()));
+                self.settings
+                    .push((config.settings.clone(), provenance.clone()));
             }
         }
 
@@ -454,9 +470,10 @@ impl ConfigMerger {
             .map(|(_, (hotkey_config, _))| hotkey_config)
             .collect();
 
-        let settings = self
-            .settings
-            .map(|(settings, _)| settings)
+        let settings_sources = self.settings;
+        let settings = settings_sources
+            .last()
+            .map(|(settings, _)| settings.clone())
             .unwrap_or_default();
 
         let config = Config {
@@ -472,6 +489,7 @@ impl ConfigMerger {
             config,
             expansions_source,
             hotkeys_source,
+            settings_sources,
             stats: self.stats,
             policy_violations: Vec::new(),
         })
@@ -564,6 +582,16 @@ fn pack_name(provenance: &Provenance) -> &str {
         .or_else(|| provenance.file.split('/').next())
         .unwrap_or(provenance.file.as_str())
         .trim_end_matches(".toml")
+}
+
+fn settings_source_allowed(provenance: &Provenance, policy: &OrganizationPolicy) -> bool {
+    if !policy.safe_mode || policy.allowed_packs.is_empty() {
+        return true;
+    }
+    provenance.layer == "organization"
+        || provenance.layer == "user"
+        || !provenance.layer.starts_with("pack:")
+        || policy.pack_allowed(pack_name(provenance))
 }
 
 #[cfg(test)]
@@ -750,6 +778,117 @@ replacement = "third"
         assert!(triggers.contains(&":org"));
         assert!(triggers.contains(&":approved"));
         assert!(!triggers.contains(&":blocked"));
+        assert_eq!(
+            merged.policy_violations,
+            ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
+        );
+    }
+
+    fn settings_candidate(max_buffer_chars: usize) -> crate::Settings {
+        crate::Settings {
+            max_buffer_chars,
+            ..crate::Settings::default()
+        }
+    }
+
+    fn add_settings_candidate(merger: &mut ConfigMerger, max_buffer_chars: usize, layer: &str) {
+        merger.settings.push((
+            settings_candidate(max_buffer_chars),
+            Provenance {
+                file: "settings.toml".to_string(),
+                layer: layer.to_string(),
+            },
+        ));
+    }
+
+    #[test]
+    fn disallowed_pack_settings_are_filtered() {
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 4096, "pack:disallowed");
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert_eq!(merged.config.settings, crate::Settings::default());
+    }
+
+    #[test]
+    fn settings_only_disallowed_pack_is_reported() {
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 4096, "pack:disallowed");
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert_eq!(
+            merged.policy_violations,
+            ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
+        );
+    }
+
+    #[test]
+    fn allowed_pack_settings_remain_active() {
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 4096, "pack:approved");
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert_eq!(merged.config.settings.max_buffer_chars, 4096);
+        assert!(merged.policy_violations.is_empty());
+    }
+
+    #[test]
+    fn filtering_last_pack_settings_falls_back_to_previous_allowed_settings() {
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 1024, "pack:approved");
+        add_settings_candidate(&mut merger, 4096, "pack:disallowed");
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert_eq!(merged.config.settings.max_buffer_chars, 1024);
+    }
+
+    #[test]
+    fn audit_mode_reports_but_does_not_filter_pack_settings() {
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 4096, "pack:disallowed");
+        let fleet = merger.merge().unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            allowed_packs: vec!["approved".to_string()],
+            ..OrganizationPolicy::default()
+        };
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, Config::parse("").unwrap(), &policy).unwrap();
+
+        assert_eq!(merged.config.settings.max_buffer_chars, 4096);
         assert_eq!(
             merged.policy_violations,
             ["pack 'disallowed' is not in allowed_packs: [\"approved\"]"]
