@@ -158,7 +158,9 @@ wayexpand doctor  # Shows what your session can use
 - Input-method-v2 is explicit/experimental: non-text pass-through depends on
   the libei injector and remains uncertified for every compositor and shortcut
   combination
-- Evdev requires `input` group membership, has no password-field signal, and is best-effort under rapid typing
+- Evdev uses active-seat/logind uaccess by default; the explicit
+  `--access=input-group` fallback grants broader permanent input-group access.
+  Both modes have no password-field signal and are best-effort under rapid typing
 
 **Want to help test?**
 - Run `wayexpand doctor` and share the output on our [GitHub issues](https://github.com/cyberducttape/wayexpand/issues)
@@ -268,7 +270,9 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 **Keys are lost (Escape, arrows, F-keys)?**
 - This is input-method-v2's limitation on some compositors
 - Use evdev as fallback: `wayexpand-daemon --source=evdev ~/.config/wayexpand/expansions.toml`
-- Remember: evdev requires `input` group and has no password protection
+- Remember: evdev has no password protection. Its installer uses active-seat
+  ACLs by default; choose `--access=input-group` only when the broader legacy
+  grant is acceptable.
 
 **See Also:**
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - What's verified vs. experimental

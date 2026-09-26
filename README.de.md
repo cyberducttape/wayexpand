@@ -140,18 +140,21 @@ kein Caching).
 | Situation | Backend | Dienst | Status |
 |---|---|---|---|
 | Compositor bietet `input-method-v2`/virtual-keyboard | `--source=input-method` | `wayexpand-input-method.service` | Experimentell (siehe [Support-Matrix](docs/SUPPORT_MATRIX.md)) |
-| Compositor bietet keins davon (z. B. KWin/KDE Plasma bis 6.6) | `--source=evdev --backend=libei` | `wayexpand-evdev.service` | Experimentell, benötigt `input`-Gruppenmitgliedschaft, **keine Sensible-Feld-Erkennung** |
-| wlroots-Compositor (Sway, Hyprland), wenn `--source=input-method` benötigte Tasten verliert | `--source=evdev --backend=wlroots` | — (Daemon manuell starten) | Experimentell, gleiche Einschränkungen wie oben |
+| Compositor bietet keins davon (z. B. KWin/KDE Plasma bis 6.6) | `--source=evdev --backend=libei` | `wayexpand-evdev.service` | Experimentell, aktive-Sitzplatz-ACL standardmäßig (optionale `input`-Gruppe), **keine Sensible-Feld-Erkennung** |
+| wlroots-Compositor (Sway, Hyprland), wenn `--source=input-method` benötigte Tasten verliert | `--source=evdev --backend=wlroots` | — (Daemon manuell starten) | Experimentell, gleiche Berechtigungsoptionen und Einschränkungen wie oben |
 | Fenster-Tracking (`app_filter`) | KWin-Scripting-Bridge | — | KDE/KWin implementiert, Zertifizierung noch ausstehend; siehe [Support-Matrix](docs/SUPPORT_MATRIX.md) |
 
 `--source=evdev` funktioniert compositor-unabhängig, liest aber
 Tastatur-Events direkt vom Kernel und erkennt daher **keine** Passwortfelder
-— lesen Sie [SECURITY.md](SECURITY.md), bevor Sie es aktivieren. Die
-nötige Berechtigung wird nie automatisch von den Installern vergeben:
+— lesen Sie [SECURITY.md](SECURITY.md), bevor Sie es aktivieren. Der Installer
+verwendet standardmäßig aktive-Sitzplatz-ACLs ohne dauerhafte Gruppenmitgliedschaft.
+Die breitere Legacy-Variante kann ausdrücklich gewählt werden:
 
 ```bash
 sudo ./scripts/install-evdev-permissions.sh --dry-run
 sudo ./scripts/install-evdev-permissions.sh
+# Legacy-Fallback mit dauerhafter, breiterer input-Gruppenmitgliedschaft:
+sudo ./scripts/install-evdev-permissions.sh --access=input-group
 ```
 
 ```bash

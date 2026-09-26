@@ -11,12 +11,12 @@
 #   2. For --access=input-group only, adds the invoking non-root user to the
 #      `input` group.
 #
-# This is the current legacy/simple access model. The WayExpand rule is scoped
-# to udev keyboard-class event nodes, but `input` group membership itself may
-# be broader on a given distribution and can grant raw access to input event
-# devices beyond WayExpand's matcher. It is not the long-term preferred
-# architecture; see docs/EVDEV_ACCESS_DESIGN.md for the active-seat ACL and
-# device-broker investigation. Read SECURITY.md before running this.
+# Active-seat/uaccess is the default. The explicit input-group mode is the
+# legacy/simple fallback. The WayExpand rule is scoped to udev keyboard-class
+# event nodes, but `input` group membership itself may be broader on a given
+# distribution and can grant raw access to input event devices beyond
+# WayExpand's matcher. See docs/EVDEV_ACCESS_DESIGN.md for the access modes and
+# remaining device-broker investigation. Read SECURITY.md before running this.
 #
 # Usage:
 #   sudo ./scripts/install-evdev-permissions.sh [--access=input-group|active-seat]

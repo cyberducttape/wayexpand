@@ -102,14 +102,16 @@ For an explicit evdev setup (acknowledges global keyboard visibility and has no
 password-field signal):
 
 ```sh
-sudo usermod -aG input "$USER"
-# Log out and back in, then:
+sudo ./scripts/install-evdev-permissions.sh --access=active-seat
 systemctl --user enable --now wayexpand-evdev.service
 wayexpand doctor
 ```
 
 Evdev has broader keyboard visibility and cannot report password-field focus.
-Use it only when that tradeoff is acceptable. For libei, the first connection
+The installer uses active-seat/logind ACLs by default and does not change
+permanent group membership. If that mode is unavailable, explicitly choose the
+broader legacy fallback with `--access=input-group` (and log out/in if group
+membership changes). For libei, the first connection
 may ask for portal consent; if a stored consent token is stale:
 
 ```sh

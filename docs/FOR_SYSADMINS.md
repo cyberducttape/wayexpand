@@ -577,10 +577,12 @@ wayexpand reload
 4. **Evdev permissions:** If using `--source=evdev`:
    - Explicit root step (`install-evdev-permissions.sh`)
    - Requires active consent
-   - Document that users are granting `input` group membership
-   - Treat the input-group grant as the current legacy/simple model; review
-     [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) for the planned
-     active-seat ACL/device-broker investigation
+   - The default `--access=active-seat` mode uses logind/uaccess ACLs and does
+     not change permanent group membership
+   - Document any explicit `--access=input-group` fallback as a broader,
+     permanent raw-input grant
+   - Review [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) for the access
+     tradeoffs and the remaining device-broker investigation
 
 ### Systemd Sandbox Constraints
 

@@ -219,23 +219,23 @@ produce an unexpanded trigger or overlapping text. The quiet period reduces
 this risk but cannot make replacement atomic; use an interception-capable
 protocol when that guarantee is required.
 
-**Check group membership:**
+**Check the active-seat ACL (default):**
 ```sh
-groups $USER           # Should include 'input'
-id -G                  # Should show the input group GID
+getfacl /dev/input/eventN  # Look for an ACL entry for the active user
+wayexpand doctor
 ```
 
-**Fix:**
+**Fix (default active-seat mode):**
 ```sh
-sudo usermod -aG input $USER
-# Log out and back in for changes to take effect
+sudo ./scripts/install-evdev-permissions.sh --access=active-seat
+systemctl --user restart wayexpand-evdev.service
 ```
 
-**Verify:**
+If active-seat/logind is unavailable, explicitly choose the legacy fallback:
 ```sh
-# After logging back in:
-groups $USER
-# Now should include 'input'
+sudo ./scripts/install-evdev-permissions.sh --access=input-group
+# Log out and back in if the installer changed group membership.
+systemctl --user restart wayexpand-evdev.service
 ```
 
 ### Portal connection issues (libei)

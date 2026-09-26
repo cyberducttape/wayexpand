@@ -68,7 +68,7 @@ users who maintain configuration files by hand.
 
 - `crates/backend-*` — Pluggable backends implementing traits
   - `backend-input-method` — input-method-v2 (capture + output)
-  - `backend-evdev` — evdev (capture only, needs `input` group)
+  - `backend-evdev` — evdev (capture only; active-seat ACL by default, or explicit `input` group fallback)
   - `backend-libei` — libei/EIS (output only, portal-mediated)
   - `backend-wlroots` — wlroots virtual-keyboard (output only)
   - `backend-kwin-window` — KWin window tracking (D-Bus)

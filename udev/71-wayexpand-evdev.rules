@@ -13,5 +13,5 @@
 # membership grants before enabling --source=evdev: it may let a process read
 # raw input event devices beyond WayExpand's matcher, depending on the rest of
 # the distribution's input group policy. See docs/EVDEV_ACCESS_DESIGN.md for
-# the active-seat ACL and device-broker investigation.
+# the active-seat default and remaining device-broker investigation.
 SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="?*", GROUP="input", MODE="0660"

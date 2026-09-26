@@ -33,7 +33,10 @@ WayExpand's engineering foundation is strong: modular architecture, security-con
 
 **The Problem:**
 - **input-method-v2:** Respects sensitive field signals and password protection, but exclusive keyboard grab and libei pass-through have not been certified for complete keyboard fidelity. Modifier chords, repetition behavior, reconnect scenarios, and application-specific shortcut conflicts remain under active validation (users on GNOME report navigation issues that may indicate incomplete key forwarding).
-- **evdev:** Preserves all keyboard events including Escape/arrows/F-keys, but reads all global keystrokes (requires `input` group), ignores password field signals, and needs careful timing/reinsert logic
+- **evdev:** Preserves all keyboard events including Escape/arrows/F-keys, but
+  reads raw global keystrokes, ignores password field signals, and needs
+  careful timing/reinsert logic. The default installer uses active-seat ACLs;
+  `--access=input-group` is the broader legacy fallback.
 
 **Current Mitigation:** Explicit user opt-in with clear warnings on mode selection; libei key pass-through is documented as experimental pending compositor-specific certification
 
