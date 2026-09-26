@@ -414,7 +414,7 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `ExpansionConfig::tags` — optional searchable tags
 - `ExpansionConfig::match_mode` — expansion matching mode ("immediate" or "word-boundary", default "immediate")
 
-**New fields** (1.0.1+):
+**New fields** (1.0.1+ and later 1.x releases):
 - `ExpansionConfig::propagate_case` (bool, default `false`) — when enabled,
   typing the trigger in `UPPERCASE` or `Capitalized` form applies the same
   casing to the replacement (e.g. trigger `:sig` typed as `:SIG` yields an
@@ -430,8 +430,21 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   the replacement is typed, instead of at the end. Supported on the libei
   and wlroots backends; silently has no effect on input-method-v2 (no
   protocol-level way to move the cursor after committing text).
+- `Settings::font_scale` (enum, default `"normal"`) — GUI font scaling;
+  accepted values are `small`, `normal`, `large`, `extra-large`, and `huge`.
+- `Settings::libei_token_persistence` (bool, default `true`) — persist the
+  libei portal restoration token; set to `false` to request fresh consent.
+- `ExpansionConfig::command` (optional, default absent) — bounded direct
+  command configuration for an expansion.
+- `CommandConfig::args` (array, default empty), `cache_ms` (integer, default
+  `0`), `environment` (enum, default `"minimal"`), and `pass_env` (array,
+  default empty) — command execution settings. `timeout_ms` defaults to
+  `500` milliseconds and is bounded to `1..=5000`.
 
-All new fields default to `null`, `false`, or empty if absent from old configurations.
+Defaults are field-specific and are part of this compatibility contract: for
+example, omitted fields may default to `true`, `"normal"`, `"minimal"`,
+`500`, `0`, `false`, an empty collection, or an absent optional value as
+documented above. They do not all default to `null`, `false`, or empty.
 
 **Backward compatibility guarantee:**
 ```toml

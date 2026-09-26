@@ -144,6 +144,25 @@ Then see [SECURITY.md](../SECURITY.md)
 | [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
 | [GUI_PERFORMANCE.md](GUI_PERFORMANCE.md) | GUI contributors | Performance considerations |
 
+### Current Technical and Release References
+
+| Document | Audience | Purpose |
+|----------|----------|---------|
+| [IBUS_ENGINE.md](IBUS_ENGINE.md) | IBus users and contributors | IBus engine behavior and protocol boundary |
+| [RELEASE_PROMOTION_GUIDE.md](../RELEASE_PROMOTION_GUIDE.md) | Release maintainers | Release and package promotion checks |
+
+### Historical Design and Audit Records
+
+These documents remain available as historical context. Their planning language
+and status snapshots are not a substitute for the current contracts above.
+
+| Document | Purpose |
+|----------|---------|
+| [V13_CRITICAL_REGRESSIONS.md](V13_CRITICAL_REGRESSIONS.md) | Historical v1.3 regression findings and fixes |
+| [JOURNEY_TO_V13.md](JOURNEY_TO_V13.md) | Historical v1.2/v1.3 implementation narrative |
+| [P1_ARCHITECTURE_ROADMAP.md](P1_ARCHITECTURE_ROADMAP.md) | Historical P1 architecture roadmap |
+| [ROADMAP_P2_IMPROVEMENTS.md](../ROADMAP_P2_IMPROVEMENTS.md) | Historical P2 audit follow-up roadmap |
+
 ---
 
 ## Organization by Topic
