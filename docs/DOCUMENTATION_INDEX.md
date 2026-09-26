@@ -94,7 +94,6 @@ Then see [SECURITY.md](../SECURITY.md)
 |----------|----------|---------|
 | [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, logs, config reload |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
-| [TROUBLESHOOTING_CHECKLIST.md](TROUBLESHOOTING_CHECKLIST.md) | Users with issues | Doctor output → diagnosis → remediation |
 | [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
 
@@ -105,10 +104,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [CUSTOMIZATION.md](CUSTOMIZATION.md) | GUI users | Themes, language support, colors |
 | [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) | All users | Resource and safety boundaries |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Advanced users | Exact CLI/JSON/config contracts |
-| [COLOR_PACKS.md](COLOR_PACKS.md) | GUI users | GUI theme options |
-| [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md) | Internationalization | Available languages |
-| [RETRO_FONTS.md](RETRO_FONTS.md) | GUI users | Retro font options |
-| [UI.md](UI.md) | GUI users | User interface guide |
+| [GUI.md](GUI.md) | GUI users | Interface, themes, languages, fonts, and performance |
 
 ### Enterprise & Security
 
@@ -142,7 +138,6 @@ Then see [SECURITY.md](../SECURITY.md)
 | [PACKAGING.md](PACKAGING.md) | Package maintainers | Building for distros |
 | [RELEASING.md](RELEASING.md) | Maintainers | Release process |
 | [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
-| [GUI_PERFORMANCE.md](GUI_PERFORMANCE.md) | GUI contributors | Performance considerations |
 
 ### Current Technical and Release References
 

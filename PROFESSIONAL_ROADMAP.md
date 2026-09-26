@@ -288,7 +288,7 @@ Further work requires compositor- and toolkit-specific testing.
 
 ### Performance Optimization
 
-**Baseline established:** See docs/GUI_PERFORMANCE.md  
+**Baseline established:** See docs/GUI.md
 Future work: reduce daemon cold-start latency, optimize matcher for 10K+ snippets
 
 ### Release Architectures

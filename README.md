@@ -191,7 +191,7 @@ Or use the GUI importer for a preview before saving. See
 ## Where to go next
 
 - New users: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
-- Troubleshooting: [docs/TROUBLESHOOTING_CHECKLIST.md](docs/TROUBLESHOOTING_CHECKLIST.md)
+- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - Backend details: [docs/BACKENDS.md](docs/BACKENDS.md)
 - Desktop support: [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md)
 - Fleet deployment: [docs/FLEET_CONFIG.md](docs/FLEET_CONFIG.md)

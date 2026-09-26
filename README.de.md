@@ -214,7 +214,7 @@ befehlsgestütztes Snippet ausführt — dafür gibt es einen expliziten
 Diagnose-Panel, atomares Speichern, begrenzte Undo-Historie (32 Schritte),
 Daemon-Pause/Fortsetzen. Acht Farbschemata inklusive Retro-Terminal-Themes
 (VT220-Grün, IBM-3270-Blau, Commodore 64) — siehe
-[docs/COLOR_PACKS.md](docs/COLOR_PACKS.md). Schriftskalierung (0,8×–2,0×)
+[docs/GUI.md](docs/GUI.md). Schriftskalierung (0,8×–2,0×)
 und WCAG-2.1-AA-Kontrast für Barrierefreiheit — siehe
 [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md).
 

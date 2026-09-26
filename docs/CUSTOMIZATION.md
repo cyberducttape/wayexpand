@@ -46,7 +46,7 @@ export LANG=de_DE.UTF-8
 wayexpand-gui
 ```
 
-See [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md) for adding more languages.
+See [GUI.md](GUI.md) for language support and adding more languages.
 
 ## Color Packs
 
@@ -242,7 +242,7 @@ All UI elements translated for selected language:
 **Unsupported language?**
 - Language defaults to English if not detected
 - Check `export LANG` to verify detection
-- See [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md)
+- See [GUI.md](GUI.md)
 
 **Wrong color pack applied?**
 - Theme selector stores only current session
@@ -258,8 +258,8 @@ All UI elements translated for selected language:
 
 Want to add your language or color pack?
 
-1. **Languages**: See [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md)
-2. **Color Packs**: See [COLOR_PACKS.md](COLOR_PACKS.md)
+1. **Languages and GUI behavior**: See [GUI.md](GUI.md)
+2. **Color Packs and fonts**: See [GUI.md](GUI.md)
 3. **Submit**: Open a GitHub issue or PR
 
 Contributions are welcome! 🎨
@@ -267,6 +267,5 @@ Contributions are welcome! 🎨
 ---
 
 **Related Documentation:**
-- [LANGUAGE_SUPPORT.md](LANGUAGE_SUPPORT.md) — Language system details
-- [COLOR_PACKS.md](COLOR_PACKS.md) — Color pack system details
+- [GUI.md](GUI.md) — GUI, language, color pack, and font details
 - [README.de.md](../README.de.md) — German documentation

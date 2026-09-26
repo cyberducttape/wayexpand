@@ -91,7 +91,7 @@ with the desktop's window-inspection tools and confirm support in
 experimental or unavailable.
 
 For the output-driven recovery flow, go directly to the
-[Troubleshooting Checklist](TROUBLESHOOTING_CHECKLIST.md).
+[Troubleshooting guide](TROUBLESHOOTING.md).
 
 ### Architecture note: aarch64
 
@@ -277,7 +277,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, or view t
 
 **See Also:**
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - What's verified vs. experimental
-- [TROUBLESHOOTING_CHECKLIST.md](TROUBLESHOOTING_CHECKLIST.md) - doctor output → fix
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - doctor output → fix
 - [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) - matcher and large-library tuning
 - [OPERATIONS.md](OPERATIONS.md) - Systemd management and troubleshooting
 - [BACKENDS.md](BACKENDS.md) - Backend protocols and compatibility
