@@ -14,5 +14,6 @@ categories.workspace = true
 [dependencies]
 tracing.workspace = true
 wayexpand-backend-input-method = { path = "../backend-input-method" }
+wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-evdev = { path = "../backend-evdev" }

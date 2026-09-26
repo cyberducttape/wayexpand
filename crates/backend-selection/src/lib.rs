@@ -9,6 +9,7 @@ use std::{env, fmt};
 use tracing::{debug, warn};
 use wayexpand_backend_evdev::readable_keyboard_available;
 use wayexpand_backend_input_method::InputMethodSource;
+use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_wlroots::WlrootsInjector;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,12 +204,17 @@ pub fn probe_capabilities() -> Capabilities {
     // socket is safe to recognize; portal availability remains an explicit
     // startup decision and is reported by doctor.
     let has_direct_libei_socket = env::var_os("LIBEI_SOCKET").is_some();
+    // KWin window tracking is only available in KDE Plasma sessions over D-Bus.
+    // Probe is relatively fast and safe; it checks for KWin availability without
+    // interfering with the session. This ensures CLI and daemon report consistent
+    // window tracking capability.
+    let has_window_tracker = KwinWindowTracker::probe().is_ok();
     let capabilities = Capabilities {
         has_input_method_v2,
         has_virtual_keyboard,
         has_direct_libei_socket,
         has_dev_input,
-        has_window_tracker: false,
+        has_window_tracker,
         compositor: Compositor::detect(),
     };
     debug!(?capabilities, "probed backend capabilities");
