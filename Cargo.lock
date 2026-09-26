@@ -4028,10 +4028,12 @@ dependencies = [
 name = "wayexpand-daemon"
 version = "1.2.0"
 dependencies = [
+ "action-broker",
  "anyhow",
  "rustix 1.1.4",
  "serde",
  "signal-hook 0.4.4",
+ "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",

@@ -1,3 +1,4 @@
+mod action_broker;
 mod backend_lifecycle;
 mod control;
 mod input_loop;
