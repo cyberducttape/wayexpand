@@ -1401,6 +1401,8 @@ mod tests {
     use std::io::{BufReader, Cursor};
     use std::time::Instant;
     use wayexpand_core::{Config, InjectorError, KeyChord};
+    use crate::input_loop::libei_policy_blocks;
+    use crate::output_loop::connect_output_backend;
 
     #[test]
     fn startup_worker_failure_remains_command_disabled_in_audit_mode() {
