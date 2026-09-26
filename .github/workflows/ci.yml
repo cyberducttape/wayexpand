@@ -193,6 +193,8 @@ jobs:
           ref: ${{ inputs.checkout_ref || github.ref }}
       - name: ShellCheck scripts
         run: shellcheck scripts/*.sh
+      - name: Test commit identity failure handling
+        run: bash scripts/test-commit-identity.sh
 
   docs:
     name: Documentation Validation

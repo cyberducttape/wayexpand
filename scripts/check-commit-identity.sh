@@ -1,5 +1,5 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 ref=${1:-HEAD}
 expected_name='Stephan Loesevitz'

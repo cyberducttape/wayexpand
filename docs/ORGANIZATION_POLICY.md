@@ -58,7 +58,8 @@ max_replacement_size = 65536
 # Allowed output backends (empty = all allowed)
 allowed_backends = ["libei", "input-method-v2"]
 
-# Allowed curated packs from ~/.local/share/wayexpand/packs/
+# Allowed curated packs from ~/.local/share/wayexpand/packs/.
+# Empty means unrestricted: all discovered packs are allowed.
 allowed_packs = ["approved-pack-1", "approved-pack-2"]
 
 # Audit prefix for violation logging to journald
@@ -105,7 +106,8 @@ require_absolute_commands = true
 disable_title_matching = false
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]
-allowed_packs = []
+# Empty is unrestricted, so list the packs explicitly when restricting use.
+allowed_packs = ["approved-pack-1"]
 audit_prefix = "corp-policy"
 ```
 
@@ -133,6 +135,7 @@ require_absolute_commands = false
 disable_title_matching = false
 max_replacement_size = 65536
 allowed_backends = []
+# Empty means all packs are allowed; use an explicit allowlist to restrict them.
 allowed_packs = []
 audit_prefix = "test-policy"
 ```
