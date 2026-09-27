@@ -29,8 +29,8 @@ async fn broker_client_server_echo_request_response() {
     let server = BrokerServer::bind(socket_path).expect("Failed to bind server");
     let socket_path = socket_path.to_string();
 
-    // Server thread
-    let server_handle = tokio::spawn(async move {
+    // Keep the blocking UnixListener accept off the Tokio runtime worker.
+    let server_handle = std::thread::spawn(move || {
         let mut conn = server.accept().expect("Failed to accept");
 
         // Receive request
@@ -76,7 +76,7 @@ async fn broker_client_server_echo_request_response() {
     }
 
     // Wait for server thread
-    let _ = tokio::time::timeout(Duration::from_secs(5), server_handle).await;
+    server_handle.join().expect("broker server thread panicked");
 }
 
 #[test]
