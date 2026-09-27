@@ -22,7 +22,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
 libc = { workspace = true }
-rustix = { workspace = true, features = ["process"] }
+rustix = { workspace = true, features = ["process", "fs"] }
 shellexpand = "3"
 
 [[bin]]

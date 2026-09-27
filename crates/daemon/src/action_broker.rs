@@ -64,10 +64,45 @@ impl ActionBrokerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use action_broker::{ActionOutput, BrokerServer};
+    use std::os::unix::fs::PermissionsExt;
+    use std::thread;
 
     #[test]
     fn action_broker_manager_creation() {
         let manager = ActionBrokerManager::new(PathBuf::from("/tmp/test_broker.sock"));
         assert_eq!(manager.socket_path, PathBuf::from("/tmp/test_broker.sock"));
+    }
+
+    #[test]
+    fn manager_reconnects_for_each_single_request_connection() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-daemon-broker-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = directory.join("broker.sock");
+        let server = BrokerServer::bind(&socket).unwrap();
+        let server_thread = thread::spawn(move || {
+            for _ in 0..2 {
+                let mut connection = server.accept().unwrap();
+                let _request = connection.read_request().unwrap();
+                connection
+                    .write_response(&ActionResponse::Success(ActionOutput {
+                        exit_code: 0,
+                        stdout: "ok".into(),
+                        stderr: String::new(),
+                        duration_ms: 0,
+                    }))
+                    .unwrap();
+            }
+        });
+
+        let manager = ActionBrokerManager::new(socket.clone());
+        assert!(manager.execute_action("first", 1000).unwrap().is_success());
+        assert!(manager.execute_action("second", 1000).unwrap().is_success());
+        server_thread.join().unwrap();
+        assert!(!socket.exists());
     }
 }

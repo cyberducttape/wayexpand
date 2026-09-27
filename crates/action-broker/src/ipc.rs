@@ -6,6 +6,7 @@
 use crate::protocol::{ActionRequest, ActionResponse};
 use serde_json;
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -81,6 +82,36 @@ pub struct BrokerServer {
     socket_identity: (u64, u64),
 }
 
+#[cfg(target_os = "linux")]
+fn validate_peer(stream: &UnixStream) -> Result<(), std::io::Error> {
+    let fd = stream.as_raw_fd();
+    let mut credentials = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credentials as *mut libc::ucred).cast(),
+            &mut length,
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if credentials.uid != rustix::process::geteuid().as_raw() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "broker client is not running as the broker user",
+        ));
+    }
+    Ok(())
+}
+
 impl BrokerServer {
     /// Create a new broker server at the given socket path.
     pub fn bind<P: AsRef<Path>>(path: P) -> Result<Self, IpcError> {
@@ -89,22 +120,8 @@ impl BrokerServer {
             .parent()
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let parent = parent.canonicalize()?;
-        let parent_metadata = std::fs::metadata(&parent)?;
         let uid = rustix::process::geteuid().as_raw();
-        if parent_metadata.uid() != uid && parent_metadata.uid() != 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "broker socket parent is not owned by the current user or root",
-            )
-            .into());
-        }
-        if parent_metadata.mode() & 0o022 != 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "broker socket parent is writable by group or other users",
-            )
-            .into());
-        }
+        Self::validate_socket_ancestors(&parent, uid)?;
 
         if let Ok(metadata) = std::fs::symlink_metadata(path) {
             if !metadata.file_type().is_socket() || (metadata.uid() != uid && metadata.uid() != 0) {
@@ -114,10 +131,25 @@ impl BrokerServer {
                 )
                 .into());
             }
+            let identity = (metadata.dev(), metadata.ino());
+            let current = std::fs::symlink_metadata(path)?;
+            if !current.file_type().is_socket()
+                || (current.dev(), current.ino()) != identity
+                || (current.uid() != uid && current.uid() != 0)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "broker socket path changed while checking stale socket",
+                )
+                .into());
+            }
             std::fs::remove_file(path)?;
         }
 
-        let listener = UnixListener::bind(path)?;
+        let previous_umask = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
+        let listener_result = UnixListener::bind(path);
+        rustix::process::umask(previous_umask);
+        let listener = listener_result?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         let metadata = std::fs::metadata(path)?;
         Ok(Self {
@@ -127,9 +159,49 @@ impl BrokerServer {
         })
     }
 
+    fn validate_socket_ancestors(path: &Path, uid: u32) -> Result<(), IpcError> {
+        let mut current = path;
+        loop {
+            let metadata = std::fs::metadata(current)?;
+            if !metadata.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "broker socket ancestor is not a directory",
+                )
+                .into());
+            }
+            if metadata.uid() != uid && metadata.uid() != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "broker socket ancestor is not owned by the current user or root",
+                )
+                .into());
+            }
+            if metadata.mode() & 0o022 != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "broker socket ancestor is writable by group or other users",
+                )
+                .into());
+            }
+            if current == Path::new("/") {
+                break;
+            }
+            current = current.parent().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "broker socket ancestor traversal failed",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
     /// Accept a new client connection.
     pub fn accept(&self) -> Result<ServerConnection, IpcError> {
         let (stream, _addr) = self.listener.accept()?;
+        #[cfg(target_os = "linux")]
+        validate_peer(&stream)?;
         stream.set_read_timeout(Some(SOCKET_READ_TIMEOUT))?;
         stream.set_write_timeout(Some(SOCKET_WRITE_TIMEOUT))?;
         let reader = BufReader::new(stream.try_clone()?);
