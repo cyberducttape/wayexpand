@@ -280,6 +280,40 @@ impl BrokerClient {
 }
 
 #[cfg(test)]
+mod bounded_frame_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn bounded_reader_rejects_a_line_without_waiting_for_newline() {
+        let (mut writer, reader) = UnixStream::pair().expect("socket pair");
+        let mut reader = BufReader::new(reader);
+        let oversized = vec![b'x'; MAX_MESSAGE_BYTES + 1];
+        let writer_thread = std::thread::spawn(move || {
+            writer.write_all(&oversized).expect("write oversized frame");
+        });
+
+        assert!(matches!(
+            read_bounded_line(&mut reader, MAX_MESSAGE_BYTES),
+            Err(IpcError::MessageTooLarge(_, MAX_MESSAGE_BYTES))
+        ));
+        writer_thread.join().expect("writer thread");
+    }
+
+    #[test]
+    fn bounded_reader_rejects_invalid_utf8_before_json_parsing() {
+        let (mut writer, reader) = UnixStream::pair().expect("socket pair");
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"{\xff}\n").expect("write invalid frame");
+
+        assert!(matches!(
+            read_bounded_line(&mut reader, MAX_MESSAGE_BYTES),
+            Err(IpcError::InvalidFormat)
+        ));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::thread;

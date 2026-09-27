@@ -75,3 +75,42 @@ pub fn drain_pending_window_events(
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draining_focus_events_keeps_the_latest_snapshot() {
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(Some(WindowContext {
+                app_id: Some("old.app".into()),
+                title: Some("old".into()),
+            }))
+            .unwrap();
+        sender
+            .send(Some(WindowContext {
+                app_id: Some("new.app".into()),
+                title: Some("new".into()),
+            }))
+            .unwrap();
+
+        let latest = drain_pending_window_events(&Some(receiver));
+        assert_eq!(
+            latest,
+            Some(Some(WindowContext {
+                app_id: Some("new.app".into()),
+                title: Some("new".into()),
+            }))
+        );
+    }
+
+    #[test]
+    fn draining_a_disconnected_tracker_fails_closed_to_no_window() {
+        let (sender, receiver) = mpsc::channel::<Option<WindowContext>>();
+        drop(sender);
+
+        assert_eq!(drain_pending_window_events(&Some(receiver)), Some(None));
+    }
+}

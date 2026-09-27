@@ -346,21 +346,7 @@ fn main() -> Result<()> {
     let mut stdin_closed = false;
     let mut logged_queue_rejections = 0;
     loop {
-        if let Some(receiver) = window_tracker.as_ref() {
-            let mut latest = None;
-            while let Ok(window) = receiver.try_recv() {
-                latest = Some(window);
-            }
-            if let Some(window) = latest {
-                process_event(
-                    &mut config.engine,
-                    InputEvent::WindowChanged(window),
-                    None,
-                    &policy,
-                    active_backend,
-                )?;
-            }
-        }
+        drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
         let requested_pause = control
             .pause_requested
             .load(std::sync::atomic::Ordering::Acquire);

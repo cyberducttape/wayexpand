@@ -5,7 +5,7 @@ Address the large monolithic source files that obscure integration boundaries an
 
 ## Target Files (by priority)
 
-### 1. `crates/daemon/src/main.rs` (2,598 lines) - HIGHEST PRIORITY
+### 1. `crates/daemon/src/main.rs` (2,318 lines) - HIGHEST PRIORITY
 Split into:
 - **event_dispatch.rs** (220 lines) - Event processing pipeline
 - **input_loop.rs** (400 lines) - Input handling and reconnection logic
@@ -45,9 +45,9 @@ Split into:
 - Status publishing
 - The event loop orchestration
 
-### 2. `crates/core/src/engine.rs` (2,213 lines) - MEDIUM PRIORITY
+### 2. `crates/core/src/engine/mod.rs` (2,268 lines) - MEDIUM PRIORITY
 Split into:
-- **engine/mod.rs** (300 lines) - Public API, core types
+- **engine/mod.rs** (target ~300 lines) - Public API, core types
 - **engine/matching.rs** (400 lines) - Trigger matching logic
 - **engine/command_runtime.rs** (350 lines) - Async command execution
 - **engine/transaction.rs** (300 lines) - Undo/expansion state
@@ -73,11 +73,11 @@ Split into:
 ## Implementation Strategy
 
 ### Phase 1: Daemon Refactoring (Next Sprint)
-1. Create `event_dispatch.rs` ✅ (in progress)
-2. Create `input_loop.rs`
-3. Create `output_loop.rs`
-4. Create `backend_lifecycle.rs`
-5. Update main.rs to use new modules
+1. Create `event_dispatch.rs` (not started; event processing remains in `main.rs`)
+2. Create `input_loop.rs` ✅
+3. Create `output_loop.rs` ✅
+4. Create `backend_lifecycle.rs` ✅
+5. Update main.rs to use new modules ✅ (window-event draining now has one path)
 6. Run full test suite
 7. Verify no behavioral changes
 
@@ -122,7 +122,7 @@ Address remaining large files based on priority and maintenance burden
 
 ## Next Steps
 
-1. Complete `event_dispatch.rs` extraction (in progress)
-2. Create `input_loop.rs`
-3. Update main.rs imports and split the event loop
-4. Run tests and verify no regressions
+1. Extract event processing into `event_dispatch.rs`
+2. Split the remaining daemon event loop into lifecycle-owned components
+3. Update main.rs imports and reduce orchestration to startup/wiring
+4. Run tests and verify no regressions after each extraction

@@ -529,4 +529,43 @@ mod tests {
         );
         assert_eq!(effective, Duration::from_millis(500));
     }
+
+    #[tokio::test]
+    async fn executor_empty_allowlist_does_not_inherit_client_environment() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "print-env".to_string(),
+            ActionConfig {
+                program: "/usr/bin/env".to_string(),
+                args_prefix: vec![],
+                timeout_ms: 1000,
+                pass_env: vec![],
+                inherit_env: false,
+                cwd: None,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "print-env".to_string(),
+                timeout_ms: 1000,
+                inherit_env: true,
+                env_vars: vec![
+                    "HOME=/should-not-pass".to_string(),
+                    "LD_PRELOAD=/should-not-pass.so".to_string(),
+                ],
+                stdout_capture: true,
+            })
+            .await
+            .expect("environment command should succeed");
+
+        let output = response.output().expect("successful action output");
+        assert!(
+            output.stdout.is_empty(),
+            "unexpected environment: {}",
+            output.stdout
+        );
+    }
 }
