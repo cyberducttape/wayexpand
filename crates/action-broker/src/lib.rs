@@ -6,7 +6,7 @@
 //!
 //! ## Architecture
 //!
-//! ```
+//! ```text
 //! ┌─────────────────────────────┐
 //! │ Keyboard Capture Daemon     │
 //! │ (restricted: no network)    │
