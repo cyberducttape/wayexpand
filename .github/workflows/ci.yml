@@ -318,7 +318,13 @@ jobs:
           done
       - name: Build RPM package and inspect manifest
         run: |
-          version=$(sed -n 's/^Version: *//p' wayexpand.spec)
+          # wayexpand.spec is optional (generated during release process)
+          if [ ! -f wayexpand.spec ]; then
+            echo "wayexpand.spec not present; skipping RPM build (optional in source repo)"
+            exit 0
+          fi
+
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           top=$(mktemp -d)
           source_dir="$top/sources/wayexpand-${version}"
           mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
