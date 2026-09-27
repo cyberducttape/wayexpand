@@ -106,8 +106,10 @@ fn broker_config_validation() {
 
 #[test]
 fn broker_config_rejects_relative_paths_when_required() {
-    let mut config = BrokerConfig::default();
-    config.require_absolute_paths = true;
+    let mut config = BrokerConfig {
+        require_absolute_paths: true,
+        ..Default::default()
+    };
 
     // Relative path action
     config.actions.insert(

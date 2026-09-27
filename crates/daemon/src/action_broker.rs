@@ -10,11 +10,13 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 /// Action broker client connection manager.
+#[allow(dead_code)]
 pub struct ActionBrokerManager {
     socket_path: PathBuf,
     client: Arc<Mutex<Option<BrokerClient>>>,
 }
 
+#[allow(dead_code)]
 impl ActionBrokerManager {
     /// Create a new action broker manager for the given socket path.
     pub fn new(socket_path: PathBuf) -> Self {
