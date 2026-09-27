@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 /// Configuration for a single action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionConfig {
     /// The command to execute.
     pub program: String,
@@ -19,7 +20,9 @@ pub struct ActionConfig {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
 
-    /// Whether to allow network access (AF_INET, AF_INET6).
+    /// Policy declaration: whether this action should have network access.
+    /// NOT ENFORCED by the executor alone — requires external sandboxing
+    /// (systemd scope, seccomp, Landlock, or namespace isolation).
     #[serde(default)]
     pub allow_network: bool,
 
@@ -73,6 +76,7 @@ impl ActionConfig {
 
 /// Complete broker configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BrokerConfig {
     /// Configured actions keyed by action_id.
     #[serde(default)]
@@ -221,5 +225,60 @@ allow_network = false
             },
         );
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn broker_config_rejects_unknown_fields() {
+        let toml_str = r#"
+require_absolute_paths = true
+strict_env = true
+nonexistent_field = true
+
+[actions."test"]
+program = "/usr/bin/echo"
+"#;
+        assert!(
+            BrokerConfig::from_toml(toml_str).is_err(),
+            "unknown fields must be rejected"
+        );
+    }
+
+    #[test]
+    fn broker_config_rejects_misplaced_broker_table() {
+        // The documented example previously used [broker] which silently
+        // became an unknown table.  With deny_unknown_fields this fails.
+        let toml_str = r#"
+[broker]
+require_absolute_paths = true
+strict_env = true
+
+[actions."test"]
+program = "/usr/bin/echo"
+"#;
+        assert!(
+            BrokerConfig::from_toml(toml_str).is_err(),
+            "[broker] wrapper table must be rejected"
+        );
+    }
+
+    #[test]
+    fn broker_help_example_config_parses() {
+        let toml_str = r#"
+require_absolute_paths = true
+strict_env = true
+
+[actions."example"]
+program = "/usr/bin/example"
+args_prefix = []
+timeout_ms = 5000
+allow_network = false
+pass_env = ["HOME"]
+enabled = true
+"#;
+        let config =
+            BrokerConfig::from_toml(toml_str).expect("help-text example must parse successfully");
+        assert!(config.require_absolute_paths);
+        assert!(config.strict_env);
+        assert!(config.get_action("example").is_some());
     }
 }

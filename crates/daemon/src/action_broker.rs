@@ -5,52 +5,35 @@
 
 use action_broker::{ActionRequest, ActionResponse, BrokerClient};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
-/// Action broker client connection manager.
+/// Action broker client — reconnects per request since the broker server
+/// handles one request per connection.
 #[allow(dead_code)]
 pub struct ActionBrokerManager {
     socket_path: PathBuf,
-    client: Arc<Mutex<Option<BrokerClient>>>,
 }
 
 #[allow(dead_code)]
 impl ActionBrokerManager {
-    /// Create a new action broker manager for the given socket path.
     pub fn new(socket_path: PathBuf) -> Self {
-        Self {
-            socket_path,
-            client: Arc::new(Mutex::new(None)),
-        }
+        Self { socket_path }
     }
 
-    /// Get or create a connection to the broker.
-    async fn get_client(&self) -> Result<BrokerClient, Box<dyn std::error::Error>> {
-        let mut guard = self.client.lock().await;
-
-        // Try to reuse existing connection
-        if let Some(client) = guard.take() {
-            return Ok(client);
-        }
-
-        // Create new connection
-        debug!(
-            socket_path = %self.socket_path.display(),
-            "connecting to action broker"
-        );
-
-        let client = BrokerClient::connect(&self.socket_path)?;
-        Ok(client)
-    }
-
-    /// Execute an action through the broker.
-    pub async fn execute_action(
+    /// Execute an action through the broker (fresh connection per request).
+    pub fn execute_action(
         &self,
         action_id: &str,
         timeout_ms: u64,
     ) -> Result<ActionResponse, Box<dyn std::error::Error>> {
+        debug!(
+            socket_path = %self.socket_path.display(),
+            action_id,
+            "connecting to action broker"
+        );
+
+        let mut client = BrokerClient::connect(&self.socket_path)?;
+
         let request = ActionRequest {
             action_id: action_id.to_string(),
             timeout_ms,
@@ -59,21 +42,14 @@ impl ActionBrokerManager {
             stdout_capture: true,
         };
 
-        let mut client = self.get_client().await?;
-
         client.send_request(&request)?;
         let response = client.recv_response()?;
-
-        // Return client to pool for reuse
-        let mut guard = self.client.lock().await;
-        *guard = Some(client);
-
         Ok(response)
     }
 
     /// Check if broker is available (attempt low-overhead probe).
-    pub async fn is_available(&self) -> bool {
-        if let Ok(_client) = BrokerClient::connect(&self.socket_path) {
+    pub fn is_available(&self) -> bool {
+        if BrokerClient::connect(&self.socket_path).is_ok() {
             debug!("action broker is available");
             return true;
         }

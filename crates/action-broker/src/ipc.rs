@@ -8,7 +8,12 @@ use serde_json;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::time::Duration;
 use thiserror::Error;
+
+const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
+const SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Error)]
 pub enum IpcError {
@@ -23,6 +28,49 @@ pub enum IpcError {
 
     #[error("Invalid message format")]
     InvalidFormat,
+
+    #[error("Message too large ({0} bytes, limit {1})")]
+    MessageTooLarge(usize, usize),
+}
+
+/// Read a newline-terminated line with a size bound.
+fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result<String, IpcError> {
+    let mut line = String::new();
+    let mut total = 0;
+
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if total == 0 {
+                return Err(IpcError::ConnectionClosed);
+            }
+            break;
+        }
+
+        if let Some(newline_pos) = available.iter().position(|&b| b == b'\n') {
+            let consume_len = newline_pos + 1;
+            total += consume_len;
+            if total > limit {
+                return Err(IpcError::MessageTooLarge(total, limit));
+            }
+            let chunk = std::str::from_utf8(&available[..consume_len])
+                .map_err(|_| IpcError::InvalidFormat)?;
+            line.push_str(chunk);
+            reader.consume(consume_len);
+            break;
+        }
+
+        let available_len = available.len();
+        total += available_len;
+        if total > limit {
+            return Err(IpcError::MessageTooLarge(total, limit));
+        }
+        let chunk = std::str::from_utf8(available).map_err(|_| IpcError::InvalidFormat)?;
+        line.push_str(chunk);
+        reader.consume(available_len);
+    }
+
+    Ok(line)
 }
 
 /// Broker server listening on a Unix socket.
@@ -49,6 +97,8 @@ impl BrokerServer {
     /// Accept a new client connection.
     pub fn accept(&self) -> Result<ServerConnection, IpcError> {
         let (stream, _addr) = self.listener.accept()?;
+        stream.set_read_timeout(Some(SOCKET_READ_TIMEOUT))?;
+        stream.set_write_timeout(Some(SOCKET_WRITE_TIMEOUT))?;
         let reader = BufReader::new(stream.try_clone()?);
         Ok(ServerConnection { stream, reader })
     }
@@ -74,10 +124,7 @@ pub struct ServerConnection {
 impl ServerConnection {
     /// Read an action request from the client.
     pub fn read_request(&mut self) -> Result<ActionRequest, IpcError> {
-        let mut line = String::new();
-        if self.reader.read_line(&mut line)? == 0 {
-            return Err(IpcError::ConnectionClosed);
-        }
+        let line = read_bounded_line(&mut self.reader, MAX_MESSAGE_BYTES)?;
         serde_json::from_str(line.trim()).map_err(IpcError::Json)
     }
 
@@ -100,6 +147,8 @@ impl BrokerClient {
     /// Connect to a broker server at the given socket path.
     pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self, IpcError> {
         let stream = UnixStream::connect(path)?;
+        stream.set_read_timeout(Some(SOCKET_READ_TIMEOUT))?;
+        stream.set_write_timeout(Some(SOCKET_WRITE_TIMEOUT))?;
         let reader = BufReader::new(stream.try_clone()?);
         Ok(Self { stream, reader })
     }
@@ -114,10 +163,7 @@ impl BrokerClient {
 
     /// Receive an action response from the broker.
     pub fn recv_response(&mut self) -> Result<ActionResponse, IpcError> {
-        let mut line = String::new();
-        if self.reader.read_line(&mut line)? == 0 {
-            return Err(IpcError::ConnectionClosed);
-        }
+        let line = read_bounded_line(&mut self.reader, MAX_MESSAGE_BYTES)?;
         serde_json::from_str(line.trim()).map_err(IpcError::Json)
     }
 }
@@ -182,6 +228,31 @@ mod tests {
         // Receive response
         let response = client.recv_response().unwrap();
         assert!(response.is_success());
+
+        server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn ipc_rejects_oversized_message() {
+        let socket_path = "/tmp/wayexpand_test_ipc_oversize";
+        let _ = std::fs::remove_file(socket_path);
+
+        let server = BrokerServer::bind(socket_path).unwrap();
+        let socket_path_clone = socket_path.to_string();
+
+        let server_thread = thread::spawn(move || {
+            let mut conn = server.accept().unwrap();
+            let result = conn.read_request();
+            assert!(result.is_err(), "should reject oversized message");
+        });
+
+        thread::sleep(std::time::Duration::from_millis(100));
+        let mut stream = UnixStream::connect(&socket_path_clone).unwrap();
+        // Send a message larger than 1 MiB without a newline
+        let huge = vec![b'a'; MAX_MESSAGE_BYTES + 100];
+        let _ = stream.write_all(&huge);
+        let _ = stream.flush();
+        drop(stream);
 
         server_thread.join().unwrap();
     }

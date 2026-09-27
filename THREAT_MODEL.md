@@ -71,7 +71,7 @@ not a full automation broker:
 They still execute a trusted program as the desktop user. Commands that need
 network access, cloud credentials, broad filesystem writes, or auditable
 approval should wait for the planned Action Broker described in
-[docs/ACTION_BROKER_DESIGN.md](docs/ACTION_BROKER_DESIGN.md).
+[docs/ACTION_BROKER_ARCHITECTURE.md](docs/ACTION_BROKER_ARCHITECTURE.md).
 
 ## Practical deployment guidance
 

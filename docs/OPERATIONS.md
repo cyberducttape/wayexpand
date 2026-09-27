@@ -144,7 +144,7 @@ the sandbox forbids.
 Do not relax the daemon unit or use a wrapper script to bypass this boundary.
 There is no supported SRE command path in the current direct-command model;
 networked or credentialed workflows require the planned Action Broker. See
-[`docs/ACTION_BROKER_DESIGN.md`](ACTION_BROKER_DESIGN.md) for its explicit
+[`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md) for its explicit
 action allowlist, environment, cwd, network, timeout, output, and audit
 requirements.
 

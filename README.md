@@ -34,7 +34,7 @@ command-backed snippets, and fleet policy support. The backend engineering is
 there when you need to inspect it, but the goal is simple: type less, paste
 less, and keep your snippets local.
 
-![WayExpand snippet dashboard](docs/archive/wiki/assets/snippets-dashboard.png)
+<!-- Screenshot placeholder: docs/archive/wiki/assets/snippets-dashboard.png not yet committed -->
 
 > **Status:** WayExpand is usable today, but desktop integration is still
 > compositor-dependent. Run `wayexpand doctor` on your own session before
@@ -58,7 +58,7 @@ For the current desktop matrix, see:
 
 - [Getting started](docs/GETTING_STARTED.md)
 - [Support matrix](docs/SUPPORT_MATRIX.md)
-- [Compositor matrix](docs/COMPOSITOR_MATRIX.md)
+- [Certification matrix](docs/CERTIFICATION_MATRIX.md)
 
 ## Install
 

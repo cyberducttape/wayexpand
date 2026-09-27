@@ -45,18 +45,19 @@ This matrix documents which desktop environments and configurations have been te
 | 1 | Basic expansion (`;hello` → "Hello World") | ✅ PASS | Clean insertion, no artifacts |
 | 2 | Fast overlapping keys | ✅ PASS | Deduplication working correctly |
 | 3 | Held key (prevent repeat expansion) | ✅ PASS | Single expansion despite held trigger |
-| 4 | Password field protection | ✅ PASS | Expansion blocked in password fields |
+| 4 | Password field protection | ⚠️ N/A | Evdev has no password-field signal; expansions fire in all fields |
 | 5 | Window-specific filtering (app_filter) | ✅ PASS | Trigger scoped correctly to Konsole |
 | 6 | Multi-line replacement with newlines | ✅ PASS | All lines inserted, formatting preserved |
 | 7 | Undo (Ctrl+Z) | ✅ PASS | Original trigger text restored |
 | 8 | Clipboard interaction | ✅ PASS | Expansion content copyable to other apps |
 
 **Known Limitations:**
+- **Evdev capture cannot detect password fields.** Expansions fire in all input fields including passwords. Compositors using input-method-v2 for capture can provide sensitive-field signals; see [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
 - KWin D-Bus window tracking occasionally has ~100ms latency on window focus changes
 - Input method selection can be finicky (workaround: use IBus explicitly)
 - Evdev requires input group membership
 
-**Recommendation:** ✅ Certified for production. This is the recommended configuration for v1.2.
+**Recommendation:** ✅ Certified for production with the above limitation. Users handling sensitive fields should prefer input-method-v2 capture where available.
 
 ### ⚠️ GNOME 47.x - EXPERIMENTAL
 
@@ -268,12 +269,12 @@ fallback_mode = "input-method-v2-safe"  # No keyboard capture, text only
 
 - **KDE Plasma:** See [docs/SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for KDE-specific setup
 - **GNOME:** See [docs/CAPTURE_BACKEND_TRADEOFFS.md](CAPTURE_BACKEND_TRADEOFFS.md) for input-method-v2 guide
-- **Sway/Hyprland:** See [docs/BACKEND_SELECTION.md](BACKEND_SELECTION.md) for manual configuration
+- **Sway/Hyprland:** See [docs/BACKENDS.md](BACKENDS.md) for manual configuration
 - **Not certified?** Open an issue with testing results—we'd love to expand certification coverage
 
 ## See Also
 
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — Current support status
 - [CAPTURE_BACKEND_TRADEOFFS.md](CAPTURE_BACKEND_TRADEOFFS.md) — Input method guide
-- [BACKEND_SELECTION.md](BACKEND_SELECTION.md) — Manual backend configuration
+- [BACKENDS.md](BACKENDS.md) — Manual backend configuration
 - [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) — Full test procedures

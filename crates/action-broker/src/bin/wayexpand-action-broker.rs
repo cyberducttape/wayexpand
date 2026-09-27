@@ -20,11 +20,13 @@ struct BrokerOptions {
 
 impl Default for BrokerOptions {
     fn default() -> Self {
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or_else(|_| format!("/run/user/{}", rustix::process::getuid().as_raw()));
         Self {
             config_file: PathBuf::from(
                 shellexpand::tilde("~/.config/wayexpand-broker.toml").into_owned(),
             ),
-            socket_path: PathBuf::from("/run/user/1000/wayexpand-broker.sock"),
+            socket_path: PathBuf::from(format!("{}/wayexpand-broker.sock", runtime_dir)),
             verbose: false,
         }
     }
@@ -101,7 +103,6 @@ EXAMPLE:
 CONFIGURATION:
     Create ~/.config/wayexpand-broker.toml with action definitions:
 
-    [broker]
     require_absolute_paths = true
     strict_env = true
 

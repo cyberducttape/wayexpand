@@ -93,7 +93,7 @@ home-directory, or broader filesystem access. The planned Action Broker is a
 separate privilege/environment boundary for that use case; it must receive an
 explicit action name and enforce its own allowlist, environment, cwd, network
 policy, timeout, output limit, and audit result. See
-[`docs/ACTION_BROKER_DESIGN.md`](docs/ACTION_BROKER_DESIGN.md).
+[`docs/ACTION_BROKER_ARCHITECTURE.md`](docs/ACTION_BROKER_ARCHITECTURE.md).
 
 **Note:** The `wayexpand-gui` preview feature does NOT run commands under the
 daemon's systemd sandbox restrictions. For testing command behavior under actual

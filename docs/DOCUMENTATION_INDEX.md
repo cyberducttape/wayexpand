@@ -114,7 +114,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [FLEET_CONFIG.md](FLEET_CONFIG.md) | Enterprise teams | Multi-layer configuration |
 | [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) | Enterprise teams | Policy enforcement and compliance |
 | [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) | Enterprise teams | Handling sensitive data |
-| [ACTION_BROKER_DESIGN.md](ACTION_BROKER_DESIGN.md) | SRE/security architects | Planned command/action privilege boundary |
+| [ACTION_BROKER_ARCHITECTURE.md](ACTION_BROKER_ARCHITECTURE.md) | SRE/security architects | Command/action privilege boundary |
 | [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) | DevOps/SRE | Ansible playbooks |
 | [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) | DevOps/SRE | Puppet modules |
 
@@ -126,7 +126,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [BACKENDS.md](BACKENDS.md) | Advanced users | Backend architecture |
 | [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md) | Advanced users | Password field protection details |
 | [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) | Security-conscious administrators | Raw-input permission model and tighter-access investigation |
-| [COMPOSITOR_MATRIX.md](COMPOSITOR_MATRIX.md) | System integrators | Desktop/protocol combinations |
+| [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) | System integrators | Desktop/protocol combinations |
 | [CERTIFICATION.md](CERTIFICATION.md) | QA and system integrators | Machine-readable certification and compositor test requirements |
 
 ### Development & Contribution

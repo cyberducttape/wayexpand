@@ -7,7 +7,7 @@
 This matrix separates implemented code from verified desktop behavior. A
 Wayland session alone does not imply that a backend is usable.
 
-**Core engine and config are stable; desktop backend support is compositor-dependent.** See [COMPOSITOR_MATRIX.md](COMPOSITOR_MATRIX.md) for the authoritative automatic-selection and certification status. No compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture.
+**Core engine and config are stable; desktop backend support is compositor-dependent.** See [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) for the authoritative automatic-selection and certification status. No compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture.
 
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |

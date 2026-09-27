@@ -73,7 +73,7 @@ supported end state before broad adoption:
 
 The optional action-broker design remains a security gate for networked or
 credentialed command workflows. See
-docs/ACTION_BROKER_DESIGN.md.
+docs/ACTION_BROKER_ARCHITECTURE.md.
 
 - [ ] Bounded, authenticated, action-name-based IPC.
 - [ ] Independent sandbox and ownership checks.
@@ -100,7 +100,7 @@ docs/ACTION_BROKER_DESIGN.md.
 ## References
 
 - docs/SUPPORT_MATRIX.md — current support status
-- docs/COMPOSITOR_MATRIX.md — backend selection and compositor evidence
+- docs/CERTIFICATION_MATRIX.md — backend selection and compositor evidence
 - docs/CERTIFICATION.md — certification procedure
 - docs/INTEGRATION_TESTING.md — integration tests
 - docs/COMPATIBILITY.md — stable contracts
