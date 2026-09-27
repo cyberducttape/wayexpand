@@ -20,17 +20,12 @@ pub struct ActionConfig {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
 
-    /// Policy declaration: whether this action should have network access.
-    /// NOT ENFORCED by the executor alone — requires external sandboxing
-    /// (systemd scope, seccomp, Landlock, or namespace isolation).
-    #[serde(default)]
-    pub allow_network: bool,
-
     /// Environment variables to pass to the action.
     #[serde(default)]
     pub pass_env: Vec<String>,
 
-    /// Whether to inherit all environment variables from daemon.
+    /// Whether to enable the action's minimal inherited environment baseline.
+    /// This never means inheriting the complete daemon environment.
     #[serde(default)]
     pub inherit_env: bool,
 
@@ -78,6 +73,12 @@ impl ActionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BrokerConfig {
+    /// Optional wrapper accepted by the documented configuration format.
+    /// Values in this table are copied into the flat runtime settings by
+    /// [`BrokerConfig::from_toml`].
+    #[serde(default)]
+    pub broker: Option<BrokerSettings>,
+
     /// Configured actions keyed by action_id.
     #[serde(default)]
     pub actions: HashMap<String, ActionConfig>,
@@ -87,7 +88,8 @@ pub struct BrokerConfig {
     #[serde(default)]
     pub require_absolute_paths: bool,
 
-    /// Whether to enforce that only explicitly allowed environment variables are passed.
+    /// Whether to globally disable an action's minimal inherited environment
+    /// and require explicit allowlisted request variables instead.
     #[serde(default = "default_strict_env")]
     pub strict_env: bool,
 
@@ -104,6 +106,21 @@ pub struct BrokerConfig {
     pub audit_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrokerSettings {
+    #[serde(default)]
+    pub require_absolute_paths: bool,
+    #[serde(default = "default_strict_env")]
+    pub strict_env: bool,
+    #[serde(default)]
+    pub default_cwd: Option<String>,
+    #[serde(default)]
+    pub audit_enabled: bool,
+    #[serde(default)]
+    pub audit_path: Option<String>,
+}
+
 fn default_strict_env() -> bool {
     true
 }
@@ -111,6 +128,7 @@ fn default_strict_env() -> bool {
 impl Default for BrokerConfig {
     fn default() -> Self {
         Self {
+            broker: None,
             actions: HashMap::new(),
             require_absolute_paths: false,
             strict_env: true,
@@ -124,7 +142,15 @@ impl Default for BrokerConfig {
 impl BrokerConfig {
     /// Load configuration from TOML file.
     pub fn from_toml(content: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(content)
+        let mut config: Self = toml::from_str(content)?;
+        if let Some(settings) = config.broker.take() {
+            config.require_absolute_paths = settings.require_absolute_paths;
+            config.strict_env = settings.strict_env;
+            config.default_cwd = settings.default_cwd;
+            config.audit_enabled = settings.audit_enabled;
+            config.audit_path = settings.audit_path;
+        }
+        Ok(config)
     }
 
     /// Get action configuration by ID.
@@ -160,7 +186,6 @@ mod tests {
             program: "/usr/bin/kubectl".to_string(),
             args_prefix: vec!["get".to_string()],
             timeout_ms: 5000,
-            allow_network: true,
             pass_env: vec!["KUBECONFIG".to_string()],
             inherit_env: false,
             cwd: None,
@@ -177,7 +202,6 @@ mod tests {
             program: String::new(),
             args_prefix: vec![],
             timeout_ms: 5000,
-            allow_network: false,
             pass_env: vec![],
             inherit_env: false,
             cwd: None,
@@ -190,6 +214,7 @@ mod tests {
     #[test]
     fn broker_config_from_toml() {
         let toml_str = r#"
+[broker]
 require_absolute_paths = true
 strict_env = true
 
@@ -197,7 +222,6 @@ strict_env = true
 program = "/usr/bin/echo"
 args_prefix = ["hello"]
 timeout_ms = 5000
-allow_network = false
 "#;
         let config = BrokerConfig::from_toml(toml_str).unwrap();
         assert!(config.require_absolute_paths);
@@ -216,7 +240,6 @@ allow_network = false
                 program: "echo".to_string(), // Not absolute
                 args_prefix: vec![],
                 timeout_ms: 5000,
-                allow_network: false,
                 pass_env: vec![],
                 inherit_env: false,
                 cwd: None,
@@ -244,9 +267,7 @@ program = "/usr/bin/echo"
     }
 
     #[test]
-    fn broker_config_rejects_misplaced_broker_table() {
-        // The documented example previously used [broker] which silently
-        // became an unknown table.  With deny_unknown_fields this fails.
+    fn broker_config_accepts_documented_broker_table() {
         let toml_str = r#"
 [broker]
 require_absolute_paths = true
@@ -255,15 +276,15 @@ strict_env = true
 [actions."test"]
 program = "/usr/bin/echo"
 "#;
-        assert!(
-            BrokerConfig::from_toml(toml_str).is_err(),
-            "[broker] wrapper table must be rejected"
-        );
+        let config = BrokerConfig::from_toml(toml_str).unwrap();
+        assert!(config.require_absolute_paths);
+        assert!(config.strict_env);
     }
 
     #[test]
     fn broker_help_example_config_parses() {
         let toml_str = r#"
+[broker]
 require_absolute_paths = true
 strict_env = true
 
@@ -271,7 +292,6 @@ strict_env = true
 program = "/usr/bin/example"
 args_prefix = []
 timeout_ms = 5000
-allow_network = false
 pass_env = ["HOME"]
 enabled = true
 "#;

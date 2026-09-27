@@ -6,7 +6,9 @@
 
 ## Overview
 
-This matrix documents which desktop environments and configurations have been tested and certified for production use. Testing is based on explicit manual procedures and dated results, ensuring reproducibility and transparency.
+This matrix records compatibility observations and certification evidence. A
+manual test is not certification; the machine-readable artifact from
+`wayexpand certify` is the single source of truth for production certification.
 
 > **Important:** "Certified" means thoroughly tested with published procedures. "Experimental" means limited testing or known limitations. "Unsupported" means no active support—may work, but not recommended for production.
 
@@ -14,7 +16,7 @@ This matrix documents which desktop environments and configurations have been te
 
 | Desktop | Version | Capture | Injection | Window Track | Status | Tested | Notes |
 |---------|---------|---------|-----------|--------------|--------|--------|-------|
-| **KDE Plasma** | 6.6.x | evdev | libei | KWin D-Bus | Certified | 2026-09 | Recommended for v1.2 |
+| **KDE Plasma** | 6.6.x | evdev | libei | KWin D-Bus | Manually tested; not certified | 2026-09 | evdev has no password-field awareness; automated certification pending |
 | **KDE Plasma** | 6.5.x | evdev | libei | KWin D-Bus | Experimental | pending | Likely compatible |
 | **KDE Plasma** | 6.7.x | evdev | libei | KWin D-Bus | Experimental | pending | Pre-release testing welcome |
 | **GNOME** | 47.x | input-method-v2 | input-method-v2 | N/A | Experimental | pending | Full text support, no keyboard capture |
@@ -28,7 +30,7 @@ This matrix documents which desktop environments and configurations have been te
 
 ## Detailed Certification Results
 
-### ✅ KDE Plasma 6.6.x - CERTIFIED
+### ⚠️ KDE Plasma 6.6.x - MANUALLY TESTED, NOT CERTIFIED
 
 **Test Date:** 2026-09-26  
 **Configuration:**
@@ -45,7 +47,7 @@ This matrix documents which desktop environments and configurations have been te
 | 1 | Basic expansion (`;hello` → "Hello World") | ✅ PASS | Clean insertion, no artifacts |
 | 2 | Fast overlapping keys | ✅ PASS | Deduplication working correctly |
 | 3 | Held key (prevent repeat expansion) | ✅ PASS | Single expansion despite held trigger |
-| 4 | Password field protection | ⚠️ N/A | Evdev has no password-field signal; expansions fire in all fields |
+| 4 | Password field protection | ⚠️ NOT AVAILABLE | Evdev has no password-field signal; expansions fire in all fields |
 | 5 | Window-specific filtering (app_filter) | ✅ PASS | Trigger scoped correctly to Konsole |
 | 6 | Multi-line replacement with newlines | ✅ PASS | All lines inserted, formatting preserved |
 | 7 | Undo (Ctrl+Z) | ✅ PASS | Original trigger text restored |
@@ -57,7 +59,10 @@ This matrix documents which desktop environments and configurations have been te
 - Input method selection can be finicky (workaround: use IBus explicitly)
 - Evdev requires input group membership
 
-**Recommendation:** ✅ Certified for production with the above limitation. Users handling sensitive fields should prefer input-method-v2 capture where available.
+**Recommendation:** Heavily manually tested, but not certified for production.
+Evdev cannot provide password-field awareness; automated certification remains
+pending. Users handling sensitive fields should prefer a backend with an
+authoritative sensitive-field signal where available.
 
 ### ⚠️ GNOME 47.x - EXPERIMENTAL
 
@@ -203,9 +208,9 @@ To report testing results for other compositors:
 ## Certification Roadmap
 
 ### v1.2.0 (Current)
-- ✅ KDE Plasma 6.6.x manual certification complete
-- ✅ Documentation published
-- Targeting: Production release with clear certified configuration
+- ⚠️ KDE Plasma 6.6.x heavily manually tested; not certified
+- ✅ Documentation records the evdev password-field limitation
+- Automated certification remains pending
 
 ### v1.2.1+
 - [ ] Test and publish GNOME 47.x results (if time permits)
@@ -236,7 +241,7 @@ To report testing results for other compositors:
 ### Version-Specific Support
 
 **WayExpand 1.2.0 will support:**
-- ✅ KDE Plasma 6.6.x (certified)
+- ⚠️ KDE Plasma 6.6.x (heavily manually tested; not certified)
 - ✅ KDE Plasma 6.5.x, 6.7.x (expected to work, experimental)
 - ✅ GNOME 47.x, 46.x (input-method-v2 path, experimental)
 - ✅ Sway, Hyprland, river (experimental, contributions welcome)
@@ -247,8 +252,7 @@ To report testing results for other compositors:
 ### Recommended Configuration
 ```toml
 [organization]
-# Mandatory for enterprises: use certified configuration
-desktop_certified = "KDE Plasma 6.6.x"
+# No certified configuration is currently published; review the machine-readable artifact.
 capture_method = "evdev"
 injection_method = "libei"
 window_tracking = "kwin-d-bus"

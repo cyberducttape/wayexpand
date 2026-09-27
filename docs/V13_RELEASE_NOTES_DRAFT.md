@@ -5,7 +5,7 @@
 
 ## What's New in v1.3.0
 
-### 🏗️ Action Broker Architecture (Phase 1) ✅ COMPLETE
+### 🏗️ Action Broker Architecture (Experimental; disabled)
 
 The biggest architectural improvement since v1.2: separate command execution from keyboard capture for better security and control.
 
@@ -32,7 +32,6 @@ The biggest architectural improvement since v1.2: separate command execution fro
 program = "/usr/bin/kubectl"
 args_prefix = ["get", "pods"]
 timeout_ms = 10000
-allow_network = true
 pass_env = ["KUBECONFIG"]
 ```
 
@@ -50,7 +49,7 @@ This prevents accidental command resolution from user PATH, ensuring predictable
 
 ## v1.3.0 Release Criteria
 
-### ✅ Phase 1 Complete: Action Broker Foundation
+### ⚠️ Action Broker Foundation (experimental only)
 - Protocol, configuration, executor, IPC, service binary
 - 100+ lines of tests
 - Full documentation
@@ -87,7 +86,7 @@ All 417 existing tests continue to pass:
 v1.3.0 is fully backward compatible with v1.2 configurations.
 
 ### What's Optional
-Action Broker is **opt-in**. v1.2 deployments continue working unchanged:
+Action Broker is **not enabled for production use**. v1.2 deployments continue working unchanged:
 - Commands still execute in daemon process (v1.2 behavior)
 - Daemon relaxes permissions if needed for commands
 - No configuration changes required
@@ -118,7 +117,7 @@ command = { program = "/usr/bin/kubectl", args = ["get", "pods"] }
 
 ## Performance Impact
 
-**Action Broker (Phase 1):**
+**Action Broker (experimental):**
 - No performance impact when disabled
 - When enabled: +5-10ms latency (IPC overhead)
 - Recommended for managed deployments where isolation matters more than latency
@@ -126,7 +125,8 @@ command = { program = "/usr/bin/kubectl", args = ["get", "pods"] }
 ## Known Limitations in v1.3.0
 
 ### Phase 1 (Current)
-- Action Broker foundation only - Phase 2 routing not implemented yet
+- Action Broker foundation only; Phase 2 routing is not implemented
+- Do not enable it as a security boundary; the restricted command runner remains the default
 - No systemd integration (use manual socket binding)
 - No audit logging yet
 - No RBAC controls yet
@@ -138,10 +138,10 @@ command = { program = "/usr/bin/kubectl", args = ["get", "pods"] }
 
 ## Enterprise Adoption
 
-v1.3 is the enterprise-ready release:
+v1.3 is not an enterprise-ready Action Broker release:
 - ✅ Input capture security validated (isolation)
-- ✅ Command execution architecture ready (fine-grained control)
-- ✅ Audit trail foundation ready
+- ⚠️ Command execution architecture remains experimental
+- ⚠️ Network/filesystem sandboxing and hardened broker IPC are not complete
 - ✅ Managed deployment support (Command Path Determinism)
 - ✅ Comprehensive documentation
 
@@ -159,7 +159,7 @@ These are pushed to v1.3.x:
 # No changes needed for existing configs
 # Everything continues to work as-is
 
-# Optional: Start Action Broker for managed deployments
+# Do not start the experimental broker for production deployments yet.
 systemctl --user start wayexpand-action-broker.service
 systemctl --user enable wayexpand-action-broker.service
 

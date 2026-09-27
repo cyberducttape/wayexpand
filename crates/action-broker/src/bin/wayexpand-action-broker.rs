@@ -103,6 +103,7 @@ EXAMPLE:
 CONFIGURATION:
     Create ~/.config/wayexpand-broker.toml with action definitions:
 
+    [broker]
     require_absolute_paths = true
     strict_env = true
 
@@ -110,7 +111,6 @@ CONFIGURATION:
     program = "/usr/bin/example"
     args_prefix = []
     timeout_ms = 5000
-    allow_network = false
     pass_env = ["HOME"]
     enabled = true
 

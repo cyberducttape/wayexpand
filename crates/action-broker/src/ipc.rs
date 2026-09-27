@@ -6,8 +6,9 @@
 use crate::protocol::{ActionRequest, ActionResponse};
 use serde_json;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -76,21 +77,53 @@ fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result
 /// Broker server listening on a Unix socket.
 pub struct BrokerServer {
     listener: UnixListener,
-    socket_path: std::path::PathBuf,
+    socket_path: PathBuf,
+    socket_identity: (u64, u64),
 }
 
 impl BrokerServer {
     /// Create a new broker server at the given socket path.
     pub fn bind<P: AsRef<Path>>(path: P) -> Result<Self, IpcError> {
         let path = path.as_ref();
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+        let parent = parent.canonicalize()?;
+        let parent_metadata = std::fs::metadata(&parent)?;
+        let uid = rustix::process::geteuid().as_raw();
+        if parent_metadata.uid() != uid && parent_metadata.uid() != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "broker socket parent is not owned by the current user or root",
+            )
+            .into());
+        }
+        if parent_metadata.mode() & 0o022 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "broker socket parent is writable by group or other users",
+            )
+            .into());
+        }
 
-        // Remove existing socket if present
-        let _ = std::fs::remove_file(path);
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            if !metadata.file_type().is_socket() || (metadata.uid() != uid && metadata.uid() != 0) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "refusing to replace a non-socket or untrusted broker path",
+                )
+                .into());
+            }
+            std::fs::remove_file(path)?;
+        }
 
         let listener = UnixListener::bind(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let metadata = std::fs::metadata(path)?;
         Ok(Self {
             listener,
             socket_path: path.to_path_buf(),
+            socket_identity: (metadata.dev(), metadata.ino()),
         })
     }
 
@@ -111,7 +144,13 @@ impl BrokerServer {
 
 impl Drop for BrokerServer {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket_path);
+        if let Ok(metadata) = std::fs::metadata(&self.socket_path) {
+            if metadata.file_type().is_socket()
+                && (metadata.dev(), metadata.ino()) == self.socket_identity
+            {
+                let _ = std::fs::remove_file(&self.socket_path);
+            }
+        }
     }
 }
 
@@ -173,25 +212,32 @@ mod tests {
     use super::*;
     use std::thread;
 
+    fn test_socket(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("wayexpand-ipc-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir.join(name)
+    }
+
     #[test]
     fn ipc_socket_creation() {
-        let socket_path = "/tmp/wayexpand_test_ipc_socket";
-        let _ = std::fs::remove_file(socket_path);
+        let socket_path = test_socket("socket");
+        let _ = std::fs::remove_file(&socket_path);
 
-        let server = BrokerServer::bind(socket_path).unwrap();
-        assert_eq!(server.socket_path(), Path::new(socket_path));
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        assert_eq!(server.socket_path(), socket_path.as_path());
 
         // Socket file exists
-        assert!(std::path::Path::new(socket_path).exists());
+        assert!(socket_path.exists());
     }
 
     #[test]
     fn ipc_client_server_communication() {
-        let socket_path = "/tmp/wayexpand_test_ipc_comm";
-        let _ = std::fs::remove_file(socket_path);
+        let socket_path = test_socket("comm");
+        let _ = std::fs::remove_file(&socket_path);
 
-        let server = BrokerServer::bind(socket_path).unwrap();
-        let socket_path_clone = socket_path.to_string();
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        let socket_path_clone = socket_path.clone();
 
         // Spawn server thread
         let server_thread = thread::spawn(move || {
@@ -234,11 +280,11 @@ mod tests {
 
     #[test]
     fn ipc_rejects_oversized_message() {
-        let socket_path = "/tmp/wayexpand_test_ipc_oversize";
-        let _ = std::fs::remove_file(socket_path);
+        let socket_path = test_socket("oversize");
+        let _ = std::fs::remove_file(&socket_path);
 
-        let server = BrokerServer::bind(socket_path).unwrap();
-        let socket_path_clone = socket_path.to_string();
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        let socket_path_clone = socket_path.clone();
 
         let server_thread = thread::spawn(move || {
             let mut conn = server.accept().unwrap();

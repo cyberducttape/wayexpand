@@ -7,27 +7,35 @@ use action_broker::{
     ActionConfig, ActionOutput, ActionRequest, ActionResponse, BrokerClient, BrokerConfig,
     BrokerServer,
 };
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
+
+fn test_socket(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("wayexpand-broker-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    dir.join(name)
+}
 
 #[test]
 fn broker_server_accepts_connections() {
-    let socket_path = "/tmp/wayexpand_test_broker_accept";
-    let _ = std::fs::remove_file(socket_path);
+    let socket_path = test_socket("accept");
+    let _ = std::fs::remove_file(&socket_path);
 
-    let server = BrokerServer::bind(socket_path).expect("Failed to bind server");
+    let server = BrokerServer::bind(&socket_path).expect("Failed to bind server");
 
     // Verify socket exists
-    assert!(std::path::Path::new(socket_path).exists());
-    assert_eq!(server.socket_path(), std::path::Path::new(socket_path));
+    assert!(socket_path.exists());
+    assert_eq!(server.socket_path(), socket_path.as_path());
 }
 
 #[tokio::test]
 async fn broker_client_server_echo_request_response() {
-    let socket_path = "/tmp/wayexpand_test_broker_echo";
-    let _ = std::fs::remove_file(socket_path);
+    let socket_path = test_socket("echo");
+    let _ = std::fs::remove_file(&socket_path);
 
-    let server = BrokerServer::bind(socket_path).expect("Failed to bind server");
-    let socket_path = socket_path.to_string();
+    let server = BrokerServer::bind(&socket_path).expect("Failed to bind server");
+    let socket_path = socket_path.to_string_lossy().into_owned();
 
     // Keep the blocking UnixListener accept off the Tokio runtime worker.
     let server_handle = std::thread::spawn(move || {
@@ -90,7 +98,6 @@ fn broker_config_validation() {
             program: "/usr/bin/echo".to_string(),
             args_prefix: vec!["hello".to_string()],
             timeout_ms: 5000,
-            allow_network: false,
             pass_env: vec!["HOME".to_string()],
             inherit_env: false,
             cwd: None,
@@ -118,7 +125,6 @@ fn broker_config_rejects_relative_paths_when_required() {
             program: "echo".to_string(), // Not absolute
             args_prefix: vec![],
             timeout_ms: 5000,
-            allow_network: false,
             pass_env: vec![],
             inherit_env: false,
             cwd: None,
@@ -141,7 +147,6 @@ strict_env = true
 program = "/usr/bin/echo"
 args_prefix = ["hello"]
 timeout_ms = 3000
-allow_network = false
 pass_env = ["HOME"]
 enabled = true
 "#;

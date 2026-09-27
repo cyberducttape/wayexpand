@@ -15,12 +15,12 @@ pub struct ActionRequest {
     /// Maximum execution time in milliseconds.
     pub timeout_ms: u64,
 
-    /// Whether to inherit environment variables from the daemon.
-    /// If false, only explicitly allowed variables are passed.
+    /// Legacy client hint. The broker ignores this field; environment policy
+    /// is selected exclusively by the server-side ActionConfig.
     pub inherit_env: bool,
 
     /// Environment variables to pass to the action.
-    /// Format: ["KEY=value", ...]. Only used if inherit_env is false.
+    /// Format: ["KEY=value", ...]. Only server-allowlisted names are accepted.
     pub env_vars: Vec<String>,
 
     /// Whether to capture and return stdout/stderr from the action.

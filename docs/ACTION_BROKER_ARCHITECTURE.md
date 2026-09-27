@@ -1,12 +1,18 @@
 # Action Broker Architecture
 
 **Version:** 1.3.0  
-**Status:** Phase 1 - Foundation Complete  
-**Next:** Phase 2 - Enhanced Control (v1.3.x)
+**Status:** Experimental foundation; disabled by default and not a security boundary
+**Next:** Hardened IPC and external sandbox integration before enablement
 
 ## Overview
 
-The Action Broker separates command execution from keyboard capture, enabling:
+The Action Broker is an experimental design for separating command execution
+from keyboard capture. It is not enabled by default and must not be treated as
+a sandbox: network and filesystem isolation are deployment responsibilities
+until a concrete service/container policy is integrated. The mature restricted
+command runner remains the safer default.
+
+The design aims to provide:
 - **Daemon isolation** - Keyboard capture stays locked down (no network)
 - **Per-action control** - Fine-grained permissions for each action
 - **Audit trail** - All command executions logged and traceable
@@ -36,7 +42,7 @@ The Action Broker separates command execution from keyboard capture, enabling:
 └─────────────────────────────┘
 ```
 
-## Phase 1: Foundation (v1.3.0) - COMPLETE
+## Experimental foundation (not production-ready)
 
 What's implemented:
 - **Protocol** (crates/action-broker/src/protocol.rs)
@@ -52,8 +58,8 @@ What's implemented:
 - **Executor** (crates/action-broker/src/executor.rs)
   - Safe command execution with policy enforcement
   - Environment variable filtering with strict mode
-  - Async execution with tokio timeout support
-  - Output capture (stdout/stderr) with exit code tracking
+  - Deadline-aware process-group termination and reaping
+  - Bounded output capture (stdout/stderr) with exit code tracking
 
 - **IPC Layer** (crates/action-broker/src/ipc.rs)
   - Unix domain sockets (AF_UNIX) for local-only communication
@@ -76,7 +82,7 @@ What will be implemented:
 - **Per-Action Permissions**
   - Environment variable filtering
   - Working directory restrictions
-  - Network access control (if needed)
+  - Network isolation through a concrete service/container sandbox (not a TOML boolean)
   - Timeout enforcement per action
 
 - **Audit Logging**
@@ -115,7 +121,6 @@ audit_path = "/var/log/wayexpand-actions.log"
 program = "/usr/bin/kubectl"
 args_prefix = ["get", "pods"]
 timeout_ms = 10000
-allow_network = true
 pass_env = ["KUBECONFIG", "HOME"]
 enabled = true
 
@@ -124,7 +129,6 @@ enabled = true
 program = "/usr/bin/aws"
 args_prefix = ["sts", "get-caller-identity"]
 timeout_ms = 5000
-allow_network = true
 pass_env = ["AWS_PROFILE", "AWS_REGION"]
 enabled = true
 
@@ -133,7 +137,6 @@ enabled = true
 program = "/usr/bin/stat"
 args_prefix = []
 timeout_ms = 2000
-allow_network = false
 pass_env = ["HOME"]
 cwd = "/home/user"
 enabled = true

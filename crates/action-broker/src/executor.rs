@@ -9,33 +9,16 @@ use crate::{
 use std::collections::HashMap;
 use std::io::Read;
 #[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024; // 1 MiB per stream
 
 pub struct ActionExecutor {
     config: BrokerConfig,
-}
-
-/// RAII guard that kills the child's process group on drop.
-#[cfg(unix)]
-struct ChildGuard {
-    child: Option<Child>,
-    pid: Option<u32>,
-}
-
-#[cfg(unix)]
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if let Some(pid) = self.pid {
-            kill_process_group(pid);
-        }
-        if let Some(ref mut child) = self.child {
-            let _ = child.wait();
-        }
-    }
 }
 
 #[cfg(unix)]
@@ -59,7 +42,174 @@ fn kill_process_group(pid: u32) {
     }
 }
 
+#[derive(Debug)]
+enum ChildRunError {
+    Timeout,
+    Io(std::io::Error),
+}
+
+#[cfg(unix)]
+struct ChildGuard {
+    child: Option<Child>,
+    pid: u32,
+}
+
+#[cfg(unix)]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        kill_process_group(self.pid);
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.wait();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_available<R: Read>(stream: &mut R, bytes: &mut Vec<u8>) -> Result<bool, std::io::Error> {
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                bytes.extend_from_slice(&buffer[..count]);
+                if bytes.len() >= MAX_OUTPUT_BYTES {
+                    bytes.truncate(MAX_OUTPUT_BYTES);
+                    return Ok(false);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn run_child_unix(
+    child: Child,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    timeout: Duration,
+) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), ChildRunError> {
+    let pid = child.id();
+    let mut guard = ChildGuard {
+        child: Some(child),
+        pid,
+    };
+    let mut stdout = stdout;
+    let mut stderr = stderr;
+    if let Some(stream) = stdout.as_ref() {
+        set_nonblocking(stream).map_err(ChildRunError::Io)?;
+    }
+    if let Some(stream) = stderr.as_ref() {
+        set_nonblocking(stream).map_err(ChildRunError::Io)?;
+    }
+    let deadline = Instant::now() + timeout;
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut stdout_eof = stdout.is_none();
+    let mut stderr_eof = stderr.is_none();
+
+    let status = loop {
+        if !stdout_eof {
+            stdout_eof = read_available(
+                stdout.as_mut().expect("stdout exists while not at EOF"),
+                &mut stdout_bytes,
+            )
+            .map_err(ChildRunError::Io)?;
+        }
+        if !stderr_eof {
+            stderr_eof = read_available(
+                stderr.as_mut().expect("stderr exists while not at EOF"),
+                &mut stderr_bytes,
+            )
+            .map_err(ChildRunError::Io)?;
+        }
+        match guard
+            .child
+            .as_mut()
+            .expect("child guard is armed")
+            .try_wait()
+            .map_err(ChildRunError::Io)?
+        {
+            Some(status) => break status,
+            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            None => {
+                kill_process_group(pid);
+                let _ = guard.child.as_mut().expect("child guard is armed").wait();
+                guard.child = None;
+                return Err(ChildRunError::Timeout);
+            }
+        }
+    };
+
+    // A successful/failed leader may have left ordinary descendants behind.
+    // Remove the whole action process group before returning to the caller.
+    kill_process_group(pid);
+    guard.child = None;
+    let drain_deadline = Instant::now() + Duration::from_millis(100);
+    while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
+        if !stdout_eof {
+            stdout_eof = read_available(
+                stdout.as_mut().expect("stdout exists while not at EOF"),
+                &mut stdout_bytes,
+            )
+            .map_err(ChildRunError::Io)?;
+        }
+        if !stderr_eof {
+            stderr_eof = read_available(
+                stderr.as_mut().expect("stderr exists while not at EOF"),
+                &mut stderr_bytes,
+            )
+            .map_err(ChildRunError::Io)?;
+        }
+        if !stdout_eof || !stderr_eof {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    Ok((status, stdout_bytes, stderr_bytes))
+}
+
+#[cfg(not(unix))]
+fn run_child_fallback(
+    mut child: Child,
+    stdout: Option<impl Read + Send + 'static>,
+    stderr: Option<impl Read + Send + 'static>,
+    timeout: Duration,
+) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), ChildRunError> {
+    let deadline = Instant::now() + timeout;
+    let stdout_thread =
+        std::thread::spawn(move || stdout.map(bounded_read_stream).unwrap_or_default());
+    let stderr_thread =
+        std::thread::spawn(move || stderr.map(bounded_read_stream).unwrap_or_default());
+    loop {
+        match child.try_wait().map_err(ChildRunError::Io)? {
+            Some(status) => {
+                let stdout = stdout_thread.join().unwrap_or_default();
+                let stderr = stderr_thread.join().unwrap_or_default();
+                return Ok((status, stdout, stderr));
+            }
+            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ChildRunError::Timeout);
+            }
+        }
+    }
+}
+
 /// Read up to MAX_OUTPUT_BYTES from a stream, silently truncating beyond that.
+#[cfg(not(unix))]
 fn bounded_read_stream<R: Read>(stream: Option<R>) -> Vec<u8> {
     let Some(stream) = stream else {
         return Vec::new();
@@ -118,22 +268,24 @@ impl ActionExecutor {
 
         cmd.env_clear();
 
-        // Environment policy is server-authoritative: action_config.inherit_env
-        // is the policy decision; request.inherit_env is ignored. strict_env on
-        // the broker config overrides per-action inherit_env as a global deny.
+        // The action configuration is authoritative; request.inherit_env is
+        // deliberately ignored. Even an explicitly inheriting action receives
+        // only the command runner's small baseline plus its pass_env entries.
         if action_config.inherit_env && !self.config.strict_env {
-            // Inherit only the variables named in pass_env.  An empty pass_env
-            // with inherit_env means "inherit nothing" — the config author must
-            // explicitly list every variable they want forwarded.
+            for key in ["HOME", "USER", "LANG", "PATH"] {
+                if let Some(value) = std::env::var_os(key) {
+                    cmd.env(key, value);
+                }
+            }
             for key in &action_config.pass_env {
-                if let Ok(value) = std::env::var(key) {
+                if let Some(value) = std::env::var_os(key) {
                     cmd.env(key, value);
                 }
             }
         } else {
             // Restricted mode: accept only client-supplied variables that appear
-            // in the action's pass_env allowlist.  An empty allowlist means
-            // nothing is permitted — not everything.
+            // in the action's pass_env allowlist. An empty allowlist means
+            // nothing is permitted.
             let allowed_vars = self.build_env_map(&request.env_vars, &action_config.pass_env);
             for (key, value) in allowed_vars {
                 cmd.env(&key, value);
@@ -141,8 +293,14 @@ impl ActionExecutor {
         }
 
         let capture_stdout = request.stdout_capture;
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        if capture_stdout {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            // The broker service's stdout/stderr are normally collected by its
+            // service manager (for example journald). Do not buffer discarded
+            // action output in the broker when the caller did not request it.
+            cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
 
         #[cfg(unix)]
         configure_process_group(&mut cmd);
@@ -158,74 +316,30 @@ impl ActionExecutor {
         let timeout = self.effective_timeout(&request, action_config.timeout_ms);
         let action_id = request.action_id.clone();
 
-        #[cfg(unix)]
-        let pid = child.id();
-
-        // Take ownership of stdout/stderr for bounded reading.
         let child_stdout = child.stdout.take();
         let child_stderr = child.stderr.take();
-
-        #[cfg(unix)]
-        let mut guard = ChildGuard {
-            child: Some(child),
-            pid: Some(pid),
-        };
-
-        #[cfg(unix)]
-        let result = {
-            let mut child_ref = guard.child.take().unwrap();
-            tokio::time::timeout(timeout, async move {
-                tokio::task::spawn_blocking(move || {
-                    let stdout_bytes = bounded_read_stream(child_stdout);
-                    let stderr_bytes = bounded_read_stream(child_stderr);
-                    let status = child_ref.wait()?;
-                    Ok::<_, std::io::Error>((status, stdout_bytes, stderr_bytes))
-                })
-                .await
-                .map_err(|e| ActionError::Internal {
-                    reason: format!("task join error: {}", e),
-                })
-                .and_then(|res| {
-                    res.map_err(|e| ActionError::Internal {
-                        reason: format!("child process error: {}", e),
-                    })
-                })
-            })
-            .await
-        };
-
-        #[cfg(not(unix))]
-        let result = {
-            tokio::time::timeout(timeout, async move {
-                tokio::task::spawn_blocking(move || {
-                    let stdout_bytes = bounded_read_stream(child_stdout);
-                    let stderr_bytes = bounded_read_stream(child_stderr);
-                    let status = child.wait()?;
-                    Ok::<_, std::io::Error>((status, stdout_bytes, stderr_bytes))
-                })
-                .await
-                .map_err(|e| ActionError::Internal {
-                    reason: format!("task join error: {}", e),
-                })
-                .and_then(|res| {
-                    res.map_err(|e| ActionError::Internal {
-                        reason: format!("child process error: {}", e),
-                    })
-                })
-            })
-            .await
-        };
+        // The blocking task owns the child for its entire lifetime. Its own
+        // deadline kills and reaps the process group, so dropping/cancelling
+        // this future cannot orphan an action behind Tokio's scheduler.
+        let result = tokio::task::spawn_blocking(move || {
+            #[cfg(unix)]
+            {
+                run_child_unix(child, child_stdout, child_stderr, timeout)
+            }
+            #[cfg(not(unix))]
+            {
+                run_child_fallback(child, child_stdout, child_stderr, timeout)
+            }
+        })
+        .await
+        .map_err(|e| ActionError::Internal {
+            reason: format!("task join error: {}", e),
+        })?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(Ok((status, stdout_bytes, stderr_bytes))) => {
-                #[cfg(unix)]
-                {
-                    kill_process_group(pid);
-                    guard.pid = None;
-                }
-
+            Ok((status, stdout_bytes, stderr_bytes)) => {
                 let exit_code = status.code().unwrap_or(-1);
                 let stdout = if capture_stdout {
                     String::from_utf8_lossy(&stdout_bytes).to_string()
@@ -249,14 +363,13 @@ impl ActionExecutor {
                     })
                 }
             }
-            Ok(Err(e)) => Err(e),
-            Err(_) => {
-                // Timeout: the guard's Drop kills the process group and reaps.
-                Err(ActionError::Timeout {
-                    action_id,
-                    timeout_ms: timeout.as_millis() as u64,
-                })
-            }
+            Err(ChildRunError::Timeout) => Err(ActionError::Timeout {
+                action_id,
+                timeout_ms: timeout.as_millis() as u64,
+            }),
+            Err(ChildRunError::Io(e)) => Err(ActionError::Internal {
+                reason: format!("child process error: {}", e),
+            }),
         }
     }
 
@@ -316,7 +429,6 @@ mod tests {
                 program: "/bin/echo".to_string(),
                 args_prefix: vec![],
                 timeout_ms: 5000,
-                allow_network: false,
                 pass_env: vec![],
                 inherit_env: false,
                 cwd: None,
@@ -363,7 +475,6 @@ mod tests {
                 program: "/bin/sleep".to_string(),
                 args_prefix: vec!["60".to_string()],
                 timeout_ms: 200,
-                allow_network: false,
                 pass_env: vec![],
                 inherit_env: false,
                 cwd: None,
@@ -397,7 +508,6 @@ mod tests {
                 program: "/bin/echo".to_string(),
                 args_prefix: vec!["hi".to_string()],
                 timeout_ms: 500,
-                allow_network: false,
                 pass_env: vec![],
                 inherit_env: false,
                 cwd: None,
