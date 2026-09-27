@@ -21,7 +21,8 @@ The biggest architectural improvement since v1.2: separate command execution fro
 - Safe command executor with timeout + policy enforcement
 - Unix socket IPC layer for local-only communication
 - Daemon integration foundation (ready for Phase 2)
-- Standalone broker service binary (`wayexpand-action-broker`)
+- Standalone broker service binary (`wayexpand-action-broker`) is source-only
+  experimental infrastructure and is not included in normal v1.2 packages
 - Comprehensive test suite
 - Full architecture documentation
 
@@ -95,7 +96,8 @@ Action Broker is **not enabled for production use**. v1.2 deployments continue w
 ```toml
 [organization]
 # When daemon and broker service are both running:
-action_broker_socket = "/run/user/1000/wayexpand-broker.sock"
+# Use the session runtime directory, for example:
+# action_broker_socket = "/run/user/$(id -u)/wayexpand-broker.sock"
 
 # Actions are automatically routed to broker instead of local execution
 [[expansion]]
@@ -159,7 +161,8 @@ These are pushed to v1.3.x:
 # No changes needed for existing configs
 # Everything continues to work as-is
 
-# Do not start the experimental broker for production deployments yet.
+# Do not start the experimental broker for production deployments yet; it is
+# intentionally absent from normal v1.2 package/release artifact lists.
 systemctl --user start wayexpand-action-broker.service
 systemctl --user enable wayexpand-action-broker.service
 

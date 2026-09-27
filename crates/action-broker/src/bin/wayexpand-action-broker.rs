@@ -5,7 +5,7 @@
 //!
 //! Usage:
 //!   wayexpand-action-broker --config ~/.config/wayexpand-broker.toml \
-//!     --socket /run/user/1000/wayexpand-broker.sock
+//!     --socket "$XDG_RUNTIME_DIR/wayexpand-broker.sock"
 
 use action_broker::{ActionExecutor, BrokerConfig, BrokerServer};
 use anyhow::{anyhow, Result};
@@ -92,7 +92,8 @@ OPTIONS:
 
     --socket <PATH>
         Unix socket path for IPC communication
-        Default: /run/user/1000/wayexpand-broker.sock
+        Default: $XDG_RUNTIME_DIR/wayexpand-broker.sock
+        (fallback: /run/user/<current-uid>/wayexpand-broker.sock)
 
     --verbose, -v
         Enable verbose logging
@@ -103,7 +104,7 @@ OPTIONS:
 EXAMPLE:
     wayexpand-action-broker \\
       --config ~/.config/wayexpand-broker.toml \\
-      --socket /run/user/1000/wayexpand-broker.sock \\
+      --socket "$XDG_RUNTIME_DIR/wayexpand-broker.sock" \\
       --verbose
 
 CONFIGURATION:

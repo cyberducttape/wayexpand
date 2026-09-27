@@ -119,9 +119,11 @@ WayExpand requires Wayland and will not be actively supported on X11. Reasons:
 
 ## Testing Procedures
 
-### For KDE Plasma 6.6.x Reproduction
+### For KDE Plasma 6.6.x manual testing
 
-To verify KDE Plasma 6.6.x certification independently:
+The following reproduces the manual compatibility observations. It is not a
+certification procedure: evdev cannot detect password fields, and only a
+machine-readable `wayexpand certify` artifact can establish certification.
 
 1. **Setup:**
    ```bash
@@ -133,43 +135,63 @@ To verify KDE Plasma 6.6.x certification independently:
    # If not present: sudo usermod -aG input $USER && logout/login
    ```
 
-2. **Test 1: Basic Expansion**
+2. **Create a temporary test configuration**
+   ```toml
+   # Save as ~/.config/wayexpand-certification-test.toml with mode 0600.
+   [[expansion]]
+   trigger = ";hello"
+   replacement = "Hello World"
+
+   [[expansion]]
+   trigger = ";a"
+   replacement = "AAA"
+
+   [[expansion]]
+   trigger = ";pw"
+   replacement = "MyPassword123"
+
+   [[expansion]]
+   trigger = ";konsole"
+   replacement = "KonsoleTest"
+   app_filter = ["konsole"]
+   ```
+   Validate it with:
    ```bash
-   wayexpand config snippets add "hello" "Hello World"
+   chmod 600 ~/.config/wayexpand-certification-test.toml
+   wayexpand validate ~/.config/wayexpand-certification-test.toml
+   ```
+
+3. **Test 1: Basic Expansion**
+   ```bash
+   wayexpand doctor "$HOME/.config/wayexpand-certification-test.toml"
    # Open Kate or any text editor
    # Type: ;hello
    # Press: Space
    # Expected: "Hello World" inserted
    ```
 
-3. **Test 2: Fast Overlapping Keys**
+4. **Test 2: Fast Overlapping Keys**
    ```bash
-   wayexpand config snippets add ";hello" "Hi"
    # In text editor, type rapidly: ;;h e l l o
-   # Expected: Only "Hi" inserted once, not duplicated
+   # Expected: Only "Hello World" inserted once, not duplicated
    ```
 
-4. **Test 3: Held Key**
+5. **Test 3: Held Key**
    ```bash
-   wayexpand config snippets add ";a" "AAA"
    # Press and hold ; for 2 seconds, then type 'a' while held
    # Expected: Exactly one "AAA" inserted, not repeated
    ```
 
-5. **Test 4: Password Fields**
+6. **Test 4: Password Fields**
    ```bash
-   wayexpand config snippets add "pw" "MyPassword123"
    # Open KDE Wallet or any password field
    # Type: ;pw
    # Press: Space
-   # Expected: Expansion is BLOCKED (not inserted)
+   # Evdev limitation: do not expect blocking; expansion may be inserted.
    ```
 
-6. **Test 5: App Filtering**
+7. **Test 5: App Filtering**
    ```bash
-   wayexpand config snippets add "konsole" "KonsoleTest"
-   wayexpand config snippets edit "konsole" --app-filter "konsole"
-   
    # In Konsole: type ;konsole → Space
    # Expected: "KonsoleTest" inserted
    
