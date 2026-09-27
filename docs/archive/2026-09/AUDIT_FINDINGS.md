@@ -269,4 +269,4 @@ can restore authorization on reconnect. Setting
 - [COMPATIBILITY.md](../../COMPATIBILITY.md) — Stability guarantees
 - [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) — Current backend/compositor status
 - [INTEGRATION_TESTING.md](../../INTEGRATION_TESTING.md) — Testing procedures
-- [ACTION_BROKER_DESIGN.md](../../ACTION_BROKER_DESIGN.md) — Security gate for v1.3
+- [ACTION_BROKER_ARCHITECTURE.md](../../ACTION_BROKER_ARCHITECTURE.md) — Security gate for v1.3

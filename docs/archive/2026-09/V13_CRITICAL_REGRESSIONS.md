@@ -27,7 +27,7 @@ matched expansion actually used a command.
 limits on worker completion before an injectable result is returned. The
 current path is `ExpansionEngine::dispatch_pending_with_policy()` followed by
 `ExpansionEngine::drain_completed_commands()` in
-[`crates/core/src/engine.rs`](../../../crates/core/src/engine.rs); daemon and IBus
+[`crates/core/src/engine/mod.rs`](../../../crates/core/src/engine/mod.rs); daemon and IBus
 boundary regressions cover the production injection/commit paths.
 
 ---

@@ -134,8 +134,8 @@ ime-preedit=fail
 ```
 
 Passing the script with `--results results.txt` requires an explicit `pass`
-result for every scenario. Any `fail` or `UNVERIFIED` result keeps the report
-uncertified. `--layout` and `--target-apps` are required so the report records
+result for every scenario. Any `fail`, `unsupported-by-design`, or `UNVERIFIED`
+result keeps the report uncertified. `--layout` and `--target-apps` are required so the report records
 the exact keyboard-layout profile set and client set used by the run.
 Certification drivers must include `us`, `de`, `fr`, `altgr`, and
 `multi-layout-switching`; list every tested client as a comma-separated value.

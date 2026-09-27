@@ -2,7 +2,7 @@
 
 > This roadmap contains historical v1.0/v1.2 planning language as well as
 > current open work. For present behavior and certification, use
-> `../../SUPPORT_MATRIX.md`, `../../COMPOSITOR_MATRIX.md`, and `wayexpand doctor`.
+> `../../SUPPORT_MATRIX.md`, `../../CERTIFICATION_MATRIX.md`, and `wayexpand doctor`.
 
 The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [../../SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
 
@@ -185,7 +185,7 @@ the shipped daemon unit or treat a wrapper script as a supported escape hatch.
 - [ ] Integration tests cover framing, auth, policy denial, timeout, output
       limits, and the absence of daemon network/home access.
 
-See [docs/ACTION_BROKER_DESIGN.md](../../ACTION_BROKER_DESIGN.md) for the
+See [docs/ACTION_BROKER_ARCHITECTURE.md](../../ACTION_BROKER_ARCHITECTURE.md) for the
 protocol, threat boundary, and acceptance criteria.
 
 **Architecture:**
@@ -215,7 +215,7 @@ independent proof points.
 
 **Scope:** Close the gap between a strong engineering foundation and a product users trust and recommend.
 
-See [the archived audit findings](docs/archive/2026-09/AUDIT_FINDINGS.md) for historical findings and priority context.
+See [the archived audit findings](AUDIT_FINDINGS.md) for historical findings and priority context.
 
 #### Compositor Certification (Sway, Hyprland, KDE Plasma, GNOME)
 
@@ -360,7 +360,7 @@ Priority goes to:
 ## References
 
 - [COMPATIBILITY.md](../../COMPATIBILITY.md) — Stability guarantees and migration policy
-- [SECURITY.md](../../SECURITY.md) — Threat model and vulnerability disclosure
-- [CONTRIBUTING.md](../../CONTRIBUTING.md) — How to contribute code and ideas
+- [SECURITY.md](../../../SECURITY.md) — Threat model and vulnerability disclosure
+- [CONTRIBUTING.md](../../../CONTRIBUTING.md) — How to contribute code and ideas
 - [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) — Current backend status by compositor
 - [INTEGRATION_TESTING.md](../../INTEGRATION_TESTING.md) — Testing and certification process

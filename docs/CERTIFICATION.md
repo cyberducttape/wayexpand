@@ -39,6 +39,14 @@ uses the doctor IBus-installation probe because it is not the daemon control
 socket path. Its stable `status` field is `certified`, `incomplete`, or
 `failed`.
 
+Scenario outcomes are deliberately more expressive than pass/fail: `pass`
+means the scenario passed, `fail` means it was exercised and failed,
+`unsupported-by-design` records a documented capability that the selected
+backend cannot provide (for example password-field awareness through evdev),
+and `UNVERIFIED` means no trustworthy result was collected. Only an artifact
+whose required scenarios are all `pass` can set `certified: true`; human
+support tables are compatibility observations, not certification evidence.
+
 JSON mode exits successfully when the report is produced; automation must
 inspect `.certified`. Human-readable mode exits nonzero while certification is
 incomplete.

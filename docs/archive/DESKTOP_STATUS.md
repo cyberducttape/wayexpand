@@ -4,7 +4,7 @@
 > the certification matrix and contains exploratory or unverified claims. Do
 > not use its “Verified” labels, test counts, or feature summaries for a
 > deployment decision. The authoritative current status is
-> [`docs/COMPOSITOR_MATRIX.md`](../COMPOSITOR_MATRIX.md), and a live session
+> [`docs/CERTIFICATION_MATRIX.md`](../CERTIFICATION_MATRIX.md), and a live session
 > must produce explicit evidence through
 > [`docs/CERTIFICATION.md`](../CERTIFICATION.md).
 

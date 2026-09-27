@@ -66,7 +66,7 @@ shellcheck scripts/*.sh
 
 ## Development Guide
 
-Detailed development policy and workflows are in [`docs/archive/wiki/Contributing.md`](docs/archive/wiki/Contributing.md).
+Detailed development policy and workflows are in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 ### Project Structure
 

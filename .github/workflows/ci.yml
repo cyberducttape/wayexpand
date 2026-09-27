@@ -230,6 +230,8 @@ jobs:
         with:
           args: --offline --exclude-link-local --exclude 'file:///' '*.md' '**/*.md'
           fail: true
+      - name: Check local markdown links deterministically
+        run: python3 scripts/check-markdown-links.py
 
   integration:
     name: Integration & System Tests

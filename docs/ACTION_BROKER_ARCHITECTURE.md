@@ -222,4 +222,4 @@ replacement = ""
 
 - `crates/action-broker/` - Action Broker library
 - `crates/daemon/src/action_broker.rs` - Daemon integration
-- [P2 Action Broker Architecture](../memory/P2_action_broker_architecture.md) - Design details
+- [Action Broker security architecture](ACTION_BROKER_ARCHITECTURE.md) - Current design and security status

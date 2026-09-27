@@ -32,7 +32,7 @@ while [ "$#" -gt 0 ]; do
         --log-dir) log_dir=${2:?missing value for --log-dir}; shift 2 ;;
         --help|-h)
             printf '%s\n' "usage: $0 --driver PATH --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --output RESULTS [--log-dir DIR]"
-            printf '%s\n' 'driver contract: argv[1] is the scenario; exit 0=pass, 1=fail, 2=unverified'
+            printf '%s\n' 'driver contract: argv[1] is the scenario; exit 0=pass, 1=fail, 2=unverified, 3=unsupported-by-design'
             exit 0
             ;;
         *) printf '%s\n' "error: unknown option $1" >&2; exit 2 ;;
@@ -106,6 +106,7 @@ while IFS= read -r scenario; do
         case "$exit_code" in
             1) result=fail; driver_status=1 ;;
             2) result=UNVERIFIED; driver_status=1 ;;
+            3) result=unsupported-by-design; driver_status=1 ;;
             *)
                 printf '%s\n' "error: driver failed unexpectedly for $scenario (exit $exit_code)" >&2
                 exit 2

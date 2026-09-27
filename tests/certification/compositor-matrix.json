@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "outcome_types": ["pass", "fail", "unsupported-by-design", "UNVERIFIED"],
   "targets": [
     {
       "id": "kde",

@@ -34,7 +34,7 @@ while [ "$#" -gt 0 ]; do
         --cli) cli=${2:?missing value for --cli}; shift 2 ;;
         --help|-h)
             printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
-            printf '%s\n' "results format: one SCENARIO=pass|fail entry per line"
+            printf '%s\n' "results format: one SCENARIO=pass|fail|unsupported-by-design entry per line"
             exit 0
             ;;
         *) printf '%s\n' "error: unknown option $1" >&2; exit 2 ;;
@@ -118,7 +118,7 @@ if [ -n "$results_file" ]; then
             for (i = 1; i <= count; i++) valid[names[i]] = 1
         }
         NF == 0 { next }
-        NF != 2 || $2 !~ /^(pass|fail)$/ {
+        NF != 2 || $2 !~ /^(pass|fail|unsupported-by-design)$/ {
             printf "error: malformed certification result: %s\n", $0 > "/dev/stderr"
             invalid = 1
             next
@@ -204,7 +204,7 @@ for scenario in $scenarios; do
     if [ -n "$results_file" ] && [ -f "$results_file" ]; then
         result=$(awk -F= -v key="$scenario" '$1 == key {print $2; found=1} END {if (!found) print "UNVERIFIED"}' "$results_file")
     fi
-    case "$result" in pass|fail|UNVERIFIED) ;; *) result=INVALID ;; esac
+    case "$result" in pass|fail|unsupported-by-design|UNVERIFIED) ;; *) result=INVALID ;; esac
     scenario_json=$(printf '%s' "$scenario_json" | jq -c --arg name "$scenario" --arg result "$result" '. + [{name: $name, result: $result}]')
     if [ "$result" != pass ]; then
         complete=0
@@ -287,7 +287,7 @@ else
     printf '%s\n' '- desktop: `'"${XDG_CURRENT_DESKTOP:-unknown}"'`'
     printf '%s\n' '- session: `'"${XDG_SESSION_TYPE:-unknown}"'`'
     printf '%s\n' '- doctor_exit: `'"$doctor_status"'`'
-    printf '%s\n\n' "- certification rule: every scenario below must be explicitly marked pass or fail"
+    printf '%s\n\n' "- certification rule: every scenario below must be explicitly marked pass; fail and unsupported-by-design do not certify"
     printf '%s\n' '## Probes'
     printf '%s\n\n' '```json'
     cat "$tmp/doctor.json"
@@ -299,7 +299,7 @@ else
         if [ -n "$results_file" ] && [ -f "$results_file" ]; then
             result=$(awk -F= -v key="$scenario" '$1 == key {print $2; found=1} END {if (!found) print "UNVERIFIED"}' "$results_file")
         fi
-        case "$result" in pass|fail|UNVERIFIED) ;; *) result=INVALID ;; esac
+        case "$result" in pass|fail|unsupported-by-design|UNVERIFIED) ;; *) result=INVALID ;; esac
         printf '%s\n' "- $scenario: **$result**"
     done
     printf '\n%s\n' 'A PASS result is valid only when the operator records the exact compositor version, backend, layout, target application, and observed behavior. **UNVERIFIED is not certified.**'
@@ -313,7 +313,7 @@ if [ "$complete" -eq 0 ]; then
     elif [ "$doctor_probe_valid" -eq 0 ]; then
         printf '%s\n' "certification remains incomplete: doctor did not produce valid JSON evidence" >&2
     else
-        printf '%s\n' "certification remains incomplete: provide pass results for every scenario" >&2
+        printf '%s\n' "certification remains incomplete: provide pass results for every scenario (or document unsupported-by-design limitations)" >&2
     fi
     exit 1
 fi
