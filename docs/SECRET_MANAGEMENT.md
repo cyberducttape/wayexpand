@@ -167,9 +167,16 @@ command = {
 
 ### Audit Logging
 
+WayExpand does not provide a complete command-execution or secret-retrieval
+audit sink. The input-method service journal may contain lifecycle or policy
+messages, but it must not be treated as a record of every command, argument,
+secret, or expansion. Enable auditing in the secret manager itself (for
+example, Vault's audit devices) and in any wrapper that invokes it; avoid
+logging secret values or full command environments.
+
 ```bash
-# View all vault access attempts
-journalctl --user -u wayexpand-input-method.service -f | grep "vault"
+# Inspect WayExpand diagnostics only; this is not a Vault audit record.
+journalctl --user -u wayexpand-input-method.service -f
 ```
 
 ## Compliance and Audit
@@ -180,7 +187,9 @@ If using WayExpand in regulated environments:
 
 1. **No secrets in snippets** - Keep expansion files audit-clean
 2. **Separate secret storage** - Use compliant secret manager
-3. **Command audit trails** - Log all expansions with commands
+3. **Command audit trails** - Use an external, privacy-reviewed audit system
+   for command usage; WayExpand does not currently log every expansion or
+   command execution
 4. **Policy enforcement** - Use `safe_mode = true`
 5. **Network isolation** - Restricted backends, no clipboard leaks
 
