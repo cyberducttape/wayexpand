@@ -18,6 +18,10 @@ Changes not yet released.
 - Make Launchpad synchronization use its decoded SSH key explicitly in the
   push step; GitHub Actions does not preserve an ssh-agent environment between
   steps.
+- Harden the experimental Action Broker by validating and canonicalizing
+  executable targets at startup and bounding concurrent action execution;
+  distribution installers continue to omit the broker until routing and
+  managed service deployment are implemented.
 - Add a non-secret Launchpad SSH preflight that reports the decoded key
   fingerprint and distinguishes authentication failure from push failure.
 - Accept both SSH client exit statuses used for Launchpad's authenticated

@@ -69,6 +69,7 @@ What's implemented:
   - Environment variable filtering with strict mode
   - Deadline-aware process-group termination and reaping
   - Bounded output capture (stdout/stderr) with exit code tracking
+  - Bounded concurrent execution (16 actions per broker process)
 
 - **IPC Layer** (crates/action-broker/src/ipc.rs)
   - Unix domain sockets (AF_UNIX) for local-only communication
@@ -84,7 +85,8 @@ What's implemented:
   - Loads a validated broker configuration
   - Binds a protected Unix socket
   - Accepts bounded, authenticated requests and executes configured actions
-  - Ships as a tested workspace binary, but is not enabled or auto-started
+  - Is a tested workspace binary; current distribution installers do not ship
+    it because no managed service or daemon routing is enabled yet
 
 ## Phase 2: Enhanced Control (v1.3.x) - PLANNED
 
@@ -216,7 +218,7 @@ replacement = ""
 | IPC (Unix socket) | ✅ Complete | ✅ Pass | JSON over AF_UNIX streams |
 | Daemon integration | ⚠️ Helper only | ✅ Unit/integration tests | `ActionBrokerManager` exists but is not wired into command routing; reconnects per request |
 | Policy routing | ⏳ Phase 2 | ⏳ Pending | Will integrate with policy module |
-| Broker binary | ✅ Complete | ✅ Pass | `wayexpand-action-broker`; service deployment remains separate |
+| Broker binary | ✅ Source implementation | ✅ Pass | `wayexpand-action-broker`; current distribution installers omit it until service deployment and routing are defined |
 | Systemd integration | ⏳ Phase 2 | ⏳ Pending | User service + socket activation |
 | Audit logging | ⏳ Phase 2 | ⏳ Pending | syslog/journald integration |
 

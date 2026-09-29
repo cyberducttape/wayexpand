@@ -17,7 +17,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
+
+const MAX_CONCURRENT_ACTIONS: usize = 16;
 
 struct BrokerOptions {
     config_file: PathBuf,
@@ -259,6 +262,7 @@ async fn main() -> Result<()> {
         BrokerServer::bind(&options.socket_path)
             .map_err(|e| anyhow!("Failed to bind broker socket: {}", e))?,
     );
+    let action_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
     let verbose = options.verbose;
 
     info!(
@@ -283,6 +287,7 @@ async fn main() -> Result<()> {
         };
         info!("accepted broker client connection");
         let executor = Arc::clone(&executor);
+        let action_slots = Arc::clone(&action_slots);
         tokio::spawn(async move {
             let (mut conn, request) = match tokio::task::spawn_blocking(move || {
                 let mut conn = conn;
@@ -305,6 +310,32 @@ async fn main() -> Result<()> {
                 info!(action_id = %request.action_id, timeout_ms = request.timeout_ms, "received action request");
             }
             let action_id = request.action_id.clone();
+            let permit = match action_slots.try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(_) => {
+                    let response = action_broker::ActionResponse::Error(
+                        action_broker::ActionError::ActionBlocked {
+                            action_id: action_id.clone(),
+                            reason: format!(
+                                "broker concurrency limit reached (maximum {})",
+                                MAX_CONCURRENT_ACTIONS
+                            ),
+                        },
+                    );
+                    match tokio::task::spawn_blocking(move || conn.write_response(&response)).await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            error!(action_id = %action_id, error = %e, "failed to send busy response")
+                        }
+                        Err(e) => {
+                            error!(action_id = %action_id, error = %e, "busy response task failed")
+                        }
+                    }
+                    return;
+                }
+            };
+            let _permit = permit;
             let action_response = match executor.execute(request).await {
                 Ok(output) => output,
                 Err(error) => action_broker::ActionResponse::Error(error),
@@ -317,5 +348,22 @@ async fn main() -> Result<()> {
                 Err(e) => error!(action_id = %action_id, error = %e, "write task failed"),
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn action_slots_reject_work_after_the_fixed_limit() {
+        let slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
+        let mut permits = Vec::with_capacity(MAX_CONCURRENT_ACTIONS);
+        for _ in 0..MAX_CONCURRENT_ACTIONS {
+            permits.push(slots.clone().try_acquire_owned().unwrap());
+        }
+        assert!(slots.try_acquire().is_err());
+        drop(permits);
+        assert!(slots.try_acquire().is_ok());
     }
 }
