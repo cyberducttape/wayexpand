@@ -3,7 +3,7 @@
 //! Uses JSON serialization over Unix stream sockets for platform independence
 //! and debuggability (can inspect with netcat, socat, etc).
 
-use crate::protocol::{ActionRequest, ActionResponse};
+use crate::protocol::{ActionError, ActionRequest, ActionResponse};
 use serde_json;
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
@@ -16,6 +16,22 @@ use thiserror::Error;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn encode_frame<T: serde::Serialize>(message: &T) -> Result<Vec<u8>, IpcError> {
+    let json = serde_json::to_vec(message)?;
+    let frame_size = json.len().saturating_add(1); // Include the newline delimiter.
+    if frame_size > MAX_MESSAGE_BYTES {
+        return Err(IpcError::MessageTooLarge(frame_size, MAX_MESSAGE_BYTES));
+    }
+    Ok(json)
+}
+
+fn write_frame(stream: &mut UnixStream, json: &[u8]) -> Result<(), IpcError> {
+    stream.write_all(json)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    Ok(())
+}
 
 #[derive(Debug, Error)]
 pub enum IpcError {
@@ -245,10 +261,20 @@ impl ServerConnection {
 
     /// Send an action response to the client.
     pub fn write_response(&mut self, response: &ActionResponse) -> Result<(), IpcError> {
-        let json = serde_json::to_string(response)?;
-        writeln!(self.stream, "{}", json)?;
-        self.stream.flush()?;
-        Ok(())
+        match encode_frame(response) {
+            Ok(json) => write_frame(&mut self.stream, &json),
+            Err(IpcError::MessageTooLarge(_, _)) => {
+                // Keep the protocol usable when an action fills either output
+                // stream. The receiver gets a small, valid response instead
+                // of a frame that it must reject halfway through parsing.
+                let bounded = ActionResponse::Error(ActionError::OutputTruncated {
+                    limit_bytes: MAX_MESSAGE_BYTES,
+                });
+                let json = encode_frame(&bounded).expect("bounded response must fit IPC frame");
+                write_frame(&mut self.stream, &json)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -270,10 +296,8 @@ impl BrokerClient {
 
     /// Send an action request to the broker.
     pub fn send_request(&mut self, request: &ActionRequest) -> Result<(), IpcError> {
-        let json = serde_json::to_string(request)?;
-        writeln!(self.stream, "{}", json)?;
-        self.stream.flush()?;
-        Ok(())
+        let json = encode_frame(request)?;
+        write_frame(&mut self.stream, &json)
     }
 
     /// Receive an action response from the broker.
@@ -320,6 +344,7 @@ mod bounded_frame_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::ActionOutput;
     use std::thread;
 
     fn test_socket(name: &str) -> PathBuf {
@@ -427,5 +452,58 @@ mod tests {
         drop(stream);
 
         server_thread.join().unwrap();
+    }
+
+    fn assert_oversized_response_is_bounded(response: ActionResponse) {
+        let (server_stream, client_stream) = UnixStream::pair().unwrap();
+        let mut server = ServerConnection {
+            reader: BufReader::new(server_stream.try_clone().unwrap()),
+            stream: server_stream,
+        };
+        let mut client = BrokerClient {
+            reader: BufReader::new(client_stream.try_clone().unwrap()),
+            stream: client_stream,
+        };
+
+        server.write_response(&response).unwrap();
+        assert!(matches!(
+            client.recv_response().unwrap(),
+            ActionResponse::Error(ActionError::OutputTruncated {
+                limit_bytes: MAX_MESSAGE_BYTES
+            })
+        ));
+    }
+
+    #[test]
+    fn ipc_bounds_response_with_large_stdout() {
+        assert_oversized_response_is_bounded(ActionResponse::Success(ActionOutput {
+            exit_code: 0,
+            stdout: "x".repeat(MAX_MESSAGE_BYTES),
+            stderr: String::new(),
+            duration_ms: 1,
+        }));
+    }
+
+    #[test]
+    fn ipc_bounds_response_with_large_stderr() {
+        assert_oversized_response_is_bounded(ActionResponse::Error(ActionError::ExitFailure {
+            action_id: "large-output".to_string(),
+            exit_code: 1,
+            stderr: "e".repeat(MAX_MESSAGE_BYTES),
+        }));
+    }
+
+    #[test]
+    fn ipc_bounds_response_after_json_escaping_expands_output() {
+        let escape_heavy = "\n\"\\\u{0001}".repeat(MAX_MESSAGE_BYTES / 8);
+        assert!(escape_heavy.len() < MAX_MESSAGE_BYTES);
+        assert!(serde_json::to_vec(&escape_heavy).unwrap().len() > MAX_MESSAGE_BYTES);
+
+        assert_oversized_response_is_bounded(ActionResponse::Success(ActionOutput {
+            exit_code: 0,
+            stdout: escape_heavy,
+            stderr: String::new(),
+            duration_ms: 1,
+        }));
     }
 }

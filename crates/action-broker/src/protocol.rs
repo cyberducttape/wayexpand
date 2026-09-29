@@ -102,6 +102,9 @@ pub enum ActionError {
     /// Communication error (IPC failure).
     CommunicationError { reason: String },
 
+    /// The action ran, but its serialized output did not fit in the IPC frame.
+    OutputTruncated { limit_bytes: usize },
+
     /// Internal broker error.
     Internal { reason: String },
 }
@@ -149,6 +152,13 @@ impl std::fmt::Display for ActionError {
             }
             ActionError::CommunicationError { reason } => {
                 write!(f, "communication error: {}", reason)
+            }
+            ActionError::OutputTruncated { limit_bytes } => {
+                write!(
+                    f,
+                    "action output exceeded the {}-byte IPC response limit and was omitted",
+                    limit_bytes
+                )
             }
             ActionError::Internal { reason } => {
                 write!(f, "internal broker error: {}", reason)

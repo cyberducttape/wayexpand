@@ -78,10 +78,7 @@ fn parse_args() -> Result<BrokerOptions> {
 }
 
 fn print_help() {
-    println!(
-        "WayExpand Action Broker Service v{}\n\n{}",
-        env!("CARGO_PKG_VERSION"),
-        r#"A secure command execution service with fine-grained per-action permissions.
+    const HELP: &str = r#"A secure command execution service with fine-grained per-action permissions.
 
 USAGE:
     wayexpand-action-broker [OPTIONS]
@@ -123,7 +120,11 @@ CONFIGURATION:
     enabled = true
 
 For more information, see: https://github.com/cyberducttape/wayexpand
-"#
+"#;
+    println!(
+        "WayExpand Action Broker Service v{}\n\n{}",
+        env!("CARGO_PKG_VERSION"),
+        HELP
     );
 }
 
