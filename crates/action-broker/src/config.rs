@@ -96,14 +96,6 @@ pub struct BrokerConfig {
     /// Default working directory if action doesn't specify one.
     #[serde(default)]
     pub default_cwd: Option<String>,
-
-    /// Enable audit logging of all action executions.
-    #[serde(default)]
-    pub audit_enabled: bool,
-
-    /// Optional audit log path (e.g., /var/log/wayexpand-actions.log).
-    #[serde(default)]
-    pub audit_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,10 +107,6 @@ pub struct BrokerSettings {
     pub strict_env: bool,
     #[serde(default)]
     pub default_cwd: Option<String>,
-    #[serde(default)]
-    pub audit_enabled: bool,
-    #[serde(default)]
-    pub audit_path: Option<String>,
 }
 
 fn default_strict_env() -> bool {
@@ -133,8 +121,6 @@ impl Default for BrokerConfig {
             require_absolute_paths: false,
             strict_env: true,
             default_cwd: None,
-            audit_enabled: false,
-            audit_path: None,
         }
     }
 }
@@ -147,8 +133,6 @@ impl BrokerConfig {
             config.require_absolute_paths = settings.require_absolute_paths;
             config.strict_env = settings.strict_env;
             config.default_cwd = settings.default_cwd;
-            config.audit_enabled = settings.audit_enabled;
-            config.audit_path = settings.audit_path;
         }
         Ok(config)
     }
@@ -264,6 +248,21 @@ program = "/usr/bin/echo"
             BrokerConfig::from_toml(toml_str).is_err(),
             "unknown fields must be rejected"
         );
+    }
+
+    #[test]
+    fn broker_config_rejects_unimplemented_audit_settings() {
+        for toml_str in [
+            "audit_enabled = true",
+            "audit_path = \"/var/log/wayexpand-actions.log\"",
+            "[broker]\naudit_enabled = true",
+            "[broker]\naudit_path = \"/var/log/wayexpand-actions.log\"",
+        ] {
+            assert!(
+                BrokerConfig::from_toml(toml_str).is_err(),
+                "unimplemented audit setting must be rejected: {toml_str}"
+            );
+        }
     }
 
     #[test]

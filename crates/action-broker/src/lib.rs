@@ -1,8 +1,7 @@
 //! Action Broker - Secure command execution with fine-grained permission control.
 //!
 //! The action broker separates command execution from the keyboard capture daemon,
-//! enabling per-action security policies and an audit trail without compromising
-//! daemon isolation.
+//! enabling per-action security policies without compromising daemon isolation.
 //!
 //! ## Architecture
 //!

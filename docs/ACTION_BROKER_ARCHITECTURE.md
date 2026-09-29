@@ -15,7 +15,7 @@ command runner remains the safer default.
 The design aims to provide:
 - **Daemon isolation** - Keyboard capture stays locked down (no network)
 - **Per-action control** - Fine-grained permissions for each action
-- **Audit trail** - All command executions logged and traceable
+- **Audit trail** - Planned; no execution audit sink is currently implemented
 - **Privilege separation** - Commands run with appropriate permissions
 
 ## Architecture
@@ -38,7 +38,7 @@ The design aims to provide:
 │ • Per-action control        │
 │ • Environment filtering     │
 │ • Timeout enforcement       │
-│ • Audit logging             │
+│ • Authenticated requests    │
 └─────────────────────────────┘
 ```
 
@@ -117,8 +117,6 @@ What could be added:
 [broker]
 require_absolute_paths = true
 strict_env = true
-audit_enabled = true
-audit_path = "/var/log/wayexpand-actions.log"
 
 # Action: List Kubernetes resources
 [actions."k8s_get_pods"]
@@ -185,11 +183,12 @@ replacement = ""
 - No escalated privileges (runs as regular user)
 
 ### Audit Trail
-- Every action logged with timestamp
-- Action parameters recorded
-- Execution time tracked
-- Exit code and output captured
-- Can integrate with syslog/journald for compliance
+- Not implemented in the current broker binary.
+- The configuration schema intentionally has no audit switch or path; adding
+  such a setting before a real, tested sink exists would create a false
+  compliance signal.
+- Audit logging remains a planned Phase 2 capability and must define its
+  privacy, rotation, failure, and integrity semantics before enablement.
 
 ## Implementation Status
 
@@ -212,7 +211,7 @@ replacement = ""
 | Daemon network access | None | None |
 | Command execution | In daemon process | Separate broker process |
 | Per-command control | Policy only (all or nothing) | Fine-grained per-action |
-| Audit trail | Not available | Full logging |
+| Audit trail | Not available | Planned; not implemented |
 | Security isolation | Moderate | Strong |
 | Flexibility | Limited | High |
 
