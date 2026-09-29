@@ -382,15 +382,18 @@ mod tests {
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
     use wayexpand_core::InputEvent;
 
     fn temporary_config() -> PathBuf {
+        static NEXT_TEMP_CONFIG: AtomicU64 = AtomicU64::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock before epoch")
-            .as_nanos();
+            .as_nanos()
+            ^ u128::from(NEXT_TEMP_CONFIG.fetch_add(1, Ordering::Relaxed));
         std::env::temp_dir().join(format!("wayexpand-reload-test-{nonce}.toml"))
     }
 

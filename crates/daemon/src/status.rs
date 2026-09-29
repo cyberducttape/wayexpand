@@ -13,10 +13,15 @@ pub fn daemon_status_body(
     metrics: CommandMetrics,
 ) -> String {
     format!(
-        "source={source}\nbackend={backend}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncommand_queue_depth={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}",
+        "source={source}\nbackend={backend}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}",
         config_path.display(),
         if config_healthy { "ok" } else { "reload-rejected" },
         metrics.command_queue_depth,
+        metrics.command_in_flight,
+        metrics.expansion_command_queue_depth,
+        metrics.expansion_command_in_flight,
+        metrics.hotkey_queue_depth,
+        metrics.hotkey_in_flight,
         metrics.command_queue_rejected_total,
         metrics.command_timeout_total,
         metrics.command_failure_total,

@@ -1887,6 +1887,11 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
                 if matches!(
                     key,
                     "command_queue_depth"
+                        | "command_in_flight"
+                        | "expansion_command_queue_depth"
+                        | "expansion_command_in_flight"
+                        | "hotkey_queue_depth"
+                        | "hotkey_in_flight"
                         | "command_queue_rejected_total"
                         | "command_timeout_total"
                         | "command_failure_total"
@@ -2333,6 +2338,11 @@ mod tests {
              config=/home/user/.config/wayexpand/expansions.toml\n\
              config_state=ok\n\
              command_queue_depth=0\n\
+             command_in_flight=0\n\
+             expansion_command_queue_depth=0\n\
+             expansion_command_in_flight=0\n\
+             hotkey_queue_depth=0\n\
+             hotkey_in_flight=0\n\
              command_queue_rejected_total=0\n\
              command_timeout_total=0\n\
              command_failure_total=0";
@@ -2366,6 +2376,11 @@ mod tests {
         );
         assert_eq!(value["config_state"], "ok");
         assert_eq!(value["command_queue_depth"], 0);
+        assert_eq!(value["command_in_flight"], 0);
+        assert_eq!(value["expansion_command_queue_depth"], 0);
+        assert_eq!(value["expansion_command_in_flight"], 0);
+        assert_eq!(value["hotkey_queue_depth"], 0);
+        assert_eq!(value["hotkey_in_flight"], 0);
         assert_eq!(value["command_queue_rejected_total"], 0);
         assert_eq!(value["command_timeout_total"], 0);
         assert_eq!(value["command_failure_total"], 0);
@@ -2417,6 +2432,11 @@ mod tests {
                 "config",
                 "config_state",
                 "command_queue_depth",
+                "command_in_flight",
+                "expansion_command_queue_depth",
+                "expansion_command_in_flight",
+                "hotkey_queue_depth",
+                "hotkey_in_flight",
                 "command_queue_rejected_total",
                 "command_timeout_total",
                 "command_failure_total",

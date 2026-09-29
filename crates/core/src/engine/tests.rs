@@ -368,13 +368,22 @@ fn asynchronous_hotkey_execution_does_not_block_input_processing() {
     assert!(started.elapsed() < Duration::from_millis(50));
 
     let deadline = Instant::now() + Duration::from_secs(1);
+    let mut observed_hotkey_work = false;
     let (completed_action, result) = loop {
+        let metrics = engine.command_metrics();
+        observed_hotkey_work |= metrics.hotkey_queue_depth > 0 || metrics.hotkey_in_flight > 0;
+        assert_eq!(metrics.expansion_command_queue_depth, 0);
+        assert_eq!(metrics.expansion_command_in_flight, 0);
         if let Some(completion) = engine.drain_completed_hotkeys().pop() {
             break completion;
         }
         assert!(Instant::now() < deadline, "hotkey did not complete");
         thread::sleep(Duration::from_millis(5));
     };
+    assert!(
+        observed_hotkey_work,
+        "hotkey work was never visible in its counters"
+    );
     assert_eq!(completed_action.chord, action.chord);
     assert!(result.is_ok());
 }
@@ -405,7 +414,8 @@ fn rejected_command_job_does_not_consume_the_trigger() {
         hotkey_sender,
         receiver: completion_receiver,
         hotkey_receiver: hotkey_completion_receiver,
-        metrics: Arc::clone(&engine.command_metrics),
+        expansion_metrics: Arc::clone(&engine.expansion_metrics),
+        hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
         shutdown: Arc::new(AtomicBool::new(false)),
         command_worker: None,
         hotkey_worker: None,
@@ -452,7 +462,8 @@ fn deferred_dispatch_rejects_a_saturated_queue_without_running_command() {
         hotkey_sender,
         receiver: completion_receiver,
         hotkey_receiver: hotkey_completion_receiver,
-        metrics: Arc::clone(&engine.command_metrics),
+        expansion_metrics: Arc::clone(&engine.expansion_metrics),
+        hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
         shutdown: Arc::new(AtomicBool::new(false)),
         command_worker: None,
         hotkey_worker: None,
@@ -2951,6 +2962,11 @@ fn dropping_async_runtime_discards_queued_commands() {
         assert!(Instant::now() < deadline, "first command did not start");
         thread::sleep(Duration::from_millis(5));
     }
+    let metrics = engine.command_metrics();
+    assert_eq!(metrics.expansion_command_queue_depth, 0);
+    assert!(metrics.expansion_command_in_flight > 0);
+    assert_eq!(metrics.hotkey_queue_depth, 0);
+    assert_eq!(metrics.hotkey_in_flight, 0);
 
     // Clear the logical reservation before queuing a second command. The
     // first command remains in flight while the second is buffered.

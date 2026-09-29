@@ -370,6 +370,11 @@ below are exactly what that response currently carries -- nothing more.
   "config": "/home/user/.config/wayexpand/expansions.toml",
   "config_state": "ok",
   "command_queue_depth": 0,
+  "command_in_flight": 0,
+  "expansion_command_queue_depth": 0,
+  "expansion_command_in_flight": 0,
+  "hotkey_queue_depth": 0,
+  "hotkey_in_flight": 0,
   "command_queue_rejected_total": 0,
   "command_timeout_total": 0,
   "command_failure_total": 0
@@ -384,7 +389,12 @@ below are exactly what that response currently carries -- nothing more.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
-- `command_queue_depth` (integer): Number of accepted command actions waiting for the command worker
+- `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
+- `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing
+- `expansion_command_queue_depth` (integer): Accepted command-backed expansions waiting for the expansion worker
+- `expansion_command_in_flight` (integer): Command-backed expansions currently executing
+- `hotkey_queue_depth` (integer): Accepted hotkey actions waiting for the hotkey worker
+- `hotkey_in_flight` (integer): Hotkey actions currently executing
 - `command_queue_rejected_total` (integer): Number of command actions rejected because the bounded queue was full or unavailable
 - `command_timeout_total` (integer): Number of command actions that exceeded their configured timeout
 - `command_failure_total` (integer): Number of command actions that failed for another reason, including spawn failures and non-zero exits

@@ -190,12 +190,16 @@ pub enum HotkeyError {
 
 /// Runtime counters for command-backed expansions and hotkey actions.
 /// Counters are monotonically increasing for the lifetime of an engine;
-/// `command_queue_depth` is the current number of jobs waiting for the worker,
-/// and `command_in_flight` is the number currently executing in worker threads.
+/// the legacy `command_queue_depth` and `command_in_flight` fields are the
+/// aggregate of the separately reported expansion-command and hotkey values.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CommandMetrics {
     pub command_queue_depth: usize,
     pub command_in_flight: usize,
+    pub expansion_command_queue_depth: usize,
+    pub expansion_command_in_flight: usize,
+    pub hotkey_queue_depth: usize,
+    pub hotkey_in_flight: usize,
     pub command_queue_rejected_total: u64,
     pub command_timeout_total: u64,
     pub command_failure_total: u64,
@@ -240,7 +244,8 @@ pub struct ExpansionEngine {
     deferred_matches: Vec<String>,
     input_generation: u64,
     async_commands: Option<AsyncCommandRuntime>,
-    command_metrics: Arc<CommandMetricsState>,
+    expansion_metrics: Arc<CommandMetricsState>,
+    hotkey_metrics: Arc<CommandMetricsState>,
     /// Whether a terminating character should be included in the replacement
     /// operation. Exclusive input sources have not delivered the delimiter to
     /// the application yet; non-exclusive sources such as evdev have.
@@ -258,7 +263,8 @@ struct AsyncCommandRuntime {
     hotkey_sender: mpsc::SyncSender<HotkeyResult>,
     receiver: mpsc::Receiver<AsyncCommandCompletion>,
     hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
-    metrics: Arc<CommandMetricsState>,
+    expansion_metrics: Arc<CommandMetricsState>,
+    hotkey_metrics: Arc<CommandMetricsState>,
     shutdown: Arc<AtomicBool>,
     command_worker: Option<JoinHandle<()>>,
     hotkey_worker: Option<JoinHandle<()>>,
@@ -324,16 +330,6 @@ impl CommandMetricsState {
         }
     }
 
-    fn snapshot(&self) -> CommandMetrics {
-        CommandMetrics {
-            command_queue_depth: self.queue_depth.load(Ordering::Relaxed),
-            command_in_flight: self.in_flight.load(Ordering::Relaxed),
-            command_queue_rejected_total: self.queue_rejected_total.load(Ordering::Relaxed),
-            command_timeout_total: self.timeout_total.load(Ordering::Relaxed),
-            command_failure_total: self.failure_total.load(Ordering::Relaxed),
-        }
-    }
-
     fn record_error(&self, timeout: bool) {
         if timeout {
             self.timeout_total.fetch_add(1, Ordering::Relaxed);
@@ -345,29 +341,30 @@ impl CommandMetricsState {
 
 impl AsyncCommandRuntime {
     fn try_send_command(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
-        self.try_send(&self.command_sender, job)
+        self.try_send(&self.command_sender, job, &self.expansion_metrics)
     }
 
     fn try_send_hotkey(&self, action: HotkeyResult) -> Result<(), QueueSendError> {
-        self.try_send(&self.hotkey_sender, action)
+        self.try_send(&self.hotkey_sender, action, &self.hotkey_metrics)
     }
 
-    fn try_send<T>(&self, sender: &mpsc::SyncSender<T>, job: T) -> Result<(), QueueSendError> {
-        self.metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
+    fn try_send<T>(
+        &self,
+        sender: &mpsc::SyncSender<T>,
+        job: T,
+        metrics: &CommandMetricsState,
+    ) -> Result<(), QueueSendError> {
+        metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
         match sender.try_send(job) {
             Ok(()) => Ok(()),
             Err(mpsc::TrySendError::Full(_)) => {
-                self.metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                self.metrics
-                    .queue_rejected_total
-                    .fetch_add(1, Ordering::Relaxed);
+                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
                 Err(QueueSendError::Full)
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
-                self.metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                self.metrics
-                    .queue_rejected_total
-                    .fetch_add(1, Ordering::Relaxed);
+                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
                 Err(QueueSendError::Disconnected)
             }
         }
@@ -501,7 +498,8 @@ impl ExpansionEngine {
             deferred_matches: Vec::new(),
             input_generation: 0,
             async_commands: None,
-            command_metrics: Arc::new(CommandMetricsState::new()),
+            expansion_metrics: Arc::new(CommandMetricsState::new()),
+            hotkey_metrics: Arc::new(CommandMetricsState::new()),
             reinsert_terminators: true,
         })
     }
@@ -543,10 +541,11 @@ impl ExpansionEngine {
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let (hotkey_completion_sender, hotkey_completion_receiver) =
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let metrics = Arc::clone(&self.command_metrics);
+        let expansion_metrics = Arc::clone(&self.expansion_metrics);
+        let hotkey_metrics = Arc::clone(&self.hotkey_metrics);
         let shutdown = Arc::new(AtomicBool::new(false));
         let command_shutdown = Arc::clone(&shutdown);
-        let worker_metrics = Arc::clone(&metrics);
+        let worker_metrics = Arc::clone(&expansion_metrics);
         let command_worker = thread::Builder::new()
             .name("wayexpand-expansion-worker".into())
             .spawn(move || {
@@ -601,7 +600,7 @@ impl ExpansionEngine {
             Err(_) => return false,
         };
         let hotkey_shutdown = Arc::clone(&shutdown);
-        let hotkey_metrics = Arc::clone(&metrics);
+        let worker_hotkey_metrics = Arc::clone(&hotkey_metrics);
         let hotkey_worker = thread::Builder::new()
             .name("wayexpand-hotkey-worker".into())
             .spawn(move || {
@@ -615,16 +614,25 @@ impl ExpansionEngine {
                     // old runtime must not acquire new side effects after a
                     // reload has requested shutdown.
                     if hotkey_shutdown.load(Ordering::Acquire) {
-                        hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                        worker_hotkey_metrics
+                            .queue_depth
+                            .fetch_sub(1, Ordering::Relaxed);
                         break;
                     }
-                    hotkey_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                    hotkey_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+                    worker_hotkey_metrics
+                        .queue_depth
+                        .fetch_sub(1, Ordering::Relaxed);
+                    worker_hotkey_metrics
+                        .in_flight
+                        .fetch_add(1, Ordering::Relaxed);
                     let output =
                         Self::execute_hotkey_with_shutdown(&action, Some(&hotkey_shutdown));
-                    hotkey_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                    worker_hotkey_metrics
+                        .in_flight
+                        .fetch_sub(1, Ordering::Relaxed);
                     if let Err(error) = &output {
-                        hotkey_metrics.record_error(matches!(error, HotkeyError::Timeout(_)));
+                        worker_hotkey_metrics
+                            .record_error(matches!(error, HotkeyError::Timeout(_)));
                     }
                     if !send_completion_or_shutdown(
                         &hotkey_completion_sender,
@@ -651,7 +659,8 @@ impl ExpansionEngine {
             hotkey_sender,
             receiver: completion_receiver,
             hotkey_receiver: hotkey_completion_receiver,
-            metrics,
+            expansion_metrics,
+            hotkey_metrics,
             shutdown,
             command_worker: Some(command_worker),
             hotkey_worker: Some(hotkey_worker.unwrap()),
@@ -665,7 +674,31 @@ impl ExpansionEngine {
 
     /// Snapshot command execution counters for diagnostics and status output.
     pub fn command_metrics(&self) -> CommandMetrics {
-        self.command_metrics.snapshot()
+        let expansion_command_queue_depth =
+            self.expansion_metrics.queue_depth.load(Ordering::Relaxed);
+        let expansion_command_in_flight = self.expansion_metrics.in_flight.load(Ordering::Relaxed);
+        let hotkey_queue_depth = self.hotkey_metrics.queue_depth.load(Ordering::Relaxed);
+        let hotkey_in_flight = self.hotkey_metrics.in_flight.load(Ordering::Relaxed);
+        CommandMetrics {
+            command_queue_depth: expansion_command_queue_depth + hotkey_queue_depth,
+            command_in_flight: expansion_command_in_flight + hotkey_in_flight,
+            expansion_command_queue_depth,
+            expansion_command_in_flight,
+            hotkey_queue_depth,
+            hotkey_in_flight,
+            command_queue_rejected_total: self
+                .expansion_metrics
+                .queue_rejected_total
+                .load(Ordering::Relaxed)
+                + self
+                    .hotkey_metrics
+                    .queue_rejected_total
+                    .load(Ordering::Relaxed),
+            command_timeout_total: self.expansion_metrics.timeout_total.load(Ordering::Relaxed)
+                + self.hotkey_metrics.timeout_total.load(Ordering::Relaxed),
+            command_failure_total: self.expansion_metrics.failure_total.load(Ordering::Relaxed)
+                + self.hotkey_metrics.failure_total.load(Ordering::Relaxed),
+        }
     }
 
     /// Whether libei portal restoration tokens may be read and persisted.

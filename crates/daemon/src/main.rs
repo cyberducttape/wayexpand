@@ -1455,11 +1455,16 @@ mod tests {
             vec![
                 "backend",
                 "command_failure_total",
+                "command_in_flight",
                 "command_queue_depth",
                 "command_queue_rejected_total",
                 "command_timeout_total",
                 "config",
                 "config_state",
+                "expansion_command_in_flight",
+                "expansion_command_queue_depth",
+                "hotkey_in_flight",
+                "hotkey_queue_depth",
                 "paused",
                 "source",
                 "state",
@@ -1470,7 +1475,10 @@ mod tests {
             body,
             "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
-             command_queue_depth=0\ncommand_queue_rejected_total=0\n\
+             command_queue_depth=0\ncommand_in_flight=0\n\
+             expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\
+             hotkey_queue_depth=0\nhotkey_in_flight=0\n\
+             command_queue_rejected_total=0\n\
              command_timeout_total=0\ncommand_failure_total=0"
         );
     }

@@ -8,6 +8,11 @@
     "config": "string",
     "config_state": "string",
     "command_queue_depth": "integer",
+    "command_in_flight": "integer",
+    "expansion_command_queue_depth": "integer",
+    "expansion_command_in_flight": "integer",
+    "hotkey_queue_depth": "integer",
+    "hotkey_in_flight": "integer",
     "command_queue_rejected_total": "integer",
     "command_timeout_total": "integer",
     "command_failure_total": "integer"
