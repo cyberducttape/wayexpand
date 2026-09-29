@@ -10,7 +10,7 @@ mod settings;
 mod theme;
 
 use anyhow::{Context, Result};
-use colorpack::ColorPack;
+use colorpack::{ColorPack, ColorScheme};
 use dialogs::{AppDetection, PendingAction};
 use editor::Draft;
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
@@ -1155,28 +1155,32 @@ impl GuiApp {
                 .min_width(340.0)
                 .show(ctx, |ui| {
                     ui.label("Choose your color scheme:");
-                    ui.add_space(6.0);
-                    ui.separator();
+                    ui.label(
+                        RichText::new("Pick a visual style; this preference is saved locally.")
+                            .small()
+                            .color(palette.muted),
+                    );
+                    ui.add_space(10.0);
                     for pack in ColorPack::all() {
                         let selected = self.colorpack == *pack;
-                        if ui
-                            .selectable_label(
-                                selected,
-                                format!("{}  —  {}", pack.name(), pack.description()),
-                            )
-                            .clicked()
+                        let scheme = ColorScheme::for_pack(*pack, self.dark_mode);
+                        if theme::colorpack_card(
+                            ui,
+                            palette,
+                            pack.name(),
+                            pack.description(),
+                            scheme.accent,
+                            selected,
+                            self.config.settings.font_scale.multiplier(),
+                        )
+                        .clicked()
                         {
                             self.colorpack = *pack;
                             theme::install_pack(ui.ctx(), *pack, self.config.settings.font_scale);
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                         }
+                        ui.add_space(6.0);
                     }
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.label("Retro PC themes:");
-                    ui.label("  🟢 Classic Green — VT220 CRT terminal glow");
-                    ui.label("  🟠 Classic Amber — Vintage Apple monitor");
-                    ui.label("  ⚪ Classic White — Monochrome classic");
                     ui.add_space(6.0);
                     if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
                         self.colorpack_selector_open = false;

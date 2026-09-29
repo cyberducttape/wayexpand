@@ -260,6 +260,81 @@ pub fn chip_scaled(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// A compact theme picker card. The swatch previews the selected pack while
+/// the card itself keeps the same surface, border, and focus treatment as the
+/// rest of the application.
+pub fn colorpack_card(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    name: &str,
+    description: &str,
+    swatch: Color32,
+    selected: bool,
+    scale: f32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), 62.0 * scale),
+        Sense::click(),
+    );
+    if ui.is_rect_visible(rect) {
+        let hovered = response.hovered();
+        let background = if selected {
+            palette.accent_weak
+        } else if hovered {
+            palette.surface_hover
+        } else {
+            palette.surface
+        };
+        let border = if selected {
+            palette.accent
+        } else {
+            palette.border
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(10), background);
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(10),
+            Stroke::new(if selected { 2.0 } else { 1.0 }, border),
+            egui::StrokeKind::Inside,
+        );
+        let swatch_rect = egui::Rect::from_min_size(
+            rect.left_center() + Vec2::new(14.0 * scale, -16.0 * scale),
+            Vec2::splat(32.0 * scale),
+        );
+        painter.rect_filled(swatch_rect, CornerRadius::same(8), swatch);
+        painter.rect_stroke(
+            swatch_rect,
+            CornerRadius::same(8),
+            Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Inside,
+        );
+        let text_left = swatch_rect.right() + 12.0 * scale;
+        painter.text(
+            egui::pos2(text_left, rect.top() + 12.0 * scale),
+            egui::Align2::LEFT_TOP,
+            name,
+            FontId::new(14.0 * scale, FontFamily::Proportional),
+            ui.visuals().text_color(),
+        );
+        painter.text(
+            egui::pos2(text_left, rect.top() + 34.0 * scale),
+            egui::Align2::LEFT_TOP,
+            description,
+            FontId::new(11.5 * scale, FontFamily::Proportional),
+            palette.muted,
+        );
+        if selected {
+            painter.circle_filled(
+                egui::pos2(rect.right() - 18.0 * scale, rect.center().y),
+                5.0 * scale,
+                palette.accent,
+            );
+        }
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// An accent-filled call-to-action button, for the one primary action in a
 /// given context (Save changes, Create snippet, ...).
 pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
