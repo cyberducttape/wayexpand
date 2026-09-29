@@ -58,6 +58,22 @@ pub fn install_pack(ctx: &egui::Context, pack: ColorPack, font_scale: FontScale)
     apply_for_pack(ctx, egui::Theme::Light, pack, font_scale);
 }
 
+/// A consistent raised surface for diagnostic blocks and modal content.
+/// Keeping the frame treatment here makes custom color packs and focus
+/// contrast apply uniformly instead of falling back to egui's default group.
+pub fn card<R>(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    egui::Frame::new()
+        .fill(palette.surface_hover)
+        .stroke(Stroke::new(1.0, palette.border))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, add_contents)
+}
+
 fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font_scale: FontScale) {
     let dark = theme == egui::Theme::Dark;
     let palette = Palette::for_pack(pack, dark);

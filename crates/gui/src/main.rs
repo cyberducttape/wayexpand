@@ -2,6 +2,7 @@ mod colorpack;
 mod diagnostics;
 mod dialogs;
 mod editor;
+mod fonts;
 mod import;
 mod lang;
 mod library;
@@ -900,11 +901,9 @@ impl GuiApp {
                             .color(palette.muted)
                             .small(),
                     );
-                    egui::Frame::group(ui.style())
-                        .fill(palette.surface_hover)
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(&self.daemon_status).monospace());
-                        });
+                    theme::card(ui, palette, |ui| {
+                        ui.label(RichText::new(&self.daemon_status).monospace());
+                    });
                     ui.label(
                         RichText::new(format!("Fleet layers: {}", self.fleet_status))
                             .small()
@@ -913,7 +912,7 @@ impl GuiApp {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         theme::section_header(ui, "", self.strings.backends());
-                        if ui.small_button(self.strings.refresh()).clicked() {
+                        if theme::secondary_button(ui, palette, self.strings.refresh()).clicked() {
                             self.refresh_diagnostics();
                         }
                     });
@@ -2071,6 +2070,10 @@ fn main() -> Result<()> {
         "WayExpand",
         options,
         Box::new(move |creation_context| {
+            // Keep egui's bundled fonts first, then add only validated system
+            // fallbacks so arrows, status symbols, and CJK snippet text do not
+            // render as missing-glyph boxes on minimal desktop installations.
+            fonts::install(&creation_context.egui_ctx);
             theme::install_pack(
                 &creation_context.egui_ctx,
                 colorpack,

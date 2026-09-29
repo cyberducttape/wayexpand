@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Improve GUI font coverage with validated platform fallbacks for symbols and
+  CJK text, and use the shared card/secondary-control treatment in diagnostics.
 - Fix Action Broker IPC parsing for valid UTF-8 frames whose characters are
   split across socket reads.
 - Polish the GUI with a layered two-tier toolbar, consistent secondary

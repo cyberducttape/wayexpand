@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+ab_glyph = "0.2.32"
 anyhow.workspace = true
 eframe = { version = "0.31.1", default-features = false, features = ["wayland", "default_fonts", "glow"] }
 wayexpand-core = { path = "../core" }
