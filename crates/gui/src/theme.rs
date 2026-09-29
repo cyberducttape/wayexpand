@@ -408,3 +408,19 @@ fn truncate(text: &str, max_chars: usize) -> String {
     truncated.push('…');
     truncated
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_pack_applies_font_scale_to_standard_text_styles() {
+        let ctx = egui::Context::default();
+
+        install_pack(&ctx, ColorPack::Default, FontScale::ExtraLarge);
+
+        let style = ctx.style_of(egui::Theme::Dark);
+        assert_eq!(style.text_styles[&TextStyle::Body].size, 14.5 * 1.5);
+        assert_eq!(style.text_styles[&TextStyle::Small].size, 12.0 * 1.5);
+    }
+}

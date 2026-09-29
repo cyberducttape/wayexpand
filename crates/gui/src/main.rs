@@ -245,7 +245,7 @@ impl GuiApp {
         }
     }
 
-    fn save_settings(&mut self) {
+    fn save_settings(&mut self, ctx: &egui::Context) {
         let max_buffer_chars = match self.settings_buffer.trim().parse::<usize>() {
             Ok(value) => value,
             Err(error) => {
@@ -277,6 +277,7 @@ impl GuiApp {
                 self.settings_font_scale = self.config.settings.font_scale;
                 self.settings_open = false;
                 self.settings_error = None;
+                theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
                 self.set_message_and_reload("Settings saved atomically");
             }
             Err(error) => {
@@ -1030,7 +1031,7 @@ impl GuiApp {
                         if theme::primary_button(ui, palette, self.strings.save_settings())
                             .clicked()
                         {
-                            self.save_settings();
+                            self.save_settings(ctx);
                         }
                         if ui.button(self.strings.close()).clicked() {
                             self.settings_open = false;
@@ -2142,7 +2143,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.settings_buffer = "0".into();
-        app.save_settings();
+        app.save_settings(&egui::Context::default());
         assert_eq!(app.config.settings.max_buffer_chars, 128);
         assert!(app.message.contains("outside the allowed range"));
         fs::remove_file(path).unwrap();
