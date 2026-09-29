@@ -53,7 +53,10 @@ pub enum IpcError {
 
 /// Read a newline-terminated line with a size bound.
 fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result<String, IpcError> {
-    let mut line = String::new();
+    // Accumulate bytes before decoding. A UTF-8 code point can straddle two
+    // reads; decoding each fill_buf() chunk independently would reject valid
+    // JSON whenever that happened at a buffer boundary.
+    let mut line = Vec::new();
     let mut total = 0;
 
     loop {
@@ -71,9 +74,7 @@ fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result
             if total > limit {
                 return Err(IpcError::MessageTooLarge(total, limit));
             }
-            let chunk = std::str::from_utf8(&available[..consume_len])
-                .map_err(|_| IpcError::InvalidFormat)?;
-            line.push_str(chunk);
+            line.extend_from_slice(&available[..consume_len]);
             reader.consume(consume_len);
             break;
         }
@@ -83,12 +84,11 @@ fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result
         if total > limit {
             return Err(IpcError::MessageTooLarge(total, limit));
         }
-        let chunk = std::str::from_utf8(available).map_err(|_| IpcError::InvalidFormat)?;
-        line.push_str(chunk);
+        line.extend_from_slice(available);
         reader.consume(available_len);
     }
 
-    Ok(line)
+    String::from_utf8(line).map_err(|_| IpcError::InvalidFormat)
 }
 
 /// Broker server listening on a Unix socket.
@@ -338,6 +338,18 @@ mod bounded_frame_tests {
             read_bounded_line(&mut reader, MAX_MESSAGE_BYTES),
             Err(IpcError::InvalidFormat)
         ));
+    }
+
+    #[test]
+    fn bounded_reader_accepts_utf8_split_across_reads() {
+        let (mut writer, reader) = UnixStream::pair().expect("socket pair");
+        let mut reader = BufReader::with_capacity(1, reader);
+        writer
+            .write_all("{\"action_id\":\"café\"}\n".as_bytes())
+            .expect("write UTF-8 frame");
+
+        let line = read_bounded_line(&mut reader, MAX_MESSAGE_BYTES).expect("valid UTF-8 frame");
+        assert_eq!(line, "{\"action_id\":\"café\"}\n");
     }
 }
 

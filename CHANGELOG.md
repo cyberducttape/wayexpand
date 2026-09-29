@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Fix Action Broker IPC parsing for valid UTF-8 frames whose characters are
+  split across socket reads.
 - Polish the GUI with a layered two-tier toolbar, consistent secondary
   controls, color-pack preview cards, font-scale-aware custom widgets, and
   responsive explicit command previews.
