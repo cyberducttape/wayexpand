@@ -143,6 +143,13 @@ Maximum contrast for accessibility and clarity.
 - Highest possible visual distinction
 - Recommended for users with visual sensitivity
 
+### 🔷 Terminal Blue
+IBM 3270-inspired mainframe styling with bright blue and cyan accents on deep
+navy surfaces.
+
+### 🟦 Commodore 64
+1982 home-computer styling with a deep blue background and warm orange accents.
+
 ## Using Color Packs
 
 ### Switching in the GUI
@@ -150,9 +157,12 @@ Maximum contrast for accessibility and clarity.
 1. Open `wayexpand-gui`
 2. Click the **🎨 Theme** button in the toolbar
 3. Select your preferred color pack from the list
-4. The colors update instantly
+4. The colors update instantly and the preference is saved to the GUI
+   preferences file
 
-The selected color pack persists only during the current session. To make a color pack default, you would need to modify the initialization code.
+The selected color pack is loaded on subsequent launches. GUI display
+preferences are stored separately from the expansion configuration, so a
+preferences-file problem does not prevent editing expansions.
 
 ## Color Pack Features
 
@@ -189,6 +199,8 @@ pub enum ColorPack {
     ClassicWhite,
     Retro80sNeon,
     HighContrast,
+    TerminalBlue,
+    Commodore64,
 }
 ```
 
