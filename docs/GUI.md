@@ -44,9 +44,10 @@ perform text-based edits or maintain a second configuration format. Preview
 rendering therefore has the same validation and template behavior as the
 daemon and CLI.
 
-Each snippet row shows its matching mode, tags, and whether it is command-backed.
-Word-boundary snippets wait until a trailing boundary is observed, preventing
-accidental expansion inside larger words. Command-backed snippets run their
+Each sidebar row shows the trigger, description (or command-backed marker),
+category, and enabled state. The editor exposes matching mode and tags for the
+selected snippet. Word-boundary snippets wait until a trailing boundary is
+observed, preventing accidental expansion inside larger words. Command-backed snippets run their
 configured direct program when previewed or matched; see the command security
 limits in the operations guide.
 
@@ -75,8 +76,10 @@ The preview input is editable, allowing a trigger to be tested inside larger
 text and making word-boundary behavior visible before saving.
 
 The `Settings` window exposes the bounded matcher buffer limit (1–4096
-characters). Changes use the same validation, atomic save, undo history, and
-daemon reload path as snippet edits.
+characters), the undo chord, and five font-scale choices from Small (80%) to
+Huge (200%). Changes use the same validation, atomic save, undo history, and
+daemon reload path as snippet edits. The selected font scale is applied to
+standard and custom widgets immediately after saving.
 
 The `Diagnostics` window reports daemon control-socket connectivity and the
 currently discoverable input/output backends, including permission and
@@ -155,8 +158,8 @@ navy surfaces.
 ### Switching in the GUI
 
 1. Open `wayexpand-gui`
-2. Click the **🎨 Theme** button in the toolbar
-3. Select your preferred color pack from the list
+2. Click **Color pack** in the toolbar
+3. Select a card showing the pack's live accent swatch and description
 4. The colors update instantly and the preference is saved to the GUI
    preferences file
 
@@ -283,15 +286,18 @@ Potential color packs for future releases:
 - [ ] **Custom user themes** — User-defined color configurations
 - [ ] **Time-based auto-switching** — Dark at night, light during day
 
-## Screenshots
+## Current GUI screenshot
 
-Would love to include screenshots of each color pack, but for now you can:
+The following frame is captured from the current v1.2 GUI build. It shows the
+empty-library state, the two-level toolbar, the search field, and the primary
+first-snippet action:
 
-1. Run `wayexpand-gui`
-2. Click **🎨 Theme**
-3. Try each pack!
+![WayExpand GUI empty-library state](images/gui-empty-library.png)
 
-Enjoy your retro computing aesthetic! 🎨
+The screenshot is intentionally a real empty state rather than a fabricated
+library: it is the first screen a new user sees after starting with a missing
+configuration. The Color pack dialog uses the same surface, border, and focus
+system and previews each of the eight packs with a live swatch.
 
 ## Retro Fonts for WayExpand Themes
 
@@ -439,7 +445,9 @@ Future work may expand this to allow:
 
 ## Accessibility Note
 
-When using retro fonts, ensure adequate color contrast is maintained. WayExpand's built-in high-contrast theme overrides font styling to improve readability; this document is not a substitute for a formal WCAG audit.
+When using retro fonts, ensure adequate color contrast is maintained. WayExpand's
+built-in High Contrast color pack improves color separation; it does not select
+a different font. This document is not a substitute for a formal WCAG audit.
 
 ## Language Support in WayExpand
 
@@ -457,7 +465,7 @@ WayExpand GUI now supports multiple languages with automatic detection and manua
 The easiest way to switch languages is to use the GUI:
 
 1. Open `wayexpand-gui`
-2. Click the **🌐 EN/DE** button in the toolbar
+2. Click **Language** in the toolbar
 3. Select your preferred language
 4. The UI updates immediately
 
@@ -553,20 +561,23 @@ if ui.selectable_label(self.language == Language::French, "Français").clicked()
 
 ### Implemented
 
-The following UI elements have been translated:
+The following UI elements are translated through the `Strings` catalog:
 
 - ✅ Toolbar (title, buttons, search placeholder)
 - ✅ Sidebar (snippets list, empty states, filters)
 - ✅ Editor (form labels, descriptions, tooltips)
 - ✅ Dialogs (diagnostics, settings, import, language selector)
 - ✅ Status messages (success, error, action confirmations)
-- ✅ Buttons and labels (all interactive elements)
+- ✅ Core buttons and labels used by the editor, dialogs, and status messages
 
 ### Not Yet Translated
 
 - Hardcoded error messages from the core library (intentionally in English for debugging)
 - System messages from Wayland protocol probes
 - Daemon status output (from the backend daemons)
+- A small number of presentation labels that are currently shared across
+  languages, including color-pack names, font-size choices, and template
+  variable names
 
 These are intentionally left in English as they contain technical diagnostic information.
 
@@ -603,7 +614,7 @@ LANG=de_DE.UTF-8 ./target/release/wayexpand-gui
 4. Run and switch in-app:
 ```bash
 ./target/release/wayexpand-gui
-# Click 🌐 EN/DE button to switch languages
+# Click Language in the toolbar to switch languages
 ```
 
 ## Future Enhancements
@@ -634,6 +645,14 @@ and tracks fixes for them.
 ---
 
 ## Resolved
+
+### Explicit command previews no longer freeze the GUI
+
+The **Run once** action for a command-backed draft executes in a background
+worker and reports `Running…` while it waits. The UI remains interactive while
+the command uses its bounded timeout. Results are associated with the draft
+that started them, so output from an older draft is not displayed after the
+editor changes.
 
 ### "Use current app" Button Could Freeze the GUI Indefinitely
 

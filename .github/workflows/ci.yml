@@ -232,6 +232,8 @@ jobs:
           fail: true
       - name: Check local markdown links deterministically
         run: python3 scripts/check-markdown-links.py
+      - name: Check documentation contracts
+        run: python3 scripts/check-documentation-contracts.py
 
   integration:
     name: Integration & System Tests

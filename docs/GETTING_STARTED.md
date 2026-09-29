@@ -36,6 +36,13 @@ graphical editor:
 wayexpand-gui
 ```
 
+The graphical editor opens with the snippet library on the left and the
+editor workspace on the right. The **Color pack**, **Language**, and **Light /
+Dark** controls are available in the toolbar; the search and daemon actions
+are arranged on the row below.
+
+![WayExpand graphical editor](images/gui-empty-library.png)
+
 The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
 `WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
 They rewrite the complete TOML file in canonical formatting, so comments and

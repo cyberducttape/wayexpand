@@ -14,7 +14,7 @@ This document defines the stability guarantees for WayExpand 1.x. Third-party to
 Every CLI build reports both its display version and the source commit:
 
 ```text
-wayexpand 1.2.0-dev+3396fc8e0b63 (commit 3396fc8e0b63)
+wayexpand 1.2.0-dev+<short-sha> (commit <short-sha>)
 ```
 
 An exact clean release tag reports the release version (`1.2.0`). A build from

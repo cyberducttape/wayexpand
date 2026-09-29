@@ -61,7 +61,7 @@ For teams with shared machines or controlled environments:
 - Use Ansible, Puppet, or similar
 - Automate installation + configuration
 - Centralized snippet library via git/distribution
-- Fully auditable deployment
+- Reviewable deployment history through the configuration-management system
 
 ## Installation at Scale
 
@@ -479,7 +479,10 @@ wayexpand list
 $EDITOR ~/.config/wayexpand/expansions.toml
 ```
 
-The GUI provides a visual editor with live preview for all snippets. Category filtering helps organize the library for quick access during daily work.
+The GUI provides a visual editor with preview for static snippets. Command
+backed snippets require an explicit **Run once** action because previewing them
+can execute external programs. Category and text filtering (including tags)
+help organize the library for quick access during daily work.
 
 **Tips for effective sysadmin snippets:**
 1. Use meaningful triggers: `.ssl-cert` is clearer than `.sc`
@@ -647,7 +650,10 @@ No central server required.
 
 **Idempotency:** Many sysadmin tasks should be idempotent (safe to run multiple times). Test before deploying at scale.
 
-**Auditing:** Consider logging snippet usage for compliance in regulated environments.
+**Auditing:** WayExpand does not provide a complete snippet-usage or
+command-execution audit trail. If compliance logging is required, use an
+external, privacy-reviewed audit system and the policy-violation journal only
+for the events it actually records.
 
 **Backup before deploy:** Always test destructive operations in a test environment first.
 

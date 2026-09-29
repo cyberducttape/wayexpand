@@ -161,11 +161,14 @@ dbus-send --session --print-reply --dest=org.kde.KWin /Scripting \
 
 #### KWin script registration delay
 
-**Symptom:** When enabling app filters, 1-2 second delay before GUI responds to "Use current app"
+**Symptom:** When enabling app filters, a 1–2 second delay may appear while the
+GUI waits for KWin to identify the focused application.
 
 **Why it happens:** The `loadScript()` call returns before the D-Bus object is fully registered
 
-**This is expected.** The delay only happens on first enable; subsequent calls are instant.
+**This is expected and no longer blocks the window.** Detection runs in a
+background worker; the GUI shows a spinner and offers **Cancel** while the
+first KWin script registration completes. Subsequent calls are usually faster.
 
 **Advanced:** To adjust retry behavior, rebuild with different constants in `crates/backend-kwin-window/src/lib.rs`:
 ```rust

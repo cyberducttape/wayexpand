@@ -118,11 +118,11 @@ allowed_backends = ["libei"]  # Restrict to safe output
 max_replacement_size = 65536
 ```
 
-✅ Audit command execution
-```bash
-# Monitor secret retrieval attempts
-journalctl --user -u wayexpand-input-method.service -f | grep "command"
-```
+⚠️ **Do not treat the WayExpand journal as a command audit trail.** Policy
+violations and selected lifecycle messages may be logged, but WayExpand does
+not record every command, argument, secret, or expansion. Use the secret
+manager's own audit device and a privacy-reviewed wrapper when command
+execution must be audited.
 
 ## Example: Vault Integration
 
