@@ -2045,6 +2045,61 @@ fn process_descendants_cleaned_up_on_successful_exit() {
 
 #[cfg(unix)]
 #[test]
+fn hotkey_descendants_are_cleaned_up_on_successful_exit() {
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::thread;
+    use std::time::Duration;
+
+    let script_path = PathBuf::from(format!(
+        "/tmp/wayexpand-hotkey-descendant-test-{}.sh",
+        std::process::id()
+    ));
+    let output_file = PathBuf::from(format!(
+        "/tmp/wayexpand-hotkey-descendant-marker-{}.txt",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&output_file);
+
+    let script_content = format!(
+        "#!/bin/bash\n(sleep 1; printf survived > {}) &\nexit 0\n",
+        output_file.display()
+    );
+    let mut script_file = File::create(&script_path).unwrap();
+    script_file.write_all(script_content.as_bytes()).unwrap();
+    drop(script_file);
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let action = HotkeyResult {
+        chord: KeyChord::parse("Ctrl+Alt+H").unwrap(),
+        description: "descendant cleanup test".into(),
+        command: CommandConfig {
+            program: script_path.display().to_string(),
+            args: Vec::new(),
+            timeout_ms: 5000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: Vec::new(),
+        },
+    };
+
+    let result = ExpansionEngine::execute_hotkey(&action);
+    thread::sleep(Duration::from_millis(1500));
+    let survived = output_file.exists();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&output_file);
+
+    assert!(result.is_ok());
+    assert!(
+        !survived,
+        "hotkey descendant survived process-group cleanup"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn detached_stdout_holder_does_not_block_command_output() {
     use std::fs::File;
     use std::io::Write;

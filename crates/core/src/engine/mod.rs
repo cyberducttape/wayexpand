@@ -1130,14 +1130,14 @@ impl ExpansionEngine {
         // valid for the entire lifetime of this function, even after the process exits.
         let pid = child.id();
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
-        let (status, was_reaped) = loop {
+        let status = loop {
             if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
                 kill_process_group_by_pid(pid);
                 let _ = child.wait();
                 return Err(HotkeyError::Timeout(result.command.timeout_ms));
             }
             match child.try_wait() {
-                Ok(Some(status)) => break (status, true),
+                Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
                 Ok(None) => {
                     kill_process_group_by_pid(pid);
@@ -1152,12 +1152,10 @@ impl ExpansionEngine {
             }
         };
 
-        // Best-effort cleanup for ordinary descendants. Only kill the process group
-        // if the child is still alive (wasn't reaped). For already-reaped processes,
-        // the kernel has already cleaned up the process group.
-        if !was_reaped {
-            kill_process_group_by_pid(pid);
-        }
+        // The leader may exit successfully while ordinary descendants remain in
+        // its process group. Kill the group after reaping the leader as well;
+        // otherwise a successful hotkey can leave background work running.
+        kill_process_group_by_pid(pid);
 
         if status.success() {
             Ok(())
