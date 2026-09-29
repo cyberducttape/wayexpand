@@ -28,6 +28,8 @@ or development guidance.
   - V13_MIGRATION_GUIDE.md - v1.3 upgrade guide
   - AUDIT_FINDINGS.md - Comprehensive audit findings
   - And other development records
+- **V13_RELEASE_NOTES_DRAFT.md** - Superseded v1.3 release-notes draft; not a
+  shipping release document
 
 ## Removed Files (Consolidated)
 
