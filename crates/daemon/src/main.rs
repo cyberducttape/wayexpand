@@ -1436,13 +1436,14 @@ mod tests {
     /// docs by construction, rather than each drifting independently.
     #[test]
     fn daemon_status_body_matches_documented_stable_contract() {
-        let body = status::daemon_status_body(
+        let body = status::daemon_status_body_with_mode(
             "input-method",
             "input-method-v2",
             "connected",
             false,
             Path::new("/home/user/.config/wayexpand/expansions.toml"),
             true,
+            "unknown",
             CommandMetrics::default(),
         );
         let mut fields: Vec<&str> = body
@@ -1454,6 +1455,7 @@ mod tests {
             fields,
             vec![
                 "backend",
+                "backend_mode",
                 "command_failure_total",
                 "command_in_flight",
                 "command_queue_depth",
@@ -1473,7 +1475,7 @@ mod tests {
         );
         assert_eq!(
             body,
-            "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\n\
+            "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstate=connected\npaused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
              command_queue_depth=0\ncommand_in_flight=0\n\
              expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\

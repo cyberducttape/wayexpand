@@ -3,6 +3,7 @@
     "response": "string",
     "source": "string",
     "backend": "string",
+    "backend_mode": "string",
     "state": "string",
     "paused": "boolean",
     "config": "string",

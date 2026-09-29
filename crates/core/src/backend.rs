@@ -81,6 +81,11 @@ impl std::error::Error for InputSourceError {}
 /// without waiting on it.
 pub trait TextInjector: Send {
     fn name(&self) -> &'static str;
+    /// Human-readable negotiated capability detail for diagnostics. Backends
+    /// that have no additional runtime mode may use the stable default.
+    fn status_detail(&self) -> &'static str {
+        ""
+    }
     /// Remove the exact trigger text immediately before the cursor.
     ///
     /// Backends may need the original UTF-8 string rather than only its
@@ -161,6 +166,10 @@ pub trait TextInjector: Send {
 impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
     fn name(&self) -> &'static str {
         (**self).name()
+    }
+
+    fn status_detail(&self) -> &'static str {
+        (**self).status_detail()
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
@@ -348,9 +357,9 @@ pub fn discover_backends() -> Vec<BackendStatus> {
             kind: BackendKind::Libei,
             state: BackendState::Implemented,
             detail: if std::env::var_os("LIBEI_SOCKET").is_some() {
-                "implemented; direct EIS socket configured (explicit backend only)"
+                "implemented; direct EIS socket configured (explicit backend only); prefers ei_text and reports live fallback mode in daemon status"
             } else if wayland {
-                "implemented; portal connection requires explicit opt-in"
+                "implemented; portal connection requires explicit opt-in; prefers ei_text and reports live fallback mode in daemon status"
             } else {
                 "Wayland session not detected"
             }

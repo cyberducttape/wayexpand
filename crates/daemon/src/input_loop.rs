@@ -16,7 +16,7 @@ use std::{
 use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::{InputMethodError, InputMethodSource};
-use wayexpand_core::{CommandMetrics, OrganizationPolicy};
+use wayexpand_core::{CommandMetrics, OrganizationPolicy, TextInjector};
 
 /// Low-latency polling while command/hotkey work is queued or running.
 const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -64,15 +64,18 @@ pub fn connect_input_method_session(
 
     match connect_output_backend("libei", persist_portal_token, portal_token_path) {
         Ok(key_injector) => {
-            status::set_daemon_status_direct(
+            let backend_mode = key_injector.status_detail();
+            source = source.with_key_pass_through(key_injector);
+            status::set_daemon_status_with_mode(
                 control,
                 "input-method",
-                "libei",
+                "input-method-v2",
                 "connected",
                 config_path,
                 config_healthy,
+                backend_mode,
+                CommandMetrics::default(),
             );
-            source = source.with_key_pass_through(key_injector);
         }
         Err(error) if error.retryable => {
             warn!(
@@ -125,10 +128,6 @@ pub fn connect_input_method_with_retry(
             policy,
         ) {
             Ok(source) => {
-                control.set_status(format!(
-                    "source=input-method\nbackend=input-method-v2\nstate=connected\npaused=false\nconfig={}\nconfig_state=ok",
-                    config_path.display()
-                ));
                 return Ok(source);
             }
             Err(error) if error.is_retryable() => {

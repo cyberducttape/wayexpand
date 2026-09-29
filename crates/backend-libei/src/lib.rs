@@ -174,6 +174,15 @@ enum TextMode {
     Keysym(KeysymTyper),
 }
 
+impl TextMode {
+    fn status_detail(&self) -> &'static str {
+        match self {
+            Self::Text(_) => "ei_text (UTF-8 insertion)",
+            Self::Keysym(_) => "ei_keyboard keysym fallback (12ms key pacing)",
+        }
+    }
+}
+
 /// Maps characters to a keycode (and whether Shift is needed) reachable on
 /// the EIS server's own keymap, built once at connect time.
 struct KeysymTyper {
@@ -1209,6 +1218,10 @@ fn connect_portal(
 impl TextInjector for LibeiInjector {
     fn name(&self) -> &'static str {
         BACKEND_NAME
+    }
+
+    fn status_detail(&self) -> &'static str {
+        self.mode.status_detail()
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

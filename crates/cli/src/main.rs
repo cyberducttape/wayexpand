@@ -2333,6 +2333,7 @@ mod tests {
         let daemon_response = "running\n\
              source=input-method\n\
              backend=input-method-v2\n\
+             backend_mode=unknown\n\
              state=connected\n\
              paused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\n\
@@ -2368,6 +2369,7 @@ mod tests {
         assert_eq!(value["response"], "running");
         assert_eq!(value["source"], "input-method");
         assert_eq!(value["backend"], "input-method-v2");
+        assert_eq!(value["backend_mode"], "unknown");
         assert_eq!(value["state"], "connected");
         assert_eq!(value["paused"], false);
         assert_eq!(
@@ -2427,6 +2429,7 @@ mod tests {
                 "response",
                 "source",
                 "backend",
+                "backend_mode",
                 "state",
                 "paused",
                 "config",

@@ -74,13 +74,19 @@ pub fn connect_output_with_retry(
     loop {
         match connect_output_backend(backend, persist_portal_token, portal_token_path_arg) {
             Ok(injector) => {
-                status::set_daemon_status_direct(
+                status::set_daemon_status_with_mode(
                     control,
                     source,
                     backend,
                     "connected",
                     config_path,
                     config_healthy,
+                    if injector.status_detail().is_empty() {
+                        "unknown"
+                    } else {
+                        injector.status_detail()
+                    },
+                    wayexpand_core::CommandMetrics::default(),
                 );
                 info!(backend, "output backend reconnected");
                 return Ok(Some(injector));
