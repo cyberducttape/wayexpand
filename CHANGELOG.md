@@ -6,6 +6,13 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Polish the GUI with a layered two-tier toolbar, consistent secondary
+  controls, color-pack preview cards, font-scale-aware custom widgets, and
+  responsive explicit command previews.
+- Refresh GUI and broker documentation with a current screenshot, corrected
+  implementation claims, and a CI documentation-contract check that catches
+  version, color-pack, screenshot, service, and removed-setting drift.
+
 - Refuse to prepare a release while an unprefixed tag with the same version
   exists, keeping public release references aligned with the `vX.Y.Z` workflow.
 
