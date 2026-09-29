@@ -177,7 +177,11 @@ impl BrokerServer {
                 )
                 .into());
             }
-            if metadata.mode() & 0o022 != 0 {
+            let group_or_other_writable = metadata.mode() & 0o022 != 0;
+            let is_sticky_directory = metadata.mode() & 0o1000 != 0;
+            let is_trusted_sticky_directory =
+                is_sticky_directory && (metadata.uid() == uid || metadata.uid() == 0);
+            if group_or_other_writable && !is_trusted_sticky_directory {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "broker socket ancestor is writable by group or other users",
