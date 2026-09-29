@@ -188,7 +188,9 @@ replacement = ""
 - The keyboard daemon would retain a minimal AF_UNIX-only permission set and
   would not spawn action commands itself.
 - Only configured programs allowed
-- Arguments constrained by prefix matching
+- Action arguments are fixed by the validated action definition; any future
+  request-supplied arguments must use a separately constrained allowlisted
+  model rather than being inferred from the current `args` array
 - Environment variables explicitly allowlisted
 - Working directory restricted
 - Execution timeout enforced
