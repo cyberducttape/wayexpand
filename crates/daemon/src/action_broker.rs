@@ -1,7 +1,8 @@
 //! Action Broker Integration - Optional routing of commands to external broker.
 //!
-//! If action_broker is configured in organization policy, commands are routed
-//! to the broker service instead of executing in the daemon process.
+//! This is a tested helper for future action-broker routing. It is not wired
+//! into the daemon's current command route; commands currently execute via
+//! the mature in-daemon path.
 
 use action_broker::{ActionRequest, ActionResponse, BrokerClient};
 use std::path::PathBuf;

@@ -18,7 +18,14 @@ The design aims to provide:
 - **Audit trail** - Planned; no execution audit sink is currently implemented
 - **Privilege separation** - Commands run with appropriate permissions
 
-## Architecture
+## Target architecture (not current routing)
+
+The following diagram is the intended Phase 2 topology. In the current v1.2
+implementation, the daemon does not route expansion commands through this
+socket: its mature command path still executes configured commands in the
+daemon process under the daemon's policy and service sandbox. The standalone
+broker binary can be run manually, but no daemon policy or service lifecycle
+starts it automatically.
 
 ```
 ┌─────────────────────────────┐
@@ -42,7 +49,7 @@ The design aims to provide:
 └─────────────────────────────┘
 ```
 
-## Experimental foundation (not production-ready)
+## Current implementation (experimental, not production-ready)
 
 What's implemented:
 - **Protocol** (crates/action-broker/src/protocol.rs)
@@ -67,9 +74,10 @@ What's implemented:
   - `BrokerServer`: Listen and accept connections
   - `BrokerClient`: Connect and send requests
 
-- **Daemon Integration** (crates/daemon/src/action_broker.rs)
-  - `ActionBrokerManager` for client connection pooling
-  - Ready for policy-based routing (Phase 2)
+- **Daemon-side broker helper** (crates/daemon/src/action_broker.rs)
+  - `ActionBrokerManager` is a tested, opt-in helper for future routing
+  - It opens a fresh client connection for each request; it is not a pool
+  - It is currently unused by the daemon command route
 - **Standalone service binary** (`wayexpand-action-broker`)
   - Loads a validated broker configuration
   - Binds a protected Unix socket
@@ -109,9 +117,9 @@ What could be added:
 - Advanced audit trail queries
 - Multi-tenant support
 
-## Configuration Example
+## Configuration examples (current broker schema and target routing)
 
-### Broker Configuration (wayexpand-broker.toml)
+### Current standalone broker configuration (wayexpand-broker.toml)
 
 ```toml
 [broker]
@@ -144,7 +152,7 @@ cwd = "/home/user"
 enabled = true
 ```
 
-### Daemon Configuration (wayexpand-config.toml)
+### Target daemon routing configuration (not active in v1.2)
 
 ```toml
 [organization]
@@ -167,14 +175,17 @@ replacement = ""
 
 ## Security Model
 
-### Daemon Permissions (Minimal)
-- No network access (AF_UNIX only)
-- No keyboard devices (input-method-v2 uses composition events)
-- Read-only access to /home
-- Cannot spawn arbitrary processes
-- Cannot access environment variables
+### Current daemon execution model
+- The daemon's mature command path can spawn configured command processes.
+- Expansion and organization policy are checked before dispatch.
+- The daemon service sandbox supplies additional restrictions such as no
+  network access and read-only home/system protection.
+- This is not equivalent to the separate-process isolation described below;
+  the daemon is not currently a broker-only command router.
 
-### Broker Permissions (Per-Action)
+### Target broker permissions (when routing is enabled)
+- The keyboard daemon would retain a minimal AF_UNIX-only permission set and
+  would not spawn action commands itself.
 - Only configured programs allowed
 - Arguments constrained by prefix matching
 - Environment variables explicitly allowlisted
@@ -198,7 +209,7 @@ replacement = ""
 | Config | ✅ Complete | ✅ Pass | TOML schema with validation |
 | Executor | ✅ Complete | ✅ Pass | Async execution with timeout |
 | IPC (Unix socket) | ✅ Complete | ✅ Pass | JSON over AF_UNIX streams |
-| Daemon integration | ✅ Foundation | ⏳ Pending | ActionBrokerManager ready |
+| Daemon integration | ⚠️ Helper only | ✅ Unit/integration tests | `ActionBrokerManager` exists but is not wired into command routing; reconnects per request |
 | Policy routing | ⏳ Phase 2 | ⏳ Pending | Will integrate with policy module |
 | Broker binary | ✅ Complete | ✅ Pass | `wayexpand-action-broker`; service deployment remains separate |
 | Systemd integration | ⏳ Phase 2 | ⏳ Pending | User service + socket activation |
@@ -209,7 +220,7 @@ replacement = ""
 | Aspect | Current (v1.2) | With Action Broker (v1.3+) |
 |--------|-----------------|--------------------------|
 | Daemon network access | None | None |
-| Command execution | In daemon process | Separate broker process |
+| Command execution | In daemon process under policy/sandbox | Separate broker process after Phase 2 routing |
 | Per-command control | Policy only (all or nothing) | Fine-grained per-action |
 | Audit trail | Not available | Planned; not implemented |
 | Security isolation | Moderate | Strong |
