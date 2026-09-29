@@ -2,7 +2,7 @@
 //! of custom-painted widgets (snippet rows, pills, section headers) that
 //! `selectable_label`/`label` alone cannot express.
 
-use crate::colorpack::{ColorPack, ColorScheme};
+use crate::colorpack::{contrast_ratio, ColorPack, ColorScheme, WCAG_AA_NORMAL_TEXT};
 use eframe::egui::{
     self, Color32, CornerRadius, FontFamily, FontId, Margin, Sense, Shadow, Stroke, TextStyle, Vec2,
 };
@@ -175,6 +175,8 @@ pub fn section_header(ui: &mut egui::Ui, icon: &str, title: &str) {
 
 /// A small rounded, colored badge (snippet/hotkey counts, status words).
 pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32) {
+    let background = blend_over(bg, ui.visuals().panel_fill);
+    let fg = readable_text_color(fg, background);
     egui::Frame::new()
         .fill(bg)
         .corner_radius(CornerRadius::same(255))
@@ -182,6 +184,31 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
         .show(ui, |ui| {
             ui.label(egui::RichText::new(text).color(fg).size(12.0).strong());
         });
+}
+
+fn blend_over(foreground: Color32, background: Color32) -> Color32 {
+    let alpha = f32::from(foreground.a()) / 255.0;
+    let channel = |foreground: u8, background: u8| {
+        (f32::from(foreground) * alpha + f32::from(background) * (1.0 - alpha)).round() as u8
+    };
+    Color32::from_rgb(
+        channel(foreground.r(), background.r()),
+        channel(foreground.g(), background.g()),
+        channel(foreground.b(), background.b()),
+    )
+}
+
+fn readable_text_color(preferred: Color32, background: Color32) -> Color32 {
+    if contrast_ratio(preferred, background) >= WCAG_AA_NORMAL_TEXT {
+        return preferred;
+    }
+    let black_ratio = contrast_ratio(Color32::BLACK, background);
+    let white_ratio = contrast_ratio(Color32::WHITE, background);
+    if black_ratio >= white_ratio {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
 }
 
 /// A small, clickable rounded chip used for the category filter row --
@@ -211,6 +238,7 @@ pub fn chip_scaled(
         } else {
             (palette.muted, tint(palette.border, 140))
         };
+        let fg = readable_text_color(fg, blend_over(bg, ui.visuals().panel_fill));
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(255), bg);
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, font, fg);
@@ -422,5 +450,15 @@ mod tests {
         let style = ctx.style_of(egui::Theme::Dark);
         assert_eq!(style.text_styles[&TextStyle::Body].size, 14.5 * 1.5);
         assert_eq!(style.text_styles[&TextStyle::Small].size, 12.0 * 1.5);
+    }
+
+    #[test]
+    fn tinted_status_pill_chooses_a_readable_foreground() {
+        let palette = Palette::for_pack(ColorPack::Default, false);
+        let background = blend_over(tint(palette.warning, 38), Color32::WHITE);
+        let foreground = readable_text_color(palette.warning, background);
+
+        assert_eq!(foreground, Color32::BLACK);
+        assert!(contrast_ratio(foreground, background) >= WCAG_AA_NORMAL_TEXT);
     }
 }

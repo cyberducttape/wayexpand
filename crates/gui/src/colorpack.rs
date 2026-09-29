@@ -5,8 +5,31 @@ use eframe::egui::Color32;
 // - Large text (18px+): 3:1 ratio required
 // - UI components: 3:1 ratio required
 //
-// Contrast Ratio = (L1 + 0.05) / (L2 + 0.05) where L is relative luminance
-// Each color in ColorScheme is validated for accessibility
+// Contrast Ratio = (L1 + 0.05) / (L2 + 0.05) where L is relative luminance.
+// The semantic foreground/background pairings are enforced by tests below.
+
+pub const WCAG_AA_NORMAL_TEXT: f32 = 4.5;
+
+/// Returns the WCAG 2.1 relative luminance for an opaque sRGB color.
+pub fn relative_luminance(color: Color32) -> f32 {
+    fn linear(channel: u8) -> f32 {
+        let channel = f32::from(channel) / 255.0;
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+}
+
+/// Returns the WCAG 2.1 contrast ratio between two opaque sRGB colors.
+pub fn contrast_ratio(foreground: Color32, background: Color32) -> f32 {
+    let foreground = relative_luminance(foreground);
+    let background = relative_luminance(background);
+    (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorPack {
@@ -136,13 +159,13 @@ impl ColorScheme {
             }
         } else {
             Self {
-                accent: Color32::from_rgb(0x4F, 0x6B, 0xED),
+                accent: Color32::from_rgb(0x3F, 0x56, 0xC9),
                 accent_weak: Color32::from_rgb(0xD4, 0xD9, 0xFC), // Improved: darker for better contrast
                 accent_text: Color32::WHITE,
-                success: Color32::from_rgb(0x1F, 0x9D, 0x55),
-                warning: Color32::from_rgb(0xB2, 0x77, 0x0A),
-                danger: Color32::from_rgb(0xD6, 0x45, 0x45),
-                muted: Color32::from_rgb(0x6B, 0x72, 0x80),
+                success: Color32::from_rgb(0x14, 0x7A, 0x42),
+                warning: Color32::from_rgb(0x8A, 0x5A, 0x00),
+                danger: Color32::from_rgb(0xB5, 0x2F, 0x38),
+                muted: Color32::from_rgb(0x62, 0x69, 0x75),
                 border: Color32::from_rgb(0xE1, 0xE4, 0xEA),
                 surface: Color32::from_rgb(0xFF, 0xFF, 0xFF),
                 surface_hover: Color32::from_rgb(0xEE, 0xF0, 0xF4),
@@ -167,7 +190,7 @@ impl ColorScheme {
             success: green,
             warning: Color32::from_rgb(0x00, 0xFF, 0x00), // Brighter green for warnings
             danger: Color32::from_rgb(0xFF, 0x66, 0x00), // Orange-red for danger (visible on green)
-            muted: Color32::from_rgb(0x00, 0x88, 0x00),
+            muted: Color32::from_rgb(0x00, 0x99, 0x00),
             border: dark_green,
             surface: black,
             surface_hover: Color32::from_rgb(0x00, 0x1A, 0x00),
@@ -243,13 +266,13 @@ impl ColorScheme {
         } else {
             // Light variant: softer neon
             Self {
-                accent: Color32::from_rgb(0xDD, 0x00, 0xDD),
+                accent: Color32::from_rgb(0x99, 0x00, 0x99),
                 accent_weak: Color32::from_rgb(0xEE, 0xCC, 0xEE),
                 accent_text: Color32::WHITE,
-                success: Color32::from_rgb(0x00, 0xCC, 0x77),
-                warning: Color32::from_rgb(0xEE, 0xAA, 0x00),
-                danger: Color32::from_rgb(0xEE, 0x00, 0x44),
-                muted: Color32::from_rgb(0x77, 0x77, 0xDD),
+                success: Color32::from_rgb(0x00, 0x6B, 0x42),
+                warning: Color32::from_rgb(0x80, 0x56, 0x00),
+                danger: Color32::from_rgb(0xB0, 0x00, 0x35),
+                muted: Color32::from_rgb(0x55, 0x55, 0xAA),
                 border: Color32::from_rgb(0x88, 0x88, 0xFF),
                 surface: Color32::from_rgb(0xF5, 0xE6, 0xFF),
                 surface_hover: Color32::from_rgb(0xEE, 0xDD, 0xFF),
@@ -268,7 +291,7 @@ impl ColorScheme {
                 accent_text: Color32::BLACK,
                 success: Color32::from_rgb(0x00, 0xFF, 0x00), // Pure green
                 warning: Color32::from_rgb(0xFF, 0xFF, 0x00), // Pure yellow
-                danger: Color32::from_rgb(0xFF, 0x00, 0x00),  // Pure red
+                danger: Color32::from_rgb(0xFF, 0x55, 0x55),  // Bright red
                 muted: Color32::from_rgb(0xAA, 0xAA, 0xAA),
                 border: Color32::WHITE,
                 surface: Color32::BLACK,
@@ -282,9 +305,9 @@ impl ColorScheme {
                 accent: Color32::BLACK,
                 accent_weak: Color32::from_rgb(0xDD, 0xDD, 0xDD),
                 accent_text: Color32::WHITE,
-                success: Color32::from_rgb(0x00, 0xAA, 0x00), // Dark green
-                warning: Color32::from_rgb(0xAA, 0xAA, 0x00), // Dark yellow
-                danger: Color32::from_rgb(0xAA, 0x00, 0x00),  // Dark red
+                success: Color32::from_rgb(0x00, 0x66, 0x00), // Dark green
+                warning: Color32::from_rgb(0x55, 0x55, 0x00), // Dark yellow
+                danger: Color32::from_rgb(0x8A, 0x00, 0x00),  // Dark red
                 muted: Color32::from_rgb(0x55, 0x55, 0x55),
                 border: Color32::BLACK,
                 surface: Color32::WHITE,
@@ -297,7 +320,7 @@ impl ColorScheme {
 
     fn terminal_blue() -> Self {
         // IBM 3270 mainframe terminal: cornflower blue on deep navy, with improved contrast
-        let blue = Color32::from_rgb(0x41, 0x69, 0xE1); // Cornflower blue
+        let blue = Color32::from_rgb(0x55, 0xAA, 0xFF); // Bright blue for text contrast
         let dark_blue = Color32::from_rgb(0x00, 0x14, 0x28); // Deep navy
         let cyan = Color32::from_rgb(0x00, 0xFF, 0xFF); // Cyan for accents
         let white = Color32::from_rgb(0xFF, 0xFF, 0xFF); // White for secondary text
@@ -306,10 +329,10 @@ impl ColorScheme {
         Self {
             accent: blue,
             accent_weak: Color32::from_rgb(0x00, 0x28, 0x50),
-            accent_text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            accent_text: Color32::BLACK,
             success: cyan,
             warning: Color32::from_rgb(0xFF, 0xFF, 0x00),
-            danger: Color32::from_rgb(0xFF, 0x64, 0x64),
+            danger: Color32::from_rgb(0xFF, 0x99, 0x99),
             muted: white, // White for muted text (better contrast)
             border: Color32::from_rgb(0x00, 0x80, 0xFF), // Brighter cyan for borders
             surface: dark_blue,
@@ -332,13 +355,61 @@ impl ColorScheme {
             accent_text: blue,
             success: orange,
             warning: white,
-            danger: Color32::from_rgb(0xFF, 0x64, 0x64),
+            danger: Color32::from_rgb(0xFF, 0x99, 0x99),
             muted: Color32::from_rgb(0xFF, 0xCC, 0x66), // Lighter orange for muted text
             border: orange,
             surface: blue,
             surface_hover: Color32::from_rgb(0x00, 0x00, 0xDD),
             background: blue,
             extreme_bg: blue,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contrast_ratio_matches_wcag_reference_pair() {
+        assert!((contrast_ratio(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.01);
+        assert!((contrast_ratio(Color32::WHITE, Color32::WHITE) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn every_pack_semantic_text_pair_meets_wcag_aa() {
+        for &pack in ColorPack::all() {
+            for dark in [false, true] {
+                let scheme = ColorScheme::for_pack(pack, dark);
+                let foregrounds = [
+                    ("accent", scheme.accent),
+                    ("success", scheme.success),
+                    ("warning", scheme.warning),
+                    ("danger", scheme.danger),
+                    ("muted", scheme.muted),
+                ];
+                let backgrounds = [
+                    ("surface", scheme.surface),
+                    ("background", scheme.background),
+                    ("surface_hover", scheme.surface_hover),
+                ];
+
+                for (foreground_name, foreground) in foregrounds {
+                    for (background_name, background) in backgrounds {
+                        let ratio = contrast_ratio(foreground, background);
+                        assert!(
+                            ratio >= WCAG_AA_NORMAL_TEXT,
+                            "{pack:?} (dark={dark}) {foreground_name} on {background_name} has {ratio:.2}:1 contrast"
+                        );
+                    }
+                }
+
+                let accent_text_ratio = contrast_ratio(scheme.accent_text, scheme.accent);
+                assert!(
+                    accent_text_ratio >= WCAG_AA_NORMAL_TEXT,
+                    "{pack:?} (dark={dark}) accent_text on accent has {accent_text_ratio:.2}:1 contrast"
+                );
+            }
         }
     }
 }

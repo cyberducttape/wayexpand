@@ -251,10 +251,13 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
 
 ## Accessibility Notes
 
-- **High Contrast** pack: Meets WCAG AA+ standards for all text
-- **Default** pack: Meets WCAG AA standards
-- **Monochrome packs**: Meet WCAG AA standards with careful color choices
-- **Retro 80s Neon**: May not meet accessibility standards; use High Contrast for required compliance
+- **High Contrast**, **Default**, and monochrome packs: Their semantic
+  foreground colors are tested at WCAG AA (4.5:1) against every light/dark
+  surface used by the GUI.
+- The **Retro 80s Neon** pack follows the same executable contrast checks.
+- Alpha-tinted status pills choose black or white text at runtime after
+  compositing their background, so their small labels are also kept at AA
+  contrast. This does not certify arbitrary user-authored colors or content.
 
 ## Future Enhancements
 
