@@ -77,6 +77,8 @@ What's implemented:
   - Line-delimited JSON for simplicity
   - `BrokerServer`: Listen and accept connections
   - `BrokerClient`: Connect and send requests
+  - Bounded client connections (64) so idle same-user clients cannot exhaust
+    the broker's blocking request workers
 
 - **Daemon-side broker helper** (crates/daemon/src/action_broker.rs)
   - `ActionBrokerManager` is a tested, opt-in helper for future routing

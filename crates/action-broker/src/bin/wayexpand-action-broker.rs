@@ -21,6 +21,7 @@ use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
 
 const MAX_CONCURRENT_ACTIONS: usize = 16;
+const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
 struct BrokerOptions {
     config_file: PathBuf,
@@ -263,6 +264,7 @@ async fn main() -> Result<()> {
             .map_err(|e| anyhow!("Failed to bind broker socket: {}", e))?,
     );
     let action_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
+    let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let verbose = options.verbose;
 
     info!(
@@ -285,10 +287,21 @@ async fn main() -> Result<()> {
                 continue;
             }
         };
+        let connection_permit = match connection_slots.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                warn!(
+                    maximum = MAX_CONCURRENT_CONNECTIONS,
+                    "broker connection limit reached; rejecting client"
+                );
+                continue;
+            }
+        };
         info!("accepted broker client connection");
         let executor = Arc::clone(&executor);
         let action_slots = Arc::clone(&action_slots);
         tokio::spawn(async move {
+            let _connection_permit = connection_permit;
             let (mut conn, request) = match tokio::task::spawn_blocking(move || {
                 let mut conn = conn;
                 let request = conn.read_request()?;
@@ -360,6 +373,18 @@ mod tests {
         let slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
         let mut permits = Vec::with_capacity(MAX_CONCURRENT_ACTIONS);
         for _ in 0..MAX_CONCURRENT_ACTIONS {
+            permits.push(slots.clone().try_acquire_owned().unwrap());
+        }
+        assert!(slots.try_acquire().is_err());
+        drop(permits);
+        assert!(slots.try_acquire().is_ok());
+    }
+
+    #[tokio::test]
+    async fn connection_slots_reject_clients_before_request_handling() {
+        let slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+        let mut permits = Vec::with_capacity(MAX_CONCURRENT_CONNECTIONS);
+        for _ in 0..MAX_CONCURRENT_CONNECTIONS {
             permits.push(slots.clone().try_acquire_owned().unwrap());
         }
         assert!(slots.try_acquire().is_err());
