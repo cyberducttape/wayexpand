@@ -60,9 +60,10 @@ What's implemented:
 - **Configuration** (crates/action-broker/src/config.rs)
   - `ActionConfig`: Per-action definitions (program, args, timeout, env, cwd)
   - `BrokerConfig`: Full broker setup with action registry
-  - Validation: Enforce absolute paths, verify regular executable ownership and
-    permissions, canonicalize executable paths, and apply environment restrictions
-    at broker startup; package upgrades require a broker restart to revalidate targets
+  - Validation: Enforce absolute paths and private working directories, verify
+    regular executable ownership and permissions, canonicalize paths, and apply
+    environment restrictions at broker startup; package upgrades require a broker
+    restart to revalidate targets
 
 - **Executor** (crates/action-broker/src/executor.rs)
   - Safe command execution with policy enforcement

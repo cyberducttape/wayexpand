@@ -22,6 +22,8 @@ Changes not yet released.
   executable targets at startup and bounding concurrent action execution;
   distribution installers continue to omit the broker until routing and
   managed service deployment are implemented.
+- Require Action Broker working directories to be absolute, private, existing
+  directories and canonicalize them during policy loading.
 - Add a non-secret Launchpad SSH preflight that reports the decoded key
   fingerprint and distinguishes authentication failure from push failure.
 - Accept both SSH client exit statuses used for Launchpad's authenticated

@@ -151,10 +151,17 @@ impl BrokerConfig {
 
     /// Validate entire configuration.
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(cwd) = &self.default_cwd {
+            validate_working_directory("default_cwd", cwd)?;
+        }
         for (id, action) in &self.actions {
             action
                 .validate()
                 .map_err(|e| format!("action '{}': {}", id, e))?;
+
+            if let Some(cwd) = &action.cwd {
+                validate_working_directory(&format!("action '{}' cwd", id), cwd)?;
+            }
 
             if self.require_absolute_paths {
                 validate_absolute_program(id, &action.program)?;
@@ -178,8 +185,58 @@ impl BrokerConfig {
                 action.program = canonical;
             }
         }
+        if let Some(cwd) = &mut self.default_cwd {
+            let canonical = fs::canonicalize(&*cwd)
+                .map_err(|error| format!("cannot canonicalize default_cwd: {error}"))?
+                .to_string_lossy()
+                .into_owned();
+            validate_working_directory("default_cwd", &canonical)?;
+            *cwd = canonical;
+        }
+        for (id, action) in &mut self.actions {
+            if let Some(cwd) = &mut action.cwd {
+                let canonical = fs::canonicalize(&*cwd)
+                    .map_err(|error| format!("cannot canonicalize action '{}' cwd: {error}", id))?
+                    .to_string_lossy()
+                    .into_owned();
+                validate_working_directory(&format!("action '{}' cwd", id), &canonical)?;
+                *cwd = canonical;
+            }
+        }
         Ok(())
     }
+}
+
+fn validate_working_directory(label: &str, directory: &str) -> Result<(), String> {
+    let path = Path::new(directory);
+    if !path.is_absolute() {
+        return Err(format!("{} must be an absolute path", label));
+    }
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("{} '{}' cannot be inspected: {}", label, directory, error))?;
+    if !metadata.is_dir() {
+        return Err(format!("{} '{}' is not a directory", label, directory));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        if metadata.mode() & 0o022 != 0 {
+            return Err(format!(
+                "{} '{}' is writable by group or other users",
+                label, directory
+            ));
+        }
+        let uid = rustix::process::geteuid().as_raw();
+        if metadata.uid() != uid && metadata.uid() != 0 {
+            return Err(format!(
+                "{} '{}' is not owned by the current user or root",
+                label, directory
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), String> {
@@ -501,5 +558,27 @@ enabled = true
             ..BrokerConfig::default()
         };
         assert!(directory.validate_and_canonicalize().is_err());
+    }
+
+    #[test]
+    fn working_directory_validation_requires_a_private_absolute_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory =
+            std::env::temp_dir().join(format!("wayexpand-private-cwd-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = BrokerConfig {
+            default_cwd: Some(directory.to_string_lossy().into_owned()),
+            ..BrokerConfig::default()
+        };
+
+        config.validate_and_canonicalize().unwrap();
+        let expected = fs::canonicalize(&directory).unwrap();
+        assert_eq!(config.default_cwd.as_deref(), expected.to_str());
+
+        config.default_cwd = Some("relative/path".to_string());
+        assert!(config.validate().is_err());
+        fs::remove_dir(directory).unwrap();
     }
 }
