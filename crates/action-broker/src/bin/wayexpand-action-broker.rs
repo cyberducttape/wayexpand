@@ -1,7 +1,8 @@
 //! WayExpand Action Broker Service
 //!
 //! Standalone service that executes actions with fine-grained per-action permissions.
-//! Phase 1 stub: accepts connections and executes commands according to policy.
+//! The binary is implemented and tested, but remains opt-in until daemon
+//! policy routing and an operator-managed service deployment are available.
 //!
 //! Usage:
 //!   wayexpand-action-broker --config ~/.config/wayexpand-broker.toml \
@@ -77,10 +78,10 @@ fn parse_args() -> Result<BrokerOptions> {
 }
 
 fn print_help() {
-    eprintln!(
-        r#"WayExpand Action Broker Service v1.3.0
-
-A secure command execution service with fine-grained per-action permissions.
+    println!(
+        "WayExpand Action Broker Service v{}\n\n{}",
+        env!("CARGO_PKG_VERSION"),
+        r#"A secure command execution service with fine-grained per-action permissions.
 
 USAGE:
     wayexpand-action-broker [OPTIONS]

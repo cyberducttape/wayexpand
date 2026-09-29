@@ -7,18 +7,10 @@ Address the large monolithic source files that obscure integration boundaries an
 
 ### 1. `crates/daemon/src/main.rs` (2,318 lines) - HIGHEST PRIORITY
 Split into:
-- **event_dispatch.rs** (220 lines) - Event processing pipeline
 - **input_loop.rs** (400 lines) - Input handling and reconnection logic
 - **output_loop.rs** (350 lines) - Output injection and backend lifecycle
 - **backend_lifecycle.rs** (300 lines) - Backend initialization and reconnection
 - **main.rs** (600 lines) - Orchestration and startup
-
-#### event_dispatch.rs Functions
-- `process_event()` - Main event processing
-- `apply_pending_results()` - Policy application
-- `dispatch_pending_results()` - Command queuing
-- `apply_results()` - Injection
-- `EventError` struct and impl
 
 #### input_loop.rs Functions
 - `connect_input_method_session()` - Input-method setup
@@ -70,10 +62,25 @@ Split into:
 
 4. **Reduced Cognitive Load**: 600-line files are easier to understand than 2,600-line files
 
+## Current implementation status
+
+The daemon lifecycle work is partially complete: input polling, output
+connection, and window/backend lifecycle helpers live in their dedicated
+modules. Event dispatch remains intentionally in `main.rs` because it owns the
+evdev release/quiet-period gate and the orchestration of completed async
+commands. An earlier unintegrated copy of that logic was removed; keeping two
+dispatch implementations made race fixes easy to miss and created a false
+refactoring target.
+
+The core engine now also has dedicated `matching`, `command_runtime`,
+`transaction`, and `expansion` modules, while `engine/mod.rs` remains the
+coordinator and public API surface.
+
 ## Implementation Strategy
 
 ### Phase 1: Daemon Refactoring (Next Sprint)
-1. Create `event_dispatch.rs` (not started; event processing remains in `main.rs`)
+1. Keep event processing in `main.rs` until its evdev gating and completion
+   orchestration can move together without duplicating state transitions.
 2. Create `input_loop.rs` ✅
 3. Create `output_loop.rs` ✅
 4. Create `backend_lifecycle.rs` ✅
@@ -122,7 +129,10 @@ Address remaining large files based on priority and maintenance burden
 
 ## Next Steps
 
-1. Extract event processing into `event_dispatch.rs`
-2. Split the remaining daemon event loop into lifecycle-owned components
-3. Update main.rs imports and reduce orchestration to startup/wiring
-4. Run tests and verify no regressions after each extraction
+1. If event dispatch is extracted, move the evdev gate, follow-up replay, and
+   completed-command drain in the same change.
+2. Split only when the module boundary preserves the single event-ordering
+   point and its regression tests.
+3. Reduce `main.rs` orchestration only after the behavior is covered by daemon
+   integration tests.
+4. Run tests and verify no regressions after each extraction.

@@ -1,8 +1,8 @@
 # Action Broker Architecture
 
-**Version:** 1.3.0  
+**Version:** 1.2.0
 **Status:** Experimental foundation; disabled by default and not a security boundary
-**Next:** Hardened IPC and external sandbox integration before enablement
+**Next:** Policy routing, service integration, and external sandbox integration before enablement
 
 ## Overview
 
@@ -70,6 +70,11 @@ What's implemented:
 - **Daemon Integration** (crates/daemon/src/action_broker.rs)
   - `ActionBrokerManager` for client connection pooling
   - Ready for policy-based routing (Phase 2)
+- **Standalone service binary** (`wayexpand-action-broker`)
+  - Loads a validated broker configuration
+  - Binds a protected Unix socket
+  - Accepts bounded, authenticated requests and executes configured actions
+  - Ships as a tested workspace binary, but is not enabled or auto-started
 
 ## Phase 2: Enhanced Control (v1.3.x) - PLANNED
 
@@ -90,11 +95,10 @@ What will be implemented:
   - Track: action ID, parameters, execution time, exit code
   - Integration with organization audit trail
 
-- **Standalone Broker Binary**
-  - Create `crates/action-broker-server/` binary
-  - Systemd user service for auto-start
-  - Socket activation support
-  - Configuration file loading
+- **Standalone Broker Deployment**
+  - Add a systemd user service and optional socket activation
+  - Document operator-managed startup and lifecycle
+  - Integrate daemon policy routing and action-name configuration
 
 ## Phase 3: Enterprise Features (v1.4+) - FUTURE
 
@@ -197,7 +201,7 @@ replacement = ""
 | IPC (Unix socket) | ✅ Complete | ✅ Pass | JSON over AF_UNIX streams |
 | Daemon integration | ✅ Foundation | ⏳ Pending | ActionBrokerManager ready |
 | Policy routing | ⏳ Phase 2 | ⏳ Pending | Will integrate with policy module |
-| Broker binary | ⏳ Phase 2 | ⏳ Pending | Standalone service executable |
+| Broker binary | ✅ Complete | ✅ Pass | `wayexpand-action-broker`; service deployment remains separate |
 | Systemd integration | ⏳ Phase 2 | ⏳ Pending | User service + socket activation |
 | Audit logging | ⏳ Phase 2 | ⏳ Pending | syslog/journald integration |
 
