@@ -1,9 +1,17 @@
 use anyhow::{Context, Result};
 use wayexpand_core::{CommandConfig, CommandEnvironment, ExpansionConfig, MatchMode};
 
+const MAX_COMMAND_ARGS: usize = 32;
+const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
+const MAX_COMMAND_ARG_CHARS: usize = 1024;
+const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
+const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
+const MAX_COMMAND_CACHE_MS: u64 = 60_000;
+
 /// Editable form state for one expansion. Keeping this separate from the
 /// application shell makes editor validation and future editor widgets
 /// independently testable.
+#[derive(Clone)]
 pub(crate) struct Draft {
     pub(crate) trigger: String,
     pub(crate) description: String,
@@ -76,15 +84,41 @@ impl Draft {
             .trim()
             .parse::<u64>()
             .context("cache duration must be an integer in milliseconds")?;
+        let args: Vec<String> = self
+            .command_args
+            .lines()
+            .map(str::trim)
+            .filter(|arg| !arg.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if program.chars().count() > MAX_COMMAND_PROGRAM_CHARS {
+            anyhow::bail!("program is too long");
+        }
+        if program.contains('\0') {
+            anyhow::bail!("program cannot contain NUL bytes");
+        }
+        if args.len() > MAX_COMMAND_ARGS {
+            anyhow::bail!("too many command arguments");
+        }
+        let arg_data_chars: usize = args.iter().map(|arg| arg.chars().count()).sum();
+        if arg_data_chars > MAX_COMMAND_ARG_DATA_CHARS {
+            anyhow::bail!("command arguments are too large");
+        }
+        if args
+            .iter()
+            .any(|arg| arg.chars().count() > MAX_COMMAND_ARG_CHARS || arg.contains('\0'))
+        {
+            anyhow::bail!("command argument is too long or contains NUL bytes");
+        }
+        if !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&timeout_ms) {
+            anyhow::bail!("timeout must be between 1 and 5000 milliseconds");
+        }
+        if cache_ms > MAX_COMMAND_CACHE_MS {
+            anyhow::bail!("cache duration must not exceed 60000 milliseconds");
+        }
         Ok(Some(CommandConfig {
             program: program.to_owned(),
-            args: self
-                .command_args
-                .lines()
-                .map(str::trim)
-                .filter(|arg| !arg.is_empty())
-                .map(str::to_owned)
-                .collect(),
+            args,
             timeout_ms,
             cache_ms,
             environment: CommandEnvironment::default(),

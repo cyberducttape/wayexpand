@@ -90,6 +90,14 @@ struct GuiApp {
     /// run has happened yet for the current draft. Cleared on selection
     /// change so a stale result from a different snippet is never shown.
     command_preview_result: Option<Result<String, String>>,
+    command_preview_key: Option<u64>,
+    /// Receiver for the currently running explicit command preview. The
+    /// command itself runs off the UI thread because even a valid preview can
+    /// wait for the configured command timeout.
+    command_preview_receiver: Option<mpsc::Receiver<Result<String, String>>>,
+    /// Reload can change the persisted font scale outside the settings dialog.
+    /// Apply that style on the next frame after the config has been replaced.
+    theme_refresh_pending: bool,
     /// Cache of the last plain preview result. Stores (draft_hash, input, result)
     /// to avoid rebuilding the ExpansionEngine on every repaint.
     preview_cache: Option<(u64, String, String)>,
@@ -191,6 +199,9 @@ impl GuiApp {
             colorpack: prefs.colorpack,
             colorpack_selector_open: false,
             command_preview_result: None,
+            command_preview_key: None,
+            command_preview_receiver: None,
+            theme_refresh_pending: false,
             preview_cache: None,
             app_detection: None,
             close_after_confirm: false,
@@ -239,6 +250,8 @@ impl GuiApp {
     /// the GUI reports success while the daemon keeps expanding the old
     /// config, and the user has no way to know the two have diverged.
     fn set_message_and_reload(&mut self, message: impl Into<String>) {
+        self.preview_cache = None;
+        self.clear_command_preview();
         self.message = message.into();
         if let Err(error) = control_command("reload") {
             self.message = format!("{} (daemon did not reload: {error})", self.message);
@@ -349,7 +362,7 @@ impl GuiApp {
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
         self.preview_input = self.config.expansion[index].trigger.clone();
         self.pending_action = None;
-        self.command_preview_result = None;
+        self.clear_command_preview();
     }
 
     fn draft_is_dirty(&self) -> bool {
@@ -441,6 +454,7 @@ impl GuiApp {
                     .map(|index| self.config.expansion[index].trigger.clone())
                     .unwrap_or_default();
                 self.undo.clear();
+                self.theme_refresh_pending = true;
                 self.message = "Configuration reloaded".into();
             }
             Err(error) => self.message = format!("Reload failed: {}", error.safe_summary()),
@@ -492,7 +506,7 @@ impl GuiApp {
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
-                self.command_preview_result = None;
+                self.clear_command_preview();
                 self.set_message_and_reload("Snippet saved atomically");
             }
             Err(error) => self.message = format!("Save failed: {}", error.safe_summary()),
@@ -525,7 +539,7 @@ impl GuiApp {
             .selected
             .map(|index| self.config.expansion[index].trigger.clone())
             .unwrap_or_default();
-        self.command_preview_result = None;
+        self.clear_command_preview();
         self.set_message_and_reload("Undid the last saved change");
     }
 
@@ -617,7 +631,7 @@ impl GuiApp {
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
-                self.command_preview_result = None;
+                self.clear_command_preview();
                 self.set_message_and_reload(format!("Deleted {trigger}"));
             }
             Err(error) => self.message = format!("Delete failed: {}", error.safe_summary()),
@@ -687,7 +701,53 @@ impl GuiApp {
         let Some(draft) = self.draft.as_ref() else {
             return;
         };
-        self.command_preview_result = Some(preview::run_command_preview(draft));
+        self.command_preview_key = Some(preview::cache_key(Some(draft), &self.preview_app));
+        let command = match draft.command_config() {
+            Ok(Some(command)) => command,
+            Ok(None) => {
+                self.command_preview_result = Some(Err("Enable the dynamic command first".into()));
+                return;
+            }
+            Err(error) => {
+                self.command_preview_result =
+                    Some(Err(format!("Command settings invalid: {error}")));
+                return;
+            }
+        };
+        let (sender, receiver) = mpsc::channel();
+        self.command_preview_result = None;
+        self.command_preview_receiver = Some(receiver);
+        thread::spawn(move || {
+            let result = wayexpand_core::run_command(&command)
+                .map_err(|error| format!("Command failed: {error}"));
+            let _ = sender.send(result);
+        });
+    }
+
+    fn poll_command_preview(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = &self.command_preview_receiver else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(result) => {
+                self.command_preview_receiver = None;
+                self.command_preview_result = Some(result);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.command_preview_receiver = None;
+                self.command_preview_result =
+                    Some(Err("Command preview failed unexpectedly".into()));
+            }
+        }
+    }
+
+    fn clear_command_preview(&mut self) {
+        self.command_preview_result = None;
+        self.command_preview_key = None;
+        self.command_preview_receiver = None;
     }
 
     fn toggle_pause(&mut self) {
@@ -1664,10 +1724,31 @@ impl GuiApp {
                         );
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
-                                        if ui.button("Run once").clicked() {
+                                        let preview_is_current = self.command_preview_key
+                                            == Some(preview::cache_key(
+                                                self.draft.as_ref(),
+                                                &self.preview_app,
+                                            ));
+                                        if ui
+                                            .add_enabled(
+                                                self.command_preview_receiver.is_none(),
+                                                egui::Button::new(
+                                                    if self.command_preview_receiver.is_some() {
+                                                        "Running…"
+                                                    } else {
+                                                        "Run once"
+                                                    },
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
                                             self.run_command_preview();
                                         }
-                                        match &self.command_preview_result {
+                                        match self
+                                            .command_preview_result
+                                            .as_ref()
+                                            .filter(|_| preview_is_current)
+                                        {
                                             Some(Ok(output)) => {
                                                 let shown: String = if output.chars().count() > 200
                                                 {
@@ -1779,6 +1860,11 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_command_preview(ctx);
+        if self.theme_refresh_pending {
+            theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
+            self.theme_refresh_pending = false;
+        }
         let palette = Palette::for_pack(self.colorpack, self.dark_mode);
         let modal_open = self.diagnostics_open
             || self.import_open
