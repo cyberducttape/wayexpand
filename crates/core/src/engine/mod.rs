@@ -3,10 +3,11 @@ pub mod expansion;
 pub mod matching;
 pub mod transaction;
 
+use command_runtime::{CommandMetricsState, QueueSendError};
+
 use crate::{
-    config::capitalize_first_letter, render_template_with_cursor, CommandConfig,
-    CommandEnvironment, Config, ConfigError, HotkeyConfig, KeyChord, MatchMode, Matcher,
-    TextInjector,
+    CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig, KeyChord, MatchMode,
+    Matcher,
 };
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
@@ -17,7 +18,7 @@ use std::{
     io::Read,
     process::{Child, ChildStdout, Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     },
     thread::{self, JoinHandle},
@@ -311,34 +312,6 @@ impl Drop for AsyncCommandRuntime {
     }
 }
 
-struct CommandMetricsState {
-    queue_depth: AtomicUsize,
-    in_flight: AtomicUsize,
-    queue_rejected_total: AtomicU64,
-    timeout_total: AtomicU64,
-    failure_total: AtomicU64,
-}
-
-impl CommandMetricsState {
-    fn new() -> Self {
-        Self {
-            queue_depth: AtomicUsize::new(0),
-            in_flight: AtomicUsize::new(0),
-            queue_rejected_total: AtomicU64::new(0),
-            timeout_total: AtomicU64::new(0),
-            failure_total: AtomicU64::new(0),
-        }
-    }
-
-    fn record_error(&self, timeout: bool) {
-        if timeout {
-            self.timeout_total.fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.failure_total.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-}
-
 impl AsyncCommandRuntime {
     fn try_send_command(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
         self.try_send(&self.command_sender, job, &self.expansion_metrics)
@@ -371,11 +344,6 @@ impl AsyncCommandRuntime {
     }
 }
 
-enum QueueSendError {
-    Full,
-    Disconnected,
-}
-
 enum AsyncCommandJob {
     Expansion {
         config_index: usize,
@@ -405,20 +373,6 @@ struct AsyncHotkeyCompletion {
 /// A non-exclusive word-boundary match has already delivered its terminating
 /// character to the application. Since `apply` replaces that character along
 /// with the trigger, undo must include it as well.
-fn transaction_texts(
-    restore: &str,
-    replacement: &str,
-    reinsert_after: Option<char>,
-) -> (String, String) {
-    let mut restore_text = restore.to_owned();
-    let mut replacement_text = replacement.to_owned();
-    if let Some(character) = reinsert_after {
-        restore_text.push(character);
-        replacement_text.push(character);
-    }
-    (restore_text, replacement_text)
-}
-
 impl ExpansionEngine {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         config.validate()?;
@@ -783,7 +737,7 @@ impl ExpansionEngine {
 
             // Apply case propagation
             let final_output = if plan.propagate_case {
-                apply_case_style(&plan.matched_text, &validated_output)
+                matching::apply_case_style(&plan.matched_text, &validated_output)
             } else {
                 validated_output
             };
@@ -846,7 +800,7 @@ impl ExpansionEngine {
         }
 
         let insert = if pending.propagate_case {
-            apply_case_style(&pending.matched_text, &output)
+            matching::apply_case_style(&pending.matched_text, &output)
         } else {
             output
         };
@@ -937,7 +891,7 @@ impl ExpansionEngine {
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
         self.release_deferred_match_for_result(result);
         if result.undoable && result.cursor_offset.is_none() {
-            self.last_expansion = Some(transaction_texts(
+            self.last_expansion = Some(transaction::transaction_texts(
                 &result.matched_text,
                 &result.insert,
                 result.reinsert_after,
@@ -1216,7 +1170,7 @@ impl ExpansionEngine {
 
     /// Process an event stream. A text event may contain multiple Unicode
     /// scalar values; matching is performed after each one.
-    pub fn process(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
+    pub(super) fn process_internal(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
         // A pending undo is valid only immediately after the expansion it
         // would revert, with no other event in between. Undo is preserved only
         // if the key event is the undo chord itself; any other key (navigation,
@@ -1266,7 +1220,7 @@ impl ExpansionEngine {
                             };
                             if !self.matcher.can_continue(&typed, character) {
                                 let trailing_word_character = match_mode == MatchMode::WordBoundary
-                                    && is_word_character(character);
+                                    && matching::is_word_character(character);
                                 if !trailing_word_character {
                                     if let Some(result) =
                                         self.take_match(config_index, length, Some(character))
@@ -1345,7 +1299,7 @@ impl ExpansionEngine {
                 results
             }
             InputEvent::Delimiter(character) => {
-                self.process(InputEvent::Text(character.to_string()))
+                self.process_internal(InputEvent::Text(character.to_string()))
             }
             InputEvent::Backspace => {
                 self.input_generation = self.input_generation.wrapping_add(1);
@@ -1403,7 +1357,10 @@ impl ExpansionEngine {
     /// Process input and return pending expansion results for deferred execution.
     /// Commands are NOT executed; caller must check policy and complete results
     /// with `dispatch_pending_with_policy()` to preserve engine state.
-    pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
+    pub(super) fn process_deferred_internal(
+        &mut self,
+        event: InputEvent,
+    ) -> Vec<PendingExpansionResult> {
         self.restore_deferred_matches();
         // Same undo validity rules as process(): only the undo chord preserves undo.
         match &event {
@@ -1448,7 +1405,7 @@ impl ExpansionEngine {
                             };
                             if !self.matcher.can_continue(&typed, character) {
                                 let trailing_word_character = match_mode == MatchMode::WordBoundary
-                                    && is_word_character(character);
+                                    && matching::is_word_character(character);
                                 if !trailing_word_character {
                                     if let Some(result) = self.take_match_deferred(
                                         config_index,
@@ -1521,7 +1478,7 @@ impl ExpansionEngine {
                 results
             }
             InputEvent::Delimiter(character) => {
-                self.process_deferred(InputEvent::Text(character.to_string()))
+                self.process_deferred_internal(InputEvent::Text(character.to_string()))
             }
             InputEvent::Backspace => {
                 self.input_generation = self.input_generation.wrapping_add(1);
@@ -1576,51 +1533,6 @@ impl ExpansionEngine {
         }
     }
 
-    /// Apply preflight policy to a match plan. Decides if execution is allowed before any side effects.
-    /// Returns the plan if approved, None if blocked by policy.
-    fn apply_preflight_policy(&self, plan: MatchPlan) -> Option<MatchPlan> {
-        // Commands are disabled by policy
-        if plan.is_command_backed() && self.config.organization.disable_commands {
-            return None;
-        }
-
-        // User has paused expansion
-        if self.user_paused {
-            return None;
-        }
-
-        // Sensitive focus (password field, etc.) disables expansion
-        if self.sensitive_focus {
-            return None;
-        }
-
-        Some(plan)
-    }
-
-    /// Apply postflight policy to command output. Validates output before injection.
-    /// Called after command execution completes, before result is committed.
-    /// Returns output if allowed, None if validation fails.
-    fn apply_postflight_policy(&self, plan: &MatchPlan, output: &str) -> Option<String> {
-        // Check max replacement size policy (0 = no limit)
-        let max_size = self.config.organization.max_replacement_size;
-        if max_size > 0 && output.len() > max_size {
-            return None;
-        }
-
-        // Generation changed between match time and command completion
-        // This means other input events occurred; result might be stale
-        if plan.generation != self.input_generation {
-            return None;
-        }
-
-        // State changed between match and completion - user paused or focused sensitive field
-        if plan.sensitive_focus != self.sensitive_focus || plan.user_paused != self.user_paused {
-            return None;
-        }
-
-        Some(output.to_string())
-    }
-
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
     /// This is the single path for committing any expansion (static or command-backed).
     /// Handles case propagation, undo state, and result metadata.
@@ -1629,7 +1541,7 @@ impl ExpansionEngine {
 
         // Apply case propagation if configured (applies to all expansion types)
         if plan.propagate_case {
-            final_insert = apply_case_style(&plan.matched_text, &final_insert);
+            final_insert = matching::apply_case_style(&plan.matched_text, &final_insert);
         }
 
         let reinsert_after = plan.terminating_char.filter(|_| self.reinsert_terminators);
@@ -1639,7 +1551,7 @@ impl ExpansionEngine {
         if plan.cursor_offset.is_none()
             && (!plan.is_command_backed() || self.async_commands.is_none())
         {
-            self.last_expansion = Some(transaction_texts(
+            self.last_expansion = Some(transaction::transaction_texts(
                 &plan.matched_text,
                 &final_insert,
                 reinsert_after,
@@ -1655,55 +1567,6 @@ impl ExpansionEngine {
             command_backed: plan.is_command_backed(),
             undoable: true,
         }
-    }
-
-    /// Create a match plan without side effects. Returns context for policy evaluation and execution.
-    /// This is the unified matching path for both immediate and deferred execution.
-    fn take_match_plan(
-        &self,
-        config_index: usize,
-        length: usize,
-        terminating_char: Option<char>,
-    ) -> Option<MatchPlan> {
-        if !self.match_allowed(config_index, length) {
-            return None;
-        }
-
-        let expansion = &self.config.expansion[config_index];
-        let propagate_case = expansion.propagate_case;
-
-        // Read the actually-typed trigger text (may be case variant due to case propagation)
-        let matched_text: String = {
-            let start = self.buffer.len().saturating_sub(length);
-            self.buffer.iter().skip(start).collect()
-        };
-
-        // Render static templates once at match time. The rendered text and
-        // cursor offset must come from the same context (and are reused by
-        // both immediate and deferred paths); commands are rendered later.
-        let (replacement_text, cursor_offset) = if expansion.command.is_some() {
-            (expansion.replacement.clone(), None)
-        } else {
-            let (rendered, cursor_offset) = render_template_with_cursor(
-                &expansion.replacement,
-                &crate::TemplateContext::system(),
-            )
-            .ok()?;
-            (rendered, cursor_offset)
-        };
-
-        Some(MatchPlan {
-            matched_text,
-            terminating_char,
-            cursor_offset,
-            generation: self.input_generation,
-            sensitive_focus: self.sensitive_focus,
-            user_paused: self.user_paused,
-            trigger_config: expansion.trigger.clone(),
-            replacement_text,
-            command: expansion.command.as_ref().map(|c| Arc::new(c.clone())),
-            propagate_case,
-        })
     }
 
     fn take_match(
@@ -1861,119 +1724,6 @@ impl ExpansionEngine {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.buffer_truncated = false;
-    }
-
-    fn match_allowed(&self, config_index: usize, length: usize) -> bool {
-        let expansion = &self.config.expansion[config_index];
-        if !self.app_filter_allows(config_index, expansion) {
-            return false;
-        }
-        if expansion.match_mode != MatchMode::WordBoundary {
-            return true;
-        }
-        match self.buffer.iter().rev().nth(length) {
-            Some(character) => !is_word_character(*character),
-            // A `None` here is ambiguous unless we know nothing was ever
-            // evicted: it means either "this is genuinely the start of
-            // input" (allow) or "a preceding character existed but was
-            // truncated out of the buffer" (unknown -- fail closed).
-            None => !self.buffer_truncated,
-        }
-    }
-
-    /// An expansion with an empty `app_filter` matches everywhere. A
-    /// non-empty filter requires a known focused window whose app id contains
-    /// one of the filter substrings (case-insensitive, preferred) or whose
-    /// title contains one (as a fallback when app_id is unavailable); if
-    /// window tracking is unavailable, this fails closed rather than
-    /// matching unconditionally.
-    ///
-    /// App ID matching is preferred because it's more reliable than window
-    /// titles, which can be user-editable or transient.
-    fn app_filter_allows(&self, config_index: usize, expansion: &crate::ExpansionConfig) -> bool {
-        if expansion.app_filter.is_empty() {
-            return true;
-        }
-        let Some(window) = &self.normalized_window else {
-            return false;
-        };
-        self.app_filters_lower[config_index].iter().any(|filter| {
-            // If app_id is available, ONLY match against it (never fall back to title).
-            // Rationale: app_id is set by the compositor and reliable; title is
-            // user-editable and can be spoofed to match sensitive filters.
-            if let Some(app_id) = window.app_id.as_deref() {
-                app_id.contains(filter.as_str())
-            } else if self.config.organization.disable_title_matching {
-                // Policy: disable_title_matching means no title fallback.
-                // Fail closed: don't match without app_id (per CLAUDE.md conventions).
-                false
-            } else {
-                // App ID unavailable but title matching allowed: fall back to title
-                window
-                    .title
-                    .as_deref()
-                    .is_some_and(|title| title.contains(filter.as_str()))
-            }
-        })
-    }
-
-    /// Apply an expansion. Backends may perform the replacement atomically;
-    /// simple backends use the safe erase-then-insert default.
-    pub fn apply<I: TextInjector + ?Sized>(
-        injector: &mut I,
-        result: &ExpansionResult,
-    ) -> Result<(), ExpansionError> {
-        // A character that completed a delayed match has already reached the
-        // application. Replace that character together with the trigger and
-        // append it to the replacement in one backend operation. Use the text
-        // actually typed for exact surrounding-text validation and
-        // case-propagated triggers. Keeping both sides of this transaction
-        // together is required for exclusive input-method backends too: they
-        // forward the delimiter before the engine sees the corresponding
-        // event.
-        let mut erase = result.matched_text.clone();
-        let mut insert = result.insert.clone();
-        if let Some(character) = result.reinsert_after {
-            erase.push(character);
-            insert.push(character);
-        }
-        injector.replace(&erase, &insert)?;
-        // Best-effort: a `{{cursor}}` marker's placement failing (or being
-        // unsupported by this backend) does not mean the expansion itself
-        // failed, since the replacement text above was already inserted.
-        let trailing_offset = usize::from(result.reinsert_after.is_some());
-        if let Some(offset) = result
-            .cursor_offset
-            .map(|offset| offset.saturating_add(trailing_offset))
-            .filter(|offset| *offset > 0)
-        {
-            let _ = injector.move_cursor_left(offset);
-        }
-        Ok(())
-    }
-}
-
-fn is_word_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
-}
-
-/// Recases `text` (a rendered replacement) to match the casing pattern of
-/// `typed` (the trigger as the user actually typed it), for expansions with
-/// `propagate_case` enabled. A single capitalized letter or a capitalized
-/// word yields a capitalized replacement; two or more uppercase letters
-/// yield a fully uppercased replacement; anything else (typed as
-/// configured, or mixed case) leaves the replacement unchanged.
-fn apply_case_style(typed: &str, text: &str) -> String {
-    let letters: Vec<char> = typed
-        .chars()
-        .filter(|character| character.is_alphabetic())
-        .collect();
-    match letters.as_slice() {
-        [] => text.to_owned(),
-        [single] if single.is_uppercase() => capitalize_first_letter(text),
-        letters if letters.iter().all(|character| character.is_uppercase()) => text.to_uppercase(),
-        [first, ..] if first.is_uppercase() => capitalize_first_letter(text),
-        _ => text.to_owned(),
     }
 }
 
