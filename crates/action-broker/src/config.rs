@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 /// Configuration for a single action.
@@ -212,7 +213,10 @@ fn validate_working_directory(label: &str, directory: &str) -> Result<(), String
     if !path.is_absolute() {
         return Err(format!("{} must be an absolute path", label));
     }
-    let metadata = fs::metadata(path)
+    let resolved = fs::canonicalize(path)
+        .map_err(|error| format!("{} '{}' cannot be resolved: {}", label, directory, error))?;
+    validate_path_ancestors(&resolved, label, false)?;
+    let metadata = fs::metadata(&resolved)
         .map_err(|error| format!("{} '{}' cannot be inspected: {}", label, directory, error))?;
     if !metadata.is_dir() {
         return Err(format!("{} '{}' is not a directory", label, directory));
@@ -248,7 +252,14 @@ fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), Strin
         ));
     }
 
-    let metadata = fs::metadata(path).map_err(|error| {
+    let resolved = fs::canonicalize(path).map_err(|error| {
+        format!(
+            "action '{}': program '{}' cannot be inspected: {}",
+            action_id, program, error
+        )
+    })?;
+    validate_path_ancestors(&resolved, &format!("action '{}' program", action_id), true)?;
+    let metadata = fs::metadata(&resolved).map_err(|error| {
         format!(
             "action '{}': program '{}' cannot be inspected: {}",
             action_id, program, error
@@ -286,6 +297,60 @@ fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), Strin
         }
     }
 
+    Ok(())
+}
+
+fn validate_path_ancestors(
+    path: &Path,
+    label: &str,
+    allow_trusted_sticky: bool,
+) -> Result<(), String> {
+    let uid = rustix::process::geteuid().as_raw();
+    let mut current = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", label))?;
+    loop {
+        let metadata = fs::metadata(current).map_err(|error| {
+            format!(
+                "{} ancestor '{}' cannot be inspected: {}",
+                label,
+                current.display(),
+                error
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(format!(
+                "{} ancestor '{}' is not a directory",
+                label,
+                current.display()
+            ));
+        }
+        if metadata.uid() != uid && metadata.uid() != 0 {
+            return Err(format!(
+                "{} ancestor '{}' is not owned by the current user or root",
+                label,
+                current.display()
+            ));
+        }
+        if metadata.mode() & 0o022 != 0 {
+            let trusted_sticky = allow_trusted_sticky
+                && metadata.mode() & 0o1000 != 0
+                && (metadata.uid() == uid || metadata.uid() == 0);
+            if !trusted_sticky {
+                return Err(format!(
+                    "{} ancestor '{}' is writable by group or other users",
+                    label,
+                    current.display()
+                ));
+            }
+        }
+        if current == Path::new("/") {
+            break;
+        }
+        current = current
+            .parent()
+            .ok_or_else(|| format!("{} ancestor traversal failed", label))?;
+    }
     Ok(())
 }
 
@@ -564,8 +629,13 @@ enabled = true
     fn working_directory_validation_requires_a_private_absolute_directory() {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory =
-            std::env::temp_dir().join(format!("wayexpand-private-cwd-{}", std::process::id()));
+        let root = Path::new(&std::env::var("HOME").unwrap()).join(format!(
+            ".wayexpand-private-cwd-root-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let directory = root.join("nested");
         fs::create_dir_all(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         let mut config = BrokerConfig {
@@ -580,5 +650,6 @@ enabled = true
         config.default_cwd = Some("relative/path".to_string());
         assert!(config.validate().is_err());
         fs::remove_dir(directory).unwrap();
+        fs::remove_dir(root).unwrap();
     }
 }

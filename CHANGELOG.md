@@ -24,6 +24,8 @@ Changes not yet released.
   managed service deployment are implemented.
 - Require Action Broker working directories to be absolute, private, existing
   directories and canonicalize them during policy loading.
+- Validate canonical executable and working-directory ancestors so writable path
+  components cannot replace or redirect broker targets after policy loading.
 - Reconcile the professional roadmap with the Action Broker’s implemented
   foundation and keep sandboxing, audit, routing, and service certification
   explicitly open.
