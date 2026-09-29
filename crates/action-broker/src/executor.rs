@@ -388,7 +388,7 @@ impl ActionExecutor {
         let mut map = HashMap::new();
         for var_str in request_vars {
             if let Some((key, value)) = var_str.split_once('=') {
-                if allowed_vars.contains(&key.to_string()) {
+                if !value.contains('\0') && allowed_vars.iter().any(|allowed| allowed == key) {
                     map.insert(key.to_string(), value.to_string());
                 }
             }
@@ -463,6 +463,10 @@ mod tests {
         let map = executor.build_env_map(&request_vars, &allowed_vars);
         assert_eq!(map.get("HOME"), Some(&"/home/user".to_string()));
         assert!(!map.contains_key("SECRET"));
+
+        let invalid =
+            executor.build_env_map(&["HOME=contains\0nul".to_string()], &["HOME".to_string()]);
+        assert!(invalid.is_empty());
     }
 
     #[tokio::test]

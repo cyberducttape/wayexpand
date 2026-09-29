@@ -59,8 +59,18 @@ impl ActionConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.program.is_empty() {
+        if self.program.is_empty() || self.program.contains('\0') {
             return Err("program cannot be empty".to_string());
+        }
+        if self.args.iter().any(|argument| argument.contains('\0')) {
+            return Err("args cannot contain NUL characters".to_string());
+        }
+        if self
+            .pass_env
+            .iter()
+            .any(|name| name.is_empty() || name.contains('=') || name.contains('\0'))
+        {
+            return Err("pass_env contains an invalid environment name".to_string());
         }
         if self.timeout_ms == 0 {
             return Err("timeout_ms must be > 0".to_string());
@@ -386,6 +396,28 @@ mod tests {
             enabled: true,
             description: None,
         };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn action_config_rejects_process_argument_and_environment_nuls() {
+        let mut config = ActionConfig {
+            program: "/usr/bin/echo".to_string(),
+            args: vec!["ok\0bad".to_string()],
+            timeout_ms: 5000,
+            pass_env: vec![],
+            inherit_env: false,
+            cwd: None,
+            enabled: true,
+            description: None,
+        };
+        assert!(config.validate().is_err());
+
+        config.args = vec![];
+        config.pass_env = vec!["BAD=NAME".to_string()];
+        assert!(config.validate().is_err());
+
+        config.pass_env = vec!["BAD\0NAME".to_string()];
         assert!(config.validate().is_err());
     }
 
