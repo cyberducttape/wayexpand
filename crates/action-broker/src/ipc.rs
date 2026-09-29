@@ -342,6 +342,22 @@ mod tests {
     }
 
     #[test]
+    fn ipc_rejects_non_sticky_writable_ancestor() {
+        let socket_path = test_socket("insecure/socket");
+        let parent = socket_path.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let result = BrokerServer::bind(&socket_path);
+        assert!(matches!(
+            result,
+            Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
+        ));
+
+        std::fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
     fn ipc_client_server_communication() {
         let socket_path = test_socket("comm");
         let _ = std::fs::remove_file(&socket_path);
