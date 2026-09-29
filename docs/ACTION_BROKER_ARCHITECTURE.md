@@ -123,6 +123,7 @@ What could be added:
 
 ```toml
 [broker]
+# Defaults to true; set false only for an intentional PATH-based deployment.
 require_absolute_paths = true
 strict_env = true
 

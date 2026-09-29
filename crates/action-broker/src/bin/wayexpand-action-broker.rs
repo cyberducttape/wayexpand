@@ -109,6 +109,7 @@ CONFIGURATION:
     Create ~/.config/wayexpand-broker.toml with action definitions:
 
     [broker]
+    # Defaults to true; set false only for intentional PATH-based resolution.
     require_absolute_paths = true
     strict_env = true
 

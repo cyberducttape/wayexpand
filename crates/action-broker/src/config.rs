@@ -62,9 +62,6 @@ impl ActionConfig {
         if self.timeout_ms == 0 {
             return Err("timeout_ms must be > 0".to_string());
         }
-        if !self.program.starts_with('/') && !self.program.contains('/') {
-            // Allow both absolute paths and simple program names (will be resolved from PATH)
-        }
         Ok(())
     }
 }
@@ -84,8 +81,10 @@ pub struct BrokerConfig {
     pub actions: HashMap<String, ActionConfig>,
 
     /// Whether to require absolute command paths.
-    /// If true, only /absolute/path/to/program is allowed.
-    #[serde(default)]
+    /// Defaults to true; if false, bare program names are resolved through
+    /// the broker process's PATH and the selected executable is deployment-
+    /// dependent.
+    #[serde(default = "default_require_absolute_paths")]
     pub require_absolute_paths: bool,
 
     /// Whether to globally disable an action's minimal inherited environment
@@ -101,7 +100,9 @@ pub struct BrokerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BrokerSettings {
-    #[serde(default)]
+    /// Defaults to true. Set false only when PATH-based resolution is an
+    /// intentional deployment choice.
+    #[serde(default = "default_require_absolute_paths")]
     pub require_absolute_paths: bool,
     #[serde(default = "default_strict_env")]
     pub strict_env: bool,
@@ -113,12 +114,16 @@ fn default_strict_env() -> bool {
     true
 }
 
+fn default_require_absolute_paths() -> bool {
+    true
+}
+
 impl Default for BrokerConfig {
     fn default() -> Self {
         Self {
             broker: None,
             actions: HashMap::new(),
-            require_absolute_paths: false,
+            require_absolute_paths: true,
             strict_env: true,
             default_cwd: None,
         }
@@ -210,6 +215,45 @@ timeout_ms = 5000
         let config = BrokerConfig::from_toml(toml_str).unwrap();
         assert!(config.require_absolute_paths);
         assert!(config.get_action("test_action").is_some());
+    }
+
+    #[test]
+    fn broker_requires_absolute_program_paths_by_default() {
+        let top_level = BrokerConfig::from_toml(
+            r#"
+[actions."test"]
+program = "/usr/bin/echo"
+"#,
+        )
+        .unwrap();
+        assert!(top_level.require_absolute_paths);
+
+        let wrapped = BrokerConfig::from_toml(
+            r#"
+[broker]
+strict_env = true
+
+[actions."test"]
+program = "/usr/bin/echo"
+"#,
+        )
+        .unwrap();
+        assert!(wrapped.require_absolute_paths);
+    }
+
+    #[test]
+    fn broker_can_explicitly_opt_out_of_absolute_program_paths() {
+        let config = BrokerConfig::from_toml(
+            r#"
+require_absolute_paths = false
+
+[actions."test"]
+program = "echo"
+"#,
+        )
+        .unwrap();
+        assert!(!config.require_absolute_paths);
+        assert!(config.validate().is_ok());
     }
 
     #[test]
