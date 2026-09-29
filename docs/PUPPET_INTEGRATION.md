@@ -356,7 +356,7 @@ ls -la /usr/local/bin/wayexpand-reload-all-users.sh
 /usr/local/bin/wayexpand-reload-all-users.sh
 
 # Check journalctl
-journalctl -u wayexpand-input-method.service -n 20
+journalctl --user -u wayexpand-input-method.service -n 20
 ```
 
 ### Puppet runs fail

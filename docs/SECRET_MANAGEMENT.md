@@ -121,7 +121,7 @@ max_replacement_size = 65536
 ✅ Audit command execution
 ```bash
 # Monitor secret retrieval attempts
-journalctl -u wayexpand-daemon -f | grep "command"
+journalctl --user -u wayexpand-input-method.service -f | grep "command"
 ```
 
 ## Example: Vault Integration
@@ -169,7 +169,7 @@ command = {
 
 ```bash
 # View all vault access attempts
-journalctl -u wayexpand-daemon -f | grep "vault"
+journalctl --user -u wayexpand-input-method.service -f | grep "vault"
 ```
 
 ## Compliance and Audit

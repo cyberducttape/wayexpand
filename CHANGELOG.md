@@ -27,6 +27,8 @@ Changes not yet released.
 - Reconcile the professional roadmap with the Action Broker’s implemented
   foundation and keep sandboxing, audit, routing, and service certification
   explicitly open.
+- Correct operational documentation to use the shipped sandboxed user-unit
+  names and remove examples for nonexistent or unsandboxed daemon services.
 - Add a non-secret Launchpad SSH preflight that reports the decoded key
   fingerprint and distinguishes authentication failure from push failure.
 - Accept both SSH client exit statuses used for Launchpad's authenticated

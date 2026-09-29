@@ -179,21 +179,10 @@ eprintln!("{}", ConfigError::safe_summary());
 
 ### Systemd units
 
-**User-level services only.** Never require root. Examples:
-```ini
-[Unit]
-Description=WayExpand
-After=graphical-session-pre.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/wayexpand-daemon
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=graphical-session.target
-```
+**User-level services only.** Never require root or invent an unsandboxed unit.
+Use the checked-in `systemd/wayexpand-input-method.service` or
+`systemd/wayexpand-evdev.service`; their `ExecStartPre` validation and sandbox
+settings are part of the supported service contract.
 
 ## Building and Testing
 

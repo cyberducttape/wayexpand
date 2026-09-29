@@ -215,7 +215,7 @@ category = "System"
 ```toml
 [[expansion]]
 trigger = ".logs"
-replacement = "sudo journalctl -u wayexpand -n 50 --no-pager"
+replacement = "journalctl --user -u wayexpand-input-method.service -n 50 --no-pager"
 description = "Show last 50 systemd journal entries for WayExpand"
 tags = ["logging", "diagnostics"]
 category = "System"
@@ -265,23 +265,12 @@ category = "Maintenance"
 
 ### Systemd Service Management
 
-**Create Systemd User Service**
+**Inspect the Packaged Systemd User Service**
 ```toml
 [[expansion]]
 trigger = ".systemd"
-replacement = """[Unit]
-Description=WayExpand Text Expansion Daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/wayexpand-daemon
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=graphical-session.target"""
-description = "Systemd user service configuration for WayExpand"
+replacement = "systemctl --user cat wayexpand-input-method.service"
+description = "Inspect the sandboxed packaged WayExpand user service"
 tags = ["systemd", "service"]
 category = "System"
 ```
@@ -290,7 +279,7 @@ category = "System"
 ```toml
 [[expansion]]
 trigger = ".status"
-replacement = "sudo systemctl status wayexpand --full && echo '---' && ps aux | grep wayexpand | grep -v grep"
+replacement = "systemctl --user status wayexpand-input-method.service --no-pager && echo '---' && ps aux | grep wayexpand | grep -v grep"
 description = "Check daemon status and process information"
 tags = ["monitoring", "diagnostics"]
 category = "System"
@@ -300,7 +289,7 @@ category = "System"
 ```toml
 [[expansion]]
 trigger = ".restart"
-replacement = "sudo systemctl restart wayexpand && sleep 2 && systemctl status wayexpand"
+replacement = "systemctl --user restart wayexpand-input-method.service && sleep 2 && systemctl --user status wayexpand-input-method.service --no-pager"
 description = "Restart daemon and show status (2s delay for startup)"
 tags = ["service", "deployment"]
 category = "System"
@@ -366,8 +355,8 @@ category = "Containers"
 ```toml
 [[expansion]]
 trigger = ".deploy"
-replacement = "sudo systemctl stop wayexpand && sudo cp /tmp/wayexpand-release /usr/local/bin/wayexpand && sudo systemctl start wayexpand && systemctl status wayexpand"
-description = "Deploy new WayExpand binary (stop, replace, start, verify)"
+replacement = "systemctl --user stop wayexpand-input-method.service && sudo install -m 0755 /tmp/wayexpand-daemon /usr/bin/wayexpand-daemon && systemctl --user start wayexpand-input-method.service && systemctl --user status wayexpand-input-method.service --no-pager"
+description = "Deploy a reviewed daemon binary and restart the sandboxed user service"
 tags = ["deployment", "release"]
 category = "Maintenance"
 ```
@@ -386,7 +375,7 @@ category = "Development"
 ```toml
 [[expansion]]
 trigger = ".build-deploy"
-replacement = "cargo build --release -p wayexpand-gui && sudo cp target/release/wayexpand-gui /usr/local/bin/ && sudo systemctl restart wayexpand"
+replacement = "cargo build --release -p wayexpand-gui && sudo install -m 0755 target/release/wayexpand-gui /usr/bin/wayexpand-gui"
 description = "Build release binary and deploy GUI"
 tags = ["deployment", "build"]
 category = "Development"

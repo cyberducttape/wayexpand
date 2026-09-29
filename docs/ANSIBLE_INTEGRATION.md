@@ -180,7 +180,7 @@ To deploy with organization policy enforcement:
 
 [[expansion]]
 trigger = ":logme"
-replacement = "journalctl --user -u wayexpand -n 50 -f"
+replacement = "journalctl --user -u wayexpand-input-method.service -n 50 -f"
 description = "Tail recent WayExpand logs"
 category = "logging"
 
@@ -284,7 +284,7 @@ cat /etc/wayexpand/snippets.d/*.toml
 wayexpand fleet status --json | jq '{files_loaded, expansion_count, hotkey_count, layers}'
 
 # Show provenance
-journalctl --user -u wayexpand | grep -i "layer\|organize"
+journalctl --user -u wayexpand-input-method.service | grep -i "layer\|organize"
 ```
 
 ## Troubleshooting
@@ -297,7 +297,7 @@ ls -la /etc/wayexpand/snippets.d/
 
 # Verify daemon sees them
 systemctl --user status wayexpand-input-method.service
-journalctl --user -u wayexpand-input-method -n 50
+journalctl --user -u wayexpand-input-method.service -n 50
 ```
 
 ### Duplicate trigger errors
