@@ -19,6 +19,10 @@ sleep 1
 git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix=wayexpand-test/ HEAD | gzip -n > "$test_root/source-b.tar.gz"
 cmp "$test_root/source-a.tar.gz" "$test_root/source-b.tar.gz"
+if tar -tzf "$test_root/source-a.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null; then
+    printf '%s\n' 'release source archive unexpectedly contains Git metadata' >&2
+    exit 1
+fi
 
 CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \

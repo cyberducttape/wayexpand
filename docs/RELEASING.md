@@ -77,6 +77,22 @@ working checkout: that can include `.git/` metadata and build outputs such as
 `target/`. The release workflow verifies that published archives contain no
 `.git/` directory.
 
+Do not use `git bundle` as a release archive. A bundle is a Git transport and
+backup artifact; it intentionally contains repository history and can be much
+larger than the source tree. Use the clean source tarball for source
+distribution, or the vendored tarball for offline builds. A quick local check
+is:
+
+```sh
+git archive --format=tar --prefix="wayexpand-${VERSION}/" HEAD \
+  | gzip -n > "wayexpand-${VERSION}.tar.gz"
+if tar -tzf "wayexpand-${VERSION}.tar.gz" \
+    | grep -E '(^|/)\.git(/|$)' >/dev/null; then
+  echo 'unexpected Git metadata in archive' >&2
+  exit 1
+fi
+```
+
 **Binary archive** (for end users):
 - `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
   systemd units, the desktop entry, application icon, example configuration,
