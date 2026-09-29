@@ -785,7 +785,7 @@ impl GuiApp {
                     ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
                     ui.label(RichText::new("WayExpand").heading().strong());
                     ui.label(RichText::new(self.strings.title()).color(palette.muted));
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                     theme::pill(
                         ui,
                         self.strings.snippets_count(self.config.expansion.len()),
@@ -808,11 +808,16 @@ impl GuiApp {
                             theme::tint(palette.warning, 38),
                         );
                     }
+                    ui.add_space(8.0);
+                    ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .button(if self.dark_mode { "Light" } else { "Dark" })
-                            .on_hover_text(self.strings.toggle_theme())
-                            .clicked()
+                        if theme::secondary_button(
+                            ui,
+                            palette,
+                            if self.dark_mode { "Light" } else { "Dark" },
+                        )
+                        .on_hover_text(self.strings.toggle_theme())
+                        .clicked()
                         {
                             self.dark_mode = !self.dark_mode;
                             ui.ctx().set_theme(if self.dark_mode {
@@ -822,56 +827,60 @@ impl GuiApp {
                             });
                             save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                         }
-                        if ui
-                            .button("Language")
+                        if theme::secondary_button(ui, palette, "Language")
                             .on_hover_text("Switch language")
                             .clicked()
                         {
                             self.language_selector_open = !self.language_selector_open;
                         }
-                        if ui
-                            .button("Color pack")
+                        if theme::secondary_button(ui, palette, "Color pack")
                             .on_hover_text("Switch color pack")
                             .clicked()
                         {
                             self.colorpack_selector_open = !self.colorpack_selector_open;
                         }
-                        if ui.button(self.strings.settings()).clicked() {
-                            self.settings_buffer =
-                                self.config.settings.max_buffer_chars.to_string();
-                            self.settings_undo_chord =
-                                self.config.settings.undo_chord.clone().unwrap_or_default();
-                            self.settings_font_scale = self.config.settings.font_scale;
-                            self.settings_error = None;
-                            self.settings_open = true;
-                        }
-                        if ui.button(self.strings.import_espanso()).clicked() {
-                            self.import_open = true;
-                            self.import_preview = None;
-                        }
-                        if ui.button(self.strings.diagnostics()).clicked() {
-                            self.diagnostics_open = true;
-                            self.refresh_diagnostics();
-                        }
-                        if ui
-                            .button(if self.paused {
-                                self.strings.resume()
-                            } else {
-                                self.strings.pause()
-                            })
-                            .clicked()
-                        {
-                            self.toggle_pause();
-                        }
-                        if ui.button(self.strings.reload()).clicked() {
-                            self.request_action(PendingAction::Reload);
-                        }
-                        ui.add(
-                            TextEdit::singleline(&mut self.filter)
-                                .hint_text(self.strings.search_placeholder())
-                                .desired_width(220.0),
-                        );
                     });
+                });
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut self.filter)
+                            .hint_text(self.strings.search_placeholder())
+                            .desired_width(260.0),
+                    );
+                    if theme::secondary_button(ui, palette, self.strings.reload()).clicked() {
+                        self.request_action(PendingAction::Reload);
+                    }
+                    if theme::secondary_button(
+                        ui,
+                        palette,
+                        if self.paused {
+                            self.strings.resume()
+                        } else {
+                            self.strings.pause()
+                        },
+                    )
+                    .clicked()
+                    {
+                        self.toggle_pause();
+                    }
+                    if theme::secondary_button(ui, palette, self.strings.diagnostics()).clicked() {
+                        self.diagnostics_open = true;
+                        self.refresh_diagnostics();
+                    }
+                    if theme::secondary_button(ui, palette, self.strings.import_espanso()).clicked()
+                    {
+                        self.import_open = true;
+                        self.import_preview = None;
+                    }
+                    if theme::secondary_button(ui, palette, self.strings.settings()).clicked() {
+                        self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                        self.settings_undo_chord =
+                            self.config.settings.undo_chord.clone().unwrap_or_default();
+                        self.settings_font_scale = self.config.settings.font_scale;
+                        self.settings_error = None;
+                        self.settings_open = true;
+                    }
                 });
             });
     }
@@ -975,7 +984,7 @@ impl GuiApp {
                         {
                             self.preview_import();
                         }
-                        if ui.button(self.strings.cancel()).clicked() {
+                        if theme::secondary_button(ui, palette, self.strings.cancel()).clicked() {
                             self.import_preview = None;
                             self.import_open = false;
                         }
@@ -1093,7 +1102,7 @@ impl GuiApp {
                         {
                             self.save_settings(ctx);
                         }
-                        if ui.button(self.strings.close()).clicked() {
+                        if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
                             self.settings_open = false;
                         }
                     });
@@ -1102,7 +1111,7 @@ impl GuiApp {
         }
     }
 
-    fn render_language_selector(&mut self, ctx: &egui::Context, _palette: &Palette) {
+    fn render_language_selector(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.language_selector_open {
             let mut open = self.language_selector_open;
             egui::Window::new("Language / Sprache")
@@ -1129,7 +1138,7 @@ impl GuiApp {
                         save_gui_prefs(self.language, self.colorpack, self.dark_mode);
                     }
                     ui.add_space(6.0);
-                    if ui.button(self.strings.close()).clicked() {
+                    if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
                         self.language_selector_open = false;
                     }
                 });
@@ -1137,7 +1146,7 @@ impl GuiApp {
         }
     }
 
-    fn render_colorpack_selector(&mut self, ctx: &egui::Context, _palette: &Palette) {
+    fn render_colorpack_selector(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.colorpack_selector_open {
             let mut open = self.colorpack_selector_open;
             egui::Window::new("Color Pack / Farbschema")
@@ -1169,7 +1178,7 @@ impl GuiApp {
                     ui.label("  🟠 Classic Amber — Vintage Apple monitor");
                     ui.label("  ⚪ Classic White — Monochrome classic");
                     ui.add_space(6.0);
-                    if ui.button(self.strings.close()).clicked() {
+                    if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
                         self.colorpack_selector_open = false;
                     }
                 });
@@ -1204,12 +1213,15 @@ impl GuiApp {
                     {
                         self.request_action(PendingAction::New);
                     }
-                    if ui.button(self.strings.duplicate()).clicked() {
+                    if theme::secondary_button(ui, palette, self.strings.duplicate()).clicked() {
                         self.request_action(PendingAction::Duplicate);
                     }
-                    if ui
-                        .button(self.strings.undo_button(self.undo.len()))
-                        .clicked()
+                    if theme::secondary_button(
+                        ui,
+                        palette,
+                        &self.strings.undo_button(self.undo.len()),
+                    )
+                    .clicked()
                     {
                         self.request_action(PendingAction::Undo);
                     }
@@ -1306,7 +1318,9 @@ impl GuiApp {
                             };
                             ui.label(RichText::new(reason).color(palette.muted));
                             ui.add_space(6.0);
-                            if ui.button(self.strings.clear_filters()).clicked() {
+                            if theme::secondary_button(ui, palette, self.strings.clear_filters())
+                                .clicked()
+                            {
                                 self.filter.clear();
                                 self.category_filter = None;
                             }
@@ -1599,7 +1613,10 @@ impl GuiApp {
                             );
                             ui.horizontal_wrapped(|ui| {
                                 for (variable, description) in TEMPLATE_VARIABLES {
-                                    if ui.button(*variable).on_hover_text(*description).clicked() {
+                                    if theme::secondary_button(ui, palette, variable)
+                                        .on_hover_text(*description)
+                                        .clicked()
+                                    {
                                         if let Some(draft) = self.draft.as_mut() {
                                             draft.replacement.push_str(variable);
                                         }
@@ -1693,7 +1710,9 @@ impl GuiApp {
                                     .hint_text(self.strings.input_hint())
                                     .desired_width(420.0),
                             );
-                            if ui.button(self.strings.use_trigger()).clicked() {
+                            if theme::secondary_button(ui, palette, self.strings.use_trigger())
+                                .clicked()
+                            {
                                 self.preview_input = self
                                     .draft
                                     .as_ref()
@@ -1831,10 +1850,13 @@ impl GuiApp {
                             {
                                 self.save_and_execute_pending();
                             }
-                            if ui.button(self.strings.discard()).clicked() {
+                            if theme::secondary_button(ui, palette, self.strings.discard())
+                                .clicked()
+                            {
                                 self.discard_pending();
                             }
-                            if ui.button(self.strings.cancel()).clicked() {
+                            if theme::secondary_button(ui, palette, self.strings.cancel()).clicked()
+                            {
                                 self.pending_action = None;
                             }
                         });
@@ -1848,7 +1870,8 @@ impl GuiApp {
                                 self.pending_action = None;
                                 self.execute_action(PendingAction::Delete);
                             }
-                            if ui.button(self.strings.cancel()).clicked() {
+                            if theme::secondary_button(ui, palette, self.strings.cancel()).clicked()
+                            {
                                 self.pending_action = None;
                             }
                         });

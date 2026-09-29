@@ -104,6 +104,20 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
         widgets.corner_radius = CornerRadius::same(8);
     }
 
+    // Keep standard egui controls on the same quiet, layered surface system
+    // as the custom cards. The default egui fills are especially conspicuous
+    // beside the sidebar/editor cards and make the interface feel assembled
+    // from unrelated widgets.
+    visuals.widgets.noninteractive.bg_fill = palette.surface;
+    visuals.widgets.inactive.bg_fill = palette.surface;
+    visuals.widgets.inactive.weak_bg_fill = palette.surface;
+    visuals.widgets.hovered.bg_fill = palette.surface_hover;
+    visuals.widgets.hovered.weak_bg_fill = palette.surface_hover;
+    visuals.widgets.active.bg_fill = palette.accent_weak;
+    visuals.widgets.active.weak_bg_fill = palette.accent_weak;
+    visuals.widgets.open.bg_fill = palette.surface_hover;
+    visuals.widgets.open.weak_bg_fill = palette.surface_hover;
+
     // Keyboard focus indicator: dashed border for accessibility
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
     visuals.widgets.inactive.fg_stroke = Stroke::new(2.0, palette.border);
@@ -117,8 +131,8 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     visuals.widgets.active.fg_stroke = Stroke::new(2.5, palette.accent);
 
     style.visuals = visuals;
-    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-    style.spacing.button_padding = Vec2::new(14.0, 7.0);
+    style.spacing.item_spacing = Vec2::new(8.0, 8.0);
+    style.spacing.button_padding = Vec2::new(12.0, 6.0);
 
     // Improved text input field sizing for better readability and editing
     style.spacing.text_edit_width = f32::INFINITY; // Use full available width
@@ -257,6 +271,17 @@ pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui:
         )
         .fill(palette.accent)
         .stroke(Stroke::NONE),
+    )
+}
+
+/// The standard secondary action treatment. Keeping this centralized prevents
+/// dialogs and toolbars from mixing egui's default gray buttons with the
+/// application's surfaces and borders.
+pub fn secondary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(ui.visuals().text_color()))
+            .fill(palette.surface_hover)
+            .stroke(Stroke::new(1.0, palette.border)),
     )
 }
 
