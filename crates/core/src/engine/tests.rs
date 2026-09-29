@@ -2,6 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::*;
+use crate::MatchMode;
 
 fn engine() -> ExpansionEngine {
     ExpansionEngine::new(
