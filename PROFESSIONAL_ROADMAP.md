@@ -75,11 +75,16 @@ The optional action-broker design remains a security gate for networked or
 credentialed command workflows. See
 docs/ACTION_BROKER_ARCHITECTURE.md.
 
-- [ ] Bounded, authenticated, action-name-based IPC.
-- [ ] Independent sandbox and ownership checks.
-- [ ] Per-action filesystem, network, environment, timeout, output, and audit
-      policy.
-- [ ] Fail-closed denial and unavailability behavior.
+- [x] Bounded, authenticated, action-name-based IPC exists in the experimental
+      standalone binary; daemon routing is still disabled.
+- [x] Broker-side executable ownership, permission, working-directory, timeout,
+      environment, output, and process-group checks are implemented.
+- [ ] Add an independent service/container sandbox with explicit network and
+      filesystem policy; the current broker is not a security boundary.
+- [ ] Add a tested execution audit sink with privacy, rotation, failure, and
+      integrity semantics.
+- [ ] Wire daemon policy routing with fail-closed behavior when the broker is
+      unavailable, then certify the managed service lifecycle.
 
 ### Distribution and release evidence
 

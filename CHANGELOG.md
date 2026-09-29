@@ -24,6 +24,9 @@ Changes not yet released.
   managed service deployment are implemented.
 - Require Action Broker working directories to be absolute, private, existing
   directories and canonicalize them during policy loading.
+- Reconcile the professional roadmap with the Action Broker’s implemented
+  foundation and keep sandboxing, audit, routing, and service certification
+  explicitly open.
 - Add a non-secret Launchpad SSH preflight that reports the decoded key
   fingerprint and distinguishes authentication failure from push failure.
 - Accept both SSH client exit statuses used for Launchpad's authenticated
