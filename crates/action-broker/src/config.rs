@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 /// Configuration for a single action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,15 +156,80 @@ impl BrokerConfig {
                 .validate()
                 .map_err(|e| format!("action '{}': {}", id, e))?;
 
-            if self.require_absolute_paths && !action.program.starts_with('/') {
-                return Err(format!(
-                    "action '{}': program must be absolute path when require_absolute_paths=true",
-                    id
-                ));
+            if self.require_absolute_paths {
+                validate_absolute_program(id, &action.program)?;
             }
         }
         Ok(())
     }
+
+    /// Validate the policy and replace every absolute program with its
+    /// canonical path. This makes the executable selected at policy load
+    /// explicit instead of retaining a symlink or `..` spelling until spawn.
+    pub fn validate_and_canonicalize(&mut self) -> Result<(), String> {
+        self.validate()?;
+        if self.require_absolute_paths {
+            for (id, action) in &mut self.actions {
+                let canonical = fs::canonicalize(&action.program)
+                    .map_err(|error| format!("cannot canonicalize action program: {error}"))?
+                    .to_string_lossy()
+                    .into_owned();
+                validate_absolute_program(id, &canonical)?;
+                action.program = canonical;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), String> {
+    let path = Path::new(program);
+    if !path.is_absolute() {
+        return Err(format!(
+            "action '{}': program must be absolute path when require_absolute_paths=true",
+            action_id
+        ));
+    }
+
+    let metadata = fs::metadata(path).map_err(|error| {
+        format!(
+            "action '{}': program '{}' cannot be inspected: {}",
+            action_id, program, error
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "action '{}': program '{}' is not a regular file",
+            action_id, program
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        if metadata.mode() & 0o111 == 0 {
+            return Err(format!(
+                "action '{}': program '{}' is not executable",
+                action_id, program
+            ));
+        }
+        if metadata.mode() & 0o022 != 0 {
+            return Err(format!(
+                "action '{}': program '{}' is writable by group or other users",
+                action_id, program
+            ));
+        }
+        let uid = rustix::process::geteuid().as_raw();
+        if metadata.uid() != uid && metadata.uid() != 0 {
+            return Err(format!(
+                "action '{}': program '{}' is not owned by the current user or root",
+                action_id, program
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -353,5 +420,86 @@ enabled = true
         assert!(config.require_absolute_paths);
         assert!(config.strict_env);
         assert!(config.get_action("example").is_some());
+    }
+
+    #[test]
+    fn absolute_program_validation_requires_a_safe_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let source = std::env::current_exe().unwrap();
+        let executable = std::env::temp_dir().join(format!(
+            "wayexpand-safe-action-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::copy(&source, &executable).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = BrokerConfig {
+            actions: HashMap::from([(
+                "self".to_string(),
+                ActionConfig {
+                    program: executable.to_string_lossy().into_owned(),
+                    args: vec![],
+                    timeout_ms: 1000,
+                    pass_env: vec![],
+                    inherit_env: false,
+                    cwd: None,
+                    enabled: true,
+                    description: None,
+                },
+            )]),
+            ..BrokerConfig::default()
+        };
+
+        config.validate_and_canonicalize().unwrap();
+        assert_eq!(
+            config.get_action("self").unwrap().program,
+            fs::canonicalize(&executable).unwrap().to_string_lossy()
+        );
+        fs::remove_file(executable).unwrap();
+    }
+
+    #[test]
+    fn absolute_program_validation_rejects_missing_and_non_executable_paths() {
+        let mut missing = BrokerConfig {
+            actions: HashMap::from([(
+                "missing".to_string(),
+                ActionConfig {
+                    program: "/definitely/missing/wayexpand-action".to_string(),
+                    args: vec![],
+                    timeout_ms: 1000,
+                    pass_env: vec![],
+                    inherit_env: false,
+                    cwd: None,
+                    enabled: true,
+                    description: None,
+                },
+            )]),
+            ..BrokerConfig::default()
+        };
+        assert!(missing.validate_and_canonicalize().is_err());
+
+        let mut directory = BrokerConfig {
+            actions: HashMap::from([(
+                "directory".to_string(),
+                ActionConfig {
+                    program: std::env::current_exe()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    args: vec![],
+                    timeout_ms: 1000,
+                    pass_env: vec![],
+                    inherit_env: false,
+                    cwd: None,
+                    enabled: true,
+                    description: None,
+                },
+            )]),
+            ..BrokerConfig::default()
+        };
+        assert!(directory.validate_and_canonicalize().is_err());
     }
 }

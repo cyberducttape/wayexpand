@@ -177,11 +177,11 @@ fn load_config(path: &PathBuf) -> Result<BrokerConfig> {
     let content =
         String::from_utf8(bytes).map_err(|e| anyhow!("config file is not valid UTF-8: {}", e))?;
 
-    let config = BrokerConfig::from_toml(&content)
+    let mut config = BrokerConfig::from_toml(&content)
         .map_err(|e| anyhow!("Failed to parse config file: {}", e))?;
 
     config
-        .validate()
+        .validate_and_canonicalize()
         .map_err(|e| anyhow!("Config validation failed: {}", e))?;
 
     Ok(config)

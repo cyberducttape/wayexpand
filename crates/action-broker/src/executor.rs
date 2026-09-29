@@ -225,10 +225,9 @@ fn bounded_read_stream<R: Read>(stream: Option<R>) -> Vec<u8> {
 
 impl ActionExecutor {
     pub fn new(config: &BrokerConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        config.validate()?;
-        Ok(Self {
-            config: config.clone(),
-        })
+        let mut config = config.clone();
+        config.validate_and_canonicalize()?;
+        Ok(Self { config })
     }
 
     /// Resolve the effective timeout: the broker config is the upper bound.
