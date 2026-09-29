@@ -130,7 +130,7 @@ strict_env = true
 # Action: List Kubernetes resources
 [actions."k8s_get_pods"]
 program = "/usr/bin/kubectl"
-args_prefix = ["get", "pods"]
+args = ["get", "pods"]
 timeout_ms = 10000
 pass_env = ["KUBECONFIG", "HOME"]
 enabled = true
@@ -138,7 +138,7 @@ enabled = true
 # Action: AWS CLI identity check
 [actions."aws_sts_identity"]
 program = "/usr/bin/aws"
-args_prefix = ["sts", "get-caller-identity"]
+args = ["sts", "get-caller-identity"]
 timeout_ms = 5000
 pass_env = ["AWS_PROFILE", "AWS_REGION"]
 enabled = true
@@ -146,7 +146,7 @@ enabled = true
 # Action: Local file operations (no network)
 [actions."file_stat"]
 program = "/usr/bin/stat"
-args_prefix = []
+args = []
 timeout_ms = 2000
 pass_env = ["HOME"]
 cwd = "/home/user"

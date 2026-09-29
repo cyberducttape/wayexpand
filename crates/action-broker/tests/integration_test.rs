@@ -96,7 +96,7 @@ fn broker_config_validation() {
         "valid".to_string(),
         ActionConfig {
             program: "/usr/bin/echo".to_string(),
-            args_prefix: vec!["hello".to_string()],
+            args: vec!["hello".to_string()],
             timeout_ms: 5000,
             pass_env: vec!["HOME".to_string()],
             inherit_env: false,
@@ -123,7 +123,7 @@ fn broker_config_rejects_relative_paths_when_required() {
         "relative".to_string(),
         ActionConfig {
             program: "echo".to_string(), // Not absolute
-            args_prefix: vec![],
+            args: vec![],
             timeout_ms: 5000,
             pass_env: vec![],
             inherit_env: false,
@@ -145,7 +145,7 @@ strict_env = true
 
 [actions."test"]
 program = "/usr/bin/echo"
-args_prefix = ["hello"]
+args = ["hello"]
 timeout_ms = 3000
 pass_env = ["HOME"]
 enabled = true
@@ -158,7 +158,7 @@ enabled = true
 
     let action = config.get_action("test").unwrap();
     assert_eq!(action.program, "/usr/bin/echo");
-    assert_eq!(action.args_prefix, vec!["hello"]);
+    assert_eq!(action.args, vec!["hello"]);
     assert_eq!(action.timeout_ms, 3000);
 }
 

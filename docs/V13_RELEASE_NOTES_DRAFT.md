@@ -31,7 +31,7 @@ The biggest architectural improvement since v1.2: separate command execution fro
 # Define actions with fine-grained control
 [actions."k8s_pods"]
 program = "/usr/bin/kubectl"
-args_prefix = ["get", "pods"]
+args = ["get", "pods"]
 timeout_ms = 10000
 pass_env = ["KUBECONFIG"]
 ```

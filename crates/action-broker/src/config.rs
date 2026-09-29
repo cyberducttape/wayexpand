@@ -12,9 +12,9 @@ pub struct ActionConfig {
     /// The command to execute.
     pub program: String,
 
-    /// Arguments to pass to the program (prefix for pattern matching).
+    /// Fixed arguments to pass to the program.
     #[serde(default)]
-    pub args_prefix: Vec<String>,
+    pub args: Vec<String>,
 
     /// Maximum execution time in milliseconds.
     #[serde(default = "default_timeout_ms")]
@@ -173,7 +173,7 @@ mod tests {
     fn action_config_validation() {
         let config = ActionConfig {
             program: "/usr/bin/kubectl".to_string(),
-            args_prefix: vec!["get".to_string()],
+            args: vec!["get".to_string()],
             timeout_ms: 5000,
             pass_env: vec!["KUBECONFIG".to_string()],
             inherit_env: false,
@@ -189,7 +189,7 @@ mod tests {
     fn action_config_empty_program() {
         let config = ActionConfig {
             program: String::new(),
-            args_prefix: vec![],
+            args: vec![],
             timeout_ms: 5000,
             pass_env: vec![],
             inherit_env: false,
@@ -209,7 +209,7 @@ strict_env = true
 
 [actions."test_action"]
 program = "/usr/bin/echo"
-args_prefix = ["hello"]
+args = ["hello"]
 timeout_ms = 5000
 "#;
         let config = BrokerConfig::from_toml(toml_str).unwrap();
@@ -266,7 +266,7 @@ program = "echo"
             "test".to_string(),
             ActionConfig {
                 program: "echo".to_string(), // Not absolute
-                args_prefix: vec![],
+                args: vec![],
                 timeout_ms: 5000,
                 pass_env: vec![],
                 inherit_env: false,
@@ -292,6 +292,16 @@ program = "/usr/bin/echo"
             BrokerConfig::from_toml(toml_str).is_err(),
             "unknown fields must be rejected"
         );
+    }
+
+    #[test]
+    fn broker_config_rejects_legacy_args_prefix_name() {
+        let toml_str = r#"
+[actions."test"]
+program = "/usr/bin/echo"
+args_prefix = ["hello"]
+"#;
+        assert!(BrokerConfig::from_toml(toml_str).is_err());
     }
 
     #[test]
@@ -333,7 +343,7 @@ strict_env = true
 
 [actions."example"]
 program = "/usr/bin/example"
-args_prefix = []
+args = []
 timeout_ms = 5000
 pass_env = ["HOME"]
 enabled = true

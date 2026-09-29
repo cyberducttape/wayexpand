@@ -256,7 +256,7 @@ impl ActionExecutor {
 
         let mut cmd = Command::new(&action_config.program);
 
-        for arg in &action_config.args_prefix {
+        for arg in &action_config.args {
             cmd.arg(arg);
         }
 
@@ -427,7 +427,7 @@ mod tests {
             "disabled".to_string(),
             ActionConfig {
                 program: "/bin/echo".to_string(),
-                args_prefix: vec![],
+                args: vec![],
                 timeout_ms: 5000,
                 pass_env: vec![],
                 inherit_env: false,
@@ -473,7 +473,7 @@ mod tests {
             "sleeper".to_string(),
             ActionConfig {
                 program: "/bin/sleep".to_string(),
-                args_prefix: vec!["60".to_string()],
+                args: vec!["60".to_string()],
                 timeout_ms: 200,
                 pass_env: vec![],
                 inherit_env: false,
@@ -506,7 +506,7 @@ mod tests {
             "echo".to_string(),
             ActionConfig {
                 program: "/bin/echo".to_string(),
-                args_prefix: vec!["hi".to_string()],
+                args: vec!["hi".to_string()],
                 timeout_ms: 500,
                 pass_env: vec![],
                 inherit_env: false,
@@ -537,7 +537,7 @@ mod tests {
             "print-env".to_string(),
             ActionConfig {
                 program: "/usr/bin/env".to_string(),
-                args_prefix: vec![],
+                args: vec![],
                 timeout_ms: 1000,
                 pass_env: vec![],
                 inherit_env: false,

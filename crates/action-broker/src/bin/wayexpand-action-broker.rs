@@ -115,7 +115,7 @@ CONFIGURATION:
 
     [actions."example"]
     program = "/usr/bin/example"
-    args_prefix = []
+    args = []
     timeout_ms = 5000
     pass_env = ["HOME"]
     enabled = true

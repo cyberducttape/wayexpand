@@ -67,7 +67,7 @@ When implemented, will support per-action secret management:
 # Proposed for future versions
 [action.vault_read]
 program = "/usr/bin/vault"
-args_prefix = ["kv", "get"]
+args = ["kv", "get"]
 secrets = ["VAULT_TOKEN", "VAULT_ADDR"]  # Injected automatically
 ```
 
