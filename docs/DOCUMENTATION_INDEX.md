@@ -25,7 +25,7 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 ### I need to manage WayExpand on servers/multiple machines
 → Read [FOR_SYSADMINS.md](FOR_SYSADMINS.md)
 - Deployment models
-- 30+ production-ready snippets
+- 30+ adaptable sysadmin snippet templates
 - Fleet management at scale
 - Health checks and monitoring
 

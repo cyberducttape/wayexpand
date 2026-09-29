@@ -156,7 +156,7 @@ wayexpand list ~/.config/wayexpand/expansions.toml
 
 ## Ready-Made Snippet Examples
 
-WayExpand is particularly useful for system administrators who frequently need to type complex commands and configurations. Below are production-ready snippets for common sysadmin tasks.
+WayExpand is particularly useful for system administrators who frequently need to type complex commands and configurations. Below are templates for common sysadmin tasks; review and adapt every command for your environment before use.
 
 ### Certificate and SSL Management
 

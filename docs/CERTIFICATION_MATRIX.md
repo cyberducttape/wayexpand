@@ -262,11 +262,11 @@ To report testing results for other compositors:
 
 ### Version-Specific Support
 
-**WayExpand 1.2.0 will support:**
+**WayExpand 1.2.0 currently lists these experimental paths:**
 - ⚠️ KDE Plasma 6.6.x (heavily manually tested; not certified)
-- ✅ KDE Plasma 6.5.x, 6.7.x (expected to work, experimental)
-- ✅ GNOME 47.x, 46.x (input-method-v2 path, experimental)
-- ✅ Sway, Hyprland, river (experimental, contributions welcome)
+- ⚠️ KDE Plasma 6.5.x, 6.7.x (expected to work, experimental)
+- ⚠️ GNOME 47.x, 46.x (input-method-v2 path, experimental)
+- ⚠️ Sway, Hyprland, river (experimental, contributions welcome)
 - ❌ X11 (unsupported, use traditional text expansion tools)
 
 ## Enterprise Deployment
