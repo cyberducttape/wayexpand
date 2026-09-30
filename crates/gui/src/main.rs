@@ -20,6 +20,7 @@ use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 use std::{
     env, fs,
     io::{Read, Write},
@@ -70,6 +71,7 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
 struct GuiApp {
     path: PathBuf,
     config_stamp: Option<GuiFileStamp>,
+    config_document: toml_edit::DocumentMut,
     config: Config,
     selected: Option<usize>,
     filter: String,
@@ -186,6 +188,109 @@ fn gui_file_stamp(path: &std::path::Path) -> Option<GuiFileStamp> {
     })
 }
 
+fn read_config_document(path: &std::path::Path) -> Result<toml_edit::DocumentMut> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("could not read configuration document {}", path.display()))?;
+    toml_edit::DocumentMut::from_str(&text)
+        .map_err(|error| anyhow::anyhow!("could not parse configuration document: {error}"))
+}
+
+/// Merge the canonical representation of a new Config into the document that
+/// the user opened. Reusing existing TOML items keeps their decorations
+/// (comments, whitespace, and quoting) while still making additions and
+/// deletions reflect the Rust configuration exactly.
+fn merge_config_document(
+    mut original: toml_edit::DocumentMut,
+    replacement: toml_edit::DocumentMut,
+) -> toml_edit::DocumentMut {
+    merge_toml_item(original.as_item_mut(), replacement.into_item());
+    original
+}
+
+fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
+    match replacement {
+        toml_edit::Item::Table(new_table) => {
+            if let toml_edit::Item::Table(old_table) = old {
+                merge_toml_table(old_table, new_table);
+            } else {
+                *old = toml_edit::Item::Table(new_table);
+            }
+        }
+        toml_edit::Item::ArrayOfTables(new_array) => {
+            if let toml_edit::Item::ArrayOfTables(old_array) = old {
+                let mut merged = Vec::new();
+                let mut used = Vec::new();
+                for (index, new_table) in new_array.iter().enumerate() {
+                    let matching_index = new_table
+                        .get("trigger")
+                        .and_then(toml_edit::Item::as_value)
+                        .and_then(toml_edit::Value::as_str)
+                        .and_then(|trigger| {
+                            old_array
+                                .iter()
+                                .enumerate()
+                                .find_map(|(old_index, old_table)| {
+                                    (!used.contains(&old_index)
+                                        && old_table
+                                            .get("trigger")
+                                            .and_then(toml_edit::Item::as_value)
+                                            .and_then(toml_edit::Value::as_str)
+                                            == Some(trigger))
+                                    .then_some(old_index)
+                                })
+                        })
+                        .or_else(|| {
+                            (index < old_array.len() && !used.contains(&index)).then_some(index)
+                        });
+                    let mut table = matching_index
+                        .and_then(|old_index| {
+                            used.push(old_index);
+                            old_array.get(old_index).cloned()
+                        })
+                        .unwrap_or_else(|| new_table.clone());
+                    merge_toml_table(&mut table, new_table.clone());
+                    merged.push(table);
+                }
+                old_array.clear();
+                for table in merged {
+                    old_array.push(table);
+                }
+            } else {
+                *old = toml_edit::Item::ArrayOfTables(new_array);
+            }
+        }
+        toml_edit::Item::Value(mut new_value) => {
+            if let toml_edit::Item::Value(old_value) = old {
+                *new_value.decor_mut() = old_value.decor().clone();
+            }
+            *old = toml_edit::Item::Value(new_value);
+        }
+        toml_edit::Item::None => *old = toml_edit::Item::None,
+    }
+}
+
+fn merge_toml_table(old: &mut toml_edit::Table, replacement: toml_edit::Table) {
+    let replacement_keys: Vec<String> = replacement.iter().map(|(key, _)| key.to_owned()).collect();
+    let old_keys: Vec<String> = old.iter().map(|(key, _)| key.to_owned()).collect();
+    for key in old_keys {
+        if !replacement_keys
+            .iter()
+            .any(|replacement_key| replacement_key == &key)
+        {
+            old.remove(&key);
+        }
+    }
+    for key in replacement_keys {
+        if let Some(item) = replacement.get(&key).cloned() {
+            if let Some(existing) = old.get_mut(&key) {
+                merge_toml_item(existing, item);
+            } else {
+                old.insert(&key, item);
+            }
+        }
+    }
+}
+
 impl GuiApp {
     fn load(path: PathBuf) -> Result<Self> {
         let config = match Config::load(&path) {
@@ -225,6 +330,7 @@ impl GuiApp {
                 ))
             }
         };
+        let config_document = read_config_document(&path)?;
         let selected = (!config.expansion.is_empty()).then_some(0);
         let draft = selected.map(|index| Draft::from_expansion(&config.expansion[index]));
         let preview_input = selected
@@ -239,6 +345,7 @@ impl GuiApp {
         Ok(Self {
             path,
             config_stamp,
+            config_document,
             config,
             selected,
             filter: String::new(),
@@ -331,6 +438,18 @@ impl GuiApp {
         self.config_stamp = gui_file_stamp(&self.path);
     }
 
+    fn save_config_candidate(&mut self, candidate: &Config) -> Result<(), String> {
+        candidate.validate().map_err(|error| error.safe_summary())?;
+        let replacement = toml_edit::ser::to_document(candidate)
+            .map_err(|error| format!("could not serialize configuration: {error}"))?;
+        let document = merge_config_document(self.config_document.clone(), replacement);
+        Config::save_atomic_text(&self.path, &document.to_string())
+            .map_err(|error| error.safe_summary())?;
+        self.config_document = document;
+        self.refresh_config_stamp();
+        Ok(())
+    }
+
     /// Reports a config change that was just saved to disk, then asks the
     /// running daemon to reload it. A failed reload request is appended to
     /// the status line rather than discarded -- and downgrades the tone from
@@ -398,17 +517,13 @@ impl GuiApp {
         // reported rather than silently producing a scale that resets on
         // the next launch.
         theme::install_pack(ctx, self.colorpack, scale);
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 self.config = candidate;
                 self.status = Status::success(self.strings.status_font_size_saved());
             }
             Err(error) => {
-                self.status = Status::error(
-                    self.strings
-                        .status_settings_save_failed(&error.safe_summary()),
-                )
+                self.status = Status::error(self.strings.status_settings_save_failed(&error))
             }
         }
     }
@@ -440,9 +555,8 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
@@ -455,7 +569,7 @@ impl GuiApp {
                 self.set_saved_status(Status::success(self.strings.status_settings_saved()));
             }
             Err(error) => {
-                let detail = error.safe_summary();
+                let detail = error;
                 self.status = Status::error(self.strings.status_settings_save_failed(&detail));
                 self.settings_error = Some(detail);
             }
@@ -491,9 +605,8 @@ impl GuiApp {
             self.import_preview = Some((imported, skipped));
             return;
         }
-        match imported.save_atomic(&self.path) {
+        match self.save_config_candidate(&imported) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, imported);
                 self.remember_undo(previous);
                 self.selected = (!self.config.expansion.is_empty()).then_some(0);
@@ -509,10 +622,7 @@ impl GuiApp {
                 self.set_saved_status(Status::success(message));
             }
             Err(error) => {
-                self.status = Status::error(
-                    self.strings
-                        .status_import_save_failed(&error.safe_summary()),
-                );
+                self.status = Status::error(self.strings.status_import_save_failed(&error));
                 self.import_preview = Some((imported, skipped));
             }
         }
@@ -647,6 +757,13 @@ impl GuiApp {
         match Config::load(&self.path) {
             Ok(config) => {
                 self.config = config;
+                match read_config_document(&self.path) {
+                    Ok(document) => self.config_document = document,
+                    Err(error) => {
+                        self.status = Status::error(error.to_string());
+                        return;
+                    }
+                }
                 self.refresh_config_stamp();
                 self.selected = (!self.config.expansion.is_empty()).then_some(0);
                 self.draft = self
@@ -709,9 +826,8 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.draft = self
@@ -720,9 +836,7 @@ impl GuiApp {
                 self.clear_command_preview();
                 self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
             }
-            Err(error) => {
-                self.status = Status::error(self.strings.status_save_failed(&error.safe_summary()))
-            }
+            Err(error) => self.status = Status::error(self.strings.status_save_failed(&error)),
         }
     }
 
@@ -739,12 +853,10 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        if let Err(error) = previous.save_atomic(&self.path) {
-            self.status =
-                Status::error(self.strings.status_undo_save_failed(&error.safe_summary()));
+        if let Err(error) = self.save_config_candidate(&previous) {
+            self.status = Status::error(self.strings.status_undo_save_failed(&error));
             return;
         }
-        self.refresh_config_stamp();
         let previous = self.undo.pop().expect("checked non-empty above");
         self.config = previous;
         self.selected = self
@@ -789,18 +901,14 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
                 self.set_saved_status(Status::success(self.strings.status_created()));
             }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_create_failed(&error.safe_summary()))
-            }
+            Err(error) => self.status = Status::error(self.strings.status_create_failed(&error)),
         }
     }
 
@@ -831,18 +939,14 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
                 self.set_saved_status(Status::success(self.strings.status_duplicated()));
             }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_duplicate_failed(&error.safe_summary()))
-            }
+            Err(error) => self.status = Status::error(self.strings.status_duplicate_failed(&error)),
         }
     }
 
@@ -857,9 +961,8 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.selected = (!self.config.expansion.is_empty())
@@ -870,10 +973,7 @@ impl GuiApp {
                 self.clear_command_preview();
                 self.set_saved_status(Status::success(self.strings.status_deleted(&trigger)));
             }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_delete_failed(&error.safe_summary()))
-            }
+            Err(error) => self.status = Status::error(self.strings.status_delete_failed(&error)),
         }
     }
 
@@ -893,9 +993,8 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        match candidate.save_atomic(&self.path) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 if self.selected == Some(index) {
@@ -910,10 +1009,7 @@ impl GuiApp {
                 };
                 self.set_saved_status(Status::success(message));
             }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_toggle_failed(&error.safe_summary()))
-            }
+            Err(error) => self.status = Status::error(self.strings.status_toggle_failed(&error)),
         }
     }
 
@@ -3074,6 +3170,51 @@ mod tests {
 
         assert_eq!(app.status.tone_for_test(), status::StatusTone::Warning);
         assert_eq!(app.status.text(), "Nichts zum Rückgängigmachen");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn format_preserving_saves_keep_manual_comments() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-format-preservation-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                trigger: ":sig".into(),
+                replacement: "Regards".into(),
+                description: "Signature".into(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let text = format!(
+            "# Maintained by the team; keep this note.\n\n{}",
+            toml_edit::ser::to_string_pretty(&config).unwrap()
+        );
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let mut candidate = app.config.clone();
+        candidate.expansion[0].replacement = "Best regards".into();
+
+        app.save_config_candidate(&candidate).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(saved.starts_with("# Maintained by the team; keep this note."));
+        assert!(saved.contains("replacement = \"Best regards\""));
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "Best regards"
+        );
         fs::remove_file(path).unwrap();
     }
 }

@@ -741,6 +741,22 @@ impl Config {
     /// existing files.
     pub fn save_atomic(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         self.validate()?;
+        let serialized = toml::to_string_pretty(self)?;
+        Self::save_atomic_serialized(path, serialized.as_bytes())
+    }
+
+    /// Atomically replace a trusted configuration file with TOML supplied by
+    /// a format-preserving editor. Parse and validate it before touching the
+    /// target so callers cannot bypass the configuration safety checks.
+    pub fn save_atomic_text(path: impl AsRef<Path>, text: &str) -> Result<(), ConfigError> {
+        Self::parse(text)?;
+        Self::save_atomic_serialized(path, text.as_bytes())
+    }
+
+    fn save_atomic_serialized(
+        path: impl AsRef<Path>,
+        serialized: &[u8],
+    ) -> Result<(), ConfigError> {
         let path = path.as_ref();
         let resolved = match fs::canonicalize(path) {
             Ok(resolved) => resolved,
@@ -775,7 +791,6 @@ impl Config {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("expansions.toml");
-        let serialized = toml::to_string_pretty(self)?;
         let mut last_error = None;
         for attempt in 0..16 {
             let nonce = std::time::SystemTime::now()
@@ -810,7 +825,7 @@ impl Config {
                 }
             };
             let result = (|| -> Result<(), ConfigError> {
-                file.write_all(serialized.as_bytes())
+                file.write_all(serialized)
                     .map_err(|source| ConfigError::Read {
                         path: temp.display().to_string(),
                         source,
