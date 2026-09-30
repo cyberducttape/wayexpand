@@ -8,6 +8,7 @@ mod lang;
 mod library;
 mod persistence;
 mod preview;
+mod runtime;
 mod settings;
 mod status;
 mod theme;
@@ -22,12 +23,11 @@ use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
 use std::{
     env, fs,
-    io::{Read, Write},
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc::{self, SyncSender},
+        Arc,
     },
     thread,
     time::Duration,
@@ -35,11 +35,10 @@ use std::{
 
 use theme::Palette;
 use wayexpand_core::{
-    default_config_path, discover_backends, BackendState, BackendStatus, Config, ConfigError,
-    ExpansionConfig, FleetConfig, FontScale, MatchMode, OrganizationPolicy, Settings,
+    default_config_path, BackendState, BackendStatus, Config, ConfigError, ExpansionConfig,
+    FontScale, MatchMode, OrganizationPolicy, Settings,
 };
 
-const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 /// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
 const SEARCH_FIELD_SALT: &str = "wayexpand-search-field";
 /// Every font scale, in the order the settings dialog offers them.
@@ -50,7 +49,6 @@ const FONT_SCALES: &[FontScale] = &[
     FontScale::ExtraLarge,
     FontScale::Huge,
 ];
-const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 const MAX_UNDO_HISTORY: usize = 32;
 const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{date}}", "UTC date"),
@@ -96,6 +94,10 @@ struct GuiApp {
     fleet_status: String,
     backend_status: Vec<BackendStatus>,
     protocol_probes: Vec<(String, String)>,
+    runtime_sender: Option<SyncSender<runtime::Request>>,
+    runtime_receiver: Option<mpsc::Receiver<runtime::Completion>>,
+    diagnostics_running: bool,
+    pending_control: usize,
     pending_action: Option<PendingAction>,
     import_open: bool,
     import_path: String,
@@ -262,8 +264,12 @@ impl GuiApp {
             diagnostics_open: false,
             daemon_status: strings.not_checked().into(),
             fleet_status: strings.not_checked().into(),
-            backend_status: discover_backends(),
+            backend_status: Vec::new(),
             protocol_probes: Vec::new(),
+            runtime_sender: None,
+            runtime_receiver: None,
+            diagnostics_running: false,
+            pending_control: 0,
             pending_action: None,
             import_open: false,
             import_path: String::new(),
@@ -290,33 +296,110 @@ impl GuiApp {
         })
     }
 
-    fn refresh_diagnostics(&mut self) {
-        self.backend_status = discover_backends();
-        self.fleet_status = match wayexpand_core::load_organization_policy().and_then(|policy| {
-            FleetConfig::load_standard_with_base_and_policy(self.config.clone(), &policy)
-                .map_err(|error| error.to_string())
-        }) {
-            Ok(fleet) => {
-                let mut status = format!(
-                    "active · {} files · {} expansions · {} hotkeys",
-                    fleet.stats.total_files_loaded,
-                    fleet.stats.total_expansions,
-                    fleet.stats.total_hotkeys
-                );
-                if !fleet.policy_violations.is_empty() {
-                    status.push_str(" · policy: ");
-                    status.push_str(&fleet.policy_violations.join("; "));
+    fn start_runtime(&mut self) -> Result<()> {
+        let (sender, receiver) = runtime::start().context("starting GUI background runtime")?;
+        self.runtime_sender = Some(sender);
+        self.runtime_receiver = Some(receiver);
+        self.refresh_diagnostics(false);
+        Ok(())
+    }
+
+    fn refresh_diagnostics(&mut self, announce: bool) {
+        if self.diagnostics_running {
+            return;
+        }
+        let request = runtime::Request::Diagnostics {
+            config: self.config.clone(),
+            announce,
+        };
+        let Some(sender) = self.runtime_sender.as_ref() else {
+            return;
+        };
+        match sender.try_send(request) {
+            Ok(()) => {
+                self.diagnostics_running = true;
+                if announce {
+                    self.status = Status::info(self.strings.diagnostics_running());
                 }
-                status
             }
-            Err(error) => format!("invalid: {error}"),
-        };
-        self.protocol_probes = diagnostics::probe_protocols();
-        self.daemon_status = match control_command("status") {
-            Ok(response) => response.trim().replace('\n', " · "),
-            Err(error) => format!("Unavailable: {error}"),
-        };
-        self.status = Status::success(self.strings.status_diagnostics_refreshed());
+            Err(_) => {
+                if announce {
+                    self.status = Status::warning(self.strings.background_queue_full());
+                }
+            }
+        }
+    }
+
+    fn poll_runtime(&mut self, ctx: &egui::Context) {
+        let mut completions = Vec::new();
+        let mut disconnected = false;
+        if let Some(receiver) = self.runtime_receiver.as_ref() {
+            loop {
+                match receiver.try_recv() {
+                    Ok(completion) => completions.push(completion),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if disconnected {
+            self.runtime_receiver = None;
+            self.runtime_sender = None;
+            self.diagnostics_running = false;
+            self.pending_control = 0;
+            self.status = Status::error(self.strings.background_runtime_stopped());
+        }
+        for completion in completions {
+            match completion {
+                runtime::Completion::Diagnostics(snapshot) => {
+                    self.backend_status = snapshot.backend_status;
+                    self.fleet_status = snapshot.fleet_status;
+                    self.protocol_probes = snapshot.protocol_probes;
+                    self.daemon_status = snapshot.daemon_status;
+                    if let Some(paused) = snapshot.paused {
+                        self.paused = paused;
+                    }
+                    self.diagnostics_running = false;
+                    if snapshot.announce {
+                        self.status = Status::success(self.strings.status_diagnostics_refreshed());
+                    }
+                }
+                runtime::Completion::Control { operation, result } => {
+                    self.pending_control = self.pending_control.saturating_sub(1);
+                    match operation {
+                        runtime::Operation::Reload(previous_status) => match result {
+                            Ok(_) => self.status = previous_status,
+                            Err(error) => {
+                                self.status = previous_status.with_caveat(
+                                    self.strings.status_daemon_not_reloaded(&error.to_string()),
+                                )
+                            }
+                        },
+                        runtime::Operation::Pause { paused } => match result {
+                            Ok(_) => {
+                                self.paused = paused;
+                                self.status = Status::success(if paused {
+                                    self.strings.status_paused()
+                                } else {
+                                    self.strings.status_resumed()
+                                });
+                            }
+                            Err(error) => {
+                                self.status = Status::error(
+                                    self.strings.status_control_unavailable(&error.to_string()),
+                                )
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        if self.diagnostics_running || self.pending_control > 0 {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
     }
 
     fn remember_undo(&mut self, previous: Config) {
@@ -364,12 +447,22 @@ impl GuiApp {
     fn set_saved_status(&mut self, status: Status) {
         self.preview_cache = None;
         self.clear_command_preview();
-        self.status = match control_command("reload") {
-            Ok(_) => status,
-            Err(error) => {
-                status.with_caveat(self.strings.status_daemon_not_reloaded(&error.to_string()))
-            }
+        let Some(sender) = self.runtime_sender.as_ref() else {
+            self.status = status;
+            return;
         };
+        match sender.try_send(runtime::Request::Control {
+            command: "reload".into(),
+            operation: runtime::Operation::Reload(status.clone()),
+        }) {
+            Ok(()) => {
+                self.pending_control += 1;
+                self.status = Status::info(self.strings.daemon_reloading());
+            }
+            Err(_) => {
+                self.status = status.with_caveat(self.strings.background_queue_full());
+            }
+        }
     }
 
     /// Opens the settings window with the editable fields reset to what is
@@ -1201,19 +1294,25 @@ impl GuiApp {
     }
 
     fn toggle_pause(&mut self) {
-        let command = if self.paused { "resume" } else { "pause" };
-        match control_command(command) {
-            Ok(_) => {
-                self.paused = !self.paused;
-                self.status = Status::success(if self.paused {
-                    self.strings.status_paused()
-                } else {
-                    self.strings.status_resumed()
-                });
+        if self.pending_control > 0 {
+            return;
+        }
+        let paused = !self.paused;
+        let command = if paused { "pause" } else { "resume" };
+        let Some(sender) = self.runtime_sender.as_ref() else {
+            self.status = Status::error(self.strings.background_runtime_stopped());
+            return;
+        };
+        match sender.try_send(runtime::Request::Control {
+            command: command.into(),
+            operation: runtime::Operation::Pause { paused },
+        }) {
+            Ok(()) => {
+                self.pending_control += 1;
+                self.status = Status::info(self.strings.daemon_control_running());
             }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_control_unavailable(&error.to_string()))
+            Err(_) => {
+                self.status = Status::warning(self.strings.background_queue_full());
             }
         }
     }
@@ -1312,11 +1411,14 @@ impl GuiApp {
                                 ui.close_menu();
                             }
                             if ui
-                                .button(if self.paused {
-                                    self.strings.resume()
-                                } else {
-                                    self.strings.pause()
-                                })
+                                .add_enabled(
+                                    self.pending_control == 0 && !self.diagnostics_running,
+                                    egui::Button::new(if self.paused {
+                                        self.strings.resume()
+                                    } else {
+                                        self.strings.pause()
+                                    }),
+                                )
                                 .clicked()
                             {
                                 self.toggle_pause();
@@ -1324,7 +1426,7 @@ impl GuiApp {
                             }
                             if ui.button(self.strings.diagnostics()).clicked() {
                                 self.diagnostics_open = true;
-                                self.refresh_diagnostics();
+                                self.refresh_diagnostics(true);
                                 ui.close_menu();
                             }
                             if ui.button(self.strings.import_espanso()).clicked() {
@@ -1421,8 +1523,18 @@ impl GuiApp {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         theme::section_header(ui, "", self.strings.backends());
-                        if theme::secondary_button(ui, palette, self.strings.refresh()).clicked() {
-                            self.refresh_diagnostics();
+                        if ui
+                            .add_enabled(
+                                !self.diagnostics_running,
+                                egui::Button::new(self.strings.refresh()),
+                            )
+                            .clicked()
+                        {
+                            self.refresh_diagnostics(true);
+                        }
+                        if self.diagnostics_running {
+                            ui.spinner();
+                            ui.label(self.strings.diagnostics_running());
                         }
                     });
                     ui.add_space(4.0);
@@ -2786,6 +2898,9 @@ impl GuiApp {
                             .rect_filled(bar, egui::CornerRadius::same(2), accent);
                     }
                     ui.label(RichText::new(self.status.text()).color(text_color));
+                    if self.diagnostics_running || self.pending_control > 0 {
+                        ui.spinner();
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(self.path.display().to_string())
@@ -2878,6 +2993,7 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_runtime(ctx);
         self.poll_command_preview(ctx);
         self.reap_app_detection_without_editor(ctx);
         if self.theme_refresh_pending {
@@ -2942,41 +3058,6 @@ impl eframe::App for GuiApp {
     }
 }
 
-/// Best-effort check of whether the running daemon currently has expansion
-/// matching paused, so the GUI's Pause/Resume button can start in sync with
-/// reality instead of always assuming "running". Returns `None` if the
-/// daemon isn't reachable or its response doesn't include the field, in
-/// which case the caller should keep its own default.
-fn query_daemon_paused() -> Option<bool> {
-    let response = control_command("status").ok()?;
-    response.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key == "paused").then(|| value == "true")
-    })
-}
-
-fn control_command(command: &str) -> Result<String> {
-    let path = env::var_os("WAYEXPAND_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-        })
-        .context("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")?;
-    let mut stream =
-        UnixStream::connect(&path).with_context(|| format!("connecting to {}", path.display()))?;
-    stream.set_read_timeout(Some(CONTROL_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONTROL_TIMEOUT))?;
-    writeln!(stream, "{command}")?;
-    let mut response = Vec::new();
-    stream
-        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)?;
-    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-        anyhow::bail!("daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
-    }
-    String::from_utf8(response).context("daemon returned a non-UTF-8 control response")
-}
-
 /// Whether `text` is exactly `values` joined with `", "`, decided without
 /// building that joined string. The editor stores tags and app filters as one
 /// comma-separated line while the configuration stores them as a list, and
@@ -3007,16 +3088,7 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let mut app = GuiApp::load(path)?;
-    // The daemon may already be paused from a prior CLI `pause` command
-    // before this GUI ever opened; without this, the button always starts
-    // believing the daemon is running, and the first click sends the wrong
-    // operation (asking an already-paused daemon to pause again does
-    // nothing, leaving the button permanently out of sync with reality
-    // until the user notices and clicks it twice more). Best-effort: if the
-    // daemon isn't reachable yet, `paused` simply keeps its default (false).
-    if let Some(paused) = query_daemon_paused() {
-        app.paused = paused;
-    }
+    app.start_runtime()?;
     let saved_dark_mode = load_gui_prefs().dark_mode;
     let colorpack = app.colorpack;
     let icon = eframe::icon_data::from_png_bytes(include_bytes!(
@@ -3796,11 +3868,13 @@ mod tests {
                         app.set_selected_index(selected);
                         app.draft = selected
                             .map(|index| Draft::from_expansion(&app.config.expansion[index]));
-                        let mut input = egui::RawInput::default();
-                        input.screen_rect = Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(width, 760.0),
-                        ));
+                        let input = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 760.0),
+                            )),
+                            ..Default::default()
+                        };
                         let _ = ctx.run(input, |ctx| {
                             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
                             app.sync_window_title(ctx);
@@ -3819,11 +3893,13 @@ mod tests {
             }
         }
         app.create_new_snippet();
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(420.0, 760.0),
-        ));
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(420.0, 760.0),
+            )),
+            ..Default::default()
+        };
         let _ = ctx.run(input, |ctx| {
             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
             app.render_editor_actions(ctx, &palette);
@@ -3847,11 +3923,13 @@ mod tests {
         for language in [Language::English, Language::German] {
             app.language = language;
             app.strings.set_language(language);
-            let mut input = egui::RawInput::default();
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(640.0, 600.0),
-            ));
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 600.0),
+                )),
+                ..Default::default()
+            };
             let _ = ctx.run(input, |ctx| {
                 let palette = Palette::for_pack(app.colorpack, app.dark_mode);
                 app.render_editor(ctx, &palette);

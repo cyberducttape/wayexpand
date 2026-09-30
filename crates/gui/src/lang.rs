@@ -1325,6 +1325,43 @@ impl Strings {
         }
     }
 
+    pub fn diagnostics_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Running diagnostics…",
+            Language::German => "Diagnose läuft…",
+        }
+    }
+
+    pub fn daemon_reloading(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Reloading daemon configuration…",
+            Language::German => "Daemon-Konfiguration wird neu geladen…",
+        }
+    }
+
+    pub fn daemon_control_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Updating daemon state…",
+            Language::German => "Daemon-Status wird aktualisiert…",
+        }
+    }
+
+    pub fn background_queue_full(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Background task queue is busy; try again shortly",
+            Language::German => {
+                "Hintergrundwarteschlange ausgelastet; bitte gleich erneut versuchen"
+            }
+        }
+    }
+
+    pub fn background_runtime_stopped(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Background runtime stopped unexpectedly",
+            Language::German => "Hintergrunddienst wurde unerwartet beendet",
+        }
+    }
+
     pub fn status_daemon_not_reloaded(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("daemon did not reload: {detail}"),
