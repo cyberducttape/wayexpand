@@ -118,8 +118,10 @@ struct GuiApp {
     /// the window-wait after it is bounded), so this runs off the UI thread
     /// with the receiver polled each frame instead of calling it inline,
     /// which could otherwise freeze the whole GUI indefinitely rather than
-    /// for the intended few seconds. `None` means no detection is running.
-    app_detection: Option<mpsc::Receiver<AppDetection>>,
+    /// for the intended few seconds. The task remains present after a UI
+    /// cancellation until its worker reports completion, preventing retries
+    /// from accumulating detached threads.
+    app_detection: Option<AppDetectionTask>,
     /// Set by `execute_action(PendingAction::Close)` once the user has
     /// confirmed closing with an unsaved draft (or there was nothing to
     /// confirm). The original OS close request was already cancelled by
@@ -143,6 +145,15 @@ struct GuiApp {
 enum SettingsTab {
     Appearance,
     Engine,
+}
+
+/// A detection worker cannot be forcefully cancelled while it is inside a
+/// potentially blocking D-Bus call. Keep its receiver alive until the worker
+/// reports completion so cancelling the UI action cannot allow another worker
+/// to be started and leak an unbounded number of detached threads.
+struct AppDetectionTask {
+    receiver: mpsc::Receiver<AppDetection>,
+    cancelled: bool,
 }
 
 impl GuiApp {
@@ -457,11 +468,36 @@ impl GuiApp {
     }
 
     fn select(&mut self, index: usize) {
+        self.cancel_app_detection();
         self.selected = Some(index);
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
         self.preview_input = self.config.expansion[index].trigger.clone();
         self.pending_action = None;
         self.clear_command_preview();
+    }
+
+    fn cancel_app_detection(&mut self) {
+        if let Some(task) = self.app_detection.as_mut() {
+            task.cancelled = true;
+        }
+    }
+
+    /// A cancelled worker may finish after the editor has disappeared (for
+    /// example after deleting the last snippet). Reap its result here so the
+    /// task does not pin the receiver or block a future detection forever.
+    fn reap_app_detection_without_editor(&mut self, ctx: &egui::Context) {
+        if self.selected_index().is_some() {
+            return;
+        }
+        let Some(task) = self.app_detection.as_ref() else {
+            return;
+        };
+        match task.receiver.try_recv() {
+            Ok(_) | Err(mpsc::TryRecvError::Disconnected) => self.app_detection = None,
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
     }
 
     /// The selected index, but only while it still addresses a snippet.
@@ -503,6 +539,7 @@ impl GuiApp {
         if matches!(&action, PendingAction::Select(index) if self.selected == Some(*index)) {
             return;
         }
+        self.cancel_app_detection();
         if matches!(&action, PendingAction::Delete) && !self.draft_is_dirty() {
             self.pending_action = Some(action);
             return;
@@ -1586,7 +1623,11 @@ impl GuiApp {
                                         )
                                 });
                                 let strings = &self.strings;
-                                let app_detecting = self.app_detection.is_some();
+                                let app_detecting = self
+                                    .app_detection
+                                    .as_ref()
+                                    .is_some_and(|task| !task.cancelled);
+                                let app_detection_busy = self.app_detection.is_some();
                                 let mut cancel_detection = false;
                                 let Some(draft) = self.draft.as_mut() else {
                                     ui.label(strings.draft_unavailable());
@@ -1694,6 +1735,10 @@ impl GuiApp {
                                                     // it eventually sends.
                                                     cancel_detection = true;
                                                 }
+                                            } else if app_detection_busy {
+                                                ui.spinner();
+                                                ui.label(strings.stopping_app_detection())
+                                                    .on_hover_text(strings.detect_app_tooltip());
                                             } else if ui
                                                 .button(strings.detect_app())
                                                 .on_hover_text(strings.detect_app_tooltip())
@@ -1740,7 +1785,9 @@ impl GuiApp {
                                         ui.end_row();
                                     });
                                 if cancel_detection {
-                                    self.app_detection = None;
+                                    if let Some(task) = self.app_detection.as_mut() {
+                                        task.cancelled = true;
+                                    }
                                 }
                                 let Some(draft) = self.draft.as_mut() else {
                                     return;
@@ -1768,7 +1815,10 @@ impl GuiApp {
                             use wayexpand_backend_kwin_window::KwinWindowTracker;
                             use wayexpand_core::WindowTracker;
                             let (sender, receiver) = mpsc::channel();
-                            self.app_detection = Some(receiver);
+                            self.app_detection = Some(AppDetectionTask {
+                                receiver,
+                                cancelled: false,
+                            });
                             thread::spawn(move || {
                                 let detection = match KwinWindowTracker::new() {
                                     Ok(mut tracker) => {
@@ -1788,39 +1838,55 @@ impl GuiApp {
                                 let _ = sender.send(detection);
                             });
                         }
-                        if let Some(receiver) = &self.app_detection {
-                            match receiver.try_recv() {
+                        let detection_cancelled = self
+                            .app_detection
+                            .as_ref()
+                            .is_some_and(|task| task.cancelled);
+                        let detection_result = self
+                            .app_detection
+                            .as_ref()
+                            .map(|task| task.receiver.try_recv());
+                        if let Some(detection_result) = detection_result {
+                            match detection_result {
                                 Ok(AppDetection::Found(window)) => {
                                     self.app_detection = None;
-                                    let value = window.app_id.or(window.title).unwrap_or_default();
-                                    if value.is_empty() {
-                                        self.status = Status::warning(
-                                            self.strings.status_window_unidentified(),
-                                        );
-                                    } else {
-                                        if let Some(draft) = self.draft.as_mut() {
-                                            if draft.app_filter.trim().is_empty() {
-                                                draft.app_filter = value.clone();
-                                            } else {
-                                                draft.app_filter.push_str(", ");
-                                                draft.app_filter.push_str(&value);
+                                    if !detection_cancelled {
+                                        let value =
+                                            window.app_id.or(window.title).unwrap_or_default();
+                                        if value.is_empty() {
+                                            self.status = Status::warning(
+                                                self.strings.status_window_unidentified(),
+                                            );
+                                        } else {
+                                            if let Some(draft) = self.draft.as_mut() {
+                                                if draft.app_filter.trim().is_empty() {
+                                                    draft.app_filter = value.clone();
+                                                } else {
+                                                    draft.app_filter.push_str(", ");
+                                                    draft.app_filter.push_str(&value);
+                                                }
                                             }
+                                            self.status = Status::success(
+                                                self.strings.status_app_filter_added(&value),
+                                            );
                                         }
-                                        self.status = Status::success(
-                                            self.strings.status_app_filter_added(&value),
-                                        );
                                     }
                                 }
                                 Ok(AppDetection::NoWindow) => {
                                     self.app_detection = None;
-                                    self.status =
-                                        Status::warning(self.strings.status_no_focused_window());
+                                    if !detection_cancelled {
+                                        self.status = Status::warning(
+                                            self.strings.status_no_focused_window(),
+                                        );
+                                    }
                                 }
                                 Ok(AppDetection::Unavailable) => {
                                     self.app_detection = None;
-                                    self.status = Status::warning(
-                                        self.strings.status_detection_unavailable(),
-                                    );
+                                    if !detection_cancelled {
+                                        self.status = Status::warning(
+                                            self.strings.status_detection_unavailable(),
+                                        );
+                                    }
                                 }
                                 Err(mpsc::TryRecvError::Empty) => {
                                     // Still waiting: request another repaint soon so
@@ -1834,8 +1900,10 @@ impl GuiApp {
                                     // sends before exiting) -- treat it the same as an
                                     // explicit Unavailable rather than waiting forever.
                                     self.app_detection = None;
-                                    self.status =
-                                        Status::error(self.strings.status_detection_failed());
+                                    if !detection_cancelled {
+                                        self.status =
+                                            Status::error(self.strings.status_detection_failed());
+                                    }
                                 }
                             }
                         }
@@ -2212,6 +2280,7 @@ impl GuiApp {
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_command_preview(ctx);
+        self.reap_app_detection_without_editor(ctx);
         if self.theme_refresh_pending {
             theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
             self.theme_refresh_pending = false;
@@ -2458,6 +2527,28 @@ mod tests {
         let mut draft = draft();
         draft.command_enabled = false;
         assert!(draft.command_config().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancelling_app_detection_keeps_the_worker_until_it_finishes() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-detection-{}.toml",
+            std::process::id()
+        ));
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let (_sender, receiver) = mpsc::channel();
+        app.app_detection = Some(AppDetectionTask {
+            receiver,
+            cancelled: false,
+        });
+
+        app.cancel_app_detection();
+
+        assert!(app
+            .app_detection
+            .as_ref()
+            .is_some_and(|task| task.cancelled));
+        let _ = fs::remove_file(path);
     }
 
     #[test]

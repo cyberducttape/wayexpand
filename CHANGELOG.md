@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Prevent repeated cancellation of GUI application detection from leaking
+  detached D-Bus worker threads, and discard late detection results after the
+  user switches snippets or cancels the request.
 - Polish the GUI's shared visual language: controls now have consistent sizing,
   quieter hover states, visible keyboard focus rings, correctly composited
   status pills, and more deliberate spacing across the toolbar, library, and

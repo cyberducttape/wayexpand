@@ -972,6 +972,13 @@ impl Strings {
         }
     }
 
+    pub fn stopping_app_detection(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Stopping application detection…",
+            Language::German => "Anwendungserkennung wird beendet…",
+        }
+    }
+
     pub fn no_description(&self) -> &'static str {
         match self.lang {
             Language::English => "No description",
