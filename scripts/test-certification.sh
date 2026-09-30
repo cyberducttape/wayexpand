@@ -53,6 +53,7 @@ run_certification() {
 
 run_certification --results "$results" --output "$output"
 grep -F -- '- keyboard_layout: us,de,fr,altgr,multi-layout-switching' "$output" >/dev/null
+grep -F -- "- required_layout_profiles: \`us\`, \`de\`, \`fr\`, \`altgr\`, \`multi-layout-switching\`" "$output" >/dev/null
 grep -F -- "- target_apps: $target_apps" "$output" >/dev/null
 
 json_output="$test_root/certification.json"

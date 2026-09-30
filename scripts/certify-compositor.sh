@@ -338,7 +338,8 @@ else
     printf '%s\n' "- compositor_version: $compositor_version"
     printf '%s\n' "- backend: $backend"
     printf '%s\n' "- keyboard_layout: $keyboard_layout"
-    printf '%s\n' "- required_layout_profiles: \`us\`, \`de\`, \`fr\`, \`altgr\`, \`multi-layout-switching\`"
+    required_layout_profiles=$(jq -r '.required_layout_profiles | map("`" + . + "`") | join(", ")' "$matrix")
+    printf '%s\n' "- required_layout_profiles: $required_layout_profiles"
     target_policy=$(jq -r --arg compositor "$compositor" \
         '.targets[] | select(.id == $compositor) | "- application_filter: `" + .application_filter + "`\n- window_tracker: `" + .window_tracker + "`"' "$matrix")
     printf '%s\n' "$target_policy"
