@@ -17,7 +17,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -28,6 +28,7 @@ const MAX_RESULT_BYTES_PER_EVENT: usize = 4 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MINIMAL_COMMAND_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
+const ASYNC_COMMAND_WORKER_COUNT: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputEvent {
@@ -271,7 +272,7 @@ struct AsyncCommandRuntime {
     expansion_metrics: Arc<CommandMetricsState>,
     hotkey_metrics: Arc<CommandMetricsState>,
     shutdown: Arc<AtomicBool>,
-    command_worker: Option<JoinHandle<()>>,
+    command_workers: Vec<JoinHandle<()>>,
     hotkey_worker: Option<JoinHandle<()>>,
 }
 
@@ -307,7 +308,7 @@ impl Drop for AsyncCommandRuntime {
         // input loop, so waiting for an old command's normal timeout here
         // would briefly freeze capture and control handling.
         self.shutdown.store(true, Ordering::Release);
-        if let Some(worker) = self.command_worker.take() {
+        for worker in self.command_workers.drain(..) {
             let _ = worker.join();
         }
         if let Some(worker) = self.hotkey_worker.take() {
@@ -502,61 +503,78 @@ impl ExpansionEngine {
         let expansion_metrics = Arc::clone(&self.expansion_metrics);
         let hotkey_metrics = Arc::clone(&self.hotkey_metrics);
         let shutdown = Arc::new(AtomicBool::new(false));
-        let command_shutdown = Arc::clone(&shutdown);
-        let worker_metrics = Arc::clone(&expansion_metrics);
-        let command_worker = thread::Builder::new()
-            .name("wayexpand-expansion-worker".into())
-            .spawn(move || {
-                while !command_shutdown.load(Ordering::Acquire) {
-                    let job = match command_receiver.recv_timeout(Duration::from_millis(50)) {
-                        Ok(job) => job,
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    };
-                    // A runtime can be dropped during a configuration reload
-                    // while work is still buffered in the channel. Do not
-                    // start another external command after shutdown begins;
-                    // only the command already executing at the boundary may
-                    // finish under its existing timeout.
-                    if command_shutdown.load(Ordering::Acquire) {
+        let command_receiver = Arc::new(Mutex::new(command_receiver));
+        let mut command_workers = Vec::with_capacity(ASYNC_COMMAND_WORKER_COUNT);
+        for worker_index in 0..ASYNC_COMMAND_WORKER_COUNT {
+            let command_shutdown = Arc::clone(&shutdown);
+            let worker_metrics = Arc::clone(&expansion_metrics);
+            let worker_receiver = Arc::clone(&command_receiver);
+            let worker_completion_sender = completion_sender.clone();
+            let command_worker = thread::Builder::new()
+                .name(format!("wayexpand-expansion-worker-{worker_index}"))
+                .spawn(move || {
+                    while !command_shutdown.load(Ordering::Acquire) {
+                        let job = match worker_receiver
+                            .lock()
+                            .expect("expansion command receiver lock poisoned")
+                            .recv_timeout(Duration::from_millis(50))
+                        {
+                            Ok(job) => job,
+                            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        };
+                        // A runtime can be dropped during a configuration reload
+                        // while work is still buffered in the channel. Do not
+                        // start another external command after shutdown begins;
+                        // only the command already executing at the boundary may
+                        // finish under its existing timeout.
+                        if command_shutdown.load(Ordering::Acquire) {
+                            worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                            break;
+                        }
                         worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                        break;
-                    }
-                    worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                    worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
-                    let AsyncCommandJob::Expansion {
-                        config_index,
-                        generation,
-                        additional_max_size,
-                        command,
-                        result,
-                    } = job;
-                    let cache_ms = command.cache_ms;
-                    let output = run_command_with_shutdown(&command, Some(&command_shutdown));
-                    worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                    if let Err(error) = &output {
-                        worker_metrics.record_error(matches!(error, CommandError::Timeout));
-                    }
-                    if !send_completion_or_shutdown(
-                        &completion_sender,
-                        AsyncCommandCompletion {
+                        worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+                        let AsyncCommandJob::Expansion {
                             config_index,
                             generation,
-                            cache_ms,
                             additional_max_size,
+                            command,
                             result,
-                            output,
-                        },
-                        &command_shutdown,
-                    ) {
-                        break;
+                        } = job;
+                        let cache_ms = command.cache_ms;
+                        let output = run_command_with_shutdown(&command, Some(&command_shutdown));
+                        worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        if let Err(error) = &output {
+                            worker_metrics.record_error(matches!(error, CommandError::Timeout));
+                        }
+                        if !send_completion_or_shutdown(
+                            &worker_completion_sender,
+                            AsyncCommandCompletion {
+                                config_index,
+                                generation,
+                                cache_ms,
+                                additional_max_size,
+                                result,
+                                output,
+                            },
+                            &command_shutdown,
+                        ) {
+                            break;
+                        }
                     }
+                });
+            match command_worker {
+                Ok(worker) => command_workers.push(worker),
+                Err(_) => {
+                    shutdown.store(true, Ordering::Release);
+                    drop(command_sender);
+                    for worker in command_workers {
+                        let _ = worker.join();
+                    }
+                    return false;
                 }
-            });
-        let command_worker = match command_worker {
-            Ok(worker) => worker,
-            Err(_) => return false,
-        };
+            }
+        }
         let hotkey_shutdown = Arc::clone(&shutdown);
         let worker_hotkey_metrics = Arc::clone(&hotkey_metrics);
         let hotkey_worker = thread::Builder::new()
@@ -614,7 +632,9 @@ impl ExpansionEngine {
                 // reloads or under a tight systemd TasksMax).
                 shutdown.store(true, Ordering::Release);
                 drop(command_sender);
-                let _ = command_worker.join();
+                for worker in command_workers {
+                    let _ = worker.join();
+                }
                 return false;
             }
         };
@@ -626,7 +646,7 @@ impl ExpansionEngine {
             expansion_metrics,
             hotkey_metrics,
             shutdown,
-            command_worker: Some(command_worker),
+            command_workers,
             hotkey_worker: Some(hotkey_worker),
         });
         true
@@ -700,8 +720,12 @@ impl ExpansionEngine {
         let completions: Vec<_> = runtime.receiver.try_iter().collect();
         let mut results = Vec::new();
         for completion in completions {
-            let Ok(output) = completion.output else {
-                continue;
+            let output = match completion.output {
+                Ok(output) => output,
+                Err(_) => {
+                    self.restore_deferred_match(&completion.result.matched_text);
+                    continue;
+                }
             };
 
             // Postflight policy: the output must still belong to the current

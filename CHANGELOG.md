@@ -6,6 +6,15 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Protect deferred command reservations when an asynchronous command fails, so
+  a failed or stale completion cannot leave its trigger missing from the
+  matcher state.
+- Run expansion commands through a bounded four-worker pool; one slow command
+  no longer serializes unrelated expansion commands while hotkeys retain their
+  separate worker and queue.
+- Refuse to overwrite a configuration that changed outside the GUI since it
+  was loaded or last saved; the GUI now reports the conflict and preserves the
+  external edit until the user explicitly reloads it.
 - Prevent repeated cancellation of GUI application detection from leaking
   detached D-Bus worker threads, and discard late detection results after the
   user switches snippets or cancels the request.

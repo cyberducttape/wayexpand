@@ -1191,6 +1191,15 @@ impl Strings {
         }
     }
 
+    pub fn status_config_changed_externally(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Configuration changed outside WayExpand; reload it before saving",
+            Language::German => {
+                "Konfiguration wurde außerhalb von WayExpand geändert; vor dem Speichern neu laden"
+            }
+        }
+    }
+
     pub fn status_reload_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Reload failed: {detail}"),

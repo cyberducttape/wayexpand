@@ -499,7 +499,7 @@ fn rejected_command_job_does_not_consume_the_trigger() {
         expansion_metrics: Arc::clone(&engine.expansion_metrics),
         hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
         shutdown: Arc::new(AtomicBool::new(false)),
-        command_worker: None,
+        command_workers: Vec::new(),
         hotkey_worker: None,
     });
     engine.buffer.extend(":slow".chars());
@@ -547,7 +547,7 @@ fn deferred_dispatch_rejects_a_saturated_queue_without_running_command() {
         expansion_metrics: Arc::clone(&engine.expansion_metrics),
         hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
         shutdown: Arc::new(AtomicBool::new(false)),
-        command_worker: None,
+        command_workers: Vec::new(),
         hotkey_worker: None,
     });
 

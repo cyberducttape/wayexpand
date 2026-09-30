@@ -19,14 +19,15 @@ use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
+use std::hash::{Hash, Hasher};
 use std::{
     env, fs,
     io::{Read, Write},
-    os::unix::net::UnixStream,
+    os::unix::{fs::MetadataExt, net::UnixStream},
     path::PathBuf,
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use theme::Palette;
 use wayexpand_core::{
@@ -68,6 +69,7 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
 
 struct GuiApp {
     path: PathBuf,
+    config_stamp: Option<GuiFileStamp>,
     config: Config,
     selected: Option<usize>,
     filter: String,
@@ -156,6 +158,34 @@ struct AppDetectionTask {
     cancelled: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GuiFileStamp {
+    modified: Option<SystemTime>,
+    length: u64,
+    inode: u64,
+    change_time: i64,
+    change_time_nsec: i64,
+    content_hash: u64,
+}
+
+/// Reads the small configuration file only when a save is about to happen.
+/// The metadata catches atomic replacement and the content hash also catches
+/// an external writer that edits the existing inode in place.
+fn gui_file_stamp(path: &std::path::Path) -> Option<GuiFileStamp> {
+    let metadata = fs::metadata(path).ok()?;
+    let bytes = fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(GuiFileStamp {
+        modified: metadata.modified().ok(),
+        length: metadata.len(),
+        inode: metadata.ino(),
+        change_time: metadata.ctime(),
+        change_time_nsec: metadata.ctime_nsec(),
+        content_hash: hasher.finish(),
+    })
+}
+
 impl GuiApp {
     fn load(path: PathBuf) -> Result<Self> {
         let config = match Config::load(&path) {
@@ -205,8 +235,10 @@ impl GuiApp {
         let settings_font_scale = config.settings.font_scale;
         let prefs = load_gui_prefs();
         let strings = Strings::new(prefs.language);
+        let config_stamp = gui_file_stamp(&path);
         Ok(Self {
             path,
+            config_stamp,
             config,
             selected,
             filter: String::new(),
@@ -283,6 +315,22 @@ impl GuiApp {
         }
     }
 
+    /// Prevents a GUI save from silently replacing a configuration changed by
+    /// the daemon, an editor, or fleet-management tooling since this window
+    /// last loaded or saved it. The stamp is refreshed only after a successful
+    /// atomic save, so a failed write cannot make a later attempt unsafe.
+    fn can_save_config(&mut self) -> bool {
+        if gui_file_stamp(&self.path) != self.config_stamp {
+            self.status = Status::warning(self.strings.status_config_changed_externally());
+            return false;
+        }
+        true
+    }
+
+    fn refresh_config_stamp(&mut self) {
+        self.config_stamp = gui_file_stamp(&self.path);
+    }
+
     /// Reports a config change that was just saved to disk, then asks the
     /// running daemon to reload it. A failed reload request is appended to
     /// the status line rather than discarded -- and downgrades the tone from
@@ -339,6 +387,9 @@ impl GuiApp {
     /// content, and filling it with display-preference steps would bury the
     /// change the user actually wants back.
     fn apply_font_scale(&mut self, ctx: &egui::Context, scale: FontScale) {
+        if !self.can_save_config() {
+            return;
+        }
         self.settings_font_scale = scale;
         let mut candidate = self.config.clone();
         candidate.settings.font_scale = scale;
@@ -349,6 +400,7 @@ impl GuiApp {
         theme::install_pack(ctx, self.colorpack, scale);
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 self.config = candidate;
                 self.status = Status::success(self.strings.status_font_size_saved());
             }
@@ -385,8 +437,12 @@ impl GuiApp {
             self.settings_error = Some(detail);
             return;
         }
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
@@ -431,8 +487,13 @@ impl GuiApp {
             self.status = Status::error(self.strings.status_import_rejected(&error.safe_summary()));
             return;
         }
+        if !self.can_save_config() {
+            self.import_preview = Some((imported, skipped));
+            return;
+        }
         match imported.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, imported);
                 self.remember_undo(previous);
                 self.selected = (!self.config.expansion.is_empty()).then_some(0);
@@ -586,6 +647,7 @@ impl GuiApp {
         match Config::load(&self.path) {
             Ok(config) => {
                 self.config = config;
+                self.refresh_config_stamp();
                 self.selected = (!self.config.expansion.is_empty()).then_some(0);
                 self.draft = self
                     .selected
@@ -644,8 +706,12 @@ impl GuiApp {
             self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
             return;
         }
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.draft = self
@@ -661,7 +727,7 @@ impl GuiApp {
     }
 
     fn undo(&mut self) {
-        let Some(previous) = self.undo.last() else {
+        let Some(previous) = self.undo.last().cloned() else {
             self.status = Status::warning(self.strings.status_nothing_to_undo());
             return;
         };
@@ -670,11 +736,15 @@ impl GuiApp {
         // order (as before) meant a failed save still left the undo entry
         // consumed and the in-memory config changed, with disk untouched --
         // GUI, daemon, and disk would all disagree about what the config is.
+        if !self.can_save_config() {
+            return;
+        }
         if let Err(error) = previous.save_atomic(&self.path) {
             self.status =
                 Status::error(self.strings.status_undo_save_failed(&error.safe_summary()));
             return;
         }
+        self.refresh_config_stamp();
         let previous = self.undo.pop().expect("checked non-empty above");
         self.config = previous;
         self.selected = self
@@ -716,8 +786,12 @@ impl GuiApp {
             enabled: true,
             propagate_case: false,
         });
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
@@ -754,8 +828,12 @@ impl GuiApp {
         }
         let mut candidate = self.config.clone();
         candidate.expansion.push(duplicate);
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
@@ -776,8 +854,12 @@ impl GuiApp {
         let mut candidate = self.config.clone();
         let trigger = candidate.expansion[index].trigger.clone();
         candidate.expansion.remove(index);
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.selected = (!self.config.expansion.is_empty())
@@ -808,8 +890,12 @@ impl GuiApp {
         candidate.expansion[index].enabled = !candidate.expansion[index].enabled;
         let now_enabled = candidate.expansion[index].enabled;
         let trigger = candidate.expansion[index].trigger.clone();
+        if !self.can_save_config() {
+            return;
+        }
         match candidate.save_atomic(&self.path) {
             Ok(()) => {
+                self.refresh_config_stamp();
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 if self.selected == Some(index) {
@@ -2615,6 +2701,49 @@ mod tests {
         app.duplicate_selected();
         assert_eq!(app.config.expansion.len(), 3);
         assert_eq!(app.config.expansion[2].trigger, ":two-copy");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn gui_refuses_to_overwrite_an_external_config_change() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-external-change-{}.toml",
+            std::process::id()
+        ));
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                trigger: ":one".into(),
+                replacement: "one".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let _ = fs::remove_file(&path);
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.draft.as_mut().unwrap().replacement = "from gui".into();
+
+        let mut external = config.clone();
+        external.expansion[0].replacement = "from external editor".into();
+        external.save_atomic(&path).unwrap();
+
+        app.save_selected();
+
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "from external editor"
+        );
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Warning);
+        assert!(app.status.text().contains("changed outside WayExpand"));
         fs::remove_file(path).unwrap();
     }
 
