@@ -411,8 +411,8 @@ impl Strings {
 
     pub fn evdev_setup_steps(&self) -> &'static str {
         match self.lang {
-            Language::English => "After acknowledging, copy the command below into a terminal. It enables the user service only; if device access is missing, follow the separately documented administrator permission step. Then return here, refresh diagnostics, and run the test expansion in a normal text field.",
-            Language::German => "Kopieren Sie nach der Bestätigung den folgenden Befehl in ein Terminal. Er aktiviert nur den Benutzerdienst; falls Gerätezugriff fehlt, folgen Sie separat der dokumentierten Administrator-Berechtigung. Kehren Sie danach zurück, aktualisieren Sie die Diagnose und testen Sie die Ersetzung in einem normalen Textfeld.",
+            Language::English => "If keyboard-device access is not already configured, first complete the administrator permission step in Getting Started. Then copy the command below into a terminal: it enables the user service, and the desktop may ask you to approve the input portal. Return here, refresh diagnostics, and test in a normal text field.",
+            Language::German => "Falls der Zugriff auf Tastaturgeräte noch nicht eingerichtet ist, schließen Sie zuerst den Administrator-Schritt in der Installationsanleitung ab. Kopieren Sie danach den folgenden Befehl in ein Terminal: Er aktiviert den Benutzerdienst; der Desktop kann um Freigabe des Eingabeportals bitten. Kehren Sie zurück, aktualisieren Sie die Diagnose und testen Sie in einem normalen Textfeld.",
         }
     }
 
