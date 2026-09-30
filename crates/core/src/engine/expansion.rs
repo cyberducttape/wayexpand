@@ -47,6 +47,8 @@ enum SettledMatch {
 impl ExpansionEngine {
     fn bump_generation(&mut self) {
         self.input_generation = self.input_generation.wrapping_add(1);
+        self.shared_input_generation
+            .store(self.input_generation, std::sync::atomic::Ordering::Release);
     }
 
     /// A pending undo is valid only immediately after the expansion it would

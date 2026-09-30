@@ -17,7 +17,7 @@ use std::{
     collections::VecDeque,
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -250,6 +250,7 @@ pub struct ExpansionEngine {
     /// is restored before subsequent input is matched.
     deferred_matches: Vec<String>,
     input_generation: u64,
+    shared_input_generation: Arc<AtomicU64>,
     async_commands: Option<AsyncCommandRuntime>,
     expansion_metrics: Arc<CommandMetricsState>,
     hotkey_metrics: Arc<CommandMetricsState>,
@@ -457,6 +458,7 @@ impl ExpansionEngine {
             last_expansion: None,
             deferred_matches: Vec::new(),
             input_generation: 0,
+            shared_input_generation: Arc::new(AtomicU64::new(0)),
             async_commands: None,
             expansion_metrics: Arc::new(CommandMetricsState::new()),
             hotkey_metrics: Arc::new(CommandMetricsState::new()),
@@ -503,6 +505,7 @@ impl ExpansionEngine {
             mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
         let expansion_metrics = Arc::clone(&self.expansion_metrics);
         let hotkey_metrics = Arc::clone(&self.hotkey_metrics);
+        let shared_input_generation = Arc::clone(&self.shared_input_generation);
         let shutdown = Arc::new(AtomicBool::new(false));
         let command_receiver = Arc::new(Mutex::new(command_receiver));
         let mut command_workers = Vec::with_capacity(ASYNC_COMMAND_WORKER_COUNT);
@@ -511,15 +514,18 @@ impl ExpansionEngine {
             let worker_metrics = Arc::clone(&expansion_metrics);
             let worker_receiver = Arc::clone(&command_receiver);
             let worker_completion_sender = completion_sender.clone();
+            let worker_input_generation = Arc::clone(&shared_input_generation);
             let command_worker = thread::Builder::new()
                 .name(format!("wayexpand-expansion-worker-{worker_index}"))
                 .spawn(move || {
                     while !command_shutdown.load(Ordering::Acquire) {
-                        let job = match worker_receiver
-                            .lock()
-                            .expect("expansion command receiver lock poisoned")
-                            .recv_timeout(Duration::from_millis(50))
-                        {
+                        let received = {
+                            worker_receiver
+                                .lock()
+                                .expect("expansion command receiver lock poisoned")
+                                .recv_timeout(Duration::from_millis(50))
+                        };
+                        let job = match received {
                             Ok(job) => job,
                             Err(mpsc::RecvTimeoutError::Timeout) => continue,
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -534,7 +540,6 @@ impl ExpansionEngine {
                             break;
                         }
                         worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                        worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                         let AsyncCommandJob::Expansion {
                             config_index,
                             generation,
@@ -543,6 +548,28 @@ impl ExpansionEngine {
                             result,
                         } = job;
                         let cache_ms = command.cache_ms;
+                        // Input can move while this job waits in the bounded
+                        // queue. Reject it before spawning the child so stale
+                        // command side effects never happen after queued work
+                        // has become irrelevant.
+                        if worker_input_generation.load(Ordering::Acquire) != generation {
+                            if !send_completion_or_shutdown(
+                                &worker_completion_sender,
+                                AsyncCommandCompletion {
+                                    config_index,
+                                    generation,
+                                    cache_ms,
+                                    additional_max_size,
+                                    result,
+                                    output: Err(CommandError::StaleInput),
+                                },
+                                &command_shutdown,
+                            ) {
+                                break;
+                            }
+                            continue;
+                        }
+                        worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
                         let output = run_command_with_shutdown(&command, Some(&command_shutdown));
                         worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
                         if let Err(error) = &output {
@@ -1065,6 +1092,8 @@ impl ExpansionEngine {
     /// undo impossible to trigger. Undo validity is checked separately.
     pub fn note_key_event(&mut self) {
         self.input_generation = self.input_generation.wrapping_add(1);
+        self.shared_input_generation
+            .store(self.input_generation, Ordering::Release);
     }
 
     /// Check if a key chord is the configured undo chord. Used to preserve

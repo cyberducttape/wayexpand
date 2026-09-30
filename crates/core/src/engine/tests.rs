@@ -590,6 +590,17 @@ fn command_metrics_count_timeouts_and_failures() {
     assert!(engine
         .process(InputEvent::Text(":timeout".into()))
         .is_empty());
+    // Ensure the timeout job has crossed the worker's pre-spawn generation
+    // check before the next input makes its result stale. This test covers
+    // metrics for a command that actually started; queued stale jobs are
+    // covered separately and must never spawn.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while engine.command_metrics().command_in_flight == 0
+        && engine.command_metrics().command_timeout_total == 0
+    {
+        assert!(Instant::now() < deadline, "timeout command did not start");
+        thread::sleep(Duration::from_millis(1));
+    }
     assert!(engine
         .process(InputEvent::Text(":failure".into()))
         .is_empty());
@@ -3049,6 +3060,114 @@ fn deferred_command_is_not_run_after_input_generation_changes() {
         Err(CommandError::StaleInput)
     ));
     assert!(!marker.exists(), "stale deferred commands must not run");
+}
+
+#[cfg(unix)]
+#[test]
+fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
+    let suffix = format!(
+        "{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let starts: Vec<_> = (0..ASYNC_COMMAND_WORKER_COUNT)
+        .map(|index| std::env::temp_dir().join(format!("wayexpand-worker-{suffix}-{index}")))
+        .collect();
+    let stale_marker = std::env::temp_dir().join(format!("wayexpand-worker-{suffix}-stale"));
+    for path in starts.iter().chain(std::iter::once(&stale_marker)) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    let mut expansions = String::new();
+    for marker in starts.iter().chain(std::iter::once(&stale_marker)) {
+        expansions.push_str(&format!(
+            "\n[[expansion]]\ntrigger = \":job{}\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/sh\"\nargs = [\"-c\", \"touch '{}'; sleep 1\"]\ntimeout_ms = 3000\n",
+            expansions.matches("[[expansion]]").count(),
+            marker.display()
+        ));
+    }
+    let config = Config::parse(&expansions).unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
+
+    for index in 0..ASYNC_COMMAND_WORKER_COUNT {
+        let result = ExpansionResult {
+            trigger: format!(":job{index}"),
+            matched_text: format!(":job{index}"),
+            insert: String::new(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: true,
+            undoable: true,
+        };
+        assert!(engine
+            .async_commands
+            .as_ref()
+            .unwrap()
+            .try_send_command(AsyncCommandJob::Expansion {
+                config_index: index,
+                generation: engine.input_generation,
+                additional_max_size: 0,
+                command: engine.config.expansion[index].command.clone().unwrap(),
+                result,
+            })
+            .is_ok());
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while starts.iter().any(|path| !path.exists()) {
+        assert!(
+            Instant::now() < deadline,
+            "workers did not start the blocking jobs: metrics={:?}, generation={}",
+            engine.command_metrics(),
+            engine.shared_input_generation.load(Ordering::Acquire)
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let stale_result = ExpansionResult {
+        trigger: ":stale".into(),
+        matched_text: ":stale".into(),
+        insert: String::new(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: true,
+        undoable: true,
+    };
+    assert!(engine
+        .async_commands
+        .as_ref()
+        .unwrap()
+        .try_send_command(AsyncCommandJob::Expansion {
+            config_index: ASYNC_COMMAND_WORKER_COUNT,
+            generation: engine.input_generation,
+            additional_max_size: 0,
+            command: engine.config.expansion[ASYNC_COMMAND_WORKER_COUNT]
+                .command
+                .clone()
+                .unwrap(),
+            result: stale_result,
+        })
+        .is_ok());
+    engine.note_key_event();
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while engine.command_metrics().command_queue_depth > 0 {
+        engine.drain_completed_commands();
+        assert!(
+            Instant::now() < deadline,
+            "stale queued command was not drained"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    engine.drain_completed_commands();
+    assert!(
+        !stale_marker.exists(),
+        "queued command that became stale must not spawn or cause side effects"
+    );
+    for path in starts {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(unix)]
