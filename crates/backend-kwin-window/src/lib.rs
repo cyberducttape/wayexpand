@@ -354,7 +354,9 @@ impl WindowTracker for KwinWindowTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::window_context_from_signal;
+    use super::{window_context_from_signal, KwinWindowTracker, TRACKER_HEALTH_CHECK_INTERVAL};
+    use std::{thread, time::Instant};
+    use wayexpand_core::WindowTracker;
 
     #[test]
     fn empty_signal_represents_window_disappearance() {
@@ -382,5 +384,60 @@ mod tests {
             window_context_from_signal("org.example.Editor".into(), "Document".into()).unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title.as_deref(), Some("Document"));
+    }
+
+    #[test]
+    #[ignore = "requires a live KDE Plasma Wayland session and briefly loads a KWin script"]
+    fn live_kwin_tracker_health_probe_detects_script_unload() {
+        let mut tracker = KwinWindowTracker::new().expect("connect to the live KWin scripting API");
+        let initial = tracker
+            .next_window_timeout(std::time::Duration::from_secs(2))
+            .expect("receive the initial active-window snapshot");
+        assert!(
+            initial.is_some(),
+            "KWin should report its initial active window"
+        );
+
+        let deadline =
+            Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL + std::time::Duration::from_secs(1);
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            tracker
+                .next_window_timeout(remaining)
+                .expect("the script should remain loaded during its health check");
+            thread::yield_now();
+        }
+
+        let unloaded: bool = tracker
+            .connection
+            .call_method(
+                Some("org.kde.KWin"),
+                "/Scripting",
+                Some("org.kde.kwin.Scripting"),
+                "unloadScript",
+                &(tracker.plugin_name.as_str(),),
+            )
+            .expect("unload only this test's uniquely named KWin script")
+            .body()
+            .deserialize()
+            .expect("decode KWin unload result");
+        assert!(unloaded, "the uniquely named test script should be loaded");
+
+        let deadline =
+            Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL + std::time::Duration::from_secs(1);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "tracker health probe did not notice script unload"
+            );
+            match tracker.next_window_timeout(remaining) {
+                Ok(_) => thread::yield_now(),
+                Err(error) => {
+                    assert!(error.message.contains("no longer reports"));
+                    break;
+                }
+            }
+        }
     }
 }
