@@ -2636,12 +2636,30 @@ impl GuiApp {
                                             );
                                         });
                                 });
-                                ui.label("Pass environment variables (one per line)");
-                                ui.add(
-                                    TextEdit::multiline(&mut draft.command_pass_env)
-                                        .desired_rows(2)
-                                        .desired_width(f32::INFINITY),
-                                );
+                                ui.label("Pass environment variables");
+                                let mut remove_env = None;
+                                for index in 0..draft.command_pass_env.len() {
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            TextEdit::multiline(&mut draft.command_pass_env[index])
+                                                .desired_rows(1)
+                                                .desired_width(ui.available_width() - 38.0),
+                                        );
+                                        if ui
+                                            .small_button("×")
+                                            .on_hover_text("Remove environment variable")
+                                            .clicked()
+                                        {
+                                            remove_env = Some(index);
+                                        }
+                                    });
+                                }
+                                if let Some(index) = remove_env {
+                                    draft.command_pass_env.remove(index);
+                                }
+                                if ui.small_button("+ Add environment variable").clicked() {
+                                    draft.command_pass_env.push(String::new());
+                                }
                             });
                         });
                         // Save and Delete are a pinned action bar under this
@@ -3185,7 +3203,7 @@ mod tests {
             command_timeout_ms: "500".into(),
             command_cache_ms: "1000".into(),
             command_environment: wayexpand_core::CommandEnvironment::default(),
-            command_pass_env: String::new(),
+            command_pass_env: Vec::new(),
         }
     }
 
@@ -3214,16 +3232,20 @@ mod tests {
             propagate_case: false,
         };
         source.command = Some(wayexpand_core::CommandConfig {
-            program: "/usr/bin/foo".into(),
+            program: "/usr/bin/foo ".into(),
             args: vec![String::new(), " foo ".into(), "hello\nworld".into()],
             timeout_ms: 900,
             cache_ms: 0,
             environment: wayexpand_core::CommandEnvironment::Inherit,
-            pass_env: vec!["DISPLAY".into(), "WAYLAND_DISPLAY".into()],
+            pass_env: vec![" DISPLAY ".into(), "TEAM\nID".into()],
         });
         let mut form = Draft::from_expansion(&source);
         assert!(form.matches_command(source.command.as_ref()));
         assert_eq!(form.command_args, source.command.as_ref().unwrap().args);
+        assert_eq!(
+            form.command_pass_env,
+            source.command.as_ref().unwrap().pass_env
+        );
         form.description = "Edited description".into();
         assert!(form.matches_command(source.command.as_ref()));
         assert_eq!(form.command_config().unwrap(), source.command);

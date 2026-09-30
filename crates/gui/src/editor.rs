@@ -28,7 +28,7 @@ pub(crate) struct Draft {
     pub(crate) command_timeout_ms: String,
     pub(crate) command_cache_ms: String,
     pub(crate) command_environment: CommandEnvironment,
-    pub(crate) command_pass_env: String,
+    pub(crate) command_pass_env: Vec<String>,
 }
 
 impl Draft {
@@ -49,7 +49,7 @@ impl Draft {
                 command.timeout_ms.to_string(),
                 command.cache_ms.to_string(),
                 command.environment,
-                command.pass_env.join("\n"),
+                command.pass_env.clone(),
             ),
             None => (
                 false,
@@ -58,7 +58,7 @@ impl Draft {
                 "500".into(),
                 "0".into(),
                 CommandEnvironment::default(),
-                String::new(),
+                Vec::new(),
             ),
         };
         Self {
@@ -92,7 +92,7 @@ impl Draft {
                     && self.command_timeout_ms == command.timeout_ms.to_string()
                     && self.command_cache_ms == command.cache_ms.to_string()
                     && self.command_environment == command.environment
-                    && self.command_pass_env == command.pass_env.join("\n")
+                    && self.command_pass_env == command.pass_env
             }
             None => {
                 !self.command_enabled
@@ -110,10 +110,10 @@ impl Draft {
         if !self.command_enabled {
             return Ok(None);
         }
-        let program = self.command_program.trim();
-        if program.is_empty() {
+        if self.command_program.trim().is_empty() {
             anyhow::bail!("program is required when command expansion is enabled");
         }
+        let program = &self.command_program;
         let timeout_ms = self
             .command_timeout_ms
             .trim()
@@ -150,20 +150,13 @@ impl Draft {
         if cache_ms > MAX_COMMAND_CACHE_MS {
             anyhow::bail!("cache duration must not exceed 60000 milliseconds");
         }
-        let pass_env = self
-            .command_pass_env
-            .lines()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .collect();
         Ok(Some(CommandConfig {
-            program: program.to_owned(),
+            program: program.clone(),
             args,
             timeout_ms,
             cache_ms,
             environment: self.command_environment,
-            pass_env,
+            pass_env: self.command_pass_env.clone(),
         }))
     }
 }
