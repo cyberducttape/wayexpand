@@ -73,6 +73,7 @@ pub fn daemon_status_body_with_latency(
         latency,
         InputSourceCapabilities::default(),
         InjectorCapabilities::default(),
+        false,
     )
 }
 
@@ -89,9 +90,10 @@ pub fn daemon_status_body_with_runtime_capabilities(
     latency: LatencySnapshot,
     capture: InputSourceCapabilities,
     injection: InjectorCapabilities,
+    window_tracker_connected: bool,
 ) -> StatusBody {
     StatusBody(format!(
-        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_app_identity={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}",
+        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\nwindow_tracker_connected={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}",
         config_path.display(),
         if config_healthy { "ok" } else { "reload-rejected" },
         capture.sensitive_focus,
@@ -99,7 +101,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
         capture.reliable_key_state,
         capture.key_passthrough,
         capture.composition_aware,
-        capture.reliable_app_identity,
+        window_tracker_connected,
         injection.atomic_replace,
         injection.full_unicode,
         injection.cursor_reposition,

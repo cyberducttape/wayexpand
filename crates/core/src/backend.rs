@@ -77,8 +77,6 @@ pub struct InputSourceCapabilities {
     pub key_passthrough: bool,
     /// The source is aware of active IME/preedit composition.
     pub composition_aware: bool,
-    /// The source provides trustworthy application identity for filtering.
-    pub reliable_app_identity: bool,
 }
 
 impl InputSourceCapabilities {
@@ -89,7 +87,6 @@ impl InputSourceCapabilities {
         reliable_key_state: true,
         key_passthrough: false,
         composition_aware: false,
-        reliable_app_identity: false,
     };
 
     /// Capture profile for the currently shipped input-method-v2 source.
@@ -101,7 +98,6 @@ impl InputSourceCapabilities {
         // was explicitly attached to the live session.
         key_passthrough: false,
         composition_aware: false,
-        reliable_app_identity: false,
     };
 }
 

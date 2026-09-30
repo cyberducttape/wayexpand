@@ -34,7 +34,6 @@ use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
     InjectorCapabilities, InputEvent, InputSource, InputSourceCapabilities, TextInjector,
-    WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -92,6 +91,7 @@ struct StatusSnapshot {
     latency: latency::Snapshot,
     capture_capabilities: InputSourceCapabilities,
     injection_capabilities: InjectorCapabilities,
+    window_tracker_connected: bool,
 }
 
 impl StatusPublisher {
@@ -108,6 +108,7 @@ impl StatusPublisher {
         metrics: CommandMetrics,
         capture_capabilities: InputSourceCapabilities,
         injection_capabilities: InjectorCapabilities,
+        window_tracker_connected: bool,
     ) {
         let snapshot = StatusSnapshot {
             source: source.to_owned(),
@@ -123,6 +124,7 @@ impl StatusPublisher {
             latency: latency::snapshot(),
             capture_capabilities,
             injection_capabilities,
+            window_tracker_connected,
         };
         if self.last.as_ref() == Some(&snapshot) {
             return;
@@ -139,6 +141,7 @@ impl StatusPublisher {
             snapshot.latency,
             snapshot.capture_capabilities,
             snapshot.injection_capabilities,
+            snapshot.window_tracker_connected,
         ));
         self.last = Some(snapshot);
     }
@@ -549,6 +552,9 @@ fn main() -> Result<()> {
                 .map(TextInjector::capabilities)
                 .or_else(|| injector.as_ref().map(|backend| backend.capabilities()))
                 .unwrap_or_default(),
+            window_tracker
+                .as_ref()
+                .is_some_and(backend_lifecycle::WindowTrackerHandle::is_connected),
         );
         if input_method_mode {
             if input_method.is_none() {
@@ -1029,12 +1035,13 @@ fn main() -> Result<()> {
 /// and apply them to the engine. This prevents app-filter races where a
 /// focus change arrives between input-event wait and processing.
 fn drain_pending_window_events(
-    window_tracker: &Option<mpsc::Receiver<Option<WindowContext>>>,
+    window_tracker: &Option<backend_lifecycle::WindowTrackerHandle>,
     engine: &mut ExpansionEngine,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> Result<()> {
-    if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(window_tracker) {
+    let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
+    if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(receiver) {
         process_event(
             engine,
             InputEvent::WindowChanged(window_opt),
@@ -1124,17 +1131,51 @@ fn set_daemon_status_with_metrics(
     config_healthy: bool,
     metrics: CommandMetrics,
 ) {
+    let connected = state == "connected";
+    let backend_mode = if connected {
+        publisher.last.as_ref().map_or_else(
+            || "unknown".to_owned(),
+            |snapshot| snapshot.backend_mode.clone(),
+        )
+    } else {
+        "unknown".to_owned()
+    };
+    let capture_capabilities = if connected {
+        publisher
+            .last
+            .as_ref()
+            .map_or_else(InputSourceCapabilities::default, |snapshot| {
+                snapshot.capture_capabilities
+            })
+    } else {
+        InputSourceCapabilities::default()
+    };
+    let injection_capabilities = if connected {
+        publisher
+            .last
+            .as_ref()
+            .map_or_else(InjectorCapabilities::default, |snapshot| {
+                snapshot.injection_capabilities
+            })
+    } else {
+        InjectorCapabilities::default()
+    };
+    let window_tracker_connected = publisher
+        .last
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.window_tracker_connected);
     publisher.publish(
         control,
         source,
         backend,
-        "unknown",
+        &backend_mode,
         state,
         config_path,
         config_healthy,
         metrics,
-        InputSourceCapabilities::default(),
-        InjectorCapabilities::default(),
+        capture_capabilities,
+        injection_capabilities,
+        window_tracker_connected,
     );
 }
 
@@ -1151,6 +1192,7 @@ fn set_daemon_status_with_runtime_capabilities(
     backend_mode: &str,
     capture_capabilities: InputSourceCapabilities,
     injection_capabilities: InjectorCapabilities,
+    window_tracker_connected: bool,
 ) {
     publisher.publish(
         control,
@@ -1163,6 +1205,7 @@ fn set_daemon_status_with_runtime_capabilities(
         metrics,
         capture_capabilities,
         injection_capabilities,
+        window_tracker_connected,
     );
 }
 
@@ -1579,6 +1622,7 @@ mod tests {
                 full_unicode: true,
                 ..InjectorCapabilities::default()
             },
+            true,
         );
         let body = body.as_str();
         let mut fields: Vec<&str> = body
@@ -1591,7 +1635,6 @@ mod tests {
             vec![
                 "backend",
                 "backend_mode",
-                "capture_app_identity",
                 "capture_composition_aware",
                 "capture_exclusive",
                 "capture_key_passthrough",
@@ -1620,6 +1663,7 @@ mod tests {
                 "paused",
                 "source",
                 "state",
+                "window_tracker_connected",
             ],
             "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
         );
@@ -1632,7 +1676,7 @@ mod tests {
              capture_reliable_key_state=true\n\
              capture_key_passthrough=false\n\
              capture_composition_aware=false\n\
-             capture_app_identity=false\n\
+             window_tracker_connected=true\n\
              inject_atomic_replace=true\n\
              inject_full_unicode=true\n\
              inject_cursor_reposition=false\n\

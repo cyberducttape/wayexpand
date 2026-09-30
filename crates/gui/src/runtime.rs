@@ -73,7 +73,7 @@ pub(crate) struct DaemonCapabilities {
     pub capture_reliable_key_state: Option<bool>,
     pub capture_key_passthrough: Option<bool>,
     pub capture_composition_aware: Option<bool>,
-    pub capture_app_identity: Option<bool>,
+    pub window_tracker_connected: Option<bool>,
     pub inject_atomic_replace: Option<bool>,
     pub inject_full_unicode: Option<bool>,
     pub inject_cursor_reposition: Option<bool>,
@@ -97,7 +97,7 @@ impl DaemonCapabilities {
                 "capture_reliable_key_state" => &mut capabilities.capture_reliable_key_state,
                 "capture_key_passthrough" => &mut capabilities.capture_key_passthrough,
                 "capture_composition_aware" => &mut capabilities.capture_composition_aware,
-                "capture_app_identity" => &mut capabilities.capture_app_identity,
+                "window_tracker_connected" => &mut capabilities.window_tracker_connected,
                 "inject_atomic_replace" => &mut capabilities.inject_atomic_replace,
                 "inject_full_unicode" => &mut capabilities.inject_full_unicode,
                 "inject_cursor_reposition" => &mut capabilities.inject_cursor_reposition,
@@ -263,12 +263,13 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "capture_sensitive_focus=false\ncapture_exclusive=true\ninject_atomic_replace=false\ninject_full_unicode=true\n",
+            "capture_sensitive_focus=false\ncapture_exclusive=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\n",
         )
         .unwrap();
         assert_eq!(capabilities.capture_sensitive_focus, Some(false));
         assert_eq!(capabilities.capture_exclusive, Some(true));
         assert_eq!(capabilities.capture_reliable_key_state, None);
+        assert_eq!(capabilities.window_tracker_connected, Some(true));
         assert_eq!(capabilities.inject_atomic_replace, Some(false));
         assert_eq!(capabilities.inject_full_unicode, Some(true));
         assert_eq!(capabilities.inject_key_passthrough, None);

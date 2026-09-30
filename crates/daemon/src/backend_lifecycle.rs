@@ -6,7 +6,10 @@
 //! - App-filter race prevention by draining pending window changes
 
 use std::{
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +21,17 @@ const TRACKER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const TRACKER_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const TRACKER_MAX_BACKOFF: Duration = Duration::from_secs(30);
 const TRACKER_STABLE_INTERVAL: Duration = Duration::from_secs(30);
+
+pub struct WindowTrackerHandle {
+    pub receiver: mpsc::Receiver<Option<WindowContext>>,
+    connected: Arc<AtomicBool>,
+}
+
+impl WindowTrackerHandle {
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+}
 
 struct ReconnectBackoff {
     current: Duration,
@@ -48,17 +62,22 @@ impl ReconnectBackoff {
 /// the supervisor keeps probing and reconnects with bounded exponential
 /// backoff. Until it sends a fresh focused-window snapshot, app-filtered
 /// expansions remain fail-closed.
-pub fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
+pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
     // Try the integrated KDE Plasma backend. The wlroots toplevel prototype is
     // deliberately not part of the production daemon until its event-loop,
     // ownership, and compositor test coverage are complete.
 
     let (sender, receiver) = mpsc::channel();
+    let connected = Arc::new(AtomicBool::new(false));
+    let supervisor_connected = Arc::clone(&connected);
     match thread::Builder::new()
         .name("wayexpand-window-tracker-supervisor".into())
-        .spawn(move || supervise_kwin_window_tracker(sender))
+        .spawn(move || supervise_kwin_window_tracker(sender, supervisor_connected))
     {
-        Ok(_) => Some(receiver),
+        Ok(_) => Some(WindowTrackerHandle {
+            receiver,
+            connected,
+        }),
         Err(error) => {
             warn!(%error, "could not start KWin window tracker supervisor");
             None
@@ -66,12 +85,21 @@ pub fn spawn_window_tracker() -> Option<mpsc::Receiver<Option<WindowContext>>> {
     }
 }
 
-fn supervise_kwin_window_tracker(sender: mpsc::Sender<Option<WindowContext>>) {
-    supervise_window_tracker(sender, KwinWindowTracker::probe, KwinWindowTracker::new);
+fn supervise_kwin_window_tracker(
+    sender: mpsc::Sender<Option<WindowContext>>,
+    connected: Arc<AtomicBool>,
+) {
+    supervise_window_tracker(
+        sender,
+        connected,
+        KwinWindowTracker::probe,
+        KwinWindowTracker::new,
+    );
 }
 
 fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     sender: mpsc::Sender<Option<WindowContext>>,
+    connected: Arc<AtomicBool>,
     mut probe: Probe,
     mut connect: Connect,
 ) where
@@ -83,6 +111,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
 {
     let mut backoff = ReconnectBackoff::default();
     loop {
+        connected.store(false, Ordering::Release);
         if sender.send(None).is_err() {
             return;
         }
@@ -108,6 +137,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
 
         // Clear any previously cached app identity before accepting the new
         // script's initial active-window snapshot.
+        connected.store(true, Ordering::Release);
         if sender.send(None).is_err() {
             return;
         }
@@ -123,6 +153,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
                 // No focus change within the timeout is expected.
                 Ok(None) => {}
                 Err(error) => {
+                    connected.store(false, Ordering::Release);
                     warn!(%error, "KWin window tracker disconnected; will reconnect");
                     if sender.send(None).is_err() {
                         return;
@@ -156,9 +187,9 @@ fn wait_for_tracker_retry(sender: &mpsc::Sender<Option<WindowContext>>, delay: D
 /// input-event wait and processing.
 /// Returns the latest window context if any changes were pending.
 pub fn drain_pending_window_events(
-    window_tracker: &Option<mpsc::Receiver<Option<WindowContext>>>,
+    window_tracker: Option<&mpsc::Receiver<Option<WindowContext>>>,
 ) -> Option<Option<WindowContext>> {
-    if let Some(receiver) = window_tracker.as_ref() {
+    if let Some(receiver) = window_tracker {
         let mut latest = None;
         loop {
             match receiver.try_recv() {
@@ -182,6 +213,36 @@ mod tests {
 
     struct ScriptedTracker {
         events: VecDeque<Result<Option<WindowContext>, &'static str>>,
+    }
+
+    struct GatedTracker {
+        ready: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+        first_poll: bool,
+    }
+
+    impl WindowTracker for GatedTracker {
+        fn name(&self) -> &'static str {
+            "gated-window-tracker"
+        }
+
+        fn next_window_timeout(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<Option<WindowContext>>, wayexpand_core::WindowTrackerError> {
+            if self.first_poll {
+                self.first_poll = false;
+                self.ready.send(()).unwrap();
+                let _ = self.release.recv_timeout(timeout);
+                Ok(None)
+            } else {
+                Err(wayexpand_core::WindowTrackerError {
+                    backend: self.name(),
+                    message: "script stopped".into(),
+                    retryable: true,
+                })
+            }
+        }
     }
 
     impl WindowTracker for ScriptedTracker {
@@ -232,8 +293,10 @@ mod tests {
             },
         ]);
         let connect = move || Ok::<_, &'static str>(trackers.pop_front().unwrap());
+        let connected = Arc::new(AtomicBool::new(false));
+        let supervisor_connected = Arc::clone(&connected);
         let supervisor = thread::spawn(move || {
-            supervise_window_tracker(sender, probe, connect);
+            supervise_window_tracker(sender, supervisor_connected, probe, connect);
         });
 
         let mut refreshed = false;
@@ -250,6 +313,40 @@ mod tests {
         drop(receiver);
         supervisor.join().unwrap();
         assert!(refreshed, "reconnected tracker must publish a fresh window");
+    }
+
+    #[test]
+    fn supervisor_publishes_tracker_health_and_clears_it_on_disconnect() {
+        let (sender, receiver) = mpsc::channel();
+        let (ready_sender, ready_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let tracker = GatedTracker {
+            ready: ready_sender,
+            release: release_receiver,
+            first_poll: true,
+        };
+        let connected = Arc::new(AtomicBool::new(false));
+        let supervisor_connected = Arc::clone(&connected);
+        let mut tracker = Some(tracker);
+        let supervisor = thread::spawn(move || {
+            supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                || Ok::<_, &'static str>(()),
+                || Ok::<_, &'static str>(tracker.take().unwrap()),
+            );
+        });
+
+        ready_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(connected.load(Ordering::Acquire));
+        release_sender.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while connected.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(!connected.load(Ordering::Acquire));
+        drop(receiver);
+        supervisor.join().unwrap();
     }
 
     #[test]
@@ -292,7 +389,7 @@ mod tests {
             }))
             .unwrap();
 
-        let latest = drain_pending_window_events(&Some(receiver));
+        let latest = drain_pending_window_events(Some(&receiver));
         assert_eq!(
             latest,
             Some(Some(WindowContext {
@@ -307,6 +404,6 @@ mod tests {
         let (sender, receiver) = mpsc::channel::<Option<WindowContext>>();
         drop(sender);
 
-        assert_eq!(drain_pending_window_events(&Some(receiver)), Some(None));
+        assert_eq!(drain_pending_window_events(Some(&receiver)), Some(None));
     }
 }

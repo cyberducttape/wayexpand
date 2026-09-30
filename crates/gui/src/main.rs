@@ -1804,10 +1804,16 @@ impl GuiApp {
                             ),
                             ("capture_passthrough", capabilities.capture_key_passthrough),
                             ("composition", capabilities.capture_composition_aware),
-                            ("app_identity", capabilities.capture_app_identity),
                         ] {
                             self.render_capability_row(ui, palette, key, value);
                         }
+                        theme::section_header(ui, "", self.strings.application_context());
+                        self.render_capability_row(
+                            ui,
+                            palette,
+                            "window_tracker",
+                            capabilities.window_tracker_connected,
+                        );
                         theme::section_header(ui, "", self.strings.injection_guarantees());
                         for (key, value) in [
                             ("atomic_replace", capabilities.inject_atomic_replace),
@@ -4473,7 +4479,7 @@ mod tests {
             capture_reliable_key_state: Some(true),
             capture_key_passthrough: Some(false),
             capture_composition_aware: Some(false),
-            capture_app_identity: None,
+            window_tracker_connected: Some(true),
             inject_atomic_replace: Some(false),
             inject_full_unicode: Some(true),
             inject_cursor_reposition: Some(true),

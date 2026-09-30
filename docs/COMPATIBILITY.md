@@ -390,7 +390,7 @@ below are exactly what that response currently carries -- nothing more.
   "capture_reliable_key_state": true,
   "capture_key_passthrough": false,
   "capture_composition_aware": false,
-  "capture_app_identity": false,
+  "window_tracker_connected": true,
   "inject_atomic_replace": true,
   "inject_full_unicode": true,
   "inject_cursor_reposition": false,
@@ -421,7 +421,8 @@ below are exactly what that response currently carries -- nothing more.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
-- `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware`, `capture_app_identity` (bool): Negotiated input-source guarantees. Conservative false values are published while the source is disconnected or unknown.
+- `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware` (bool): Negotiated input-source guarantees. Conservative false values are published while the source is disconnected or unknown.
+- `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
 - `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
 - `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
 - `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing

@@ -2044,7 +2044,9 @@ fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json:
             "reliable_key_state": value("capture_reliable_key_state"),
             "key_passthrough": value("capture_key_passthrough"),
             "composition_aware": value("capture_composition_aware"),
-            "app_identity": value("capture_app_identity"),
+        },
+        "window_context": {
+            "tracker_connected": value("window_tracker_connected"),
         },
         "injection": {
             "atomic_replace": value("inject_atomic_replace"),
@@ -2457,7 +2459,7 @@ mod tests {
     #[test]
     fn status_json_preserves_types_and_ignores_banner() {
         let value = status_as_json(
-            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\ninject_full_unicode=true\n",
+            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\ninject_full_unicode=true\n",
         )
         .unwrap();
         assert_eq!(value["response"], "running");
@@ -2466,6 +2468,7 @@ mod tests {
         assert_eq!(value["command_queue_depth"], 3);
         assert_eq!(value["config_state"], "ok");
         assert_eq!(value["capture_sensitive_focus"], false);
+        assert_eq!(value["window_tracker_connected"], true);
         assert_eq!(value["inject_full_unicode"], true);
     }
 
@@ -2508,7 +2511,7 @@ mod tests {
              capture_reliable_key_state=true\n\
              capture_key_passthrough=false\n\
              capture_composition_aware=false\n\
-             capture_app_identity=false\n\
+             window_tracker_connected=false\n\
              inject_atomic_replace=true\n\
              inject_full_unicode=true\n\
              inject_cursor_reposition=false\n\
@@ -2619,7 +2622,7 @@ mod tests {
                 "capture_reliable_key_state",
                 "capture_key_passthrough",
                 "capture_composition_aware",
-                "capture_app_identity",
+                "window_tracker_connected",
                 "inject_atomic_replace",
                 "inject_full_unicode",
                 "inject_cursor_reposition",

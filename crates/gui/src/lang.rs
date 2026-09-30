@@ -459,6 +459,13 @@ impl Strings {
         }
     }
 
+    pub fn application_context(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Application context",
+            Language::German => "Anwendungskontext",
+        }
+    }
+
     pub fn capability_label(&self, key: &str) -> &'static str {
         match (self.lang, key) {
             (Language::English, "sensitive_focus") => "Sensitive-field awareness",
@@ -471,8 +478,8 @@ impl Strings {
             (Language::German, "capture_passthrough") => "Weitergabe nicht unterstützter Tasten",
             (Language::English, "composition") => "IME composition awareness",
             (Language::German, "composition") => "IME-Kompositionserkennung",
-            (Language::English, "app_identity") => "Focused application identity",
-            (Language::German, "app_identity") => "Erkennung der aktiven Anwendung",
+            (Language::English, "window_tracker") => "KWin window tracker",
+            (Language::German, "window_tracker") => "KWin-Fensterverfolgung",
             (Language::English, "atomic_replace") => "Atomic text replacement",
             (Language::German, "atomic_replace") => "Atomarer Textersatz",
             (Language::English, "unicode") => "Layout-independent Unicode",

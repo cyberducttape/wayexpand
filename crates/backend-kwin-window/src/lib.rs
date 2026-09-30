@@ -29,6 +29,7 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
+const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 /// Upper bound on how long `probe()` waits for the session bus / KWin to
 /// answer before giving up. A local D-Bus round trip normally completes in
 /// well under this; this exists specifically for the case where it does
@@ -45,6 +46,8 @@ pub enum KwinWindowError {
     ScriptNotReady,
     #[error("KWin tracker setup exceeded its time limit")]
     SetupTimedOut,
+    #[error("KWin no longer reports the WayExpand window-tracker script as loaded")]
+    ScriptStopped,
     #[error("org.kde.KWin's scripting interface is not reachable on the session bus")]
     NotAvailable,
     #[error("could not generate a unique KWin tracker nonce: {0}")]
@@ -95,6 +98,7 @@ pub struct KwinWindowTracker {
     receiver: mpsc::Receiver<Option<WindowContext>>,
     plugin_name: String,
     script_path: std::path::PathBuf,
+    next_health_check: Instant,
 }
 
 impl KwinWindowTracker {
@@ -208,6 +212,7 @@ impl KwinWindowTracker {
             receiver,
             plugin_name,
             script_path,
+            next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
         })
     }
 
@@ -291,14 +296,58 @@ impl WindowTracker for KwinWindowTracker {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Option<WindowContext>>, WindowTrackerError> {
-        match self.receiver.recv_timeout(timeout) {
-            Ok(window) => Ok(Some(window)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(WindowTrackerError {
-                backend: BACKEND_NAME,
-                message: "the KWin script's D-Bus callback service stopped".into(),
-                retryable: true,
-            }),
+        let deadline = Instant::now() + timeout;
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            if now >= self.next_health_check {
+                let loaded: bool = self
+                    .connection
+                    .call_method(
+                        Some("org.kde.KWin"),
+                        "/Scripting",
+                        Some("org.kde.kwin.Scripting"),
+                        "isScriptLoaded",
+                        &(self.plugin_name.as_str(),),
+                    )
+                    .and_then(|reply| reply.body().deserialize())
+                    .map_err(|error| WindowTrackerError {
+                        backend: BACKEND_NAME,
+                        message: format!("checking KWin tracker health failed: {error}"),
+                        retryable: true,
+                    })?;
+                if !loaded {
+                    return Err(WindowTrackerError {
+                        backend: BACKEND_NAME,
+                        message: KwinWindowError::ScriptStopped.to_string(),
+                        retryable: true,
+                    });
+                }
+                self.next_health_check = Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            let wait = deadline
+                .min(self.next_health_check)
+                .saturating_duration_since(now);
+            match self.receiver.recv_timeout(wait) {
+                Ok(window) => return Ok(Some(window)),
+                Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
+                    return Ok(None)
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(WindowTrackerError {
+                        backend: BACKEND_NAME,
+                        message: "the KWin script's D-Bus callback service stopped".into(),
+                        retryable: true,
+                    })
+                }
+            }
         }
     }
 }
