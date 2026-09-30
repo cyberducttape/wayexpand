@@ -393,7 +393,12 @@ below are exactly what that response currently carries -- nothing more.
   "hotkey_in_flight": 0,
   "command_queue_rejected_total": 0,
   "command_timeout_total": 0,
-  "command_failure_total": 0
+  "command_failure_total": 0,
+  "injection_latency_sample_count": 0,
+  "injection_latency_window_count": 0,
+  "injection_latency_p50_us": 0,
+  "injection_latency_p95_us": 0,
+  "injection_latency_p99_us": 0
 }
 ```
 
@@ -415,6 +420,11 @@ below are exactly what that response currently carries -- nothing more.
 - `command_queue_rejected_total` (integer): Number of command actions rejected because the bounded queue was full or unavailable
 - `command_timeout_total` (integer): Number of command actions that exceeded their configured timeout
 - `command_failure_total` (integer): Number of command actions that failed for another reason, including spawn failures and non-zero exits
+- `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
+- `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
+- `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
+
+These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 
 **Stability:** 🔒 **Stable** — these fields are guaranteed; new fields may be
 added. The queue depth is instantaneous; the three totals cover the current

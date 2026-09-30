@@ -43,9 +43,11 @@ less, and keep your snippets local.
 
 > **Important limitations:** WayExpand sees committed text, not active IME
 > preedit/composition. Complete CJK/IBus/Fcitx, dead-key, and Compose sequences
-> before expecting a trigger to match. App-filtered snippets require focused-
-> window tracking; that integration is currently available only through the
-> KWin bridge, and fails closed elsewhere. If either capability is essential
+> before expecting a trigger to match. Its intended scope is direct keyboard
+> input and committed-text workflows; no desktop is yet E2E certified.
+> App-filtered snippets require focused-window tracking; that integration is
+> currently available only through the KWin bridge, and fails closed
+> elsewhere. If either capability is essential
 > to your workflow, verify it with `wayexpand doctor` on the exact desktop
 > session before deployment.
 
@@ -160,6 +162,7 @@ wayexpand test ';;email' expansions.toml # simulate a trigger
 wayexpand preview ':today' expansions.toml
 wayexpand validate expansions.toml
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+# Migration counts and unmapped-option warnings are printed to stderr.
 ```
 
 For stable JSON output and automation contracts, see
@@ -208,7 +211,10 @@ Start here:
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 ```
 
-Or use the GUI importer for a preview before saving. See
+The GUI defaults to a merge that preserves current snippets and reports
+duplicates/conflicts; replacement is a separate explicit action. Review the
+CLI's migration report or GUI preview for unmapped features before applying.
+See
 [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
 ## Where to go next

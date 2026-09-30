@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::control::ControlServer;
+use crate::latency::Snapshot as LatencySnapshot;
 use wayexpand_core::CommandMetrics;
 
 /// A complete control-socket status body.
@@ -35,8 +36,33 @@ pub fn daemon_status_body_with_mode(
     backend_mode: &str,
     metrics: CommandMetrics,
 ) -> StatusBody {
+    daemon_status_body_with_latency(
+        source,
+        backend,
+        state,
+        paused,
+        config_path,
+        config_healthy,
+        backend_mode,
+        metrics,
+        crate::latency::snapshot(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn daemon_status_body_with_latency(
+    source: &str,
+    backend: &str,
+    state: &str,
+    paused: bool,
+    config_path: &Path,
+    config_healthy: bool,
+    backend_mode: &str,
+    metrics: CommandMetrics,
+    latency: LatencySnapshot,
+) -> StatusBody {
     StatusBody(format!(
-        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}",
+        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstate={state}\npaused={paused}\nconfig={}\nconfig_state={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}",
         config_path.display(),
         if config_healthy { "ok" } else { "reload-rejected" },
         metrics.command_queue_depth,
@@ -48,6 +74,11 @@ pub fn daemon_status_body_with_mode(
         metrics.command_queue_rejected_total,
         metrics.command_timeout_total,
         metrics.command_failure_total,
+        latency.sample_count,
+        latency.window_count,
+        latency.p50_us,
+        latency.p95_us,
+        latency.p99_us,
     ))
 }
 
@@ -94,6 +125,32 @@ pub fn set_daemon_status_with_mode(
         config_healthy,
         backend_mode,
         metrics,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn set_daemon_status_with_latency(
+    control: &ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+    metrics: CommandMetrics,
+    latency: LatencySnapshot,
+) {
+    control.set_status(daemon_status_body_with_latency(
+        source,
+        backend,
+        state,
+        control
+            .pause_requested
+            .load(std::sync::atomic::Ordering::Acquire),
+        config_path,
+        config_healthy,
+        "unknown",
+        metrics,
+        latency,
     ));
 }
 

@@ -32,6 +32,8 @@ pub(crate) fn cache_key(draft: Option<&Draft>, app: &str) -> u64 {
         draft.command_args.hash(&mut hasher);
         draft.command_timeout_ms.hash(&mut hasher);
         draft.command_cache_ms.hash(&mut hasher);
+        (draft.command_environment as u8).hash(&mut hasher);
+        draft.command_pass_env.hash(&mut hasher);
     }
     app.hash(&mut hasher);
     hasher.finish()
@@ -50,21 +52,9 @@ pub(crate) fn render(
         config.expansion[index].match_mode = draft.match_mode;
         config.expansion[index].enabled = draft.enabled;
         config.expansion[index].propagate_case = draft.propagate_case;
-        config.expansion[index].app_filter = draft
-            .app_filter
-            .split(',')
-            .map(str::trim)
-            .filter(|filter| !filter.is_empty())
-            .map(str::to_owned)
-            .collect();
+        config.expansion[index].app_filter = draft.app_filter.clone();
         config.expansion[index].description = draft.description.clone();
-        config.expansion[index].tags = draft
-            .tags
-            .split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(str::to_owned)
-            .collect();
+        config.expansion[index].tags = draft.tags.clone();
         config.expansion[index].category = draft.category.clone();
         config.expansion[index].command = match draft.command_config() {
             Ok(command) => command,
@@ -96,6 +86,7 @@ mod tests {
     fn config(app_filter: Vec<&str>) -> Config {
         Config {
             expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
                 trigger: ":hi".into(),
                 replacement: "Hello".into(),
                 description: String::new(),
@@ -142,6 +133,7 @@ mod tests {
     #[test]
     fn cache_key_changes_when_command_draft_changes() {
         let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger: ":hi".into(),
             replacement: "Hello".into(),
             description: String::new(),
@@ -157,7 +149,7 @@ mod tests {
         let before = cache_key(Some(&draft), "");
         draft.command_enabled = true;
         draft.command_program = "/usr/bin/printf".into();
-        draft.command_args = "changed".into();
+        draft.command_args = vec!["changed".into()];
         draft.command_timeout_ms = "1000".into();
         draft.command_cache_ms = "500".into();
         assert_ne!(before, cache_key(Some(&draft), ""));
@@ -166,6 +158,7 @@ mod tests {
     #[test]
     fn invalid_command_draft_does_not_preview_static_replacement() {
         let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger: ":hi".into(),
             replacement: "Hello".into(),
             description: String::new(),
@@ -188,6 +181,7 @@ mod tests {
     #[test]
     fn command_preview_requires_explicit_enablement() {
         let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger: ":hi".into(),
             replacement: "Hello".into(),
             description: String::new(),

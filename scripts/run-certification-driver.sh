@@ -3,6 +3,7 @@
 # checked-in matrix. The driver owns the real GTK/Qt/client interaction; this
 # wrapper owns scenario coverage and result normalization.
 set -eu
+set -f
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 matrix="$project_dir/tests/certification/compositor-matrix.json"
@@ -32,7 +33,7 @@ while [ "$#" -gt 0 ]; do
         --log-dir) log_dir=${2:?missing value for --log-dir}; shift 2 ;;
         --help|-h)
             printf '%s\n' "usage: $0 --driver PATH --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --output RESULTS [--log-dir DIR]"
-            printf '%s\n' 'driver contract: argv[1] is the scenario; exit 0=pass, 1=fail, 2=unverified, 3=unsupported-by-design'
+            printf '%s\n' 'driver contract: argv[1] is the scenario; WAYEXPAND_CERTIFICATION_LAYOUT and WAYEXPAND_CERTIFICATION_TARGET_APP identify the required matrix cell. Exit 0=pass, 1=fail, 2=unverified, 3=unsupported-by-design.'
             exit 0
             ;;
         *) printf '%s\n' "error: unknown option $1" >&2; exit 2 ;;
@@ -46,6 +47,14 @@ done
 [ -n "$backend" ] || { printf '%s\n' 'error: --backend is required' >&2; exit 2; }
 [ -n "$keyboard_layout" ] || { printf '%s\n' 'error: --layout is required' >&2; exit 2; }
 [ -n "$target_apps" ] || { printf '%s\n' 'error: --target-apps is required' >&2; exit 2; }
+jq -en --arg apps "$target_apps" '
+    ($apps | split(",")) as $items |
+    ([ $items[] | select(test("^[a-zA-Z0-9._+-]+$")) ] | length) == ($items | length) and
+    ($items | unique | length) == ($items | length)
+' >/dev/null || {
+    printf '%s\n' 'error: --target-apps must be a unique comma-separated list of simple client identifiers' >&2
+    exit 2
+}
 [ -n "$output" ] || { printf '%s\n' 'error: --output is required' >&2; exit 2; }
 target_apps_lower=$(printf '%s' "$target_apps" | tr '[:upper:]' '[:lower:]')
 required_client_markers=$(jq -r --arg compositor "$compositor" \
@@ -92,28 +101,47 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 driver_status=0
 while IFS= read -r scenario; do
     [ -n "$scenario" ] || continue
-    log="$log_dir/$scenario.log"
-    if WAYEXPAND_CERTIFICATION_COMPOSITOR="$compositor" \
-        WAYEXPAND_CERTIFICATION_VERSION="$compositor_version" \
-        WAYEXPAND_CERTIFICATION_BACKEND="$backend" \
-        WAYEXPAND_CERTIFICATION_LAYOUT="$keyboard_layout" \
-        WAYEXPAND_CERTIFICATION_TARGET_APPS="$target_apps" \
-        WAYEXPAND_CERTIFICATION_SCENARIO="$scenario" \
-        "$driver" "$scenario" >"$log" 2>&1; then
-        result=pass
-    else
-        exit_code=$?
-        case "$exit_code" in
-            1) result=fail; driver_status=1 ;;
-            2) result=UNVERIFIED; driver_status=1 ;;
-            3) result=unsupported-by-design; driver_status=1 ;;
-            *)
-                printf '%s\n' "error: driver failed unexpectedly for $scenario (exit $exit_code)" >&2
-                exit 2
-                ;;
-        esac
-    fi
-    printf '%s=%s\n' "$scenario" "$result" >>"$output"
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Split the validated CSV on its explicit comma IFS; globbing is disabled.
+    set -- $keyboard_layout
+    IFS=$old_ifs
+    for layout_profile do
+        layout_profile=$(printf '%s' "$layout_profile" | tr '[:upper:]' '[:lower:]')
+        old_ifs=$IFS
+        IFS=,
+        # shellcheck disable=SC2086 # Split the validated CSV on its explicit comma IFS; globbing is disabled.
+        set -- $target_apps
+        IFS=$old_ifs
+        for target_app do
+            cell_key="$scenario|$layout_profile|$target_app"
+            safe_log=$(printf '%s' "$cell_key" | tr '|' '_')
+            log="$log_dir/$safe_log.log"
+            if WAYEXPAND_CERTIFICATION_COMPOSITOR="$compositor" \
+                WAYEXPAND_CERTIFICATION_VERSION="$compositor_version" \
+                WAYEXPAND_CERTIFICATION_BACKEND="$backend" \
+                WAYEXPAND_CERTIFICATION_LAYOUT="$layout_profile" \
+                WAYEXPAND_CERTIFICATION_LAYOUT_PROFILES="$keyboard_layout" \
+                WAYEXPAND_CERTIFICATION_TARGET_APP="$target_app" \
+                WAYEXPAND_CERTIFICATION_TARGET_APPS="$target_apps" \
+                WAYEXPAND_CERTIFICATION_SCENARIO="$scenario" \
+                "$driver" "$scenario" >"$log" 2>&1; then
+                result=pass
+            else
+                exit_code=$?
+                case "$exit_code" in
+                    1) result=fail; driver_status=1 ;;
+                    2) result=UNVERIFIED; driver_status=1 ;;
+                    3) result=unsupported-by-design; driver_status=1 ;;
+                    *)
+                        printf '%s\n' "error: driver failed unexpectedly for $cell_key (exit $exit_code)" >&2
+                        exit 2
+                        ;;
+                esac
+            fi
+            printf '%s=%s\n' "$cell_key" "$result" >>"$output"
+        done
+    done
 done <<EOF
 $scenarios
 EOF

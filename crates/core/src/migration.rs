@@ -3,13 +3,15 @@ use crate::{
     Config, ConfigError, ExpansionConfig, MatchMode, Settings,
 };
 use serde::Deserialize;
-use std::{fs, io::Read, path::Path};
+use std::{collections::BTreeMap, fs, io::Read, path::Path};
 use thiserror::Error;
 
 #[derive(Debug, Deserialize)]
 struct EspansoDocument {
     #[serde(default)]
     matches: Vec<EspansoMatch>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,12 +19,39 @@ struct EspansoMatch {
     trigger: String,
     replace: Option<String>,
     label: Option<String>,
+    #[serde(default)]
+    propagate_case: bool,
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug)]
 pub struct EspansoImport {
     pub config: Config,
+    pub report: EspansoImportReport,
+    /// Retained for existing callers; equals `report.unsupported`.
     pub skipped: usize,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct EspansoImportReport {
+    pub fully_migrated: usize,
+    pub migrated_with_warnings: usize,
+    pub unsupported: usize,
+    pub warnings: Vec<EspansoImportWarning>,
+    pub unsupported_matches: Vec<EspansoUnsupportedMatch>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EspansoImportWarning {
+    pub trigger: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EspansoUnsupportedMatch {
+    pub trigger: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Error)]
@@ -38,6 +67,8 @@ pub enum MigrationError {
         length: usize,
         maximum: usize,
     },
+    #[error("Espanso path is not a regular file: {path}")]
+    NotRegular { path: String },
     #[error("could not parse Espanso YAML: {0}")]
     Parse(#[from] serde_yaml::Error),
     #[error("imported configuration is invalid: {0}")]
@@ -50,8 +81,23 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
         path: path.display().to_string(),
         source,
     };
-    let mut file = fs::File::open(path).map_err(read_error)?;
+    let resolved_path = fs::canonicalize(path).map_err(read_error)?;
+    // Open the resolved target nonblocking, then validate the descriptor. In
+    // particular, opening a FIFO read-only without O_NONBLOCK could hang the
+    // GUI before metadata or the bounded read is reached.
+    let descriptor = rustix::fs::open(
+        &resolved_path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| read_error(error.into()))?;
+    let mut file = fs::File::from(descriptor);
     let metadata = file.metadata().map_err(read_error)?;
+    if !metadata.file_type().is_file() {
+        return Err(MigrationError::NotRegular {
+            path: path.display().to_string(),
+        });
+    }
     if metadata.len() > MAX_CONFIG_BYTES as u64 {
         return Err(MigrationError::TooLarge {
             path: path.display().to_string(),
@@ -79,17 +125,45 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             error.utf8_error(),
         ))
     })?;
-    // serde_yaml resolves anchors/aliases; the size cap above bounds how much
-    // expansion a crafted "billion laughs"-style document can achieve here.
+    // The byte limit bounds the source document size; serde_yaml additionally
+    // applies a recursion limit while deserializing nested structures.
     let document: EspansoDocument = serde_yaml::from_str(&text)?;
     let mut expansion = Vec::with_capacity(document.matches.len());
-    let mut skipped = 0;
+    let mut report = EspansoImportReport::default();
+    for key in document.extra.keys() {
+        report.warnings.push(EspansoImportWarning {
+            trigger: "(file)".into(),
+            details: vec![format!(
+                "top-level option `{key}` is not imported; review its semantics"
+            )],
+        });
+    }
     for item in document.matches {
         let Some(replacement) = item.replace else {
-            skipped += 1;
+            report.unsupported += 1;
+            report.unsupported_matches.push(EspansoUnsupportedMatch {
+                trigger: item.trigger,
+                reason: "match has no static `replace` value (dynamic matches are unsupported)"
+                    .into(),
+            });
             continue;
         };
+        let details = item
+            .extra
+            .keys()
+            .map(|key| format!("option `{key}` is not mapped; review its semantics"))
+            .collect::<Vec<_>>();
+        if details.is_empty() {
+            report.fully_migrated += 1;
+        } else {
+            report.migrated_with_warnings += 1;
+            report.warnings.push(EspansoImportWarning {
+                trigger: item.trigger.clone(),
+                details,
+            });
+        }
         expansion.push(ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger: item.trigger,
             replacement,
             description: item.label.unwrap_or_default(),
@@ -99,9 +173,7 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             match_mode: MatchMode::Immediate,
             command: None,
             enabled: true,
-            // Espanso's own `propagate_case` match option is not mapped
-            // here; imported snippets keep their replacement text as-is.
-            propagate_case: false,
+            propagate_case: item.propagate_case,
         });
     }
     let config = Config {
@@ -111,7 +183,12 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
         organization: OrganizationPolicy::default(),
     };
     config.validate()?;
-    Ok(EspansoImport { config, skipped })
+    let skipped = report.unsupported;
+    Ok(EspansoImport {
+        config,
+        report,
+        skipped,
+    })
 }
 
 #[cfg(test)]
@@ -134,6 +211,56 @@ mod tests {
         assert_eq!(imported.config.expansion[0].trigger, ":hi");
         assert_eq!(imported.config.expansion[0].description, "Greeting");
         assert_eq!(imported.skipped, 1);
+        assert_eq!(imported.report.fully_migrated, 1);
+        assert_eq!(imported.report.unsupported, 1);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reports_semantics_that_are_not_mapped() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-espanso-report-{}.yml",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            "global_vars:\n  name: Example\nmatches:\n  - trigger: ':plain'\n    replace: Hello\n  - trigger: ':case'\n    replace: Hello\n    propagate_case: true\n  - trigger: ':word'\n    replace: Hello\n    word: true\n  - trigger: ':dynamic'\n    vars:\n      - name: output\n        type: shell\n",
+        )
+        .unwrap();
+
+        let imported = import_espanso(&path).unwrap();
+        assert_eq!(imported.report.fully_migrated, 2);
+        assert_eq!(imported.report.migrated_with_warnings, 1);
+        assert_eq!(imported.report.unsupported, 1);
+        assert_eq!(imported.report.warnings.len(), 2); // also reports global_vars
+        assert!(imported.config.expansion[1].propagate_case);
+        assert!(!imported
+            .report
+            .warnings
+            .iter()
+            .any(|warning| warning.trigger == ":case"));
+        assert!(imported.report.warnings.iter().any(|warning| {
+            warning.trigger == ":word"
+                && warning.details.iter().any(|detail| detail.contains("word"))
+        }));
+        assert_eq!(imported.report.unsupported_matches[0].trigger, ":dynamic");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_fifo_without_waiting_for_a_writer() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-espanso-fifo-{}.yml", std::process::id()));
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &path,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        assert!(matches!(
+            import_espanso(&path),
+            Err(MigrationError::NotRegular { .. })
+        ));
         fs::remove_file(path).unwrap();
     }
 

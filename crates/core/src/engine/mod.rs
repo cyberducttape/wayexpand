@@ -3,11 +3,11 @@ pub mod expansion;
 pub mod matching;
 pub mod transaction;
 
-pub use command_runtime::run_command;
 use command_runtime::{
     configure_command_environment, configure_process_group, kill_process_group_by_pid,
     run_command_with_shutdown, CommandMetricsState, QueueSendError,
 };
+pub use command_runtime::{run_command, run_command_cancellable};
 
 use crate::{
     CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig, InjectorCapabilities,

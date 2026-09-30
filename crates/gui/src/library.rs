@@ -66,6 +66,7 @@ mod tests {
         tags: &[&str],
     ) -> ExpansionConfig {
         ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger: trigger.into(),
             replacement: "never searched".into(),
             description: description.into(),

@@ -16,7 +16,9 @@ wayexpand certify --json > wayexpand-certification.json
 The JSON record includes the detected desktop, selected input mode, every
 check with a stable status, and the limitations of the selected backend. It is
 safe to attach to a support report and contains no typed text or expansion
-contents.
+contents. Certification scope is direct keyboard input and already-committed
+text. Active IME/preedit composition is intentionally out of scope and is
+reported as `unsupported-by-design`; a certification never implies otherwise.
 
 For an operator evidence record after running the real-client scenarios, use
 the collector with `--format json` and a validated results file:
@@ -25,13 +27,13 @@ the collector with `--format json` and a validated results file:
 scripts/certify-compositor.sh --format json --compositor kde \
   --version 6.6.2 --backend ibus \
   --layout us,de,fr,altgr,multi-layout-switching \
-  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
   --results kde-results.txt --output kde-certification.json
 ```
 
 That record is distinct from the CLI preflight: it includes the exact session
-metadata and one result for each required scenario, but remains
-`certified: false` unless every scenario is explicitly passed, the doctor
+metadata and one result for every scenario × layout × client cell, but remains
+`certified: false` unless every cell is explicitly passed, the doctor
 snapshot reports `healthy: true`, and the selected backend probe is consistent
 with the evidence metadata. Daemon-backed paths additionally require a status
 snapshot with `response: "running"` and the matching source/backend pair; IBus
@@ -39,24 +41,34 @@ uses the doctor IBus-installation probe because it is not the daemon control
 socket path. Its stable `status` field is `certified`, `incomplete`, or
 `failed`.
 
-Scenario outcomes are deliberately more expressive than pass/fail: `pass`
+Matrix-cell outcomes are deliberately more expressive than pass/fail: `pass`
 means the scenario passed, `fail` means it was exercised and failed,
 `unsupported-by-design` records a documented capability that the selected
 backend cannot provide (for example password-field awareness through evdev),
 and `UNVERIFIED` means no trustworthy result was collected. Only an artifact
-whose required scenarios are all `pass` can set `certified: true`; human
+whose required cells are all `pass` can set `certified: true`; human
 support tables are compatibility observations, not certification evidence.
 
 JSON mode exits successfully when the report is produced; automation must
 inspect `.certified`. Human-readable mode exits nonzero while certification is
 incomplete.
 
-The intended compositor harness will exercise the same checks against real
-clients:
+The compositor evidence collector emits schema version 2, where each entry in
+`scenarios` is an individual scenario × layout × client result. Scenario-only
+schema-1 artifacts do not prove this expanded matrix.
+The artifact also carries `out_of_scope_capabilities`; these are explicit
+product boundaries, not untested passing scenarios. The committed-text
+composition scenarios exercise expansion after the user completes composition.
+
+The self-hosted workflow currently expects a compositor-specific executable
+driver configured by the runner. The repository does not yet provide that
+real-client driver; fake-driver contract tests verify orchestration only and
+are not compositor evidence. Until real driver implementations run and
+reviewed artifacts pass, every desktop remains uncertified.
 
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
-CI validates that all four required desktop targets and all twelve scenarios
+CI validates that all four required desktop targets and all thirty-five scenarios
 remain present, rejects evidence that pairs a compositor with a backend
 outside its declared certification paths, and requires the layout profiles
 `us`, `de`, `fr`, `altgr`, and `multi-layout-switching` from certification

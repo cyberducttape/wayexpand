@@ -446,10 +446,21 @@ fn run() -> Result<()> {
                 usage_bail!("usage: wayexpand import espanso <file>");
             }
             let imported = import_espanso(Path::new(&source))?;
-            if imported.skipped > 0 {
+            eprintln!(
+                "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
+                imported.report.fully_migrated,
+                imported.report.migrated_with_warnings,
+                imported.report.unsupported
+            );
+            for warning in &imported.report.warnings {
+                for detail in &warning.details {
+                    eprintln!("warning: {}: {detail}", warning.trigger);
+                }
+            }
+            for unsupported in &imported.report.unsupported_matches {
                 eprintln!(
-                    "warning: skipped {} Espanso match(es) without a string replacement",
-                    imported.skipped
+                    "unsupported: {}: {}",
+                    unsupported.trigger, unsupported.reason
                 );
             }
             print!("{}", toml::to_string_pretty(&imported.config)?);
@@ -473,9 +484,11 @@ fn run() -> Result<()> {
             if args.next().is_some() {
                 usage_bail!("usage: wayexpand set-enabled <trigger> <on|off> [config]");
             }
-            let mut config = Config::load(&path).map_err(|error| {
+            let loaded = Config::load_versioned(&path).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
+            let expected_revision = loaded.revision;
+            let mut config = loaded.config;
             let Some(expansion) = config
                 .expansion
                 .iter_mut()
@@ -490,12 +503,14 @@ fn run() -> Result<()> {
                     error.safe_summary()
                 ))
             })?;
-            config.save_atomic(&path).map_err(|error| {
-                config_error(format!(
-                    "could not save configuration: {}",
-                    error.safe_summary()
-                ))
-            })?;
+            config
+                .save_atomic_if_revision_matches(&path, &expected_revision)
+                .map_err(|error| {
+                    config_error(format!(
+                        "could not save configuration: {}",
+                        error.safe_summary()
+                    ))
+                })?;
             println!(
                 "{} {}",
                 if enabled { "enabled" } else { "disabled" },
@@ -527,9 +542,11 @@ fn run() -> Result<()> {
                     "usage: wayexpand set-mode <trigger> <immediate|word-boundary> [config]"
                 );
             }
-            let mut config = Config::load(&path).map_err(|error| {
+            let loaded = Config::load_versioned(&path).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
+            let expected_revision = loaded.revision;
+            let mut config = loaded.config;
             let Some(expansion) = config
                 .expansion
                 .iter_mut()
@@ -544,12 +561,14 @@ fn run() -> Result<()> {
                     error.safe_summary()
                 ))
             })?;
-            config.save_atomic(&path).map_err(|error| {
-                config_error(format!(
-                    "could not save configuration: {}",
-                    error.safe_summary()
-                ))
-            })?;
+            config
+                .save_atomic_if_revision_matches(&path, &expected_revision)
+                .map_err(|error| {
+                    config_error(format!(
+                        "could not save configuration: {}",
+                        error.safe_summary()
+                    ))
+                })?;
             println!("{} {}", value, trigger);
         }
         Some("backup") => {
@@ -1604,7 +1623,9 @@ fn certification_scenario_category(scenario: &str) -> &'static str {
         "config-reload" | "daemon-restart" | "compositor-restart" | "failed-insertion" => {
             "recovery"
         }
-        "ime-preedit" => "input-method",
+        "dead-key-committed-text"
+        | "compose-committed-text"
+        | "expansion-after-committed-composition" => "input-method",
         _ => "other",
     }
 }
@@ -1906,6 +1927,11 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "command_queue_rejected_total"
                         | "command_timeout_total"
                         | "command_failure_total"
+                        | "injection_latency_sample_count"
+                        | "injection_latency_window_count"
+                        | "injection_latency_p50_us"
+                        | "injection_latency_p95_us"
+                        | "injection_latency_p99_us"
                 ) =>
             {
                 match value.parse::<u64>() {
@@ -2357,7 +2383,12 @@ mod tests {
              hotkey_in_flight=0\n\
              command_queue_rejected_total=0\n\
              command_timeout_total=0\n\
-             command_failure_total=0";
+             command_failure_total=0\n\
+             injection_latency_sample_count=0\n\
+             injection_latency_window_count=0\n\
+             injection_latency_p50_us=0\n\
+             injection_latency_p95_us=0\n\
+             injection_latency_p99_us=0";
         let value = status_as_json(daemon_response).unwrap();
         let object = value.as_object().expect("status --json returns an object");
         let contract: serde_json::Value =
@@ -2454,6 +2485,11 @@ mod tests {
                 "command_queue_rejected_total",
                 "command_timeout_total",
                 "command_failure_total",
+                "injection_latency_sample_count",
+                "injection_latency_window_count",
+                "injection_latency_p50_us",
+                "injection_latency_p95_us",
+                "injection_latency_p99_us",
             ]
             .into_iter()
             .collect()

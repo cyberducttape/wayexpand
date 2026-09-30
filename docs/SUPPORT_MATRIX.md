@@ -9,6 +9,12 @@ Wayland session alone does not imply that a backend is usable.
 
 **Core engine and config are stable; desktop backend support is compositor-dependent.** See [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) for the authoritative automatic-selection and certification status. No compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture.
 
+**Product scope (current):** WayExpand is intended for direct keyboard input
+and text that an input method has already committed. Active IME/preedit
+composition is explicitly unsupported. This is a scope boundary, not a claim
+that any desktop is currently production-certified; certification applies only
+to the tested backend, compositor, client, and layout combinations.
+
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |
 | Core matching and config validation | Supported | Workspace unit tests and Clippy |
@@ -35,9 +41,11 @@ deploying desktop capture, test and record the exact compositor and version:
 
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not
-evidence for layout-independent text injection. CJK/IME and preedit remain
-unsupported categories until they receive a separate implementation and
-certification plan.
+evidence for layout-independent text injection. Certification checks
+dead-key/Compose input and expansion only after composition is committed;
+active preedit is an explicit out-of-scope capability and does not become
+supported through a passing certification. The machine-readable report lists
+this boundary under `out_of_scope_capabilities`.
 
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,
@@ -64,7 +72,10 @@ This affects users who rely on:
 
 ### Why Unsupported
 
-Text expansion happens at the character/string level, after the input method has committed text. WayExpand's replacement injection cannot interact with active composition sessions — typing an expansion trigger during IME composition may:
+The supported workflow is direct keyboard input or text expansion after an
+input method has committed its text. WayExpand does not observe or control
+active composition sessions — typing an expansion trigger during IME
+composition may:
 
 - Interrupt ongoing composition
 - Insert the trigger text before the IME has finished
@@ -78,12 +89,19 @@ Text expansion happens at the character/string level, after the input method has
 
 ### About WayExpand's IBus Support
 
-WayExpand ships its own **IBus engine backend** (`wayexpand-ibus`). This backend works alongside IBus for text expansion. The limitation documented above applies specifically to **active composition** — when the IME is actively composing (in preedit state). Text expansion works fine:
+WayExpand ships its own **IBus engine backend** (`wayexpand-ibus`). This is an
+alternative WayExpand input path, not support for observing or coordinating
+another engine's active preedit state. Its behavior still requires testing with
+the target IBus version and client toolkit. The committed-text scope applies
+when text has already been committed, subject to the selected backend/client
+path being tested:
 - After composition is committed (Enter/Space)
 - Outside of active composition sessions
-- Via the native IBus engine that WayExpand provides
+- Via the WayExpand IBus engine when selected and configured
 
-This is different from saying "IBus is unsupported." Rather, WayExpand and IBus composition don't safely mix during active composition, but they coexist fine otherwise.
+This is not a blanket statement that IBus is unsupported: WayExpand has an
+IBus integration. It does not promise interoperability with active composition
+from Fcitx, IBus engines, Rime, or other IMEs unless that exact path is tested.
 
 ### For Package Maintainers / System Administrators
 
@@ -91,7 +109,7 @@ When deploying WayExpand in regions or environments with heavy IME usage:
 
 - **Document the limitation clearly** in your deployment guides (specifically: active composition incompatibility)
 - **Test with your local IME** before recommending to users
-- **Highlight the IBus engine:** Users in IBus environments can use WayExpand's native IBus backend for seamless integration
+- **Describe the IBus engine accurately:** It is an available integration path, not evidence of active-preedit support or universal client compatibility
 - **Suggest complementary tools:** Many input methods (Fcitx, IBus) have built-in phrase expansion that can complement WayExpand
 
 ### Future Possibility
@@ -115,4 +133,8 @@ systemctl --user status fcitx.service  # or ibus, etc.
 wayexpand doctor
 ```
 
-**Summary:** WayExpand is great for ASCII-heavy English/European languages and global hotkeys. For CJK, dead-keys, or composition-heavy workflows, consider your IME system's built-in expansion features as a complement or alternative.
+**Summary:** The current intended scope is direct keyboard input and committed
+text. Active-preedit expansion is unsupported; users who need expansion during
+composition should use their IME's own phrase-expansion feature or a
+composition-aware tool. Desktop behavior remains uncertified until real-client
+evidence is published.

@@ -193,8 +193,8 @@ impl Strings {
 
     pub fn import_preview_info(&self) -> &'static str {
         match self.lang {
-            Language::English => "Import is previewed first and replaces this library only after explicit confirmation.",
-            Language::German => "Der Import wird zuerst angezeigt und ersetzt diese Bibliothek nur nach ausdrücklicher Bestätigung.",
+            Language::English => "Preview first, then merge while preserving current snippets or explicitly replace the library.",
+            Language::German => "Zuerst prüfen, dann aktuelle Snippets beim Zusammenführen bewahren oder die Bibliothek ausdrücklich ersetzen.",
         }
     }
 
@@ -216,6 +216,32 @@ impl Strings {
         match self.lang {
             Language::English => "Replace current library",
             Language::German => "Aktuelle Bibliothek ersetzen",
+        }
+    }
+
+    pub fn merge_library(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Merge (keep current conflicts)",
+            Language::German => "Zusammenführen (Konflikte behalten)",
+        }
+    }
+
+    pub fn status_import_merged(
+        &self,
+        added: usize,
+        duplicates: usize,
+        conflicts: usize,
+        fully_migrated: usize,
+        with_warnings: usize,
+        unsupported: usize,
+    ) -> String {
+        match self.lang {
+            Language::English => format!(
+                "Import merged: {added} added, {duplicates} identical duplicates ignored, {conflicts} trigger conflicts kept; {fully_migrated} fully migrated, {with_warnings} with warnings, {unsupported} unsupported"
+            ),
+            Language::German => format!(
+                "Import zusammengeführt: {added} hinzugefügt, {duplicates} identische Duplikate ignoriert, {conflicts} Trigger-Konflikte beibehalten; {fully_migrated} vollständig importiert, {with_warnings} mit Warnungen, {unsupported} nicht unterstützt"
+            ),
         }
     }
 
@@ -439,13 +465,6 @@ impl Strings {
         }
     }
 
-    pub fn tags_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "email, support, ops",
-            Language::German => "E-Mail, Support, Betrieb",
-        }
-    }
-
     pub fn category(&self) -> &'static str {
         match self.lang {
             Language::English => "Category",
@@ -471,13 +490,6 @@ impl Strings {
         match self.lang {
             Language::English => "Only in these apps",
             Language::German => "Nur in diesen Apps",
-        }
-    }
-
-    pub fn app_filter_hint(&self) -> &'static str {
-        match self.lang {
-            Language::English => "thunderbird, konsole",
-            Language::German => "thunderbird, konsole",
         }
     }
 
@@ -1063,13 +1075,18 @@ impl Strings {
     }
 
     // Import
-    pub fn import_preview_summary(&self, expansions: usize, skipped: usize) -> String {
+    pub fn import_preview_summary(
+        &self,
+        fully_migrated: usize,
+        with_warnings: usize,
+        unsupported: usize,
+    ) -> String {
         match self.lang {
-            Language::English => {
-                format!("Preview: {expansions} expansion(s), {skipped} unsupported match(es) skipped")
-            }
+            Language::English => format!(
+                "Migration preview: {fully_migrated} fully migrated, {with_warnings} with warnings, {unsupported} unsupported"
+            ),
             Language::German => format!(
-                "Vorschau: {expansions} Erweiterung(en), {skipped} nicht unterstützte Regel(n) übersprungen"
+                "Importvorschau: {fully_migrated} vollständig importiert, {with_warnings} mit Warnungen, {unsupported} nicht unterstützt"
             ),
         }
     }
@@ -1166,20 +1183,18 @@ impl Strings {
         }
     }
 
-    pub fn status_imported(&self) -> &'static str {
+    pub fn status_imported_with_report(
+        &self,
+        fully_migrated: usize,
+        with_warnings: usize,
+        unsupported: usize,
+    ) -> String {
         match self.lang {
-            Language::English => "Espanso library imported",
-            Language::German => "Espanso-Bibliothek importiert",
-        }
-    }
-
-    pub fn status_imported_with_skips(&self, skipped: usize) -> String {
-        match self.lang {
-            Language::English => {
-                format!("Espanso library imported; skipped {skipped} unsupported match(es)")
-            }
+            Language::English => format!(
+                "Espanso import applied: {fully_migrated} fully migrated, {with_warnings} with warnings, {unsupported} unsupported"
+            ),
             Language::German => format!(
-                "Espanso-Bibliothek importiert; {skipped} nicht unterstützte Regel(n) übersprungen"
+                "Espanso-Import angewendet: {fully_migrated} vollständig importiert, {with_warnings} mit Warnungen, {unsupported} nicht unterstützt"
             ),
         }
     }

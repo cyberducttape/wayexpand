@@ -14,8 +14,10 @@ use std::{
     fs,
     io::Write,
     process,
-    sync::{mpsc, Mutex},
-    thread,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Mutex,
+    },
     time::Duration,
 };
 use thiserror::Error;
@@ -30,7 +32,7 @@ const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 /// answer before giving up. A local D-Bus round trip normally completes in
 /// well under this; this exists specifically for the case where it does
 /// not (see `probe()`'s doc comment).
-const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -98,39 +100,19 @@ impl KwinWindowTracker {
     /// advertises the scripting interface, without loading or running
     /// anything.
     ///
-    /// Called synchronously from the daemon's `main()` before its event
-    /// loop starts (see `spawn_window_tracker`), so this must never be
-    /// allowed to block indefinitely: `zbus::blocking::connection::Connection::session()`
-    /// has no timeout of its own, and a session bus or KWin left in a bad
-    /// state (observed in practice after a KWin script/D-Bus name from a
-    /// prior, forcibly-killed daemon instance was not cleaned up) can hang
-    /// it forever, which previously meant the *entire daemon* never
-    /// reached its main loop -- no expansions worked, and no log line
-    /// even indicated why, since the hang happened before any logging
-    /// past this call. Bounded by running the real check on its own
-    /// thread and abandoning it (not joining) if it doesn't answer in
-    /// time, the same pattern already used for the output injector's
-    /// drop on shutdown.
+    /// The supervisor calls this from its own worker, never from the daemon's
+    /// input loop. The D-Bus introspection call has a finite method timeout;
+    /// keeping the probe in the supervisor thread also ensures a hung
+    /// connection attempt cannot create an unbounded series of abandoned
+    /// probe threads across retries.
     pub fn probe() -> Result<(), KwinWindowError> {
-        let (sender, receiver) = mpsc::channel();
-        // Intentionally not joined: if probe_blocking() is itself stuck in
-        // a hung D-Bus call, this thread may never finish. Leaking it here
-        // is preferable to letting that hang propagate to the caller --
-        // the OS reclaims it when the process exits either way.
-        thread::Builder::new()
-            .name("wayexpand-kwin-probe".into())
-            .spawn(move || {
-                let _ = sender.send(Self::probe_blocking());
-            })
-            .map_err(|_| KwinWindowError::NotAvailable)?;
-        match receiver.recv_timeout(PROBE_TIMEOUT) {
-            Ok(result) => result,
-            Err(_) => Err(KwinWindowError::NotAvailable),
-        }
+        Self::probe_blocking()
     }
 
     fn probe_blocking() -> Result<(), KwinWindowError> {
-        let connection = Connection::session()?;
+        let connection = zbus::blocking::connection::Builder::session()?
+            .method_timeout(DBUS_METHOD_TIMEOUT)
+            .build()?;
         let reply = connection
             .call_method(
                 Some("org.kde.KWin"),
@@ -152,18 +134,33 @@ impl KwinWindowTracker {
     }
 
     pub fn new() -> Result<Self, KwinWindowError> {
+        Self::new_cancellable(None)
+    }
+
+    /// Like `new`, but allows an owning UI/task to stop the bounded script
+    /// readiness retry loop. An in-flight D-Bus call is bounded by
+    /// `DBUS_METHOD_TIMEOUT`.
+    pub fn new_cancellable(cancelled: Option<&AtomicBool>) -> Result<Self, KwinWindowError> {
         let pid = process::id();
-        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}");
+        // Reconnects may overlap cleanup of a failed tracker. Give each
+        // attempt distinct D-Bus and KWin script identities so a delayed
+        // unload cannot collide with the replacement instance.
+        let mut nonce_bytes = [0_u8; 8];
+        getrandom::fill(&mut nonce_bytes)
+            .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
+        let nonce = u64::from_le_bytes(nonce_bytes);
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce:x}");
         let (sender, receiver) = mpsc::channel();
         let service = WindowTrackerService {
             sender: Mutex::new(sender),
         };
         let connection = zbus::blocking::connection::Builder::session()?
+            .method_timeout(DBUS_METHOD_TIMEOUT)
             .name(bus_name.clone())?
             .serve_at("/WindowTracker", service)?
             .build()?;
 
-        let plugin_name = format!("wayexpand-window-tracker-{pid}");
+        let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce:x}");
         // The path is otherwise predictable (PID plus a fixed prefix, under
         // world-writable /tmp), so a local attacker who guesses this
         // process's upcoming PID could pre-place a symlink here pointing at
@@ -172,10 +169,6 @@ impl KwinWindowTracker {
         // the exact path unguessable, and `create_new` (O_CREAT|O_EXCL) refuses
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
-        let mut nonce_bytes = [0_u8; 8];
-        getrandom::fill(&mut nonce_bytes)
-            .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
-        let nonce = u64::from_le_bytes(nonce_bytes);
         let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
@@ -186,7 +179,14 @@ impl KwinWindowTracker {
         file.write_all(script_contents.as_bytes())
             .map_err(KwinWindowError::ScriptWrite)?;
 
-        if let Err(error) = Self::load_and_run(&connection, &script_path, &plugin_name) {
+        if let Err(error) = Self::load_and_run(&connection, &script_path, &plugin_name, cancelled) {
+            let _ = connection.call_method(
+                Some("org.kde.KWin"),
+                "/Scripting",
+                Some("org.kde.kwin.Scripting"),
+                "unloadScript",
+                &(plugin_name.as_str(),),
+            );
             let _ = fs::remove_file(&script_path);
             return Err(error);
         }
@@ -209,6 +209,7 @@ impl KwinWindowTracker {
         connection: &Connection,
         script_path: &std::path::Path,
         plugin_name: &str,
+        cancelled: Option<&AtomicBool>,
     ) -> Result<(), KwinWindowError> {
         let script_id: i32 = connection
             .call_method(
@@ -223,6 +224,9 @@ impl KwinWindowTracker {
         let script_object_path = format!("/Scripting/Script{script_id}");
 
         for attempt in 0..LOAD_RETRY_ATTEMPTS {
+            if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                return Err(KwinWindowError::ScriptNotReady);
+            }
             match connection.call_method(
                 Some("org.kde.KWin"),
                 script_object_path.as_str(),
@@ -269,7 +273,7 @@ impl WindowTracker for KwinWindowTracker {
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(WindowTrackerError {
                 backend: BACKEND_NAME,
                 message: "the KWin script's D-Bus callback service stopped".into(),
-                retryable: false,
+                retryable: true,
             }),
         }
     }

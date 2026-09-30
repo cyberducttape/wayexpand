@@ -19,6 +19,7 @@ toml.workspace = true
 rustix = { workspace = true, features = ["fs"] }
 libc.workspace = true
 unicode-segmentation.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 criterion = "0.8"

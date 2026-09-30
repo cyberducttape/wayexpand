@@ -23,18 +23,21 @@ pub use backend::{
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    CommandConfig, CommandEnvironment, Config, ConfigError, ExpansionConfig, FontScale,
-    HotkeyConfig, MatchMode, OrganizationPolicy, Settings,
+    CommandConfig, CommandEnvironment, Config, ConfigError, ConfigRevision, ExpansionConfig,
+    FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings,
 };
 pub use engine::{
-    run_command, CommandError, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    HotkeyError, HotkeyResult, InputEvent, PendingExpansionDispatch, PendingExpansionResult,
-    WindowContext,
+    run_command, run_command_cancellable, CommandError, CommandMetrics, ExpansionEngine,
+    ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent,
+    PendingExpansionDispatch, PendingExpansionResult, WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
-pub use migration::{import_espanso, EspansoImport, MigrationError};
+pub use migration::{
+    import_espanso, EspansoImport, EspansoImportReport, EspansoImportWarning,
+    EspansoUnsupportedMatch, MigrationError,
+};
 pub use paths::default_config_path;
 pub use policy::{
     load_organization_policy, load_organization_policy_from_paths, parse_organization_policy,

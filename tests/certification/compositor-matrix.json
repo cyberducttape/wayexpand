@@ -1,13 +1,20 @@
 {
   "schema": 1,
   "outcome_types": ["pass", "fail", "unsupported-by-design", "UNVERIFIED"],
+  "out_of_scope_capabilities": [
+    {
+      "id": "active-ime-preedit",
+      "status": "unsupported-by-design",
+      "description": "Certification covers direct keyboard input and text committed by an input method. Expansion during an active IME/preedit session is unsupported and is not implied by certification."
+    }
+  ],
   "targets": [
     {
       "id": "kde",
       "display": "KDE Plasma / KWin",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
-      "required_client_markers": ["gtk", "qt", "password"],
+      "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
       "application_filter": "supported",
       "window_tracker": "KWin application tracker"
@@ -17,7 +24,7 @@
       "display": "GNOME Shell / Mutter",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
-      "required_client_markers": ["gtk", "qt", "password"],
+      "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
       "application_filter": "unavailable",
       "window_tracker": "none"
@@ -27,7 +34,7 @@
       "display": "Sway / wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
-      "required_client_markers": ["gtk", "qt", "password"],
+      "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
       "application_filter": "unavailable",
       "window_tracker": "none"
@@ -37,7 +44,7 @@
       "display": "Hyprland / wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
-      "required_client_markers": ["gtk", "qt", "password"],
+      "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
       "application_filter": "unavailable",
       "window_tracker": "none"
@@ -45,17 +52,40 @@
   ],
   "required_scenarios": [
     "printable-press-release",
+    "backspace",
+    "escape",
+    "arrow-navigation",
+    "function-keys",
     "held-keys-repeat",
+    "held-modifiers",
+    "repeated-keys",
+    "ctrl-alt-super-chords",
+    "key-pass-through-injector-failure",
+    "key-pass-through-reconnect",
+    "key-pass-through-cancellation",
+    "key-pass-through-daemon-crash",
+    "key-pass-through-compositor-restart",
     "modifier-navigation",
     "unicode-combining",
+    "dead-key-committed-text",
+    "compose-committed-text",
     "multiline-rapid",
     "password-field",
     "focus-cross-window",
     "config-reload",
     "daemon-restart",
+    "daemon-restart-during-typing",
     "compositor-restart",
+    "suspend-resume",
     "failed-insertion",
-    "ime-preedit"
+    "expansion-after-committed-composition",
+    "keyboard-hotplug",
+    "multiple-keyboards",
+    "electron-client",
+    "text-editor-client",
+    "command-timeout",
+    "expansion-cancellation",
+    "portal-revocation"
   ],
   "required_layout_profiles": [
     "us",

@@ -185,8 +185,10 @@ struct StateData {
     /// Key events (Linux evdev numbering plus effective modifiers) from
     /// unsupported keys that must be passed through to a separate injector.
     pending_key_pass_through: VecDeque<PendingKeyPassThrough>,
-    /// Keys currently held by the separate virtual keyboard. Repeated
-    /// physical presses do not create another virtual press for these keys.
+    /// Safety ledger of physical keys whose virtual press may have been or
+    /// may yet be sent. A key-up retires an entry only after its matching
+    /// release is queued; teardown also inspects pending transitions because
+    /// transport errors make delivery of the last event ambiguous.
     virtual_held_keys: Vec<u32>,
 }
 
@@ -245,7 +247,6 @@ impl StateData {
             // boundary discards the partial trigger while preserving the
             // engine's normal non-sensitive capture policy.
             self.events.clear();
-            self.pending_key_pass_through.clear();
             self.error = Some(InputMethodError::PassThrough {
                 message: format!(
                     "input-method event queue overflow (max {} events)",
@@ -265,14 +266,14 @@ impl StateData {
         modifiers: Modifiers,
         key_state: KeyEventState,
     ) {
+        let held_index = self
+            .virtual_held_keys
+            .iter()
+            .position(|held| *held == keycode);
         let should_queue = match key_state {
+            KeyEventState::Pressed if held_index.is_some() => false,
             KeyEventState::Pressed => {
-                if self.virtual_held_keys.contains(&keycode) {
-                    // A repeat is represented by the already-held virtual
-                    // key. Emitting another press would turn a hold into
-                    // synthetic taps.
-                    false
-                } else if self.virtual_held_keys.len() >= MAX_PENDING_KEY_PASS_THROUGH {
+                if self.virtual_held_keys.len() >= MAX_PENDING_KEY_PASS_THROUGH {
                     self.error = Some(InputMethodError::PassThrough {
                         message: format!(
                             "too many virtual keys held (max {})",
@@ -280,36 +281,36 @@ impl StateData {
                         ),
                         retryable: true,
                     });
-                    false
-                } else {
-                    self.virtual_held_keys.push(keycode);
-                    true
+                    self.queue_event(InputEvent::Reset);
+                    return;
                 }
+                true
             }
-            KeyEventState::Released => {
-                if let Some(index) = self
-                    .virtual_held_keys
-                    .iter()
-                    .position(|held| *held == keycode)
-                {
-                    self.virtual_held_keys.remove(index);
-                    true
-                } else {
-                    false
-                }
-            }
+            KeyEventState::Released => held_index.is_some(),
         };
 
+        if should_queue && self.pending_key_pass_through.len() >= MAX_PENDING_KEY_PASS_THROUGH {
+            self.error = Some(InputMethodError::PassThrough {
+                message: format!(
+                    "key pass-through queue overflow (max {} keys pending)",
+                    MAX_PENDING_KEY_PASS_THROUGH
+                ),
+                retryable: true,
+            });
+            // Do not retire a physical key-up from our held set until its
+            // virtual transition is queued. Error teardown will release it.
+            self.queue_event(InputEvent::Reset);
+            return;
+        }
+
         if should_queue {
-            if self.pending_key_pass_through.len() >= MAX_PENDING_KEY_PASS_THROUGH {
-                self.error = Some(InputMethodError::PassThrough {
-                    message: format!(
-                        "key pass-through queue overflow (max {} keys pending)",
-                        MAX_PENDING_KEY_PASS_THROUGH
-                    ),
-                    retryable: true,
-                });
-                return;
+            match key_state {
+                KeyEventState::Pressed => self.virtual_held_keys.push(keycode),
+                KeyEventState::Released => {
+                    if let Some(index) = held_index {
+                        self.virtual_held_keys.remove(index);
+                    }
+                }
             }
             self.pending_key_pass_through
                 .push_back(PendingKeyPassThrough {
@@ -800,7 +801,7 @@ fn pass_through_pending_keys(
         }
         return Ok(());
     };
-    while let Some(pending) = pending_keys.pop_front() {
+    while let Some(pending) = pending_keys.front().copied() {
         injector
             .inject_key_event(pending.keycode, pending.modifiers, pending.state)
             .map_err(|error| {
@@ -809,6 +810,7 @@ fn pass_through_pending_keys(
                     retryable: error.retryable,
                 })
             })?;
+        pending_keys.pop_front();
     }
     Ok(())
 }
@@ -844,8 +846,21 @@ fn pass_through_pending_key(
 fn release_virtual_keys_from_state(state: &mut StateData, injector: Option<&mut dyn TextInjector>) {
     let held = std::mem::take(&mut state.virtual_held_keys);
     if let Some(injector) = injector {
-        let _ = pass_through_pending_keys(&mut state.pending_key_pass_through, Some(injector));
-        for keycode in held.into_iter().rev() {
+        let pending_flush_failed =
+            pass_through_pending_keys(&mut state.pending_key_pass_through, Some(&mut *injector))
+                .is_err();
+        let mut release_keys: Vec<u32> = held.into_iter().rev().collect();
+        if pending_flush_failed {
+            // A failed transition has an ambiguous delivery outcome: the
+            // compositor may have observed a press even though flush failed.
+            // Keep its keycode until we've attempted a compensating release.
+            for pending in state.pending_key_pass_through.iter().rev() {
+                if !release_keys.contains(&pending.keycode) {
+                    release_keys.push(pending.keycode);
+                }
+            }
+        }
+        for keycode in release_keys {
             let _ =
                 injector.inject_key_event(keycode, Modifiers::default(), KeyEventState::Released);
         }
@@ -1396,6 +1411,11 @@ mod tests {
         fail: bool,
     }
 
+    struct FailFirstReleaseInjector {
+        failed_release: bool,
+        events: Vec<(u32, KeyEventState, bool)>,
+    }
+
     fn default_state() -> State {
         let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
         State::new(keymap)
@@ -1453,6 +1473,42 @@ mod tests {
             self.calls.push((keycode, modifiers));
             self.events.push((keycode, state));
             Ok(())
+        }
+    }
+
+    impl TextInjector for FailFirstReleaseInjector {
+        fn name(&self) -> &'static str {
+            "fail-first-release"
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn inject_key_event(
+            &mut self,
+            keycode: u32,
+            _: Modifiers,
+            state: KeyEventState,
+        ) -> Result<(), InjectorError> {
+            let fail = state == KeyEventState::Released && !self.failed_release;
+            if fail {
+                self.failed_release = true;
+            }
+            self.events.push((keycode, state, fail));
+            if fail {
+                Err(InjectorError {
+                    backend: self.name(),
+                    message: "synthetic release failure".into(),
+                    retryable: true,
+                })
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -1892,6 +1948,36 @@ mod tests {
     }
 
     #[test]
+    fn failed_key_release_remains_pending_for_cleanup_retry() {
+        let mut state = StateData::new();
+        let mut injector = FailFirstReleaseInjector {
+            failed_release: false,
+            events: Vec::new(),
+        };
+        state.queue_virtual_key_event(105, Modifiers::default(), KeyEventState::Pressed);
+        state.queue_virtual_key_event(105, Modifiers::default(), KeyEventState::Released);
+
+        pass_through_pending_key(&mut state.pending_key_pass_through, Some(&mut injector)).unwrap();
+        let error =
+            pass_through_pending_key(&mut state.pending_key_pass_through, Some(&mut injector))
+                .unwrap_err();
+        assert!(error.retryable);
+        assert_eq!(state.pending_key_pass_through.len(), 1);
+
+        release_virtual_keys_from_state(&mut state, Some(&mut injector));
+
+        assert!(state.pending_key_pass_through.is_empty());
+        assert_eq!(
+            injector.events,
+            vec![
+                (105, KeyEventState::Pressed, false),
+                (105, KeyEventState::Released, true),
+                (105, KeyEventState::Released, false),
+            ]
+        );
+    }
+
+    #[test]
     fn reconnect_starts_without_stale_virtual_keys() {
         let mut state = StateData::new();
         let mut injector = RecordingInjector {
@@ -2171,12 +2257,32 @@ mod tests {
     #[test]
     fn protocol_event_queue_is_bounded_and_fails_closed() {
         let mut state = StateData::new();
+        state.queue_virtual_key_event(125, Modifiers::default(), KeyEventState::Pressed);
         for _ in 0..MAX_QUEUED_EVENTS {
             state.queue_event(InputEvent::Text("x".into()));
         }
         state.queue_event(InputEvent::Text("overflow".into()));
-        assert_eq!(state.events.len(), 1);
+        assert_eq!(state.events.len(), 2);
         assert_eq!(state.events.front(), Some(&InputEvent::Reset));
+        assert_eq!(
+            state.events.get(1),
+            Some(&InputEvent::Text("overflow".into()))
+        );
+        assert_eq!(state.pending_key_pass_through.len(), 1);
+
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        release_virtual_keys_from_state(&mut state, Some(&mut injector));
+        assert_eq!(
+            injector.events,
+            vec![
+                (125, KeyEventState::Pressed),
+                (125, KeyEventState::Released),
+            ]
+        );
     }
 
     #[test]
@@ -2220,6 +2326,40 @@ mod tests {
             state.pending_key_pass_through.len(),
             MAX_PENDING_KEY_PASS_THROUGH + 1,
             "queue bounds are enforced at dispatch time, not push time"
+        );
+    }
+
+    #[test]
+    fn dropped_key_up_at_queue_capacity_remains_tracked_for_teardown() {
+        let mut state = StateData::new();
+        state.virtual_held_keys.push(999);
+        for index in 0..MAX_PENDING_KEY_PASS_THROUGH {
+            state
+                .pending_key_pass_through
+                .push_back(PendingKeyPassThrough {
+                    keycode: index as u32,
+                    modifiers: Modifiers::default(),
+                    state: KeyEventState::Pressed,
+                });
+        }
+
+        state.queue_virtual_key_event(999, Modifiers::default(), KeyEventState::Released);
+
+        assert!(state.error.is_some());
+        assert_eq!(state.virtual_held_keys, vec![999]);
+        assert_eq!(
+            state.pending_key_pass_through.len(),
+            MAX_PENDING_KEY_PASS_THROUGH
+        );
+        let mut injector = RecordingInjector {
+            calls: Vec::new(),
+            events: Vec::new(),
+            fail: false,
+        };
+        release_virtual_keys_from_state(&mut state, Some(&mut injector));
+        assert_eq!(
+            injector.events.last(),
+            Some(&(999, KeyEventState::Released))
         );
     }
 
@@ -2386,10 +2526,11 @@ mod tests {
         assert!(error.message.contains("synthetic failure"));
         assert_eq!(
             pending.len(),
-            1,
-            "remaining keys should be preserved on error"
+            2,
+            "failed and not-yet-sent keys should be preserved on error"
         );
-        assert_eq!(pending.front().unwrap().keycode, 106);
+        assert_eq!(pending.front().unwrap().keycode, 105);
+        assert_eq!(pending.get(1).unwrap().keycode, 106);
     }
 
     #[test]

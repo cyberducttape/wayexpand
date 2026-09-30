@@ -33,8 +33,10 @@ jobs:
         with:
           toolchain: 1.96.0
       - name: Build certification binaries
+        id: build
         run: cargo build --locked -p wayexpand -p wayexpand-daemon -p wayexpand-backend-ibus
       - name: Require runner-provided compositor driver
+        id: metadata
         env:
           EXPECTED_COMPOSITOR: ${{ matrix.compositor }}
         run: |
@@ -46,6 +48,8 @@ jobs:
           test -n "${WAYEXPAND_CERTIFICATION_LAYOUT:?WAYEXPAND_CERTIFICATION_LAYOUT is not configured on this runner}"
           test -n "${WAYEXPAND_CERTIFICATION_TARGET_APPS:?WAYEXPAND_CERTIFICATION_TARGET_APPS is not configured on this runner}"
       - name: Run every matrix scenario
+        id: driver
+        continue-on-error: true
         env:
           COMPOSITOR: ${{ matrix.compositor }}
           BACKEND: ${{ matrix.backend }}
@@ -63,6 +67,7 @@ jobs:
             --output "$RUNNER_TEMP/wayexpand-certification/results.txt" \
             --log-dir "$RUNNER_TEMP/wayexpand-certification/driver-logs"
       - name: Collect machine-readable evidence
+        if: always() && steps.build.outcome == 'success' && steps.metadata.outcome == 'success' && steps.driver.outcome != 'skipped'
         env:
           COMPOSITOR: ${{ matrix.compositor }}
           BACKEND: ${{ matrix.backend }}
@@ -79,8 +84,23 @@ jobs:
             --results "$RUNNER_TEMP/wayexpand-certification/results.txt" \
             --output "$RUNNER_TEMP/wayexpand-certification/$COMPOSITOR.json"
       - name: Upload certification evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wayexpand-certification-${{ matrix.compositor }}
           path: ${{ runner.temp }}/wayexpand-certification
           if-no-files-found: error
+      - name: Require certified evidence
+        if: always()
+        env:
+          EVIDENCE_FILE: ${{ runner.temp }}/wayexpand-certification/${{ matrix.compositor }}.json
+        run: |
+          set -eu
+          test -s "$EVIDENCE_FILE" || {
+            echo "certification evidence was not produced" >&2
+            exit 1
+          }
+          jq -e '.certified == true and .status == "certified"' "$EVIDENCE_FILE" >/dev/null || {
+            echo "desktop certification is incomplete or failed; inspect the uploaded evidence artifact" >&2
+            exit 1
+          }

@@ -16,6 +16,11 @@
     "hotkey_in_flight": "integer",
     "command_queue_rejected_total": "integer",
     "command_timeout_total": "integer",
-    "command_failure_total": "integer"
+    "command_failure_total": "integer",
+    "injection_latency_sample_count": "integer",
+    "injection_latency_window_count": "integer",
+    "injection_latency_p50_us": "integer",
+    "injection_latency_p95_us": "integer",
+    "injection_latency_p99_us": "integer"
   }
 }

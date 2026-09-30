@@ -6,7 +6,14 @@ This guide covers the settings frontends, themes, languages, retro fonts, and GU
 
 WayExpand ships two settings frontends: `wayexpand-ui` is dependency-light and
 terminal-native, while `wayexpand-gui` is a graphical Wayland-capable editor.
-Both use the same core model and atomic-save path.
+Both use the same core model and revision-checked atomic-save path. A stale
+GUI/TUI/CLI editor cannot silently overwrite a newer revision; reload and
+reapply the edit after a conflict. The core serializes cooperating WayExpand
+writers with a per-config advisory lock. Editors that do not participate in
+that lock protocol (for example, a manually edited file) are detected by the
+exact source-revision check immediately before replacement, though no userspace
+check can prevent a non-cooperating writer from racing in the final filesystem
+operation window.
 
 Start it with:
 
@@ -39,7 +46,7 @@ Controls:
 - `p` pauses or resumes the running daemon
 - `q`, `Esc`, or `Ctrl-C` exits
 
-The UI uses the core `Config` model and `Config::save_atomic`; it does not
+The UI uses the core `Config` model and conditional atomic saves; it does not
 perform text-based edits or maintain a second configuration format. Preview
 rendering therefore has the same validation and template behavior as the
 daemon and CLI.
@@ -65,6 +72,11 @@ be renamed without touching TOML. Empty, duplicate, oversized, or otherwise
 invalid triggers are rejected by the same core validation used by the daemon.
 `Duplicate` copies the selected snippet, including tags, match mode, templates,
 and command settings, then assigns a collision-free trigger for quick editing.
+Each snippet also has a persistent UUID `id`, independent of its trigger. Older
+configuration files receive IDs when loaded, and the next save writes them;
+the GUI uses these IDs to keep selection, undo snapshots, and TOML comments
+attached to the same snippet through trigger edits and reordering. IDs normally
+need no manual editing.
 It can also create and edit bounded direct-program expansions: enter the
 program, one argument per line, timeout, and optional successful-output cache
 duration. Shell syntax is never interpreted by this editor. Invalid command
@@ -114,11 +126,14 @@ also performs non-mutating input-method-v2 and wlroots virtual-keyboard
 protocol probes. It never opens a libei portal consent prompt from passive
 diagnostics.
 
-`Import Espanso` accepts an existing Espanso YAML file, validates and previews
-the converted expansion count, and reports unsupported entries before offering
-an explicit “Replace current library” action. The current TOML is preserved in
-the bounded undo history, and the daemon is asked to reload only after the new
-file is durably saved.
+`Import Espanso` accepts an existing Espanso YAML file, validates it, and
+previews a migration report: fully migrated snippets, snippets with semantic
+warnings, and unsupported dynamic matches. Unmapped fields and top-level
+options are listed before applying the import. The default merge action adds
+new triggers, ignores identical duplicates, and keeps the current snippet on
+trigger conflicts; an explicit replace action remains available. The current
+TOML is preserved in the bounded undo history, and the daemon is asked to
+reload only after the new file is durably saved.
 
 It requires a Wayland-capable desktop session for window creation, but does
 not require the global input-method backend to edit configuration.

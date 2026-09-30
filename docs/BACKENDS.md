@@ -124,6 +124,14 @@ focus loss, deactivation, transport failure, and source teardown. If the
 secondary injector is unavailable or fails, the source reports an error rather
 than silently discarding the key.
 
+Failed transitions remain in the pending queue until acknowledged by a
+successful injector call. Teardown retries pending transitions and sends
+compensating releases for keys whose delivery outcome is uncertain; queue
+overflow preserves this safety ledger for the same cleanup path. This is a
+best-effort process guarantee, not proof of compositor behavior: if the libei
+transport is already unusable, release depends on the remote virtual-device
+lifecycle and still requires real compositor testing.
+
 This preserves key lifetimes in the source and injector, but
 compositor-specific repeat rates, modifier identity, and shortcut behavior
 still require real session certification. It is not evidence that every
@@ -161,9 +169,9 @@ D-Bus (`org.kde.kwin.Scripting`). This is the same mechanism community
 tools like `kdotool` rely on for the same reason. The daemon loads a small
 bundled script (`src/window-tracker.js`) that watches
 `workspace.windowActivated` and calls back into a private D-Bus service
-this process hosts for exactly that purpose, named uniquely per process
-(`org.wayexpand.WindowTracker.pid<pid>`) so multiple daemon instances do
-not collide. `loadScript` returns before the resulting
+this process hosts for exactly that purpose, named uniquely per tracker
+instance so reconnect cleanup cannot collide with its replacement. `loadScript`
+returns before the resulting
 `/Scripting/ScriptN` object is reliably reachable -- observed directly
 against a live KWin 6.6 session, where calling `run()` immediately after
 `loadScript` failed with "No such object path" for roughly the first second.

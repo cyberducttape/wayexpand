@@ -63,12 +63,25 @@ pub fn run_command(command: &CommandConfig) -> Result<String, CommandError> {
     run_command_with_shutdown(command, None)
 }
 
+/// Execute a command that may be cancelled by its owner. Cancellation is
+/// checked before spawning and while waiting; on Unix the whole process group
+/// is killed before this function returns.
+pub fn run_command_cancellable(
+    command: &CommandConfig,
+    cancelled: &AtomicBool,
+) -> Result<String, CommandError> {
+    run_command_with_shutdown(command, Some(cancelled))
+}
+
 pub(super) fn run_command_with_shutdown(
     command: &CommandConfig,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
     #[cfg(unix)]
     {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(CommandError::StaleInput);
+        }
         let mut process = Command::new(&command.program);
         configure_command_environment(&mut process, command);
         process

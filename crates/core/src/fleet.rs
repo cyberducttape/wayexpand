@@ -12,9 +12,10 @@
 ///
 /// ## Precedence and Conflict Resolution
 ///
-/// **Expansion triggers and hotkey chords:** Duplicates are rejected with error
-/// (fail-closed). Each trigger/chord name must be unique across all layers and
-/// the base config.
+/// **Expansion triggers and hotkey chords:** Duplicate triggers are rejected
+/// unless the expansion UUID matches, in which case the later layer updates
+/// that same snippet (including its trigger). Duplicate hotkey chords remain
+/// fail-closed.
 ///
 /// **Settings:** Last layer wins. Pack settings override user settings, which
 /// override organization settings. Within a layer, later files override earlier.
@@ -327,8 +328,9 @@ impl FleetConfig {
 
 /// Merges configuration from multiple layers with duplicate detection.
 ///
-/// Implements fleet precedence: duplicates are rejected (fail-closed) for triggers
-/// and hotkeys, while settings follow "last wins".
+/// Implements fleet precedence: stable-ID expansion updates and duplicate
+/// triggers with different IDs are handled explicitly; hotkey duplicates fail
+/// closed, while settings follow "last wins".
 ///
 /// Duplicate detection across all loaded layers ensures configuration safety:
 /// accidental trigger collisions are caught early rather than silently masked
@@ -337,6 +339,7 @@ struct ConfigMerger {
     // Individual items keyed by trigger/chord for duplicate detection.
     // Stores (item, provenance) to report exact source on conflict.
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
+    expansion_ids: HashMap<String, String>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
     settings: Vec<(crate::Settings, Provenance)>,
     stats: MergeStats,
@@ -346,10 +349,44 @@ impl ConfigMerger {
     fn new() -> Self {
         Self {
             expansions: BTreeMap::new(),
+            expansion_ids: HashMap::new(),
             hotkeys: BTreeMap::new(),
             settings: Vec::new(),
             stats: MergeStats::default(),
         }
+    }
+
+    fn add_expansion(
+        &mut self,
+        expansion: crate::ExpansionConfig,
+        provenance: Provenance,
+    ) -> Result<(), FleetError> {
+        let previous_trigger = self.expansion_ids.get(&expansion.id).cloned();
+        if let Some((_, existing_provenance)) = self.expansions.get(&expansion.trigger) {
+            let same_identity = previous_trigger.as_deref() == Some(&expansion.trigger);
+            if !same_identity {
+                return Err(FleetError::DuplicateTrigger {
+                    trigger: expansion.trigger.clone(),
+                    message: format!(
+                        "expansion trigger '{}' in {} conflicts with existing definition",
+                        expansion.trigger, provenance.file
+                    ),
+                    existing_file: existing_provenance.file.clone(),
+                });
+            }
+        }
+        if let Some(previous_trigger) = previous_trigger {
+            if previous_trigger != expansion.trigger {
+                self.expansions.remove(&previous_trigger);
+            }
+        } else {
+            self.stats.total_expansions += 1;
+        }
+        self.expansion_ids
+            .insert(expansion.id.clone(), expansion.trigger.clone());
+        self.expansions
+            .insert(expansion.trigger.clone(), (expansion, provenance));
+        Ok(())
     }
 
     fn load_layer(&mut self, dir: impl AsRef<Path>, layer: Layer) -> Result<(), FleetError> {
@@ -400,22 +437,7 @@ impl ConfigMerger {
 
             // Merge expansions (check for duplicates)
             for expansion in &config.expansion {
-                if self.expansions.contains_key(&expansion.trigger) {
-                    let existing = &self.expansions[&expansion.trigger].1;
-                    return Err(FleetError::DuplicateTrigger {
-                        trigger: expansion.trigger.clone(),
-                        message: format!(
-                            "expansion trigger '{}' in {} conflicts with existing definition",
-                            expansion.trigger, provenance.file
-                        ),
-                        existing_file: existing.file.clone(),
-                    });
-                }
-                self.expansions.insert(
-                    expansion.trigger.clone(),
-                    (expansion.clone(), provenance.clone()),
-                );
-                self.stats.total_expansions += 1;
+                self.add_expansion(expansion.clone(), provenance.clone())?;
             }
 
             // Merge hotkeys (check for duplicates)
@@ -634,6 +656,53 @@ mod tests {
         assert_eq!(Layer::Organization.name(), "organization");
         assert_eq!(Layer::User.name(), "user");
         assert_eq!(Layer::Pack.name(), "pack");
+    }
+
+    #[test]
+    fn later_fleet_layer_updates_a_snippet_by_stable_id() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let earlier = Config::parse(&format!(
+            "[[expansion]]\nid='{id}'\ntrigger=':old'\nreplacement='before'\n"
+        ))
+        .unwrap()
+        .expansion
+        .into_iter()
+        .next()
+        .unwrap();
+        let later = Config::parse(&format!(
+            "[[expansion]]\nid='{id}'\ntrigger=':new'\nreplacement='after'\n"
+        ))
+        .unwrap()
+        .expansion
+        .into_iter()
+        .next()
+        .unwrap();
+        let mut merger = ConfigMerger::new();
+        merger
+            .add_expansion(
+                earlier,
+                Provenance {
+                    file: "organization.toml".into(),
+                    layer: "organization".into(),
+                },
+            )
+            .unwrap();
+        merger
+            .add_expansion(
+                later,
+                Provenance {
+                    file: "user.toml".into(),
+                    layer: "user".into(),
+                },
+            )
+            .unwrap();
+
+        let fleet = merger.merge().unwrap();
+        assert_eq!(fleet.config.expansion.len(), 1);
+        assert_eq!(fleet.config.expansion[0].trigger, ":new");
+        assert_eq!(fleet.config.expansion[0].replacement, "after");
+        assert_eq!(fleet.stats.total_expansions, 1);
+        assert_eq!(fleet.expansions_source[":new"].file, "user.toml");
     }
 
     #[test]

@@ -15,7 +15,7 @@ use std::{
     time::Duration,
     time::Instant,
 };
-use wayexpand_core::{default_config_path, Config, ExpansionEngine, InputEvent};
+use wayexpand_core::{default_config_path, Config, ConfigRevision, ExpansionEngine, InputEvent};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
@@ -23,6 +23,7 @@ const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 struct App {
     path: PathBuf,
     config: Config,
+    config_revision: ConfigRevision,
     selected: usize,
     query: String,
     searching: bool,
@@ -52,11 +53,12 @@ enum Prompt {
 
 impl App {
     fn load(path: PathBuf) -> Result<Self> {
-        let config = Config::load(&path)
+        let loaded = Config::load_versioned(&path)
             .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
         Ok(Self {
             path,
-            config,
+            config: loaded.config,
+            config_revision: loaded.revision,
             selected: 0,
             query: String::new(),
             searching: false,
@@ -72,6 +74,18 @@ impl App {
             preview_cache: None,
             preview_app: String::new(),
         })
+    }
+
+    fn save_candidate(&mut self, candidate: &Config) -> Result<(), wayexpand_core::ConfigError> {
+        let revision =
+            candidate.save_atomic_if_revision_matches(&self.path, &self.config_revision)?;
+        self.config_revision = revision;
+        Ok(())
+    }
+
+    fn save_current(&mut self) -> Result<(), wayexpand_core::ConfigError> {
+        let candidate = self.config.clone();
+        self.save_candidate(&candidate)
     }
 
     fn visible_indices(&mut self) -> Vec<usize> {
@@ -114,7 +128,7 @@ impl App {
         };
         let previous = self.config.clone();
         self.config.expansion[index].enabled = !self.config.expansion[index].enabled;
-        match self.config.save_atomic(&self.path) {
+        match self.save_current() {
             Ok(()) => {
                 self.message = format!(
                     "{} {}",
@@ -151,7 +165,7 @@ impl App {
             wayexpand_core::MatchMode::Immediate => "Immediate",
             wayexpand_core::MatchMode::WordBoundary => "Word-boundary",
         };
-        match self.config.save_atomic(&self.path) {
+        match self.save_current() {
             Ok(()) => {
                 self.message = format!(
                     "{label} matching enabled for {}",
@@ -169,9 +183,10 @@ impl App {
     }
 
     fn reload(&mut self) {
-        match Config::load(&self.path) {
-            Ok(config) => {
-                self.config = config;
+        match Config::load_versioned(&self.path) {
+            Ok(loaded) => {
+                self.config = loaded.config;
+                self.config_revision = loaded.revision;
                 self.undo = None;
                 // Config changed: both caches are now stale regardless of
                 // whether the query string changed.
@@ -223,12 +238,12 @@ impl App {
             self.message = "No snippet selected".into();
             return;
         };
-        self.input = self.config.expansion[index].tags.join(", ");
+        self.input = encode_tags(&self.config.expansion[index].tags);
         self.prompt = Some(Prompt::EditTags {
             index,
             trigger: self.config.expansion[index].trigger.clone(),
         });
-        self.message = "Enter comma-separated tags and press Enter".into();
+        self.message = "Edit tags as a JSON string array and press Enter (example: [\"ops\", \"customer, west\"])".into();
     }
 
     fn request_delete(&mut self) {
@@ -253,7 +268,7 @@ impl App {
         self.selected = self
             .selected
             .min(self.visible_indices().len().saturating_sub(1));
-        if let Err(error) = self.config.save_atomic(&self.path) {
+        if let Err(error) = self.save_current() {
             self.config = previous;
             self.message = format!("Delete failed: {}", error.safe_summary());
         } else {
@@ -271,7 +286,7 @@ impl App {
             return;
         };
         let current = std::mem::replace(&mut self.config, previous);
-        if let Err(error) = self.config.save_atomic(&self.path) {
+        if let Err(error) = self.save_current() {
             self.config = current;
             self.message = format!("Undo failed: {}", error.safe_summary());
         } else {
@@ -296,6 +311,7 @@ impl App {
             Some(Prompt::NewReplacement { trigger }) => {
                 let previous = self.config.clone();
                 self.config.expansion.push(wayexpand_core::ExpansionConfig {
+                    id: wayexpand_core::ExpansionConfig::new_id(),
                     trigger,
                     replacement: input,
                     description: String::new(),
@@ -307,7 +323,7 @@ impl App {
                     enabled: true,
                     propagate_case: false,
                 });
-                if let Err(error) = self.config.save_atomic(&self.path) {
+                if let Err(error) = self.save_current() {
                     self.config = previous;
                     self.message = format!("Create failed: {}", error.safe_summary());
                 } else {
@@ -321,7 +337,7 @@ impl App {
             Some(Prompt::EditReplacement { index, trigger }) => {
                 let previous = self.config.clone();
                 self.config.expansion[index].replacement = input;
-                if let Err(error) = self.config.save_atomic(&self.path) {
+                if let Err(error) = self.save_current() {
                     self.config = previous;
                     self.message = format!("Edit failed: {}", error.safe_summary());
                 } else {
@@ -334,7 +350,7 @@ impl App {
             Some(Prompt::EditDescription { index, trigger }) => {
                 let previous = self.config.clone();
                 self.config.expansion[index].description = input;
-                if let Err(error) = self.config.save_atomic(&self.path) {
+                if let Err(error) = self.save_current() {
                     self.config = previous;
                     self.message = format!("Description edit failed: {}", error.safe_summary());
                 } else {
@@ -345,14 +361,18 @@ impl App {
                 }
             }
             Some(Prompt::EditTags { index, trigger }) => {
+                let tags = match decode_tags(&input) {
+                    Ok(tags) => tags,
+                    Err(error) => {
+                        self.message = format!("Tags must be a JSON string array: {error}");
+                        self.input = input;
+                        self.prompt = Some(Prompt::EditTags { index, trigger });
+                        return;
+                    }
+                };
                 let previous = self.config.clone();
-                self.config.expansion[index].tags = input
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|tag| !tag.is_empty())
-                    .map(str::to_owned)
-                    .collect();
-                if let Err(error) = self.config.save_atomic(&self.path) {
+                self.config.expansion[index].tags = tags;
+                if let Err(error) = self.save_current() {
                     self.config = previous;
                     self.message = format!("Tag edit failed: {}", error.safe_summary());
                 } else {
@@ -694,7 +714,7 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
         candidate
             .validate()
             .map_err(|error| anyhow::anyhow!("replacement is invalid: {}", error.safe_summary()))?;
-        candidate.save_atomic(&app.path).map_err(|error| {
+        app.save_candidate(&candidate).map_err(|error| {
             anyhow::anyhow!("could not save replacement: {}", error.safe_summary())
         })?;
         app.config = candidate;
@@ -835,4 +855,58 @@ fn control_command(command: &str) -> Result<String> {
         anyhow::bail!("daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
     }
     Ok(response)
+}
+
+fn encode_tags(tags: &[String]) -> String {
+    serde_json::to_string(tags).expect("serializing strings to JSON cannot fail")
+}
+
+fn decode_tags(input: &str) -> serde_json::Result<Vec<String>> {
+    serde_json::from_str(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn tui_tag_editor_round_trips_exact_values() {
+        let tags = vec![
+            "customer, west".into(),
+            " email ".into(),
+            String::new(),
+            "line one\nline two".into(),
+        ];
+        assert_eq!(decode_tags(&encode_tags(&tags)).unwrap(), tags);
+    }
+
+    #[test]
+    fn tui_refuses_to_overwrite_a_newer_external_revision() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-tui-revision-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let initial =
+            Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"initial\"\n").unwrap();
+        initial.save_atomic(&path).unwrap();
+        let mut app = App::load(path.clone()).unwrap();
+
+        let mut external = initial;
+        external.expansion[0].replacement = "external edit".into();
+        external.save_atomic(&path).unwrap();
+
+        app.toggle_selected();
+        let on_disk = Config::load(&path).unwrap();
+        assert_eq!(on_disk.expansion[0].replacement, "external edit");
+        assert!(on_disk.expansion[0].enabled);
+        assert!(app.config.expansion[0].enabled);
+        assert!(app.message.contains("changed externally"));
+
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let lock_path = path.with_file_name(format!(".{filename}.wayexpand.lock"));
+        fs::remove_file(path).unwrap();
+        fs::remove_file(lock_path).unwrap();
+    }
 }

@@ -14,13 +14,18 @@ WayExpand can automatically convert your Espanso YAML configs to TOML:
 wayexpand import espanso ~/.config/espanso/default.yml
 ```
 
-This converts:
-- ✅ String-based replacements
-- ✅ Basic abbreviations
-- ⚠️ Skips unsupported advanced features (with warnings)
-- ❌ Never modifies your Espanso config
+This imports static trigger/replacement pairs and emits TOML on stdout. A
+migration report is printed to stderr with counts for fully migrated entries,
+entries with warnings, and unsupported entries. Every unmapped match option
+and top-level YAML key is called out for review; dynamic matches without a
+static replacement are listed as unsupported. `propagate_case` is mapped to
+WayExpand's equivalent option. The source file is never modified.
 
-**Result:** Your snippets appear in WayExpand's GUI ready to use.
+The GUI previews this report before applying. Its default merge preserves the
+existing library, adds new triggers, ignores identical duplicates, and keeps
+the existing snippet when a trigger conflicts. Replacing the library remains
+an explicit separate choice. Do not treat a warning-bearing entry as a
+semantics-preserving migration until you have reviewed the listed option.
 
 ## What's Different
 
@@ -277,7 +282,8 @@ wayexpand-gui
 
 ### Manual steps for advanced configs
 
-If `wayexpand import` skips features, you'll need to adapt manually:
+If the import report lists unsupported entries or unmapped options, adapt
+those entries manually before relying on equivalent behavior:
 
 **1. Shell commands → Structured commands:**
 

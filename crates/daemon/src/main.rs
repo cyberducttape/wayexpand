@@ -1,8 +1,10 @@
 mod backend_lifecycle;
 mod control;
 mod input_loop;
+mod latency;
 mod output_loop;
 mod policy;
+mod reactor;
 mod reload;
 mod status;
 
@@ -85,6 +87,7 @@ struct StatusSnapshot {
     config_path: PathBuf,
     config_healthy: bool,
     metrics: CommandMetrics,
+    latency: latency::Snapshot,
 }
 
 impl StatusPublisher {
@@ -109,11 +112,12 @@ impl StatusPublisher {
             config_path: config_path.to_path_buf(),
             config_healthy,
             metrics,
+            latency: latency::snapshot(),
         };
         if self.last.as_ref() == Some(&snapshot) {
             return;
         }
-        status::set_daemon_status(
+        status::set_daemon_status_with_latency(
             control,
             &snapshot.source,
             &snapshot.backend,
@@ -121,6 +125,7 @@ impl StatusPublisher {
             snapshot.config_path.as_path(),
             snapshot.config_healthy,
             snapshot.metrics,
+            snapshot.latency,
         );
         self.last = Some(snapshot);
     }
@@ -397,10 +402,13 @@ fn main() -> Result<()> {
     let mut logged_queue_rejections = 0;
     loop {
         drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
-        let requested_pause = control
-            .pause_requested
-            .load(std::sync::atomic::Ordering::Acquire);
-        if requested_pause != paused {
+        let transition = reactor::ReactorTransition::sample(
+            &control.stop_requested,
+            &control.pause_requested,
+            &control.reload_requested,
+            paused,
+        );
+        if let Some(requested_pause) = transition.pause_changed() {
             process_event(
                 &mut config.engine,
                 InputEvent::PauseChanged(requested_pause),
@@ -411,16 +419,10 @@ fn main() -> Result<()> {
             paused = requested_pause;
             info!(paused, "expansion processing policy changed");
         }
-        if control
-            .reload_requested
-            .swap(false, std::sync::atomic::Ordering::AcqRel)
-        {
+        if transition.reload_requested() {
             config.reload_now();
         }
-        if control
-            .stop_requested
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if transition.should_stop() {
             break;
         }
         config.reload_if_changed();
@@ -1138,7 +1140,7 @@ fn process_event(
         if injector.is_some() {
             if let Some(result) = engine.prepare_undo(&chord) {
                 if let Some(backend) = injector.as_deref_mut() {
-                    if let Err(source) = ExpansionEngine::apply(backend, &result) {
+                    if let Err(source) = latency::apply(backend, &result) {
                         return Err(Box::new(EventError { result, source }));
                     }
                     engine.commit_undo(&result);
@@ -1372,7 +1374,7 @@ fn apply_results(
         }
 
         if let Some(backend) = injector.as_deref_mut() {
-            let inject_result = ExpansionEngine::apply(backend, &result);
+            let inject_result = latency::apply(backend, &result);
 
             if let Err(source) = inject_result {
                 engine.restore_deferred_match(&result.matched_text);
@@ -1492,7 +1494,7 @@ mod tests {
     /// docs by construction, rather than each drifting independently.
     #[test]
     fn daemon_status_body_matches_documented_stable_contract() {
-        let body = status::daemon_status_body_with_mode(
+        let body = status::daemon_status_body_with_latency(
             "input-method",
             "input-method-v2",
             "connected",
@@ -1501,6 +1503,7 @@ mod tests {
             true,
             "unknown",
             CommandMetrics::default(),
+            latency::Snapshot::default(),
         );
         let body = body.as_str();
         let mut fields: Vec<&str> = body
@@ -1524,6 +1527,11 @@ mod tests {
                 "expansion_command_queue_depth",
                 "hotkey_in_flight",
                 "hotkey_queue_depth",
+                "injection_latency_p50_us",
+                "injection_latency_p95_us",
+                "injection_latency_p99_us",
+                "injection_latency_sample_count",
+                "injection_latency_window_count",
                 "paused",
                 "source",
                 "state",
@@ -1538,7 +1546,12 @@ mod tests {
              expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\
              hotkey_queue_depth=0\nhotkey_in_flight=0\n\
              command_queue_rejected_total=0\n\
-             command_timeout_total=0\ncommand_failure_total=0"
+             command_timeout_total=0\ncommand_failure_total=0\n\
+             injection_latency_sample_count=0\n\
+             injection_latency_window_count=0\n\
+             injection_latency_p50_us=0\n\
+             injection_latency_p95_us=0\n\
+             injection_latency_p99_us=0"
         );
     }
 

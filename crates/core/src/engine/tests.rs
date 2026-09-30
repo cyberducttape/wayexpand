@@ -824,6 +824,7 @@ fn malformed_config_is_an_error() {
 fn engine_rejects_manually_constructed_invalid_config() {
     let config = Config {
         expansion: vec![crate::ExpansionConfig {
+            id: crate::ExpansionConfig::new_id(),
             trigger: String::new(),
             replacement: "value".into(),
             description: String::new(),

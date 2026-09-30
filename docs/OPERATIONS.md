@@ -177,6 +177,11 @@ with a root-owned `/tmp`), to prevent path replacement during reload. The file
 must be owned by the current user or root. Symlinked configuration paths are
 supported, but validation and loading use the resolved target path so the
 target's ancestor directories are held to the same rules.
+For root-owned generic configuration, every ancestor directory must also be
+root-owned; a root-owned file below a user-owned directory is rejected because
+that directory's owner could replace the file entry. This rule also applies to
+root-managed files placed in sticky directories such as `/tmp` (which itself
+must remain root-owned).
 
 If an existing home configuration directory is group/world-writable, tighten
 it before validation:

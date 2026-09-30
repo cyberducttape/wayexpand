@@ -19,22 +19,67 @@ use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
-use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::{
     env, fs,
     io::{Read, Write},
-    os::unix::{fs::MetadataExt, net::UnixStream},
+    os::unix::net::UnixStream,
     path::PathBuf,
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     thread,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
+
 use theme::Palette;
+use wayexpand_core::EspansoImportReport;
 use wayexpand_core::{
     default_config_path, discover_backends, BackendState, BackendStatus, Config, ConfigError,
     ExpansionConfig, FleetConfig, FontScale, MatchMode, OrganizationPolicy, Settings,
 };
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ImportMergeStats {
+    added: usize,
+    identical_duplicates: usize,
+    conflicts_kept: usize,
+}
+
+fn merge_imported_expansions(current: &Config, imported: &Config) -> (Config, ImportMergeStats) {
+    let mut merged = current.clone();
+    let mut stats = ImportMergeStats::default();
+    for candidate in &imported.expansion {
+        let candidate_triggers = candidate.effective_triggers();
+        match merged.expansion.iter().find(|existing| {
+            existing.id == candidate.id
+                || existing.trigger == candidate.trigger
+                || (existing.enabled
+                    && candidate.enabled
+                    && existing
+                        .effective_triggers()
+                        .iter()
+                        .any(|trigger| candidate_triggers.contains(trigger)))
+        }) {
+            Some(existing) if expansion_content_equal(existing, candidate) => {
+                stats.identical_duplicates += 1
+            }
+            Some(_) => stats.conflicts_kept += 1,
+            None => {
+                merged.expansion.push(candidate.clone());
+                stats.added += 1;
+            }
+        }
+    }
+    (merged, stats)
+}
+
+fn expansion_content_equal(left: &ExpansionConfig, right: &ExpansionConfig) -> bool {
+    let mut left_without_identity = left.clone();
+    left_without_identity.id = right.id.clone();
+    left_without_identity == *right
+}
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 /// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
@@ -70,10 +115,11 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
 
 struct GuiApp {
     path: PathBuf,
-    config_stamp: Option<GuiFileStamp>,
+    config_revision: wayexpand_core::ConfigRevision,
     config_document: toml_edit::DocumentMut,
     config: Config,
     selected: Option<usize>,
+    selected_id: Option<String>,
     filter: String,
     category_filter: Option<String>,
     preview_input: String,
@@ -90,7 +136,7 @@ struct GuiApp {
     pending_action: Option<PendingAction>,
     import_open: bool,
     import_path: String,
-    import_preview: Option<(Config, usize)>,
+    import_preview: Option<(Config, EspansoImportReport)>,
     settings_open: bool,
     settings_tab: SettingsTab,
     settings_buffer: String,
@@ -111,6 +157,7 @@ struct GuiApp {
     /// command itself runs off the UI thread because even a valid preview can
     /// wait for the configured command timeout.
     command_preview_receiver: Option<mpsc::Receiver<Result<String, String>>>,
+    command_preview_cancel: Option<Arc<AtomicBool>>,
     /// Reload can change the persisted font scale outside the settings dialog.
     /// Apply that style on the next frame after the config has been replaced.
     theme_refresh_pending: bool,
@@ -157,41 +204,22 @@ enum SettingsTab {
 /// to be started and leak an unbounded number of detached threads.
 struct AppDetectionTask {
     receiver: mpsc::Receiver<AppDetection>,
-    cancelled: bool,
+    cancelled: Arc<AtomicBool>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct GuiFileStamp {
-    modified: Option<SystemTime>,
-    length: u64,
-    inode: u64,
-    change_time: i64,
-    change_time_nsec: i64,
-    content_hash: u64,
+impl Drop for GuiApp {
+    fn drop(&mut self) {
+        if let Some(cancelled) = self.command_preview_cancel.take() {
+            cancelled.store(true, Ordering::Release);
+        }
+        if let Some(task) = self.app_detection.as_ref() {
+            task.cancelled.store(true, Ordering::Release);
+        }
+    }
 }
 
-/// Reads the small configuration file only when a save is about to happen.
-/// The metadata catches atomic replacement and the content hash also catches
-/// an external writer that edits the existing inode in place.
-fn gui_file_stamp(path: &std::path::Path) -> Option<GuiFileStamp> {
-    let metadata = fs::metadata(path).ok()?;
-    let bytes = fs::read(path).ok()?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(GuiFileStamp {
-        modified: metadata.modified().ok(),
-        length: metadata.len(),
-        inode: metadata.ino(),
-        change_time: metadata.ctime(),
-        change_time_nsec: metadata.ctime_nsec(),
-        content_hash: hasher.finish(),
-    })
-}
-
-fn read_config_document(path: &std::path::Path) -> Result<toml_edit::DocumentMut> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("could not read configuration document {}", path.display()))?;
-    toml_edit::DocumentMut::from_str(&text)
+fn read_config_document(text: &str) -> Result<toml_edit::DocumentMut> {
+    toml_edit::DocumentMut::from_str(text)
         .map_err(|error| anyhow::anyhow!("could not parse configuration document: {error}"))
 }
 
@@ -219,35 +247,67 @@ fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
         toml_edit::Item::ArrayOfTables(new_array) => {
             if let toml_edit::Item::ArrayOfTables(old_array) = old {
                 let mut merged = Vec::new();
-                let mut used = Vec::new();
-                for (index, new_table) in new_array.iter().enumerate() {
-                    let matching_index = new_table
+                let mut used = vec![false; old_array.len()];
+                let mut by_id: std::collections::HashMap<&str, std::collections::VecDeque<usize>> =
+                    std::collections::HashMap::new();
+                let mut by_trigger: std::collections::HashMap<
+                    &str,
+                    std::collections::VecDeque<usize>,
+                > = std::collections::HashMap::new();
+                for (old_index, old_table) in old_array.iter().enumerate() {
+                    if let Some(id) = old_table
+                        .get("id")
+                        .and_then(toml_edit::Item::as_value)
+                        .and_then(toml_edit::Value::as_str)
+                    {
+                        by_id.entry(id).or_default().push_back(old_index);
+                    }
+                    if let Some(trigger) = old_table
                         .get("trigger")
                         .and_then(toml_edit::Item::as_value)
                         .and_then(toml_edit::Value::as_str)
-                        .and_then(|trigger| {
-                            old_array
-                                .iter()
-                                .enumerate()
-                                .find_map(|(old_index, old_table)| {
-                                    (!used.contains(&old_index)
-                                        && old_table
-                                            .get("trigger")
-                                            .and_then(toml_edit::Item::as_value)
-                                            .and_then(toml_edit::Value::as_str)
-                                            == Some(trigger))
-                                    .then_some(old_index)
+                    {
+                        by_trigger.entry(trigger).or_default().push_back(old_index);
+                    }
+                }
+                for (index, new_table) in new_array.iter().enumerate() {
+                    let id_match = new_table
+                        .get("id")
+                        .and_then(toml_edit::Item::as_value)
+                        .and_then(toml_edit::Value::as_str)
+                        .and_then(|id| {
+                            let candidates = by_id.get_mut(id)?;
+                            while let Some(candidate) = candidates.pop_front() {
+                                if !used[candidate] {
+                                    return Some(candidate);
+                                }
+                            }
+                            None
+                        });
+                    let matching_index = id_match
+                        .or_else(|| {
+                            new_table
+                                .get("trigger")
+                                .and_then(toml_edit::Item::as_value)
+                                .and_then(toml_edit::Value::as_str)
+                                .and_then(|trigger| {
+                                    let candidates = by_trigger.get_mut(trigger)?;
+                                    while let Some(candidate) = candidates.pop_front() {
+                                        if !used[candidate] {
+                                            return Some(candidate);
+                                        }
+                                    }
+                                    None
                                 })
                         })
-                        .or_else(|| {
-                            (index < old_array.len() && !used.contains(&index)).then_some(index)
-                        });
+                        .or_else(|| (index < old_array.len() && !used[index]).then_some(index));
                     let mut table = matching_index
                         .and_then(|old_index| {
-                            used.push(old_index);
+                            used[old_index] = true;
                             old_array.get(old_index).cloned()
                         })
                         .unwrap_or_else(|| new_table.clone());
+                    table.set_position(None);
                     merge_toml_table(&mut table, new_table.clone());
                     merged.push(table);
                 }
@@ -271,12 +331,11 @@ fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
 
 fn merge_toml_table(old: &mut toml_edit::Table, replacement: toml_edit::Table) {
     let replacement_keys: Vec<String> = replacement.iter().map(|(key, _)| key.to_owned()).collect();
+    let replacement_key_set: std::collections::HashSet<&str> =
+        replacement_keys.iter().map(String::as_str).collect();
     let old_keys: Vec<String> = old.iter().map(|(key, _)| key.to_owned()).collect();
     for key in old_keys {
-        if !replacement_keys
-            .iter()
-            .any(|replacement_key| replacement_key == &key)
-        {
+        if !replacement_key_set.contains(key.as_str()) {
             old.remove(&key);
         }
     }
@@ -293,8 +352,8 @@ fn merge_toml_table(old: &mut toml_edit::Table, replacement: toml_edit::Table) {
 
 impl GuiApp {
     fn load(path: PathBuf) -> Result<Self> {
-        let config = match Config::load(&path) {
-            Ok(config) => config,
+        let loaded = match Config::load_versioned(&path) {
+            Ok(loaded) => loaded,
             Err(ConfigError::Read { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
             {
@@ -321,7 +380,12 @@ impl GuiApp {
                         error.safe_summary()
                     )
                 })?;
-                config
+                Config::load_versioned(&path).map_err(|error| {
+                    anyhow::anyhow!(
+                        "could not load initialized configuration: {}",
+                        error.safe_summary()
+                    )
+                })?
             }
             Err(error) => {
                 return Err(anyhow::anyhow!(
@@ -330,8 +394,11 @@ impl GuiApp {
                 ))
             }
         };
-        let config_document = read_config_document(&path)?;
+        let config_document = read_config_document(loaded.source())?;
+        let config_revision = loaded.revision.clone();
+        let config = loaded.config;
         let selected = (!config.expansion.is_empty()).then_some(0);
+        let selected_id = selected.map(|index| config.expansion[index].id.clone());
         let draft = selected.map(|index| Draft::from_expansion(&config.expansion[index]));
         let preview_input = selected
             .map(|index| config.expansion[index].trigger.clone())
@@ -341,13 +408,13 @@ impl GuiApp {
         let settings_font_scale = config.settings.font_scale;
         let prefs = load_gui_prefs();
         let strings = Strings::new(prefs.language);
-        let config_stamp = gui_file_stamp(&path);
         Ok(Self {
             path,
-            config_stamp,
+            config_revision,
             config_document,
             config,
             selected,
+            selected_id,
             filter: String::new(),
             category_filter: None,
             preview_input,
@@ -378,6 +445,7 @@ impl GuiApp {
             command_preview_result: None,
             command_preview_key: None,
             command_preview_receiver: None,
+            command_preview_cancel: None,
             theme_refresh_pending: false,
             preview_cache: None,
             app_detection: None,
@@ -422,20 +490,16 @@ impl GuiApp {
         }
     }
 
-    /// Prevents a GUI save from silently replacing a configuration changed by
-    /// the daemon, an editor, or fleet-management tooling since this window
-    /// last loaded or saved it. The stamp is refreshed only after a successful
-    /// atomic save, so a failed write cannot make a later attempt unsafe.
+    /// Give the GUI a clear pre-save warning. The definitive check is repeated
+    /// under the core store's writer lock during `save_config_candidate`, so
+    /// this early check is only a UX optimization, not the concurrency guard.
     fn can_save_config(&mut self) -> bool {
-        if gui_file_stamp(&self.path) != self.config_stamp {
+        let current = Config::load_versioned(&self.path);
+        if !current.is_ok_and(|loaded| loaded.revision == self.config_revision) {
             self.status = Status::warning(self.strings.status_config_changed_externally());
             return false;
         }
         true
-    }
-
-    fn refresh_config_stamp(&mut self) {
-        self.config_stamp = gui_file_stamp(&self.path);
     }
 
     fn save_config_candidate(&mut self, candidate: &Config) -> Result<(), String> {
@@ -443,10 +507,14 @@ impl GuiApp {
         let replacement = toml_edit::ser::to_document(candidate)
             .map_err(|error| format!("could not serialize configuration: {error}"))?;
         let document = merge_config_document(self.config_document.clone(), replacement);
-        Config::save_atomic_text(&self.path, &document.to_string())
-            .map_err(|error| error.safe_summary())?;
+        let revision = Config::save_atomic_text_if_revision_matches(
+            &self.path,
+            &document.to_string(),
+            &self.config_revision,
+        )
+        .map_err(|error| error.safe_summary())?;
         self.config_document = document;
-        self.refresh_config_stamp();
+        self.config_revision = revision;
         Ok(())
     }
 
@@ -579,8 +647,8 @@ impl GuiApp {
     fn preview_import(&mut self) {
         let source = expand_user_path(self.import_path.trim());
         match import::preview_espanso(&source) {
-            Ok((config, skipped)) => {
-                self.import_preview = Some((config, skipped));
+            Ok((config, report)) => {
+                self.import_preview = Some((config, report));
                 self.status = Status::success(self.strings.status_import_loaded());
             }
             Err(error) => {
@@ -589,41 +657,59 @@ impl GuiApp {
         }
     }
 
-    fn apply_import(&mut self) {
+    fn apply_import(&mut self, replace_library: bool) {
         if self.draft_is_dirty() {
             self.status = Status::warning(self.strings.status_import_needs_clean_draft());
             return;
         }
-        let Some((imported, skipped)) = self.import_preview.take() else {
+        let Some((imported, report)) = self.import_preview.take() else {
             return;
         };
-        if let Err(error) = imported.validate() {
+        let (candidate, merge_stats) = if replace_library {
+            (imported.clone(), None)
+        } else {
+            let (merged, stats) = merge_imported_expansions(&self.config, &imported);
+            (merged, Some(stats))
+        };
+        if let Err(error) = candidate.validate() {
             self.status = Status::error(self.strings.status_import_rejected(&error.safe_summary()));
+            self.import_preview = Some((imported, report));
             return;
         }
         if !self.can_save_config() {
-            self.import_preview = Some((imported, skipped));
+            self.import_preview = Some((imported, report));
             return;
         }
-        match self.save_config_candidate(&imported) {
+        match self.save_config_candidate(&candidate) {
             Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, imported);
+                let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
-                self.selected = (!self.config.expansion.is_empty()).then_some(0);
+                self.set_selected_index((!self.config.expansion.is_empty()).then_some(0));
                 self.draft = self
                     .selected
                     .map(|index| Draft::from_expansion(&self.config.expansion[index]));
                 self.import_open = false;
-                let message = if skipped == 0 {
-                    self.strings.status_imported().to_owned()
+                let message = if let Some(stats) = merge_stats {
+                    self.strings.status_import_merged(
+                        stats.added,
+                        stats.identical_duplicates,
+                        stats.conflicts_kept,
+                        report.fully_migrated,
+                        report.migrated_with_warnings,
+                        report.unsupported,
+                    )
                 } else {
-                    self.strings.status_imported_with_skips(skipped)
+                    self.strings.status_imported_with_report(
+                        report.fully_migrated,
+                        report.migrated_with_warnings,
+                        report.unsupported,
+                    )
                 };
                 self.set_saved_status(Status::success(message));
             }
             Err(error) => {
                 self.status = Status::error(self.strings.status_import_save_failed(&error));
-                self.import_preview = Some((imported, skipped));
+                self.import_preview = Some((imported, report));
             }
         }
     }
@@ -640,7 +726,7 @@ impl GuiApp {
 
     fn select(&mut self, index: usize) {
         self.cancel_app_detection();
-        self.selected = Some(index);
+        self.set_selected_index(Some(index));
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
         self.preview_input = self.config.expansion[index].trigger.clone();
         self.pending_action = None;
@@ -649,7 +735,7 @@ impl GuiApp {
 
     fn cancel_app_detection(&mut self) {
         if let Some(task) = self.app_detection.as_mut() {
-            task.cancelled = true;
+            task.cancelled.store(true, Ordering::Release);
         }
     }
 
@@ -676,8 +762,23 @@ impl GuiApp {
     /// selection left behind by a reload or an external edit reports "no
     /// snippet selected" instead of panicking on an out-of-range index.
     fn selected_index(&self) -> Option<usize> {
-        self.selected
-            .filter(|index| *index < self.config.expansion.len())
+        match self.selected_id.as_ref() {
+            Some(id) => self
+                .config
+                .expansion
+                .iter()
+                .position(|entry| &entry.id == id),
+            None => self
+                .selected
+                .filter(|index| *index < self.config.expansion.len()),
+        }
+    }
+
+    fn set_selected_index(&mut self, index: Option<usize>) {
+        self.selected = index.filter(|index| *index < self.config.expansion.len());
+        self.selected_id = self
+            .selected
+            .map(|index| self.config.expansion[index].id.clone());
     }
 
     /// Whether the editor holds edits that are not yet in the configuration.
@@ -696,18 +797,17 @@ impl GuiApp {
             || draft.description != expansion.description
             || draft.category != expansion.category
             || draft.replacement != expansion.replacement
-            || !equals_comma_list(&draft.tags, &expansion.tags)
-            || !equals_comma_list(&draft.app_filter, &expansion.app_filter)
+            || draft.tags != expansion.tags
+            || draft.app_filter != expansion.app_filter
             || draft.enabled != expansion.enabled
             || draft.match_mode != expansion.match_mode
             || draft.propagate_case != expansion.propagate_case
-            // Building the command last means the parse and its allocations
-            // are skipped entirely whenever any earlier field already differs.
-            || draft.command_config().ok().flatten() != expansion.command
+            || !draft.matches_command(expansion.command.as_ref())
     }
 
     fn request_action(&mut self, action: PendingAction) {
-        if matches!(&action, PendingAction::Select(index) if self.selected == Some(*index)) {
+        if matches!(&action, PendingAction::Select(index) if self.selected_index() == Some(*index))
+        {
             return;
         }
         self.cancel_app_detection();
@@ -754,25 +854,39 @@ impl GuiApp {
     }
 
     fn perform_reload(&mut self) {
-        match Config::load(&self.path) {
-            Ok(config) => {
-                self.config = config;
-                match read_config_document(&self.path) {
-                    Ok(document) => self.config_document = document,
+        match Config::load_versioned(&self.path) {
+            Ok(loaded) => {
+                let new_document = match read_config_document(loaded.source()) {
+                    Ok(document) => document,
                     Err(error) => {
                         self.status = Status::error(error.to_string());
                         return;
                     }
-                }
-                self.refresh_config_stamp();
-                self.selected = (!self.config.expansion.is_empty()).then_some(0);
-                self.draft = self
-                    .selected
-                    .map(|index| Draft::from_expansion(&self.config.expansion[index]));
-                self.preview_input = self
-                    .selected
-                    .map(|index| self.config.expansion[index].trigger.clone())
+                };
+                let new_config = loaded.config;
+                let new_revision = loaded.revision;
+                let new_selected = self
+                    .selected_id
+                    .as_ref()
+                    .and_then(|id| {
+                        new_config
+                            .expansion
+                            .iter()
+                            .position(|entry| &entry.id == id)
+                    })
+                    .or_else(|| (!new_config.expansion.is_empty()).then_some(0));
+                let new_draft =
+                    new_selected.map(|index| Draft::from_expansion(&new_config.expansion[index]));
+                let new_preview_input = new_selected
+                    .map(|index| new_config.expansion[index].trigger.clone())
                     .unwrap_or_default();
+
+                self.config = new_config;
+                self.config_document = new_document;
+                self.config_revision = new_revision;
+                self.set_selected_index(new_selected);
+                self.draft = new_draft;
+                self.preview_input = new_preview_input;
                 self.undo.clear();
                 self.theme_refresh_pending = true;
                 self.status = Status::success(self.strings.status_config_reloaded());
@@ -792,21 +906,9 @@ impl GuiApp {
         let mut candidate = self.config.clone();
         candidate.expansion[index].trigger = draft.trigger.clone();
         candidate.expansion[index].description = draft.description.clone();
-        candidate.expansion[index].tags = draft
-            .tags
-            .split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(str::to_owned)
-            .collect();
+        candidate.expansion[index].tags = draft.tags.clone();
         candidate.expansion[index].category = draft.category.clone();
-        candidate.expansion[index].app_filter = draft
-            .app_filter
-            .split(',')
-            .map(str::trim)
-            .filter(|filter| !filter.is_empty())
-            .map(str::to_owned)
-            .collect();
+        candidate.expansion[index].app_filter = draft.app_filter.clone();
         candidate.expansion[index].replacement = draft.replacement.clone();
         candidate.expansion[index].enabled = draft.enabled;
         candidate.expansion[index].match_mode = draft.match_mode;
@@ -859,9 +961,20 @@ impl GuiApp {
         }
         let previous = self.undo.pop().expect("checked non-empty above");
         self.config = previous;
-        self.selected = self
-            .selected
-            .filter(|index| *index < self.config.expansion.len());
+        let restored_selection = self
+            .selected_id
+            .as_ref()
+            .and_then(|id| {
+                self.config
+                    .expansion
+                    .iter()
+                    .position(|entry| &entry.id == id)
+            })
+            .or_else(|| {
+                self.selected
+                    .filter(|index| *index < self.config.expansion.len())
+            });
+        self.set_selected_index(restored_selection);
         self.draft = self
             .selected
             .map(|index| Draft::from_expansion(&self.config.expansion[index]));
@@ -887,6 +1000,7 @@ impl GuiApp {
         }
         let mut candidate = self.config.clone();
         candidate.expansion.push(ExpansionConfig {
+            id: ExpansionConfig::new_id(),
             trigger,
             replacement: String::new(),
             description: "New snippet".into(),
@@ -931,6 +1045,7 @@ impl GuiApp {
             suffix += 1;
         }
         duplicate.trigger = trigger;
+        duplicate.id = ExpansionConfig::new_id();
         if !duplicate.description.is_empty() {
             duplicate.description.push_str(" (copy)");
         }
@@ -965,8 +1080,9 @@ impl GuiApp {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
-                self.selected = (!self.config.expansion.is_empty())
+                let next_selection = (!self.config.expansion.is_empty())
                     .then_some(index.min(self.config.expansion.len() - 1));
+                self.set_selected_index(next_selection);
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
@@ -1046,6 +1162,7 @@ impl GuiApp {
     /// the only place a command-backed draft's program should ever run
     /// before it is saved.
     fn run_command_preview(&mut self) {
+        self.clear_command_preview();
         let Some(draft) = self.draft.as_ref() else {
             return;
         };
@@ -1064,13 +1181,16 @@ impl GuiApp {
             }
         };
         let (sender, receiver) = mpsc::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancelled);
         self.command_preview_result = None;
         self.command_preview_receiver = Some(receiver);
+        self.command_preview_cancel = Some(cancelled);
         // `Strings` is a plain language tag, so the worker can phrase its own
         // failure in the user's language without borrowing the app.
         let strings = Strings::new(self.language);
         thread::spawn(move || {
-            let result = wayexpand_core::run_command(&command)
+            let result = wayexpand_core::run_command_cancellable(&command, &worker_cancel)
                 .map_err(|error| strings.status_command_failed(&error.to_string()));
             let _ = sender.send(result);
         });
@@ -1083,6 +1203,7 @@ impl GuiApp {
         match receiver.try_recv() {
             Ok(result) => {
                 self.command_preview_receiver = None;
+                self.command_preview_cancel = None;
                 self.command_preview_result = Some(result);
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -1090,6 +1211,7 @@ impl GuiApp {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.command_preview_receiver = None;
+                self.command_preview_cancel = None;
                 self.command_preview_result =
                     Some(Err(self.strings.status_command_preview_failed().into()));
             }
@@ -1097,6 +1219,9 @@ impl GuiApp {
     }
 
     fn clear_command_preview(&mut self) {
+        if let Some(cancel) = self.command_preview_cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
         self.command_preview_result = None;
         self.command_preview_key = None;
         self.command_preview_receiver = None;
@@ -1371,17 +1496,48 @@ impl GuiApp {
                             self.import_open = false;
                         }
                     });
-                    if let Some((config, skipped)) = self.import_preview.as_ref() {
+                    if let Some((_config, report)) = self.import_preview.as_ref() {
                         ui.separator();
-                        ui.label(
-                            self.strings
-                                .import_preview_summary(config.expansion.len(), *skipped),
-                        );
-                        if theme::primary_button(ui, palette, self.strings.replace_library())
-                            .clicked()
-                        {
-                            self.apply_import();
-                        }
+                        ui.label(self.strings.import_preview_summary(
+                            report.fully_migrated,
+                            report.migrated_with_warnings,
+                            report.unsupported,
+                        ));
+                        egui::ScrollArea::vertical()
+                            .max_height(160.0)
+                            .show(ui, |ui| {
+                                for warning in &report.warnings {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{}: {}",
+                                            warning.trigger,
+                                            warning.details.join("; ")
+                                        ))
+                                        .color(palette.warning),
+                                    );
+                                }
+                                for unsupported in &report.unsupported_matches {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{}: {}",
+                                            unsupported.trigger, unsupported.reason
+                                        ))
+                                        .color(palette.danger),
+                                    );
+                                }
+                            });
+                        ui.horizontal(|ui| {
+                            if theme::primary_button(ui, palette, self.strings.merge_library())
+                                .clicked()
+                            {
+                                self.apply_import(false);
+                            }
+                            if theme::secondary_button(ui, palette, self.strings.replace_library())
+                                .clicked()
+                            {
+                                self.apply_import(true);
+                            }
+                        });
                     }
                 });
             self.import_open = open && self.import_open;
@@ -1681,7 +1837,7 @@ impl GuiApp {
                             ui,
                             palette,
                             theme::SnippetRow {
-                                selected: self.selected == Some(index),
+                                selected: self.selected_index() == Some(index),
                                 enabled: expansion.enabled,
                                 command_backed: expansion.command.is_some(),
                                 trigger: &expansion.trigger,
@@ -1753,7 +1909,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
             .show(ctx, |ui| {
-                let Some(index) = self.selected else {
+                let Some(index) = self.selected_index() else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(70.0);
                         ui.label(RichText::new("✨").size(40.0));
@@ -1772,7 +1928,7 @@ impl GuiApp {
                     return;
                 };
                 if index >= self.config.expansion.len() {
-                    self.selected = None;
+                    self.set_selected_index(None);
                     self.draft = None;
                     ui.label(self.strings.selection_stale());
                     return;
@@ -1808,7 +1964,7 @@ impl GuiApp {
                                 let app_detecting = self
                                     .app_detection
                                     .as_ref()
-                                    .is_some_and(|task| !task.cancelled);
+                                    .is_some_and(|task| !task.cancelled.load(Ordering::Acquire));
                                 let app_detection_busy = self.app_detection.is_some();
                                 let mut cancel_detection = false;
                                 let Some(draft) = self.draft.as_mut() else {
@@ -1857,11 +2013,27 @@ impl GuiApp {
                                         ui.end_row();
 
                                         ui.label(strings.tags());
-                                        ui.add(
-                                            TextEdit::singleline(&mut draft.tags)
-                                                .hint_text(strings.tags_hint())
-                                                .desired_width(f32::INFINITY),
-                                        );
+                                        let mut remove_tag = None;
+                                        ui.horizontal_wrapped(|ui| {
+                                            for (index, tag) in draft.tags.iter_mut().enumerate() {
+                                                ui.horizontal(|ui| {
+                                                    ui.add(
+                                                        TextEdit::multiline(tag)
+                                                            .desired_rows(1)
+                                                            .desired_width(120.0),
+                                                    );
+                                                    if ui.small_button("×").clicked() {
+                                                        remove_tag = Some(index);
+                                                    }
+                                                });
+                                            }
+                                            if ui.small_button("+ Add tag").clicked() {
+                                                draft.tags.push(String::new());
+                                            }
+                                        });
+                                        if let Some(index) = remove_tag {
+                                            draft.tags.remove(index);
+                                        }
                                         ui.end_row();
 
                                         ui.label(strings.category());
@@ -1898,42 +2070,62 @@ impl GuiApp {
                                         ui.end_row();
 
                                         ui.label(strings.app_filter());
-                                        ui.horizontal(|ui| {
-                                            ui.add(
-                                                TextEdit::singleline(&mut draft.app_filter)
-                                                    .hint_text(strings.app_filter_hint())
-                                                    .desired_width(
-                                                        (ui.available_width() - 190.0).max(120.0),
-                                                    ),
-                                            );
-                                            if app_detecting {
-                                                ui.spinner();
-                                                ui.label(strings.detecting_app())
-                                                    .on_hover_text(strings.detect_app_tooltip());
-                                                if ui.small_button(strings.cancel()).clicked() {
-                                                    // The spawned thread is not joined/cancelled --
-                                                    // it may itself be stuck in a hung D-Bus call --
-                                                    // just stop waiting on it and discard whatever
-                                                    // it eventually sends.
-                                                    cancel_detection = true;
-                                                }
-                                            } else if app_detection_busy {
-                                                ui.spinner();
-                                                ui.label(strings.stopping_app_detection())
-                                                    .on_hover_text(strings.detect_app_tooltip());
-                                            } else if ui
-                                                .button(strings.detect_app())
-                                                .on_hover_text(strings.detect_app_tooltip())
-                                                .clicked()
+                                        let mut remove_filter = None;
+                                        ui.vertical(|ui| {
+                                            for (index, filter) in
+                                                draft.app_filter.iter_mut().enumerate()
                                             {
-                                                detect_app_clicked = true;
+                                                ui.horizontal(|ui| {
+                                                    ui.add(
+                                                        TextEdit::multiline(filter)
+                                                            .desired_rows(1)
+                                                            .desired_width(220.0),
+                                                    );
+                                                    if ui.small_button("×").clicked() {
+                                                        remove_filter = Some(index);
+                                                    }
+                                                });
                                             }
+                                            ui.horizontal(|ui| {
+                                                if ui.small_button("+ Add app").clicked() {
+                                                    draft.app_filter.push(String::new());
+                                                }
+                                                if app_detecting {
+                                                    ui.spinner();
+                                                    ui.label(strings.detecting_app())
+                                                        .on_hover_text(
+                                                            strings.detect_app_tooltip(),
+                                                        );
+                                                    if ui.small_button(strings.cancel()).clicked() {
+                                                        // The spawned thread is not joined/cancelled --
+                                                        // it may itself be stuck in a hung D-Bus call --
+                                                        // just stop waiting on it and discard whatever
+                                                        // it eventually sends.
+                                                        cancel_detection = true;
+                                                    }
+                                                } else if app_detection_busy {
+                                                    ui.spinner();
+                                                    ui.label(strings.stopping_app_detection())
+                                                        .on_hover_text(
+                                                            strings.detect_app_tooltip(),
+                                                        );
+                                                } else if ui
+                                                    .button(strings.detect_app())
+                                                    .on_hover_text(strings.detect_app_tooltip())
+                                                    .clicked()
+                                                {
+                                                    detect_app_clicked = true;
+                                                }
+                                            });
                                         });
+                                        if let Some(index) = remove_filter {
+                                            draft.app_filter.remove(index);
+                                        }
                                         ui.end_row();
 
                                         ui.label("");
                                         ui.label(
-                                            RichText::new(if draft.app_filter.trim().is_empty() {
+                                            RichText::new(if draft.app_filter.is_empty() {
                                                 strings.app_filter_help()
                                             } else {
                                                 strings.window_tracking_warning()
@@ -1968,7 +2160,7 @@ impl GuiApp {
                                     });
                                 if cancel_detection {
                                     if let Some(task) = self.app_detection.as_mut() {
-                                        task.cancelled = true;
+                                        task.cancelled.store(true, Ordering::Release);
                                     }
                                 }
                                 let Some(draft) = self.draft.as_mut() else {
@@ -1997,13 +2189,21 @@ impl GuiApp {
                             use wayexpand_backend_kwin_window::KwinWindowTracker;
                             use wayexpand_core::WindowTracker;
                             let (sender, receiver) = mpsc::channel();
+                            let cancelled = Arc::new(AtomicBool::new(false));
+                            let worker_cancel = Arc::clone(&cancelled);
                             self.app_detection = Some(AppDetectionTask {
                                 receiver,
-                                cancelled: false,
+                                cancelled,
                             });
                             thread::spawn(move || {
-                                let detection = match KwinWindowTracker::new() {
+                                let detection = match KwinWindowTracker::new_cancellable(Some(
+                                    &worker_cancel,
+                                )) {
                                     Ok(mut tracker) => {
+                                        if worker_cancel.load(Ordering::Acquire) {
+                                            let _ = sender.send(AppDetection::Unavailable);
+                                            return;
+                                        }
                                         match tracker
                                             .next_window_timeout(std::time::Duration::from_secs(5))
                                         {
@@ -2023,7 +2223,7 @@ impl GuiApp {
                         let detection_cancelled = self
                             .app_detection
                             .as_ref()
-                            .is_some_and(|task| task.cancelled);
+                            .is_some_and(|task| task.cancelled.load(Ordering::Acquire));
                         let detection_result = self
                             .app_detection
                             .as_ref()
@@ -2041,11 +2241,8 @@ impl GuiApp {
                                             );
                                         } else {
                                             if let Some(draft) = self.draft.as_mut() {
-                                                if draft.app_filter.trim().is_empty() {
-                                                    draft.app_filter = value.clone();
-                                                } else {
-                                                    draft.app_filter.push_str(", ");
-                                                    draft.app_filter.push_str(&value);
+                                                if !draft.app_filter.contains(&value) {
+                                                    draft.app_filter.push(value.clone());
                                                 }
                                             }
                                             self.status = Status::success(
@@ -2174,9 +2371,71 @@ impl GuiApp {
                                     );
                                 });
                                 ui.label(self.strings.arguments());
+                                let mut remove_arg = None;
+                                let mut move_arg = None;
+                                for index in 0..draft.command_args.len() {
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            TextEdit::multiline(&mut draft.command_args[index])
+                                                .desired_rows(1)
+                                                .desired_width(ui.available_width() - 108.0),
+                                        );
+                                        if ui.small_button("↑").on_hover_text("Move up").clicked()
+                                            && index > 0
+                                        {
+                                            move_arg = Some((index, index - 1));
+                                        }
+                                        if ui.small_button("↓").on_hover_text("Move down").clicked()
+                                            && index + 1 < draft.command_args.len()
+                                        {
+                                            move_arg = Some((index, index + 1));
+                                        }
+                                        if ui
+                                            .small_button("×")
+                                            .on_hover_text("Remove argument")
+                                            .clicked()
+                                        {
+                                            remove_arg = Some(index);
+                                        }
+                                    });
+                                }
+                                if let Some(index) = remove_arg {
+                                    draft.command_args.remove(index);
+                                }
+                                if let Some((from, to)) = move_arg {
+                                    draft.command_args.swap(from, to);
+                                }
+                                if ui.small_button("+ Add argument").clicked() {
+                                    draft.command_args.push(String::new());
+                                }
+                                ui.horizontal(|ui| {
+                                    ui.label("Environment");
+                                    egui::ComboBox::from_id_salt("command_environment")
+                                        .selected_text(match draft.command_environment {
+                                            wayexpand_core::CommandEnvironment::Minimal => {
+                                                "Minimal"
+                                            }
+                                            wayexpand_core::CommandEnvironment::Inherit => {
+                                                "Inherit"
+                                            }
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut draft.command_environment,
+                                                wayexpand_core::CommandEnvironment::Minimal,
+                                                "Minimal",
+                                            );
+                                            ui.selectable_value(
+                                                &mut draft.command_environment,
+                                                wayexpand_core::CommandEnvironment::Inherit,
+                                                "Inherit",
+                                            );
+                                        });
+                                });
+                                ui.label("Pass environment variables (one per line)");
                                 ui.add(
-                                    TextEdit::multiline(&mut draft.command_args)
-                                        .desired_rows(3)
+                                    TextEdit::multiline(&mut draft.command_pass_env)
+                                        .desired_rows(2)
                                         .desired_width(f32::INFINITY),
                                 );
                             });
@@ -2563,27 +2822,6 @@ fn control_command(command: &str) -> Result<String> {
 /// Whether `text` is exactly `values` joined with `", "`, decided without
 /// building that joined string. The editor stores tags and app filters as one
 /// comma-separated line while the configuration stores them as a list, and
-/// this comparison runs on every frame.
-fn equals_comma_list(text: &str, values: &[String]) -> bool {
-    // Consume the joined form one literal piece at a time rather than
-    // splitting on the separator: a value that itself contains ", " joins back
-    // to exactly the same text, and splitting would call that a difference.
-    let mut rest = text;
-    for (position, value) in values.iter().enumerate() {
-        if position > 0 {
-            let Some(remainder) = rest.strip_prefix(", ") else {
-                return false;
-            };
-            rest = remainder;
-        }
-        let Some(remainder) = rest.strip_prefix(value.as_str()) else {
-            return false;
-        };
-        rest = remainder;
-    }
-    rest.is_empty()
-}
-
 fn expand_user_path(value: &str) -> PathBuf {
     expand_user_path_with_home(value, env::var_os("HOME").as_deref())
 }
@@ -2668,22 +2906,82 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::ExpansionConfig {
+        wayexpand_core::ExpansionConfig {
+            id: wayexpand_core::ExpansionConfig::new_id(),
+            trigger: trigger.into(),
+            replacement: replacement.into(),
+            description: String::new(),
+            tags: vec!["imported".into()],
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        }
+    }
+
+    #[test]
+    fn import_merge_deduplicates_and_keeps_existing_trigger_conflicts() {
+        let current = Config {
+            expansion: vec![
+                import_expansion(":same", "identical"),
+                import_expansion(":conflict", "keep this"),
+                wayexpand_core::ExpansionConfig {
+                    trigger: ":hello".into(),
+                    replacement: "case variant wins".into(),
+                    propagate_case: true,
+                    ..import_expansion(":hello", "case variant wins")
+                },
+            ],
+            hotkey: Vec::new(),
+            settings: wayexpand_core::Settings {
+                max_buffer_chars: 2048,
+                ..Default::default()
+            },
+            organization: wayexpand_core::OrganizationPolicy::default(),
+        };
+        let imported = Config {
+            expansion: vec![
+                import_expansion(":same", "identical"),
+                import_expansion(":conflict", "do not replace"),
+                import_expansion(":HELLO", "must not collide"),
+                import_expansion(":new", "append this"),
+            ],
+            hotkey: Vec::new(),
+            settings: wayexpand_core::Settings::default(),
+            organization: wayexpand_core::OrganizationPolicy::default(),
+        };
+
+        let (merged, stats) = merge_imported_expansions(&current, &imported);
+        assert_eq!(stats.added, 1);
+        assert_eq!(stats.identical_duplicates, 1);
+        assert_eq!(stats.conflicts_kept, 2);
+        assert_eq!(merged.expansion.len(), 4);
+        assert_eq!(merged.expansion[1].replacement, "keep this");
+        assert_eq!(merged.expansion[2].replacement, "case variant wins");
+        assert_eq!(merged.settings.max_buffer_chars, 2048);
+    }
+
     fn draft() -> Draft {
         Draft {
             trigger: ":cmd".into(),
             description: String::new(),
-            tags: String::new(),
+            tags: Vec::new(),
             category: String::new(),
-            app_filter: String::new(),
+            app_filter: Vec::new(),
             replacement: "fallback".into(),
             enabled: true,
             match_mode: MatchMode::Immediate,
             propagate_case: false,
             command_enabled: true,
             command_program: "uname".into(),
-            command_args: "-s\n-r\n".into(),
+            command_args: vec!["-s".into(), "-r".into()],
             command_timeout_ms: "500".into(),
             command_cache_ms: "1000".into(),
+            command_environment: wayexpand_core::CommandEnvironment::default(),
+            command_pass_env: String::new(),
         }
     }
 
@@ -2694,6 +2992,81 @@ mod tests {
         assert_eq!(command.args, ["-s", "-r"]);
         assert_eq!(command.timeout_ms, 500);
         assert_eq!(command.cache_ms, 1000);
+    }
+
+    #[test]
+    fn command_editor_preserves_advanced_environment_settings() {
+        let mut source = wayexpand_core::ExpansionConfig {
+            id: wayexpand_core::ExpansionConfig::new_id(),
+            trigger: ":foo".into(),
+            replacement: String::new(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        };
+        source.command = Some(wayexpand_core::CommandConfig {
+            program: "/usr/bin/foo".into(),
+            args: vec![String::new(), " foo ".into(), "hello\nworld".into()],
+            timeout_ms: 900,
+            cache_ms: 0,
+            environment: wayexpand_core::CommandEnvironment::Inherit,
+            pass_env: vec!["DISPLAY".into(), "WAYLAND_DISPLAY".into()],
+        });
+        let mut form = Draft::from_expansion(&source);
+        assert!(form.matches_command(source.command.as_ref()));
+        assert_eq!(form.command_args, source.command.as_ref().unwrap().args);
+        form.description = "Edited description".into();
+        assert!(form.matches_command(source.command.as_ref()));
+        assert_eq!(form.command_config().unwrap(), source.command);
+        form.command_program.clear();
+        assert!(!form.matches_command(source.command.as_ref()));
+        assert!(form.command_config().is_err());
+    }
+
+    #[test]
+    fn invalid_command_draft_is_not_mistaken_for_clean_none() {
+        let source = wayexpand_core::ExpansionConfig {
+            id: wayexpand_core::ExpansionConfig::new_id(),
+            trigger: ":foo".into(),
+            replacement: String::new(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        };
+        let mut form = Draft::from_expansion(&source);
+        form.command_enabled = true;
+        assert!(!form.matches_command(None));
+        assert!(form.command_config().is_err());
+    }
+
+    #[test]
+    fn editor_draft_preserves_tag_and_app_filter_tokens_verbatim() {
+        let source = wayexpand_core::ExpansionConfig {
+            id: wayexpand_core::ExpansionConfig::new_id(),
+            trigger: ":foo".into(),
+            replacement: String::new(),
+            description: String::new(),
+            tags: vec!["customer, west".into(), " email ".into()],
+            category: String::new(),
+            app_filter: vec!["org.example, beta".into(), "browser".into()],
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        };
+        let form = Draft::from_expansion(&source);
+        assert_eq!(form.tags, source.tags);
+        assert_eq!(form.app_filter, source.app_filter);
     }
 
     #[test]
@@ -2721,7 +3094,7 @@ mod tests {
         let (_sender, receiver) = mpsc::channel();
         app.app_detection = Some(AppDetectionTask {
             receiver,
-            cancelled: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
         });
 
         app.cancel_app_detection();
@@ -2729,7 +3102,7 @@ mod tests {
         assert!(app
             .app_detection
             .as_ref()
-            .is_some_and(|task| task.cancelled));
+            .is_some_and(|task| task.cancelled.load(Ordering::Acquire)));
         let _ = fs::remove_file(path);
     }
 
@@ -2756,6 +3129,7 @@ mod tests {
         let config = Config {
             expansion: vec![
                 ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
                     trigger: ":one".into(),
                     replacement: "one".into(),
                     description: String::new(),
@@ -2768,6 +3142,7 @@ mod tests {
                     propagate_case: false,
                 },
                 ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
                     trigger: ":two".into(),
                     replacement: "two".into(),
                     description: String::new(),
@@ -2808,6 +3183,7 @@ mod tests {
         ));
         let config = Config {
             expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
                 trigger: ":one".into(),
                 replacement: "one".into(),
                 description: String::new(),
@@ -2844,6 +3220,51 @@ mod tests {
     }
 
     #[test]
+    fn gui_core_revision_guard_catches_a_write_after_the_early_check() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-revision-race-{}.toml",
+            std::process::id()
+        ));
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: ":one".into(),
+                replacement: "initial".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let _ = fs::remove_file(&path);
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let mut external = config.clone();
+        external.expansion[0].replacement = "external edit".into();
+        external.save_atomic(&path).unwrap();
+
+        let mut stale_candidate = app.config.clone();
+        stale_candidate.expansion[0].replacement = "stale GUI edit".into();
+        assert!(app
+            .save_config_candidate(&stale_candidate)
+            .unwrap_err()
+            .contains("changed externally"));
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "external edit"
+        );
+        assert_eq!(app.config.expansion[0].replacement, "initial");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn import_path_expands_home_prefix_without_shell_evaluation() {
         assert_eq!(
             expand_user_path_with_home(
@@ -2863,38 +3284,6 @@ mod tests {
             expand_user_path_with_home("~/matches.yml", None),
             PathBuf::from("~/matches.yml")
         );
-    }
-
-    #[test]
-    fn comma_list_comparison_matches_the_joined_form_it_replaces() {
-        let cases: &[(&str, &[&str])] = &[
-            ("", &[]),
-            ("one", &["one"]),
-            ("one, two", &["one", "two"]),
-            ("one, two, three", &["one", "two", "three"]),
-            // A value that itself contains the separator joins back to the
-            // same text, so it must still compare equal.
-            ("a, b", &["a, b"]),
-            ("a, b, c", &["a, b", "c"]),
-            (" one", &["one"]),
-            ("one,two", &["one", "two"]),
-            ("one, two, ", &["one", "two"]),
-            ("", &["one"]),
-            ("one", &[]),
-        ];
-        for (text, values) in cases {
-            let owned: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
-            let joined = owned
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            assert_eq!(
-                equals_comma_list(text, &owned),
-                *text == joined,
-                "disagreed with the joined form for {text:?} vs {values:?}"
-            );
-        }
     }
 
     #[test]
@@ -2964,7 +3353,7 @@ mod tests {
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.diagnostics_open = true;
         app.import_open = true;
-        app.import_preview = Some((app.config.clone(), 0));
+        app.import_preview = Some((app.config.clone(), EspansoImportReport::default()));
         app.settings_open = true;
         assert!(app.any_dialog_open());
 
@@ -2993,6 +3382,7 @@ mod tests {
             std::env::temp_dir().join(format!("wayexpand-gui-title-{}.toml", std::process::id()));
         let config = Config {
             expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
                 trigger: ":one".into(),
                 replacement: "one".into(),
                 description: String::new(),
@@ -3058,6 +3448,7 @@ mod tests {
         let config = Config {
             expansion: vec![
                 ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
                     trigger: ":plain".into(),
                     replacement: "plain text".into(),
                     description: "A plain snippet".into(),
@@ -3070,6 +3461,7 @@ mod tests {
                     propagate_case: false,
                 },
                 ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
                     trigger: ":cmd".into(),
                     replacement: "fallback".into(),
                     description: String::new(),
@@ -3110,7 +3502,7 @@ mod tests {
             for tab in [SettingsTab::Appearance, SettingsTab::Engine] {
                 app.settings_tab = tab;
                 for selected in [Some(0), Some(1), None] {
-                    app.selected = selected;
+                    app.set_selected_index(selected);
                     app.draft =
                         selected.map(|index| Draft::from_expansion(&app.config.expansion[index]));
                     let _ = ctx.run(egui::RawInput::default(), |ctx| {
@@ -3182,6 +3574,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let config = Config {
             expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
                 trigger: ":sig".into(),
                 replacement: "Regards".into(),
                 description: "Signature".into(),
@@ -3214,6 +3607,69 @@ mod tests {
         assert_eq!(
             Config::load(&path).unwrap().expansion[0].replacement,
             "Best regards"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn format_merge_matches_duplicate_triggers_in_order() {
+        let old = read_config_document(
+            "[[expansion]]\n# disabled duplicate one\ntrigger = ':dup'\nenabled = false\n\n[[expansion]]\n# disabled duplicate two\ntrigger = ':dup'\nenabled = false\n",
+        )
+        .unwrap();
+        let new = read_config_document(
+            "[[expansion]]\ntrigger = ':dup'\nenabled = false\n\n[[expansion]]\ntrigger = ':dup'\nenabled = false\n",
+        )
+        .unwrap();
+        let merged = merge_config_document(old, new).to_string();
+        assert!(
+            merged.find("# disabled duplicate one").unwrap()
+                < merged.find("# disabled duplicate two").unwrap()
+        );
+        assert_eq!(merged.matches("trigger = ':dup'").count(), 2);
+    }
+
+    #[test]
+    fn format_merge_follows_stable_ids_when_triggers_change_and_reorder() {
+        let old = read_config_document(
+            "# note for A\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':old-a'\n\n# note for B\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000002'\ntrigger = ':old-b'\n",
+        )
+        .unwrap();
+        let new = read_config_document(
+            "[[expansion]]\nid = '00000000-0000-4000-8000-000000000002'\ntrigger = ':new-b'\n\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':new-a'\n",
+        )
+        .unwrap();
+
+        let merged = merge_config_document(old, new).to_string();
+        let b_id = merged.find("00000000-0000-4000-8000-000000000002").unwrap();
+        let b_note = merged.find("# note for B").unwrap();
+        let a_id = merged.find("00000000-0000-4000-8000-000000000001").unwrap();
+        let a_note = merged.find("# note for A").unwrap();
+        assert!(b_note < b_id && b_id < a_note && a_note < a_id, "{merged}");
+        assert!(merged.contains("trigger = ':new-b'"));
+        assert!(merged.contains("trigger = ':new-a'"));
+    }
+
+    #[test]
+    fn gui_selection_tracks_the_snippet_id_when_config_order_changes() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-selection-id-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.config.expansion = vec![
+            import_expansion(":first", "first"),
+            import_expansion(":second", "second"),
+        ];
+        app.select(1);
+        let selected_id = app.selected_id.clone().unwrap();
+        app.config.expansion.swap(0, 1);
+
+        assert_eq!(app.selected_index(), Some(0));
+        assert_eq!(
+            app.config.expansion[app.selected_index().unwrap()].id,
+            selected_id
         );
         fs::remove_file(path).unwrap();
     }

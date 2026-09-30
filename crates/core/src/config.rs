@@ -1,10 +1,17 @@
 use crate::{render_template_with_cursor, KeyChord, TemplateContext, TemplateError};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Write},
+    os::fd::AsRawFd,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -29,6 +36,32 @@ const MAX_HOTKEYS: usize = 1_024;
 const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
 pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
+static EXPANSION_ID_FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn new_expansion_id() -> String {
+    let mut bytes = [0_u8; 16];
+    if getrandom::fill(&mut bytes).is_err() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let counter = EXPANSION_ID_FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed);
+        bytes[..8].copy_from_slice(&(timestamp as u64).to_be_bytes());
+        bytes[8..12].copy_from_slice(&std::process::id().to_be_bytes());
+        bytes[12..].copy_from_slice(&(counter as u32).to_be_bytes());
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let mut hex = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            hex.push('-');
+        }
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +74,34 @@ pub struct Config {
     pub settings: Settings,
     #[serde(default)]
     pub organization: OrganizationPolicy,
+}
+
+/// Exact validated source snapshot used to detect a stale editor before save.
+/// The source is shared with `LoadedConfig` so format-preserving editors can
+/// parse the same bytes without reopening the path.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ConfigRevision(Arc<str>);
+
+impl std::fmt::Debug for ConfigRevision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ConfigRevision")
+            .field("bytes", &self.0.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
+pub struct LoadedConfig {
+    pub config: Config,
+    pub revision: ConfigRevision,
+    source: Arc<str>,
+}
+
+impl LoadedConfig {
+    pub fn source(&self) -> &str {
+        &self.source
+    }
 }
 
 /// A keyboard chord which invokes a bounded direct program action.
@@ -335,9 +396,13 @@ impl OrganizationPolicy {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ExpansionConfig {
+    /// Stable identity independent of the editable trigger. Older configs
+    /// receive a UUID on load and persist it on their next save.
+    #[serde(default = "new_expansion_id")]
+    pub id: String,
     pub trigger: String,
     pub replacement: String,
     #[serde(default)]
@@ -367,6 +432,11 @@ pub struct ExpansionConfig {
 }
 
 impl ExpansionConfig {
+    /// Generate an RFC 4122 version-4 UUID for a new snippet.
+    pub fn new_id() -> String {
+        new_expansion_id()
+    }
+
     /// The trigger strings this expansion actually inserts into the
     /// matcher's trie: just `trigger`, or (when `propagate_case` is
     /// enabled) `trigger` plus its uppercase and capitalized forms -- see
@@ -378,7 +448,10 @@ impl ExpansionConfig {
     /// `propagate_case` generates `:SIG`, which would otherwise silently
     /// shadow an unrelated, literally-configured `:SIG` expansion in the
     /// matcher with no validation error at all).
-    pub(crate) fn effective_triggers(&self) -> Vec<String> {
+    /// Return the literal trigger plus the case variants generated when case
+    /// propagation is enabled. Useful to avoid merge-time collisions using
+    /// the same semantics as runtime matching and configuration validation.
+    pub fn effective_triggers(&self) -> Vec<String> {
         let mut variants = vec![self.trigger.clone()];
         if self.propagate_case {
             for variant in [
@@ -468,6 +541,8 @@ pub enum ConfigError {
     InsecurePermissions { path: String, mode: u32 },
     #[error("configuration {path} is owned by uid {uid}; expected the current user or root")]
     InsecureOwner { path: String, uid: u32 },
+    #[error("configuration changed since it was loaded; reload before saving")]
+    RevisionConflict,
     #[error(
         "configuration parent {path} is writable by group or other users without sticky protection (mode {mode:04o})"
     )]
@@ -485,6 +560,10 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("expansion {index} has an empty trigger")]
     EmptyTrigger { index: usize },
+    #[error("expansion {index} has an invalid UUID id")]
+    InvalidExpansionId { index: usize },
+    #[error("expansion ids at indexes {first} and {second} are duplicated")]
+    DuplicateExpansionId { first: usize, second: usize },
     #[error("expansion {index} {field} contains a NUL character")]
     NulCharacter { index: usize, field: &'static str },
     #[error("expansion {index} trigger is too long ({length} characters; maximum is {maximum})")]
@@ -557,6 +636,9 @@ impl ConfigError {
                 format!("file permissions are insecure (mode {mode:04o})")
             }
             Self::InsecureOwner { uid, .. } => format!("file owner is not trusted (uid {uid})"),
+            Self::RevisionConflict => {
+                "configuration changed externally; reload before saving".into()
+            }
             Self::InsecureParent { mode, .. } => {
                 format!("parent directory is insecure (mode {mode:04o})")
             }
@@ -571,6 +653,10 @@ impl ConfigError {
             }
             Self::Parse(_) => "invalid TOML".into(),
             Self::EmptyTrigger { index } => format!("expansion {index} has an empty trigger"),
+            Self::InvalidExpansionId { index } => format!("expansion {index} has an invalid id"),
+            Self::DuplicateExpansionId { first, second } => {
+                format!("expansions {first} and {second} have duplicate ids")
+            }
             Self::NulCharacter { index, field } => {
                 format!("expansion {index} {field} contains a NUL character")
             }
@@ -638,6 +724,13 @@ impl ConfigError {
 
 impl Config {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        Self::load_versioned(path).map(|loaded| loaded.config)
+    }
+
+    /// Load, validate, and retain the exact source document from one secure
+    /// descriptor read. Editors should keep the revision and use it for
+    /// conditional saves rather than re-reading the file independently.
+    pub fn load_versioned(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
         let path = path.as_ref();
         // Resolve symlinks before validating ancestors and opening the file.
         // Validating the link's parent alone would allow a link swap to point
@@ -677,6 +770,9 @@ impl Config {
                 path: path.display().to_string(),
                 uid,
             });
+        }
+        if uid == 0 {
+            validate_root_managed_parent_chain(&resolved_path)?;
         }
         let mode = metadata.permissions().mode() & 0o777;
         // Personal configuration may contain private snippets, addresses, and
@@ -718,7 +814,13 @@ impl Config {
             path: path.display().to_string(),
             source,
         })?;
-        Self::parse(&text)
+        let config = Self::parse(&text)?;
+        let source: Arc<str> = Arc::from(text);
+        Ok(LoadedConfig {
+            config,
+            revision: ConfigRevision(source.clone()),
+            source,
+        })
     }
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
@@ -742,7 +844,7 @@ impl Config {
     pub fn save_atomic(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         self.validate()?;
         let serialized = toml::to_string_pretty(self)?;
-        Self::save_atomic_serialized(path, serialized.as_bytes())
+        Self::save_text_unconditionally(path, &serialized)
     }
 
     /// Atomically replace a trusted configuration file with TOML supplied by
@@ -750,7 +852,54 @@ impl Config {
     /// target so callers cannot bypass the configuration safety checks.
     pub fn save_atomic_text(path: impl AsRef<Path>, text: &str) -> Result<(), ConfigError> {
         Self::parse(text)?;
-        Self::save_atomic_serialized(path, text.as_bytes())
+        Self::save_text_unconditionally(path, text)
+    }
+
+    fn save_text_unconditionally(path: impl AsRef<Path>, text: &str) -> Result<(), ConfigError> {
+        let resolved = resolve_config_target(path.as_ref())?;
+        validate_parent_directories(&resolved)?;
+        let _lock = ConfigWriteLock::acquire(&resolved)?;
+        Self::save_atomic_serialized(&resolved, text.as_bytes())
+    }
+
+    /// Save only if the exact validated source snapshot is still current.
+    /// A stable per-path advisory lock serializes cooperating WayExpand
+    /// writers; the revision comparison also detects changes made by editors
+    /// and tools that do not participate in that lock protocol.
+    pub fn save_atomic_if_revision_matches(
+        &self,
+        path: impl AsRef<Path>,
+        expected: &ConfigRevision,
+    ) -> Result<ConfigRevision, ConfigError> {
+        self.validate()?;
+        let serialized = toml::to_string_pretty(self)?;
+        Self::save_text_if_revision_matches(path, &serialized, expected)
+    }
+
+    /// Format-preserving counterpart to `save_atomic_if_revision_matches`.
+    pub fn save_atomic_text_if_revision_matches(
+        path: impl AsRef<Path>,
+        text: &str,
+        expected: &ConfigRevision,
+    ) -> Result<ConfigRevision, ConfigError> {
+        Self::parse(text)?;
+        Self::save_text_if_revision_matches(path, text, expected)
+    }
+
+    fn save_text_if_revision_matches(
+        path: impl AsRef<Path>,
+        text: &str,
+        expected: &ConfigRevision,
+    ) -> Result<ConfigRevision, ConfigError> {
+        let resolved = resolve_config_target(path.as_ref())?;
+        validate_parent_directories(&resolved)?;
+        let _lock = ConfigWriteLock::acquire(&resolved)?;
+        let current = Self::load_versioned(&resolved)?;
+        if current.revision != *expected {
+            return Err(ConfigError::RevisionConflict);
+        }
+        Self::save_atomic_serialized(&resolved, text.as_bytes())?;
+        Ok(ConfigRevision(Arc::from(text)))
     }
 
     fn save_atomic_serialized(
@@ -758,33 +907,7 @@ impl Config {
         serialized: &[u8],
     ) -> Result<(), ConfigError> {
         let path = path.as_ref();
-        let resolved = match fs::canonicalize(path) {
-            Ok(resolved) => resolved,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                let parent = path
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                    .unwrap_or_else(|| Path::new("."));
-                let parent = fs::canonicalize(parent).map_err(|source| ConfigError::Read {
-                    path: parent.display().to_string(),
-                    source,
-                })?;
-                let file_name = path.file_name().ok_or_else(|| ConfigError::Read {
-                    path: path.display().to_string(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "configuration path has no file name",
-                    ),
-                })?;
-                parent.join(file_name)
-            }
-            Err(source) => {
-                return Err(ConfigError::Read {
-                    path: path.display().to_string(),
-                    source,
-                })
-            }
-        };
+        let resolved = resolve_config_target(path)?;
         validate_parent_directories(&resolved)?;
         let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
         let file_name = resolved
@@ -968,7 +1091,17 @@ impl Config {
             }
         }
         let mut total_trigger_chars = 0usize;
+        let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
+            if !is_uuid(&expansion.id) {
+                return Err(ConfigError::InvalidExpansionId { index });
+            }
+            if let Some(first) = expansion_ids.insert(expansion.id.to_ascii_lowercase(), index) {
+                return Err(ConfigError::DuplicateExpansionId {
+                    first,
+                    second: index,
+                });
+            }
             if expansion.trigger.is_empty() {
                 return Err(ConfigError::EmptyTrigger { index });
             }
@@ -1201,6 +1334,109 @@ impl Config {
     }
 }
 
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn resolve_config_target(path: &Path) -> Result<std::path::PathBuf, ConfigError> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => Ok(resolved),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let parent = fs::canonicalize(parent).map_err(|source| ConfigError::Read {
+                path: parent.display().to_string(),
+                source,
+            })?;
+            let file_name = path.file_name().ok_or_else(|| ConfigError::Read {
+                path: path.display().to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "configuration path has no file name",
+                ),
+            })?;
+            Ok(parent.join(file_name))
+        }
+        Err(source) => Err(ConfigError::Read {
+            path: path.display().to_string(),
+            source,
+        }),
+    }
+}
+
+struct ConfigWriteLock {
+    _file: fs::File,
+}
+
+impl ConfigWriteLock {
+    fn acquire(target: &Path) -> Result<Self, ConfigError> {
+        let parent = target.parent().unwrap_or_else(|| Path::new("."));
+        let name = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("expansions.toml");
+        let lock_path = parent.join(format!(".{name}.wayexpand.lock"));
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&lock_path)
+            .map_err(|source| ConfigError::Read {
+                path: lock_path.display().to_string(),
+                source,
+            })?;
+        let metadata = file.metadata().map_err(|source| ConfigError::Read {
+            path: lock_path.display().to_string(),
+            source,
+        })?;
+        let uid = rustix::process::geteuid().as_raw();
+        if !metadata.file_type().is_file() {
+            return Err(ConfigError::NotRegular {
+                path: lock_path.display().to_string(),
+            });
+        }
+        if metadata.uid() != uid {
+            return Err(ConfigError::InsecureOwner {
+                path: lock_path.display().to_string(),
+                uid: metadata.uid(),
+            });
+        }
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode != 0o600 || metadata.nlink() != 1 {
+            return Err(ConfigError::InsecurePermissions {
+                path: lock_path.display().to_string(),
+                mode,
+            });
+        }
+        loop {
+            // SAFETY: `file` remains alive for this guard's lifetime and owns
+            // a valid descriptor. flock does not retain the pointer.
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if result == 0 {
+                return Ok(Self { _file: file });
+            }
+            let source = std::io::Error::last_os_error();
+            if source.kind() != std::io::ErrorKind::Interrupted {
+                return Err(ConfigError::Read {
+                    path: lock_path.display().to_string(),
+                    source,
+                });
+            }
+        }
+    }
+}
+
 fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
     let mut current = path
         .parent()
@@ -1275,6 +1511,44 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// A root-owned config only represents administrator-managed policy when an
+/// unprivileged directory owner cannot replace its directory entry. Require
+/// every directory in its ancestry to be root-owned; the ordinary parent
+/// validator separately checks permissions and sticky-directory semantics.
+fn validate_root_managed_parent_chain(path: &Path) -> Result<(), ConfigError> {
+    let mut current = path.parent().unwrap_or_else(|| Path::new("/"));
+    loop {
+        let metadata = fs::metadata(current).map_err(|source| ConfigError::Read {
+            path: current.display().to_string(),
+            source,
+        })?;
+        if !metadata.is_dir() {
+            return Err(ConfigError::Read {
+                path: current.display().to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "configuration parent is not a directory",
+                ),
+            });
+        }
+        if !root_managed_parent_owner_allowed(metadata.uid()) {
+            return Err(ConfigError::InsecureParentOwner {
+                path: current.display().to_string(),
+                uid: metadata.uid(),
+            });
+        }
+        if current == Path::new("/") {
+            break;
+        }
+        current = current.parent().unwrap_or_else(|| Path::new("/"));
+    }
+    Ok(())
+}
+
+fn root_managed_parent_owner_allowed(uid: u32) -> bool {
+    uid == 0
+}
+
 fn parent_mode_is_secure(mode: u32) -> bool {
     mode & 0o022 == 0 || mode & 0o1000 != 0
 }
@@ -1316,6 +1590,30 @@ mod tests {
         assert!(!parent_mode_is_secure(0o0777));
         assert!(parent_mode_is_secure(0o1777));
         assert!(parent_mode_is_secure(0o0755));
+    }
+
+    #[test]
+    fn root_managed_configuration_requires_root_owned_parents() {
+        assert!(root_managed_parent_owner_allowed(0));
+        assert!(!root_managed_parent_owner_allowed(1000));
+    }
+
+    #[test]
+    fn root_owned_config_below_user_owned_directory_is_rejected() {
+        let uid = rustix::process::geteuid().as_raw();
+        let parent = std::env::temp_dir().join(format!(
+            "wayexpand-root-config-parent-{}-{}",
+            std::process::id(),
+            EXPANSION_ID_FALLBACK_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&parent).unwrap();
+        if uid != 0 {
+            assert!(matches!(
+                validate_root_managed_parent_chain(&parent.join("expansions.toml")),
+                Err(ConfigError::InsecureParentOwner { uid: owner, .. }) if owner == uid
+            ));
+        }
+        fs::remove_dir(parent).unwrap();
     }
 
     #[test]
@@ -1400,6 +1698,90 @@ mod tests {
     }
 
     #[test]
+    fn versioned_load_uses_one_source_snapshot_and_rejects_stale_save() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-config-revision-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let source =
+            "# retained source snapshot\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"old\"\n";
+        fs::write(&path, source).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let loaded = Config::load_versioned(&path).unwrap();
+        assert_eq!(loaded.source(), source);
+        let mut stale_candidate = loaded.config.clone();
+        stale_candidate.expansion[0].replacement = "stale edit".into();
+
+        let mut external = loaded.config.clone();
+        external.expansion[0].replacement = "external edit".into();
+        external.save_atomic(&path).unwrap();
+        let error = stale_candidate
+            .save_atomic_if_revision_matches(&path, &loaded.revision)
+            .unwrap_err();
+        assert!(matches!(error, ConfigError::RevisionConflict));
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "external edit"
+        );
+
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let lock_path = path.with_file_name(format!(".{filename}.wayexpand.lock"));
+        fs::remove_file(path).unwrap();
+        fs::remove_file(lock_path).unwrap();
+    }
+
+    #[test]
+    fn concurrent_conditional_writers_allow_only_one_revision_winner() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-config-concurrent-revision-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let initial =
+            Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"initial\"\n").unwrap();
+        initial.save_atomic(&path).unwrap();
+        let loaded = Config::load_versioned(&path).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let mut first = loaded.config.clone();
+        first.expansion[0].replacement = "first writer".into();
+        let first_barrier = barrier.clone();
+        let first_path = path.clone();
+        let first_revision = loaded.revision.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            first
+                .save_atomic_if_revision_matches(first_path, &first_revision)
+                .is_ok()
+        });
+
+        let mut second = loaded.config;
+        second.expansion[0].replacement = "second writer".into();
+        let second_barrier = barrier;
+        let second_path = path.clone();
+        let second_revision = loaded.revision;
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            second
+                .save_atomic_if_revision_matches(second_path, &second_revision)
+                .is_ok()
+        });
+
+        assert_ne!(first.join().unwrap(), second.join().unwrap());
+        let saved = Config::load(&path).unwrap();
+        assert!(matches!(
+            saved.expansion[0].replacement.as_str(),
+            "first writer" | "second writer"
+        ));
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let lock_path = path.with_file_name(format!(".{filename}.wayexpand.lock"));
+        fs::remove_file(path).unwrap();
+        fs::remove_file(lock_path).unwrap();
+    }
+
+    #[test]
     fn pre_category_config_without_new_fields_still_parses() {
         // A config written before `category`/`app_filter` existed: neither
         // field is present. `#[serde(default)]` must keep this loadable
@@ -1421,6 +1803,44 @@ mod tests {
         assert_eq!(expansion.trigger, ":legacy");
         assert_eq!(expansion.category, "");
         assert!(expansion.app_filter.is_empty());
+        assert!(is_uuid(&expansion.id));
+    }
+
+    #[test]
+    fn generated_expansion_ids_are_unique_and_round_trip() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger=':one'\nreplacement='one'\n[[expansion]]\ntrigger=':two'\nreplacement='two'\n",
+        )
+        .unwrap();
+        let first = config.expansion[0].id.clone();
+        let second = config.expansion[1].id.clone();
+        assert!(is_uuid(&first));
+        assert_ne!(first, second);
+
+        let encoded = toml::to_string(&config).unwrap();
+        let decoded = Config::parse(&encoded).unwrap();
+        assert_eq!(decoded.expansion[0].id, first);
+        assert_eq!(decoded.expansion[1].id, second);
+    }
+
+    #[test]
+    fn expansion_ids_must_be_valid_and_unique() {
+        let invalid =
+            Config::parse("[[expansion]]\nid='not-a-uuid'\ntrigger=':one'\nreplacement='one'\n")
+                .unwrap_err();
+        assert!(matches!(
+            invalid,
+            ConfigError::InvalidExpansionId { index: 0 }
+        ));
+
+        let repeated = "[[expansion]]\nid='00000000-0000-4000-8000-000000000001'\ntrigger=':one'\nreplacement='one'\n[[expansion]]\nid='00000000-0000-4000-8000-000000000001'\ntrigger=':two'\nreplacement='two'\n";
+        assert!(matches!(
+            Config::parse(repeated),
+            Err(ConfigError::DuplicateExpansionId {
+                first: 0,
+                second: 1
+            })
+        ));
     }
 
     #[test]

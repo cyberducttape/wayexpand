@@ -90,7 +90,7 @@ Use the evidence collector on a real compositor session:
 ```sh
 scripts/certify-compositor.sh --compositor kde --version 6.6.2 \
   --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
-  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
   --output kde-run.md
 ```
 
@@ -100,7 +100,7 @@ Use `--format json` when a machine-readable evidence record is required:
 scripts/certify-compositor.sh --format json --compositor kde \
   --version 6.6.2 --backend ibus \
   --layout us,de,fr,altgr,multi-layout-switching \
-  --target-apps gtk4-demo,qt6-demo,terminal,browser,password-field \
+  --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
   --results kde-results.txt --output kde-run.json
 ```
 
@@ -109,44 +109,41 @@ source build, so the doctor and status probes are taken from the exact binary
 under test rather than whichever installation happens to be in `PATH`.
 
 The JSON record includes the exact session metadata, live doctor/status
-snapshots, and one result object for every matrix scenario. It reports
+snapshots, and one result object for every scenario × layout × client cell. It reports
 `certified: false` for missing or failed evidence; `status` distinguishes
 `incomplete` from `failed`. It does not replace the CLI preflight report or
 turn protocol availability into a certification.
 
-It captures the live doctor/status probes and writes every required scenario as
-`UNVERIFIED`; it never treats a probe as certification. A compositor-specific
+It captures the live doctor/status probes and writes every required
+scenario × layout × client cell as `UNVERIFIED`; it never treats a probe as
+certification. A compositor-specific
 operator or self-hosted driver can provide a results file, for example:
 
 ```text
-printable-press-release=pass
-held-keys-repeat=pass
-modifier-navigation=pass
-unicode-combining=pass
-multiline-rapid=pass
-password-field=pass
-focus-cross-window=pass
-config-reload=pass
-daemon-restart=pass
-compositor-restart=pass
-failed-insertion=pass
-ime-preedit=fail
+printable-press-release|us|gtk4-demo=pass
+held-keys-repeat|de|qt6-demo=pass
+modifier-navigation|fr|browser-firefox=pass
+password-field|altgr|terminal-konsole=pass
+expansion-after-committed-composition|multi-layout-switching|password-field=pass
 ```
 
 Passing the script with `--results results.txt` requires an explicit `pass`
-result for every scenario. Any `fail`, `unsupported-by-design`, or `UNVERIFIED`
-result keeps the report uncertified. `--layout` and `--target-apps` are required so the report records
-the exact keyboard-layout profile set and client set used by the run.
-Certification drivers must include `us`, `de`, `fr`, `altgr`, and
-`multi-layout-switching`; list every tested client as a comma-separated value.
-The collector requires at least one GTK
-client, one Qt client, and one password/PIN-field client because those are
-mandatory coverage dimensions in the certification matrix.
+for every in-scope scenario × layout × client cell. Active IME/preedit is
+recorded separately as `unsupported-by-design` in the evidence artifact and
+does not count as tested or supported. The wrapper invokes the driver
+separately for each cell and sets `WAYEXPAND_CERTIFICATION_LAYOUT` and
+`WAYEXPAND_CERTIFICATION_TARGET_APP` to the selected profile and client. The
+driver must actually select that keymap and exercise that client; echoing the
+environment values is not evidence. Any `fail`, `unsupported-by-design`, or
+`UNVERIFIED` cell keeps the report uncertified. Required clients include GTK,
+Qt, browser, terminal, and password/PIN-field roles; required profiles are
+`us`, `de`, `fr`, `altgr`, and `multi-layout-switching`; clients include GTK,
+Qt, browser, terminal, password/PIN-field, Electron, and text-editor roles.
 
 For repeatable automation, use `scripts/run-certification-driver.sh` with a
 compositor-specific driver. The driver receives the scenario name as its first
-argument and the exact session metadata through `WAYEXPAND_CERTIFICATION_*`
-environment variables. Exit `0` for pass, `1` for an observed failure, and
+argument and the exact session metadata plus selected layout and client through
+`WAYEXPAND_CERTIFICATION_*` environment variables. Exit `0` for pass, `1` for an observed failure, and
 `2` when the scenario cannot be verified. The wrapper runs every matrix
 scenario, preserves each driver's stdout/stderr log beside the results file,
 and produces the results file consumed by the evidence collector. Those logs
