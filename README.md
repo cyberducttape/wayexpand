@@ -85,6 +85,16 @@ wayexpand-gui
 On Debian, use the source/release installation path for now; the Launchpad PPA
 targets Ubuntu series, not Debian releases.
 
+New GitHub releases are built to include installable Debian and RPM packages
+for x86_64, plus a native aarch64 release archive. Existing releases may not
+contain these assets. Fedora/Copr and AUR repositories are not yet published;
+see [Packaging](docs/PACKAGING.md) for the verified options.
+
+For those release assets, install the downloaded local package with
+`sudo apt install ./wayexpand_*_amd64.deb` or
+`sudo dnf install ./wayexpand-*.x86_64.rpm`. These are per-release packages,
+not a signed auto-updating Debian/Fedora repository.
+
 From source:
 
 ```sh
@@ -100,7 +110,8 @@ raw-input permissions, or accept portal consent for you.
 
 Other paths:
 
-- Arch packaging preview: `makepkg -si`
+- Arch packaging preview: `makepkg -si` (AUR publication is pending)
+- Fedora/RHEL: build the maintained RPM spec (no official Copr repository yet)
 - Release tarballs: `./scripts/install-release.sh`
 - Packaging notes: [docs/PACKAGING.md](docs/PACKAGING.md)
 

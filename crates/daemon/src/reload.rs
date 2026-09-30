@@ -655,6 +655,29 @@ mod tests {
         write_config(&path, &config_text("stable metadata"));
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+
+        // notify may deliver a parent-directory event for the file's initial
+        // creation after the watcher is installed. Let that startup event
+        // settle first; this test is about steady-state idle polling, not the
+        // watcher backend's asynchronous startup queue.
+        let settle_deadline = Instant::now() + Duration::from_secs(2);
+        let mut quiet_since = Instant::now();
+        loop {
+            config.reload_if_changed();
+            let pending =
+                config.watch_check_after.is_some() || config.watch_dirty.load(Ordering::Acquire);
+            if pending {
+                quiet_since = Instant::now();
+            } else if quiet_since.elapsed() >= WATCH_DEBOUNCE * 2 {
+                break;
+            }
+            assert!(
+                Instant::now() < settle_deadline,
+                "configuration watcher did not become idle after startup"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
         let stamp = config.observed.unwrap();
         config.last_integrity_check = Instant::now();
         config.reload_if_changed();

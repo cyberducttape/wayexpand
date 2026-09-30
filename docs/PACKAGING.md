@@ -15,11 +15,11 @@ distribution backports or an isolated toolchain installation.
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
-| Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 only |
+| Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 and aarch64 PKGBUILD |
 | Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
-| Debian | source/release build | No native archive yet | Use vendored source archive for package builds |
-| Fedora/RHEL | `wayexpand` | Build from source | ⚠️ No official Copr yet |
-| aarch64 | source build | No pre-built release archive yet | Cross-build or build natively |
+| Debian | `.deb` release asset | Per-release x86_64 package planned for new tags; no APT repository | Ubuntu PPA remains Ubuntu-only |
+| Fedora/RHEL | `.rpm` release asset | Per-release x86_64 package planned for new tags; no DNF repository | RPM spec and CI build are maintained; Copr publication pending |
+| aarch64 | `wayexpand` | Native release archive on new tagged releases | Existing releases may be x86_64-only |
 
 ## Building Locally
 
@@ -58,9 +58,10 @@ dpkg-buildpackage -b
 sudo dpkg -i ../wayexpand_${VERSION}-1_amd64.deb
 ```
 
-The Launchpad PPA path targets Ubuntu series. Plain Debian users should build
-from the vendored release archive or install from the upstream release/source
-workflow until a native Debian repository exists.
+The Launchpad PPA path targets Ubuntu series. New GitHub releases are configured
+to include a directly installable Debian package for x86_64; it is a local
+package, not an APT repository with automatic updates. Plain Debian users can
+also build from the vendored source archive.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -70,7 +71,15 @@ workflow until a native Debian repository exists.
 
 ### Fedora/RHEL
 
-**Status:** No official Copr repository yet. Build locally or from source.
+**Status:** New GitHub releases are configured to include a local-install RPM
+for x86_64. The RPM spec is maintained and built in CI, but no official Copr
+repository is published, so DNF repository-based updates are not yet available.
+
+For the release RPM, install the downloaded local package with:
+
+```bash
+sudo dnf install ./wayexpand-<version>-1.x86_64.rpm
+```
 
 **Local build from spec file:**
 
@@ -101,10 +110,11 @@ rpmbuild -ba wayexpand.spec
 
 ### aarch64
 
-The GitHub release workflow currently publishes a pre-built Linux archive only
-for `x86_64`; there is no official aarch64 binary to download yet. On an
-aarch64 Fedora, Debian, Ubuntu, or Arch system, build from the source archive
-or checkout after installing Rust 1.87+ and the native Wayland dependencies:
+The release workflow builds on native x86_64 and aarch64 runners and attaches
+both archives to new tagged releases. Older releases may have only x86_64.
+On an aarch64 Fedora, Debian, Ubuntu, or Arch system, either use the matching
+release archive or build from source after installing Rust 1.87+ and native
+Wayland dependencies:
 
 ```bash
 sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev
@@ -115,10 +125,9 @@ The binaries are in `target/release/`. Run `wayexpand doctor` before enabling
 a user service. Native builds are preferred over cross-builds because the
 Wayland and compositor protocol libraries must match the target system.
 
-For a cross-build, install a Rust target and target-native development
-libraries first, then use Cargo's normal `--target aarch64-unknown-linux-gnu`
-flow. WayExpand does not currently publish a prebuilt sysroot or cross-build
-toolchain.
+CI uses native aarch64 hardware, avoiding fragile cross-builds of the Wayland
+and compositor-protocol stack. The release archive uses the same user installer
+and assets as x86_64.
 
 ---
 
@@ -256,11 +265,12 @@ Release tooling supports two source archive shapes:
 - `wayexpand-<version>-vendored.tar.gz`: offline-build archive with `vendor/`
   and the generated Cargo source replacement config
 
-Use the clean archive for build systems that can access Cargo registries or run
-`cargo vendor` during their build step. Use the vendored archive for Launchpad,
-air-gapped builders, or any policy that requires all Rust dependencies to be
-present in the source upload. Large local `vendor/` directories are build
-artifacts, not required repository content.
+Use the clean archive for build systems that can access Cargo registries and
+populate Cargo's cache before an offline/frozen build (the Arch PKGBUILD does
+this in `prepare()`). Use the vendored archive for Launchpad, Fedora RPM builds,
+air-gapped builders, or any policy requiring all Rust dependencies to be in the
+source upload. Large local `vendor/` directories are build artifacts, not
+required repository content.
 
 ---
 

@@ -18,7 +18,8 @@ sudo add-apt-repository ppa:cyberducttape/ppa
 sudo apt update
 sudo apt install wayexpand
 
-# Debian: build from the vendored source archive; the PPA is Ubuntu-only.
+# Debian: use the x86_64 .deb release asset (from new tagged releases), or build
+# from the vendored source archive. The PPA is Ubuntu-only.
 
 # Arch (packaging prepared; build locally)
 git clone https://github.com/cyberducttape/wayexpand.git
@@ -30,9 +31,9 @@ cd wayexpand && makepkg -si
 
 **Packaging Status:**
 - ✅ Ubuntu: Available via PPA
-- ⚠️ Debian: Build from the vendored source archive; the Launchpad PPA targets Ubuntu series
+- ⚠️ Debian: Per-release x86_64 .deb planned; no APT repository, PPA is Ubuntu-only
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
-- 📦 Fedora: Copr packaging prepared (not yet published)
+- ⚠️ Fedora: Per-release x86_64 RPM planned; no Copr repository published
 - 🔧 Others: Build from source using `./scripts/install-user.sh`
 
 **Admin overhead:** Minimal. Users manage their own configs.
@@ -45,9 +46,9 @@ For teams with shared machines or controlled environments:
 
 **Approach 1: Package distribution** (recommended)
 - **Ubuntu:** Deploy via PPA (apt)
-- **Debian:** Build/deploy from the vendored release archive or internal package repository
+- **Debian:** Install the per-release .deb or mirror it to an internal package repository
 - **Arch:** Packaging prepared (not yet official AUR)
-- **Fedora:** Packaging prepared (Copr packaging ready)
+- **Fedora:** Install the per-release RPM or mirror it to an internal repository; Copr publication pending
 - Users self-install from organizational repo
 - Admin manages package version, not individual instances
 

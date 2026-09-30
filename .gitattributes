@@ -1,6 +1,5 @@
-# Packaging metadata is not part of the source archive consumed by PKGBUILD.
-# This keeps the PKGBUILD checksum independent of the checksum field itself.
+# Avoid embedding PKGBUILD in its own source archive; Debian metadata is
+# supplied separately by the vendored Launchpad source package.
 PKGBUILD export-ignore
-wayexpand.spec export-ignore
 debian/ export-ignore
 .github/ export-ignore

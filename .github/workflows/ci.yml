@@ -44,8 +44,7 @@ jobs:
           cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           pkgbuild_version=$(sed -n 's/^pkgver=//p' PKGBUILD)
           debian_version=$(sed -n 's/^wayexpand (\([^ -]*\)-.*/\1/p' debian/changelog | head -n1)
-          # wayexpand.spec is optional (packaging artifact, not in source repo)
-          spec_version=$(if [ -f wayexpand.spec ]; then sed -n 's/^Version: *//p' wayexpand.spec; fi)
+          spec_version=$(sed -n 's/^Version: *//p' wayexpand.spec)
           ibus_version=$(sed -n 's/.*<version>\([^<]*\)<\/version>.*/\1/p' desktop/wayexpand-ibus.xml | head -n1)
           appstream_version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' io.github.cyberducttape.WayExpand.metainfo.xml | head -n1)
 
@@ -53,22 +52,35 @@ jobs:
           echo "  Cargo.toml:            $cargo_version"
           echo "  PKGBUILD:              $pkgbuild_version"
           echo "  debian/changelog:      $debian_version"
-          if [ -f wayexpand.spec ]; then
-            echo "  wayexpand.spec:        $spec_version"
-          fi
+          echo "  wayexpand.spec:        $spec_version"
           echo "  IBus XML:              $ibus_version"
           echo "  AppStream metadata:    $appstream_version"
 
           # Verify all match
           test "$cargo_version" = "$pkgbuild_version" || exit 1
           test "$cargo_version" = "$debian_version" || exit 1
-          if [ -f wayexpand.spec ]; then
-            test "$cargo_version" = "$spec_version" || exit 1
-          fi
+          test "$cargo_version" = "$spec_version" || exit 1
           test "$cargo_version" = "$ibus_version" || exit 1
           test "$cargo_version" = "$appstream_version" || exit 1
 
           echo "✓ All versions consistent"
+
+  aarch64-build:
+    name: Native aarch64 build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Build release binaries
+        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
   workflow:
     name: GitHub Actions Validation
@@ -124,6 +136,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
         run: cargo test --locked --workspace
+      - name: Test experimental Action Broker opt-in build
+        run: cargo test --locked -p action-broker --features experimental-action-broker
       - name: Run tests (locked, release)
         run: cargo test --locked --release --workspace
       - name: Clippy (locked, debug)
@@ -322,12 +336,6 @@ jobs:
           done
       - name: Build RPM package and inspect manifest
         run: |
-          # wayexpand.spec is optional (generated during release process)
-          if [ ! -f wayexpand.spec ]; then
-            echo "wayexpand.spec not present; skipping RPM build (optional in source repo)"
-            exit 0
-          fi
-
           version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           top=$(mktemp -d)
           source_dir="$top/sources/wayexpand-${version}"
@@ -335,7 +343,7 @@ jobs:
           git archive --format=tar HEAD | tar -x -C "$source_dir"
           test -f "$source_dir/docs/wayexpand.1"
           cp -a .cargo vendor "$source_dir/"
-          tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}.tar.gz" \
+          tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
           rpmbuild -bb --nodeps \
             --define "_topdir $top/rpmbuild" \

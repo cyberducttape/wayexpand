@@ -131,7 +131,7 @@ those pins with moving version tags during release-workflow maintenance.
 | Target | Tarball | Build | Notes |
 |--------|---------|-------|-------|
 | AUR | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | Build system adds `cargo vendor vendor/` automatically |
-| Copr (Fedora) | `wayexpand-<version>.tar.gz` | `cargo build --release --locked` | RPM spec includes `cargo vendor vendor/` in %build |
+| Copr (Fedora) | `wayexpand-<version>-vendored.tar.gz` | `cargo build --release --frozen` | Vendored Source0 is required because the spec builds offline |
 | Launchpad PPA | `wayexpand-<version>-vendored.tar.gz` | `dpkg-buildpackage -b` | Debian rules invoke the declared Cargo toolchain directly and use the vendored archive offline |
 | Source distribution | `wayexpand-<version>.tar.gz` | Any | Registry access required; no project source replacement config |
 | Offline build | `wayexpand-<version>-vendored.tar.gz` | `CARGO_NET_OFFLINE=true` | All dependencies included, no network required |

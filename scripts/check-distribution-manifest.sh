@@ -45,15 +45,16 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     done
 done
 
-# wayexpand.spec is optional (may be removed if not used for distribution)
-if test -f "$project_dir/wayexpand.spec"; then
-    for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
-        grep -q -F "$binary" "$project_dir/wayexpand.spec" || {
-            printf '%s\n' "manifest omits $binary: $project_dir/wayexpand.spec" >&2
-            exit 1
-        }
-    done
-fi
+test -f "$project_dir/wayexpand.spec" || {
+    printf '%s\n' 'required Fedora RPM spec is missing' >&2
+    exit 1
+}
+for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    grep -q -F "$binary" "$project_dir/wayexpand.spec" || {
+        printf '%s\n' "manifest omits $binary: $project_dir/wayexpand.spec" >&2
+        exit 1
+    }
+done
 
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     "$project_dir/.github/workflows/release.yml"; do
@@ -63,13 +64,14 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     }
 done
 
-# wayexpand.spec is optional (may be removed if not used for distribution)
-if test -f "$project_dir/wayexpand.spec"; then
-    grep -q -F 'wayexpand-ibus.xml' "$project_dir/wayexpand.spec" || {
-        printf '%s\n' "manifest omits the IBus component: $project_dir/wayexpand.spec" >&2
-        exit 1
-    }
-fi
+grep -q -F 'wayexpand-ibus.xml' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' "manifest omits the IBus component: $project_dir/wayexpand.spec" >&2
+    exit 1
+}
+grep -q -F -- '-vendored.tar.gz' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' 'RPM spec must use the offline-build vendored release source' >&2
+    exit 1
+}
 
 # Distro packages may ship the policies as data, but must never install them
 # into udev's active rules directory as part of the base package.

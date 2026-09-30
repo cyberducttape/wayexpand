@@ -1,7 +1,7 @@
 # Action Broker Architecture
 
 **Version:** 1.2.0
-**Status:** Experimental foundation; disabled by default and not a security boundary
+**Status:** Experimental prototype; excluded from normal daemon routing and not a security boundary
 **Next:** Policy routing, service integration, and external sandbox integration before enablement
 
 ## Overview
@@ -11,6 +11,13 @@ from keyboard capture. It is not enabled by default and must not be treated as
 a sandbox: network and filesystem isolation are deployment responsibilities
 until a concrete service/container policy is integrated. The mature restricted
 command runner remains the safer default.
+
+The standalone binary is behind the Cargo feature
+`experimental-action-broker`; normal builds and distribution packages do not
+enable or install it. The daemon has no broker client integration. Enabling the
+feature only builds the prototype binary—it does not connect it to snippets,
+policy routing, a managed service, or an audit sink. Do not use it as a
+production security boundary.
 
 The design aims to provide:
 - **Daemon isolation** - Keyboard capture stays locked down (no network)
@@ -80,16 +87,22 @@ What's implemented:
   - Bounded client connections (64) so idle same-user clients cannot exhaust
     the broker's blocking request workers
 
-- **Daemon-side broker helper** (crates/daemon/src/action_broker.rs)
-  - `ActionBrokerManager` is a tested, opt-in helper for future routing
-  - It opens a fresh client connection for each request; it is not a pool
-  - It is currently unused by the daemon command route
 - **Standalone service binary** (`wayexpand-action-broker`)
   - Loads a validated broker configuration
   - Binds a protected Unix socket
   - Accepts bounded, authenticated requests and executes configured actions
   - Is a tested workspace binary; current distribution installers do not ship
     it because no managed service or daemon routing is enabled yet
+
+To build the standalone prototype explicitly from a checkout:
+
+```sh
+cargo build --locked -p action-broker --features experimental-action-broker \
+  --bin wayexpand-action-broker
+```
+
+This is a developer/research build instruction, not an installation or
+deployment recommendation.
 
 ## Phase 2: Enhanced Control (v1.3.x) - PLANNED
 
@@ -219,9 +232,9 @@ replacement = ""
 | Config | ✅ Complete | ✅ Pass | TOML schema with validation |
 | Executor | ✅ Complete | ✅ Pass | Async execution with timeout |
 | IPC (Unix socket) | ✅ Complete | ✅ Pass | JSON over AF_UNIX streams |
-| Daemon integration | ⚠️ Helper only | ✅ Unit/integration tests | `ActionBrokerManager` exists but is not wired into command routing; reconnects per request |
+| Daemon integration | ❌ None | N/A | Daemon has no broker dependency or command-routing path |
 | Policy routing | ⏳ Phase 2 | ⏳ Pending | Will integrate with policy module |
-| Broker binary | ✅ Source implementation | ✅ Pass | `wayexpand-action-broker`; current distribution installers omit it until service deployment and routing are defined |
+| Broker binary | ⚠️ Source implementation | ⚠️ Explicit experimental Cargo feature | `wayexpand-action-broker`; excluded from normal builds and distribution installers |
 | Systemd integration | ⏳ Phase 2 | ⏳ Pending | User service + socket activation |
 | Audit logging | ⏳ Phase 2 | ⏳ Pending | syslog/journald integration |
 
@@ -245,5 +258,5 @@ replacement = ""
 ## References
 
 - `crates/action-broker/` - Action Broker library
-- `crates/daemon/src/action_broker.rs` - Daemon integration
+- `crates/action-broker/Cargo.toml` - Explicit experimental binary feature gate
 - [Action Broker security architecture](ACTION_BROKER_ARCHITECTURE.md) - Current design and security status

@@ -25,8 +25,15 @@ libc = { workspace = true }
 rustix = { workspace = true, features = ["process", "fs"] }
 shellexpand = "3"
 
+[features]
+default = []
+# Explicit opt-in for the standalone prototype. This is not used by the
+# daemon's production command route and is not installed by normal packages.
+experimental-action-broker = []
+
 [[bin]]
 name = "wayexpand-action-broker"
 path = "src/bin/wayexpand-action-broker.rs"
+required-features = ["experimental-action-broker"]
 
 [dev-dependencies]

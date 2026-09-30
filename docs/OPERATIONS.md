@@ -142,11 +142,12 @@ typed manually may fail when triggered by WayExpand if it requires capabilities
 the sandbox forbids.
 
 Do not relax the daemon unit or use a wrapper script to bypass this boundary.
-There is no supported SRE command path in the current direct-command model;
-networked or credentialed workflows require the planned Action Broker. See
-[`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md) for its explicit
-action allowlist, environment, cwd, network, timeout, output, and planned audit
-requirements.
+There is no supported SRE command path in the current direct-command model.
+The Action Broker is an experimental prototype, is not routed by the daemon,
+and does not itself provide network isolation or audit logging. Networked or
+credentialed workflows require a separately deployed and reviewed service;
+see [`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md) for
+the prototype's exact status and limitations.
 
 ⚠️ **Important:** The GUI's Preview button does NOT run commands under the daemon's
 systemd sandbox — it invokes them in the GUI process without those restrictions.

@@ -20,6 +20,8 @@ def main() -> int:
     cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
     gui_source = (ROOT / "crates/gui/src/colorpack.rs").read_text(encoding="utf-8")
     broker_source = ROOT / "crates/action-broker/src/bin/wayexpand-action-broker.rs"
+    broker_manifest = (ROOT / "crates/action-broker/Cargo.toml").read_text(encoding="utf-8")
+    daemon_manifest = (ROOT / "crates/daemon/Cargo.toml").read_text(encoding="utf-8")
     gui_doc = (ROOT / "docs/GUI.md").read_text(encoding="utf-8")
     architecture = (ROOT / "docs/ACTION_BROKER_ARCHITECTURE.md").read_text(
         encoding="utf-8"
@@ -52,6 +54,10 @@ def main() -> int:
 
     if not broker_source.is_file():
         errors.append("Action Broker standalone binary source is missing")
+    if 'required-features = ["experimental-action-broker"]' not in broker_manifest:
+        errors.append("Action Broker binary is not gated behind its explicit experimental feature")
+    if "action-broker =" in daemon_manifest:
+        errors.append("production daemon still depends on the unrouted Action Broker")
     if "wayexpand-action-broker" not in architecture or "Source implementation" not in architecture:
         errors.append("Action Broker architecture does not describe the current standalone binary")
 

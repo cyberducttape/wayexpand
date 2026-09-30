@@ -111,10 +111,10 @@ For the output-driven recovery flow, go directly to the
 ### Architecture note: aarch64
 
 The release archive currently has a pre-built Linux binary only for `x86_64`.
-There is no official aarch64 binary yet. On aarch64, follow the
-[source-build instructions in the packaging guide](PACKAGING.md#aarch64) and
-run `wayexpand doctor` after building. Fedora Copr is also not published yet;
-Fedora users should build from source or the RPM spec for now.
+New tagged releases include a native aarch64 archive; earlier releases may not.
+Fedora Copr is not published yet; Fedora users can build from source or the
+maintained RPM spec for now. See the [packaging guide](PACKAGING.md) for the
+current release and repository status.
 
 ## Which Desktop Are You Using?
 

@@ -20,7 +20,6 @@ signal-hook.workspace = true
 rustix = { workspace = true, features = ["process", "fs"] }
 toml.workspace = true
 wayexpand-core = { path = "../core" }
-action-broker = { path = "../action-broker" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }

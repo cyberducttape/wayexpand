@@ -4078,7 +4078,6 @@ dependencies = [
 name = "wayexpand-daemon"
 version = "1.2.0"
 dependencies = [
- "action-broker",
  "anyhow",
  "notify",
  "rustix 1.1.4",
