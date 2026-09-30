@@ -1282,7 +1282,7 @@ impl GuiApp {
                     }),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
                     ui.label(RichText::new("WayExpand").heading().strong());
                     ui.label(RichText::new(self.strings.title()).color(palette.muted));
@@ -1312,32 +1312,70 @@ impl GuiApp {
                     ui.add_space(12.0);
                     ui.separator();
                     ui.add_space(4.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Appearance, language, and engine preferences all live
-                        // in one settings window; the theme toggle stays in the
-                        // toolbar because it is the one display preference
-                        // people flip several times a day.
-                        if theme::secondary_button(ui, palette, self.strings.settings())
-                            .on_hover_text(self.strings.settings_tooltip())
+                    let ctx = ui.ctx().clone();
+                    theme::pill(
+                        ui,
+                        if self.paused {
+                            self.strings.paused_status()
+                        } else {
+                            self.strings.running_status()
+                        },
+                        if self.paused {
+                            palette.warning
+                        } else {
+                            palette.success
+                        },
+                        if self.paused {
+                            theme::tint(palette.warning, 38)
+                        } else {
+                            theme::tint(palette.success, 38)
+                        },
+                    );
+                    ui.menu_button("⋯", |ui| {
+                        if ui.button(self.strings.reload()).clicked() {
+                            self.request_action(PendingAction::Reload);
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button(if self.paused {
+                                self.strings.resume()
+                            } else {
+                                self.strings.pause()
+                            })
                             .clicked()
                         {
-                            self.open_settings();
+                            self.toggle_pause();
+                            ui.close_menu();
                         }
-                        if theme::secondary_button(
-                            ui,
-                            palette,
-                            if self.dark_mode {
+                        if ui.button(self.strings.diagnostics()).clicked() {
+                            self.diagnostics_open = true;
+                            self.refresh_diagnostics();
+                            ui.close_menu();
+                        }
+                        if ui.button(self.strings.import_espanso()).clicked() {
+                            self.import_open = true;
+                            self.import_preview = None;
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button(self.strings.settings()).clicked() {
+                            self.open_settings();
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button(if self.dark_mode {
                                 self.strings.theme_light()
                             } else {
                                 self.strings.theme_dark()
-                            },
-                        )
-                        .on_hover_text(self.strings.toggle_theme())
-                        .clicked()
+                            })
+                            .clicked()
                         {
-                            self.set_dark_mode(ui.ctx(), !self.dark_mode);
+                            self.set_dark_mode(&ctx, !self.dark_mode);
+                            ui.close_menu();
                         }
-                    });
+                    })
+                    .response
+                    .on_hover_text(self.strings.settings_tooltip());
                 });
                 ui.add_space(10.0);
                 ui.horizontal_wrapped(|ui| {
@@ -1348,31 +1386,6 @@ impl GuiApp {
                             .desired_width(260.0),
                     )
                     .on_hover_text(self.strings.search_tooltip());
-                    if theme::secondary_button(ui, palette, self.strings.reload()).clicked() {
-                        self.request_action(PendingAction::Reload);
-                    }
-                    if theme::secondary_button(
-                        ui,
-                        palette,
-                        if self.paused {
-                            self.strings.resume()
-                        } else {
-                            self.strings.pause()
-                        },
-                    )
-                    .clicked()
-                    {
-                        self.toggle_pause();
-                    }
-                    if theme::secondary_button(ui, palette, self.strings.diagnostics()).clicked() {
-                        self.diagnostics_open = true;
-                        self.refresh_diagnostics();
-                    }
-                    if theme::secondary_button(ui, palette, self.strings.import_espanso()).clicked()
-                    {
-                        self.import_open = true;
-                        self.import_preview = None;
-                    }
                 });
             });
     }
@@ -1384,7 +1397,7 @@ impl GuiApp {
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
-                .min_width(460.0)
+                .min_width(340.0)
                 .max_height(560.0)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
@@ -1431,23 +1444,27 @@ impl GuiApp {
                                 color,
                                 theme::tint(color, 32),
                             );
-                            ui.label(RichText::new(status.kind.to_string()).strong());
+                            ui.label(
+                                RichText::new(self.strings.backend_label(status.kind)).strong(),
+                            );
                         });
                         ui.label(RichText::new(&status.detail).small().color(palette.muted));
                         // The exact triple `wayexpand doctor` reports, kept
                         // verbatim so the GUI mirrors the documented
                         // diagnostic vocabulary instead of paraphrasing it.
-                        ui.label(
-                            RichText::new(format!(
-                                "implementation={} · availability={} · permission={}",
-                                status.implementation(),
-                                status.availability(),
-                                status.permission()
-                            ))
-                            .monospace()
-                            .small()
-                            .color(palette.muted),
-                        );
+                        ui.collapsing(self.strings.technical_details(), |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "implementation={} · availability={} · permission={}",
+                                    status.implementation(),
+                                    status.availability(),
+                                    status.permission()
+                                ))
+                                .monospace()
+                                .small()
+                                .color(palette.muted),
+                            );
+                        });
                         ui.add_space(6.0);
                     }
                     ui.separator();
@@ -1867,11 +1884,6 @@ impl GuiApp {
                                 RichText::new(self.strings.no_snippets()).color(palette.muted),
                             );
                             ui.add_space(6.0);
-                            if theme::primary_button(ui, palette, self.strings.create_first())
-                                .clicked()
-                            {
-                                self.request_action(PendingAction::New);
-                            }
                         });
                     } else if nothing_visible {
                         ui.add_space(16.0);
@@ -3501,23 +3513,30 @@ mod tests {
             app.strings.set_language(language);
             for tab in [SettingsTab::Appearance, SettingsTab::Engine] {
                 app.settings_tab = tab;
-                for selected in [Some(0), Some(1), None] {
-                    app.set_selected_index(selected);
-                    app.draft =
-                        selected.map(|index| Draft::from_expansion(&app.config.expansion[index]));
-                    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                        let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-                        app.sync_window_title(ctx);
-                        app.render_toolbar(ctx, &palette);
-                        app.render_diagnostics(ctx, &palette);
-                        app.render_import_dialog(ctx, &palette);
-                        app.render_settings_dialog(ctx, &palette);
-                        app.render_status_bar(ctx, &palette);
-                        app.render_snippet_list(ctx, &palette);
-                        app.render_editor_actions(ctx, &palette);
-                        app.render_editor(ctx, &palette);
-                        app.render_pending_action(ctx, &palette);
-                    });
+                for width in [420.0, 980.0] {
+                    for selected in [Some(0), Some(1), None] {
+                        app.set_selected_index(selected);
+                        app.draft = selected
+                            .map(|index| Draft::from_expansion(&app.config.expansion[index]));
+                        let mut input = egui::RawInput::default();
+                        input.screen_rect = Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 760.0),
+                        ));
+                        let _ = ctx.run(input, |ctx| {
+                            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                            app.sync_window_title(ctx);
+                            app.render_toolbar(ctx, &palette);
+                            app.render_diagnostics(ctx, &palette);
+                            app.render_import_dialog(ctx, &palette);
+                            app.render_settings_dialog(ctx, &palette);
+                            app.render_status_bar(ctx, &palette);
+                            app.render_snippet_list(ctx, &palette);
+                            app.render_editor_actions(ctx, &palette);
+                            app.render_editor(ctx, &palette);
+                            app.render_pending_action(ctx, &palette);
+                        });
+                    }
                 }
             }
         }

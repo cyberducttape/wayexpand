@@ -78,13 +78,6 @@ impl Strings {
         }
     }
 
-    pub fn toggle_theme(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Toggle light/dark theme",
-            Language::German => "Helles/dunkles Design umschalten",
-        }
-    }
-
     pub fn settings(&self) -> &'static str {
         match self.lang {
             Language::English => "Settings",
@@ -117,6 +110,58 @@ impl Strings {
         match self.lang {
             Language::English => "Resume",
             Language::German => "Fortsetzen",
+        }
+    }
+
+    pub fn running_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "● Running",
+            Language::German => "● Aktiv",
+        }
+    }
+
+    pub fn paused_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "● Paused",
+            Language::German => "● Pausiert",
+        }
+    }
+
+    pub fn technical_details(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Technical details",
+            Language::German => "Technische Details",
+        }
+    }
+
+    pub fn backend_label(&self, kind: wayexpand_core::BackendKind) -> &'static str {
+        match (self.lang, kind) {
+            (
+                Language::English,
+                wayexpand_core::BackendKind::InputMethodV2 | wayexpand_core::BackendKind::Evdev,
+            ) => "Keyboard capture",
+            (
+                Language::German,
+                wayexpand_core::BackendKind::InputMethodV2 | wayexpand_core::BackendKind::Evdev,
+            ) => "Tastatureingabe",
+            (
+                Language::English,
+                wayexpand_core::BackendKind::Libei
+                | wayexpand_core::BackendKind::WlrootsVirtualKeyboard
+                | wayexpand_core::BackendKind::Uinput,
+            ) => "Text injection",
+            (
+                Language::German,
+                wayexpand_core::BackendKind::Libei
+                | wayexpand_core::BackendKind::WlrootsVirtualKeyboard
+                | wayexpand_core::BackendKind::Uinput,
+            ) => "Texteingabe",
+            (Language::English, wayexpand_core::BackendKind::WindowTracker) => {
+                "Application detection"
+            }
+            (Language::German, wayexpand_core::BackendKind::WindowTracker) => "App-Erkennung",
+            (Language::English, wayexpand_core::BackendKind::Clipboard) => "Clipboard",
+            (Language::German, wayexpand_core::BackendKind::Clipboard) => "Zwischenablage",
         }
     }
 
@@ -354,13 +399,6 @@ impl Strings {
         match self.lang {
             Language::English => "No snippets yet.",
             Language::German => "Noch keine Snippets.",
-        }
-    }
-
-    pub fn create_first(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Create your first snippet",
-            Language::German => "Erstellen Sie Ihr erstes Snippet",
         }
     }
 
