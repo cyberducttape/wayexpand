@@ -121,6 +121,8 @@ struct GuiApp {
     selected: Option<usize>,
     selected_id: Option<String>,
     filter: String,
+    search_fields: library::SearchFields,
+    search_index: library::SearchIndex,
     category_filter: Option<String>,
     preview_input: String,
     preview_app: String,
@@ -397,6 +399,7 @@ impl GuiApp {
         let config_document = read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;
+        let search_index = library::SearchIndex::new(&config);
         let selected = (!config.expansion.is_empty()).then_some(0);
         let selected_id = selected.map(|index| config.expansion[index].id.clone());
         let draft = selected.map(|index| Draft::from_expansion(&config.expansion[index]));
@@ -416,6 +419,8 @@ impl GuiApp {
             selected,
             selected_id,
             filter: String::new(),
+            search_fields: library::SearchFields::default(),
+            search_index,
             category_filter: None,
             preview_input,
             preview_app: String::new(),
@@ -683,6 +688,7 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 self.set_selected_index((!self.config.expansion.is_empty()).then_some(0));
                 self.draft = self
@@ -715,7 +721,16 @@ impl GuiApp {
     }
 
     fn visible_indices(&self) -> Vec<usize> {
-        library::visible_indices(&self.config, &self.filter, self.category_filter.as_deref())
+        self.search_index.visible_indices(
+            &self.config,
+            &self.filter,
+            self.category_filter.as_deref(),
+            self.search_fields,
+        )
+    }
+
+    fn rebuild_search_index(&mut self) {
+        self.search_index = library::SearchIndex::new(&self.config);
     }
 
     /// Distinct, sorted, non-empty categories currently in use — drives the
@@ -882,6 +897,7 @@ impl GuiApp {
                     .unwrap_or_default();
 
                 self.config = new_config;
+                self.rebuild_search_index();
                 self.config_document = new_document;
                 self.config_revision = new_revision;
                 self.set_selected_index(new_selected);
@@ -931,6 +947,7 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 self.draft = self
                     .selected
@@ -961,6 +978,7 @@ impl GuiApp {
         }
         let previous = self.undo.pop().expect("checked non-empty above");
         self.config = previous;
+        self.rebuild_search_index();
         let restored_selection = self
             .selected_id
             .as_ref()
@@ -1018,8 +1036,43 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
+                self.set_saved_status(Status::success(self.strings.status_created()));
+            }
+            Err(error) => self.status = Status::error(self.strings.status_create_failed(&error)),
+        }
+    }
+
+    fn create_test_snippet(&mut self) {
+        if !self.config.expansion.is_empty() {
+            self.status = Status::warning(self.strings.no_selection());
+            return;
+        }
+        let mut candidate = self.config.clone();
+        candidate.expansion.push(ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":wayexpand-test".into(),
+            replacement: "WayExpand is working!".into(),
+            description: self.strings.onboarding_sample_description().into(),
+            tags: vec!["tutorial".into()],
+            category: self.strings.onboarding_sample_category().into(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::WordBoundary,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        });
+        if !self.can_save_config() {
+            return;
+        }
+        match self.save_config_candidate(&candidate) {
+            Ok(()) => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                self.select(0);
                 self.set_saved_status(Status::success(self.strings.status_created()));
             }
             Err(error) => self.status = Status::error(self.strings.status_create_failed(&error)),
@@ -1057,6 +1110,7 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
                 self.set_saved_status(Status::success(self.strings.status_duplicated()));
@@ -1079,6 +1133,7 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 let next_selection = (!self.config.expansion.is_empty())
                     .then_some(index.min(self.config.expansion.len() - 1));
@@ -1112,6 +1167,7 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
                 self.remember_undo(previous);
                 if self.selected == Some(index) {
                     if let Some(draft) = self.draft.as_mut() {
@@ -1331,51 +1387,56 @@ impl GuiApp {
                             theme::tint(palette.success, 38)
                         },
                     );
-                    ui.menu_button("⋯", |ui| {
-                        if ui.button(self.strings.reload()).clicked() {
-                            self.request_action(PendingAction::Reload);
-                            ui.close_menu();
-                        }
-                        if ui
-                            .button(if self.paused {
-                                self.strings.resume()
-                            } else {
-                                self.strings.pause()
-                            })
-                            .clicked()
-                        {
-                            self.toggle_pause();
-                            ui.close_menu();
-                        }
-                        if ui.button(self.strings.diagnostics()).clicked() {
-                            self.diagnostics_open = true;
-                            self.refresh_diagnostics();
-                            ui.close_menu();
-                        }
-                        if ui.button(self.strings.import_espanso()).clicked() {
-                            self.import_open = true;
-                            self.import_preview = None;
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if ui.button(self.strings.settings()).clicked() {
-                            self.open_settings();
-                            ui.close_menu();
-                        }
-                        if ui
-                            .button(if self.dark_mode {
-                                self.strings.theme_light()
-                            } else {
-                                self.strings.theme_dark()
-                            })
-                            .clicked()
-                        {
-                            self.set_dark_mode(&ctx, !self.dark_mode);
-                            ui.close_menu();
-                        }
-                    })
-                    .response
-                    .on_hover_text(self.strings.settings_tooltip());
+                    let more_actions = self.strings.more_actions();
+                    let actions_response = ui
+                        .menu_button(more_actions, |ui| {
+                            if ui.button(self.strings.reload()).clicked() {
+                                self.request_action(PendingAction::Reload);
+                                ui.close_menu();
+                            }
+                            if ui
+                                .button(if self.paused {
+                                    self.strings.resume()
+                                } else {
+                                    self.strings.pause()
+                                })
+                                .clicked()
+                            {
+                                self.toggle_pause();
+                                ui.close_menu();
+                            }
+                            if ui.button(self.strings.diagnostics()).clicked() {
+                                self.diagnostics_open = true;
+                                self.refresh_diagnostics();
+                                ui.close_menu();
+                            }
+                            if ui.button(self.strings.import_espanso()).clicked() {
+                                self.import_open = true;
+                                self.import_preview = None;
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button(self.strings.settings()).clicked() {
+                                self.open_settings();
+                                ui.close_menu();
+                            }
+                            if ui
+                                .button(if self.dark_mode {
+                                    self.strings.theme_light()
+                                } else {
+                                    self.strings.theme_dark()
+                                })
+                                .clicked()
+                            {
+                                self.set_dark_mode(&ctx, !self.dark_mode);
+                                ui.close_menu();
+                            }
+                        })
+                        .response;
+                    actions_response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
+                    });
+                    actions_response.on_hover_text(more_actions);
                 });
                 ui.add_space(10.0);
                 ui.horizontal_wrapped(|ui| {
@@ -1386,6 +1447,21 @@ impl GuiApp {
                             .desired_width(260.0),
                     )
                     .on_hover_text(self.strings.search_tooltip());
+                    ui.menu_button(self.strings.search_fields(), |ui| {
+                        ui.checkbox(
+                            &mut self.search_fields.triggers,
+                            self.strings.search_triggers(),
+                        );
+                        ui.checkbox(
+                            &mut self.search_fields.descriptions,
+                            self.strings.search_descriptions(),
+                        );
+                        ui.checkbox(&mut self.search_fields.tags, self.strings.search_tags());
+                        ui.checkbox(
+                            &mut self.search_fields.replacements,
+                            self.strings.search_replacements(),
+                        );
+                    });
                 });
             });
     }
@@ -1921,21 +1997,137 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
             .show(ctx, |ui| {
+                if self.selected_index().is_none() && !self.config.expansion.is_empty() {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(self.strings.select_snippet_prompt());
+                    });
+                    return;
+                }
                 let Some(index) = self.selected_index() else {
+                    let desktop = env::var("XDG_CURRENT_DESKTOP")
+                        .or_else(|_| env::var("XDG_SESSION_DESKTOP"))
+                        .unwrap_or_else(|_| "Linux desktop".into());
+                    let is_wayland = env::var_os("WAYLAND_DISPLAY").is_some();
+                    let app_context_available = self.backend_status.iter().any(|status| {
+                        status.kind == wayexpand_core::BackendKind::WindowTracker
+                            && status.state == BackendState::Available
+                    });
+                    let best_probe = |matches: fn(wayexpand_core::BackendKind) -> bool| {
+                        self.backend_status
+                            .iter()
+                            .filter(|status| matches(status.kind))
+                            .map(|status| status.state)
+                            .max_by_key(|state| match state {
+                                BackendState::Available => 4,
+                                BackendState::RequiresPermission => 3,
+                                BackendState::Implemented => 2,
+                                BackendState::Unavailable => 1,
+                                BackendState::NotImplemented => 0,
+                            })
+                            .unwrap_or(BackendState::NotImplemented)
+                    };
+                    let keyboard_probe = best_probe(|kind| {
+                        matches!(
+                            kind,
+                            wayexpand_core::BackendKind::InputMethodV2
+                                | wayexpand_core::BackendKind::Evdev
+                        )
+                    });
+                    let injection_probe = best_probe(|kind| {
+                        matches!(
+                            kind,
+                            wayexpand_core::BackendKind::Libei
+                                | wayexpand_core::BackendKind::WlrootsVirtualKeyboard
+                                | wayexpand_core::BackendKind::Uinput
+                        )
+                    });
                     ui.vertical_centered(|ui| {
-                        ui.add_space(70.0);
-                        ui.label(RichText::new("✨").size(40.0));
-                        ui.add_space(6.0);
-                        ui.heading(self.strings.build_first());
-                        ui.label(
-                            RichText::new(self.strings.build_description()).color(palette.muted),
+                        ui.add_space(22.0);
+                        ui.label(RichText::new("⚡").size(32.0).color(palette.accent));
+                        ui.add_space(4.0);
+                        ui.heading(self.strings.welcome_title());
+                        ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
+                        ui.add_space(20.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width().min(620.0), ui.available_height()),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                theme::card(ui, palette, |ui| {
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_desktop_step())
+                                            .strong(),
+                                    );
+                                    ui.label(self.strings.onboarding_desktop(&desktop, is_wayland));
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_support_title())
+                                            .strong(),
+                                    );
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_probe_caveat())
+                                            .color(palette.muted),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.strings.onboarding_keyboard_label());
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    self.strings
+                                                        .onboarding_backend_state(keyboard_probe),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.strings.onboarding_injection_label());
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    self.strings
+                                                        .onboarding_backend_state(injection_probe),
+                                                );
+                                            },
+                                        );
+                                    });
+                                    ui.label(
+                                        RichText::new(
+                                            self.strings
+                                                .onboarding_detection(app_context_available),
+                                        )
+                                        .color(palette.muted),
+                                    );
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_app_caveat())
+                                            .small()
+                                            .color(palette.muted),
+                                    );
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_safety_title())
+                                            .strong(),
+                                    );
+                                    ui.label(self.strings.onboarding_try_text());
+                                    ui.add_space(8.0);
+                                    if theme::primary_button(
+                                        ui,
+                                        palette,
+                                        self.strings.create_test_snippet(),
+                                    )
+                                    .clicked()
+                                    {
+                                        self.create_test_snippet();
+                                    }
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        RichText::new(self.strings.onboarding_certification_note())
+                                            .small()
+                                            .color(palette.warning),
+                                    );
+                                });
+                            },
                         );
-                        ui.add_space(10.0);
-                        if theme::primary_button(ui, palette, self.strings.create_snippet())
-                            .clicked()
-                        {
-                            self.request_action(PendingAction::New);
-                        }
                     });
                     return;
                 };
@@ -2880,7 +3072,7 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
-            .with_min_inner_size([760.0, 480.0])
+            .with_min_inner_size([640.0, 460.0])
             .with_icon(icon),
         ..Default::default()
     };
@@ -3121,7 +3313,7 @@ mod tests {
     #[test]
     fn missing_configuration_is_initialized_without_replacing_existing_files() {
         let path = std::env::temp_dir().join(format!(
-            "wayexpand-gui-first-run-{}.toml",
+            "wayexpand-gui-onboarding-run-{}.toml",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -3513,7 +3705,7 @@ mod tests {
             app.strings.set_language(language);
             for tab in [SettingsTab::Appearance, SettingsTab::Engine] {
                 app.settings_tab = tab;
-                for width in [420.0, 980.0] {
+                for width in [420.0, 640.0, 980.0] {
                     for selected in [Some(0), Some(1), None] {
                         app.set_selected_index(selected);
                         app.draft = selected
@@ -3540,6 +3732,41 @@ mod tests {
                 }
             }
         }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn first_run_screen_renders_and_creates_a_real_test_expansion() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-first-run-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        assert!(app.config.expansion.is_empty());
+        let ctx = egui::Context::default();
+        for language in [Language::English, Language::German] {
+            app.language = language;
+            app.strings.set_language(language);
+            let mut input = egui::RawInput::default();
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 600.0),
+            ));
+            let _ = ctx.run(input, |ctx| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_editor(ctx, &palette);
+            });
+        }
+        app.create_test_snippet();
+        assert_eq!(app.config.expansion.len(), 1, "{}", app.status.text());
+        assert_eq!(app.config.expansion[0].trigger, ":wayexpand-test");
+        assert_eq!(app.config.expansion[0].replacement, "WayExpand is working!");
+        app.filter = "working".into();
+        assert!(app.visible_indices().is_empty());
+        app.search_fields.replacements = true;
+        assert_eq!(app.visible_indices(), vec![0]);
+        assert_eq!(Config::load(&path).unwrap().expansion.len(), 1);
         fs::remove_file(path).unwrap();
     }
 

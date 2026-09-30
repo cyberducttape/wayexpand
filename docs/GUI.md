@@ -67,6 +67,10 @@ search, select, edit replacement/description/tags, choose matching mode,
 toggle enablement, preview, create, delete, undo, reload, and pause/resume.
 It marks drafts with unsaved changes and asks whether to save, discard, or
 cancel before switching to another snippet.
+The search-field menu lets you choose triggers, names/descriptions, tags, and
+replacement content independently. Replacement bodies are normalized into an
+index when the committed library changes, so long templates are not repeatedly
+lowercased on each UI frame. Searching replacement content is off by default.
 Triggers are editable in the graphical editor, so a newly created snippet can
 be renamed without touching TOML. Empty, duplicate, oversized, or otherwise
 invalid triggers are rejected by the same core validation used by the daemon.
@@ -315,6 +319,32 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
 - Alpha-tinted status pills choose black or white text at runtime after
   compositing their background, so their small labels are also kept at AA
   contrast. This does not certify arbitrary user-authored colors or content.
+- The native eframe build enables AccessKit. Custom snippet rows expose a
+  selectable button and a separately named checkbox for their enabled state;
+  category/theme choices expose radio-button semantics. The snippet toggle's
+  hit target is at least 28 logical pixels, and the window can shrink to
+  640×460 logical pixels.
+- Headless tests inspect the generated AccessKit tree and render the GUI at
+  narrow and standard widths in English and German. This is not a substitute
+  for testing with Orca. A live Orca check on KDE could not complete in the
+  current session because AT-SPI returned `Unknown object
+  '/org/a11y/atspi/cache'`; do not treat Linux screen-reader support as
+  release-certified until a working Orca session verifies keyboard navigation,
+  control names/states, and the first-run flow.
+- An empty configuration opens a guided first-run panel. It reports desktop and
+  backend probe results without treating probes as certification. The user can
+  explicitly add `:wayexpand-test`, then verify it in a normal text field;
+  this is a manual check, not an automated input-safety test.
+
+### Manual Orca verification
+
+In a Wayland desktop with Orca and AT-SPI functioning, enable the screen reader,
+then launch `wayexpand-gui` and verify that the library rows, enabled checkboxes,
+search field/options, editor controls, and dialogs are announced with useful
+names and states. Navigate without a pointer, create the first-run test snippet,
+and confirm the sample expansion in a normal text field. Never use a password
+field for this test. Also verify both English and German and the largest font
+scale.
 
 ## Future Enhancements
 

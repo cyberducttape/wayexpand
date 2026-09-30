@@ -259,8 +259,11 @@ pub fn chip_scaled(
     let galley = ui
         .painter()
         .layout_no_wrap(text.to_owned(), font.clone(), Color32::TRANSPARENT);
-    let size = Vec2::new(galley.size().x + 20.0 * scale, 24.0 * scale);
+    let size = Vec2::new(galley.size().x + 20.0 * scale, (28.0 * scale).max(28.0));
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, text)
+    });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let (fg, bg) = if selected {
@@ -302,6 +305,9 @@ pub fn colorpack_card(
         Vec2::new(ui.available_width(), 62.0 * scale),
         Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, name)
+    });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let background = if selected {
@@ -448,7 +454,8 @@ pub fn snippet_row_scaled(
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
 
     let dot_center = rect.left_center() + Vec2::new(16.0 * scale, 0.0);
-    let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(20.0 * scale));
+    let toggle_size = (28.0 * scale).max(28.0);
+    let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(toggle_size));
     let toggle_response = ui
         .interact(toggle_rect, response.id.with("toggle"), Sense::click())
         .on_hover_text(row.toggle_hint)
@@ -564,6 +571,23 @@ pub fn snippet_row_scaled(
         );
     }
 
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            true,
+            row.selected,
+            row.trigger,
+        )
+    });
+    toggle_response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            true,
+            row.enabled,
+            format!("{} — {}", row.toggle_hint, row.trigger),
+        )
+    });
+
     SnippetRowResponse {
         row: response.on_hover_cursor(egui::CursorIcon::PointingHand),
         toggle: toggle_response,
@@ -608,5 +632,38 @@ mod tests {
 
         assert_eq!(foreground, Color32::BLACK);
         assert!(contrast_ratio(foreground, background) >= WCAG_AA_NORMAL_TEXT);
+    }
+
+    #[test]
+    fn custom_snippet_controls_appear_in_the_accesskit_tree() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let palette = Palette::for_pack(ColorPack::Default, true);
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                snippet_row_scaled(
+                    ui,
+                    &palette,
+                    SnippetRow {
+                        selected: true,
+                        enabled: false,
+                        command_backed: false,
+                        trigger: ":test",
+                        detail: "Example",
+                        category: "Demo",
+                        detail_placeholder: "No description",
+                        toggle_hint: "Click to enable",
+                    },
+                    1.0,
+                );
+            });
+        });
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit should receive the custom row widgets");
+        let serialized = format!("{:?}", tree.nodes);
+        assert!(serialized.contains(":test"));
+        assert!(serialized.contains("Click to enable"));
     }
 }

@@ -85,6 +85,13 @@ impl Strings {
         }
     }
 
+    pub fn more_actions(&self) -> &'static str {
+        match self.lang {
+            Language::English => "More actions",
+            Language::German => "Weitere Aktionen",
+        }
+    }
+
     pub fn import_espanso(&self) -> &'static str {
         match self.lang {
             Language::English => "Import Espanso",
@@ -176,6 +183,201 @@ impl Strings {
         match self.lang {
             Language::English => "Search snippets…",
             Language::German => "Snippets durchsuchen…",
+        }
+    }
+
+    pub fn search_fields(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Fields",
+            Language::German => "Felder",
+        }
+    }
+
+    pub fn search_triggers(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Triggers",
+            Language::German => "Kürzel",
+        }
+    }
+
+    pub fn search_descriptions(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Names and descriptions",
+            Language::German => "Namen und Beschreibungen",
+        }
+    }
+
+    pub fn search_tags(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Tags",
+            Language::German => "Schlagwörter",
+        }
+    }
+
+    pub fn search_replacements(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Replacement content",
+            Language::German => "Eingefügter Text",
+        }
+    }
+
+    pub fn welcome_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Welcome to WayExpand",
+            Language::German => "Willkommen bei WayExpand",
+        }
+    }
+
+    pub fn welcome_intro(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Set up a test expansion, then verify it in an app you use every day.",
+            Language::German => "Richten Sie eine Test-Ersetzung ein und prüfen Sie sie in einer täglich genutzten App.",
+        }
+    }
+
+    pub fn select_snippet_prompt(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Select a snippet from your library to edit it.",
+            Language::German => "Wählen Sie ein Snippet aus Ihrer Bibliothek zum Bearbeiten aus.",
+        }
+    }
+
+    pub fn onboarding_desktop(&self, desktop: &str, wayland: bool) -> String {
+        match (self.lang, wayland) {
+            (Language::English, true) => format!("{desktop} · Wayland session detected"),
+            (Language::English, false) => format!("{desktop} · Wayland session not detected"),
+            (Language::German, true) => format!("{desktop} · Wayland-Sitzung erkannt"),
+            (Language::German, false) => format!("{desktop} · Keine Wayland-Sitzung erkannt"),
+        }
+    }
+
+    pub fn onboarding_probe_caveat(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Backend probes show what may be available; they do not certify reliable input or output.",
+            Language::German => "Backend-Prüfungen zeigen mögliche Verfügbarkeit, zertifizieren aber keine zuverlässige Ein- oder Ausgabe.",
+        }
+    }
+
+    pub fn onboarding_app_caveat(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Application filters depend on desktop integration and may be unavailable."
+            }
+            Language::German => {
+                "App-Filter benötigen Desktop-Integration und sind möglicherweise nicht verfügbar."
+            }
+        }
+    }
+
+    pub fn create_test_snippet(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Create test snippet",
+            Language::German => "Testsnippet erstellen",
+        }
+    }
+
+    pub fn onboarding_try_text(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Then type :wayexpand-test in another app. It expands to “WayExpand is working!” Use a normal text field, never a password field.",
+            Language::German => "Geben Sie danach :wayexpand-test in einer anderen App ein. Es wird zu „WayExpand is working!“. Verwenden Sie ein normales Textfeld, kein Passwortfeld.",
+        }
+    }
+
+    pub fn onboarding_sample_description(&self) -> &'static str {
+        match self.lang {
+            Language::English => "A test expansion for your first-run check",
+            Language::German => "Eine Textersetzung zum Ausprobieren",
+        }
+    }
+
+    pub fn onboarding_sample_category(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Getting started",
+            Language::German => "Erste Schritte",
+        }
+    }
+
+    pub fn onboarding_certification_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Manual verification only · this desktop is not automatically certified."
+            }
+            Language::German => {
+                "Nur manuell geprüft · dieser Desktop ist nicht automatisiert zertifiziert."
+            }
+        }
+    }
+
+    pub fn onboarding_support_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "2 · Input and application support",
+            Language::German => "2 · Eingabe und App-Unterstützung",
+        }
+    }
+
+    pub fn onboarding_desktop_step(&self) -> &'static str {
+        match self.lang {
+            Language::English => "1 · Desktop",
+            Language::German => "1 · Desktop",
+        }
+    }
+
+    pub fn onboarding_detection(&self, available: bool) -> &'static str {
+        match (self.lang, available) {
+            (Language::English, true) => "Application detection probe available",
+            (Language::English, false) => "Application detection unavailable on this desktop",
+            (Language::German, true) => "Prüfung der App-Erkennung verfügbar",
+            (Language::German, false) => "App-Erkennung auf diesem Desktop nicht verfügbar",
+        }
+    }
+
+    pub fn onboarding_keyboard_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Keyboard capture",
+            Language::German => "Tastatureingabe",
+        }
+    }
+
+    pub fn onboarding_injection_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Text injection",
+            Language::German => "Texteingabe",
+        }
+    }
+
+    pub fn onboarding_backend_state(&self, state: wayexpand_core::BackendState) -> &'static str {
+        match (self.lang, state) {
+            (Language::English, wayexpand_core::BackendState::Available) => "Detected",
+            (Language::German, wayexpand_core::BackendState::Available) => "Erkannt",
+            (Language::English, wayexpand_core::BackendState::RequiresPermission) => {
+                "Permission required"
+            }
+            (Language::German, wayexpand_core::BackendState::RequiresPermission) => {
+                "Berechtigung erforderlich"
+            }
+            (Language::English, wayexpand_core::BackendState::Implemented) => {
+                "Supported for testing · not verified"
+            }
+            (Language::German, wayexpand_core::BackendState::Implemented) => {
+                "Zum Testen unterstützt · nicht geprüft"
+            }
+            (
+                Language::English,
+                wayexpand_core::BackendState::Unavailable
+                | wayexpand_core::BackendState::NotImplemented,
+            ) => "Unavailable",
+            (
+                Language::German,
+                wayexpand_core::BackendState::Unavailable
+                | wayexpand_core::BackendState::NotImplemented,
+            ) => "Nicht verfügbar",
+        }
+    }
+
+    pub fn onboarding_safety_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "3 · Safe expansion check",
+            Language::German => "3 · Sicherer Ersetzungstest",
         }
     }
 
@@ -431,29 +633,6 @@ impl Strings {
     }
 
     // Editor
-    pub fn build_first(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Build your first expansion",
-            Language::German => "Bauen Sie Ihre erste Erweiterung",
-        }
-    }
-
-    pub fn build_description(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Turn repetitive text into a fast, reliable shortcut.",
-            Language::German => {
-                "Verwandeln Sie wiederholten Text in eine schnelle, zuverlässige Verknüpfung."
-            }
-        }
-    }
-
-    pub fn create_snippet(&self) -> &'static str {
-        match self.lang {
-            Language::English => "+ Create snippet",
-            Language::German => "+ Snippet erstellen",
-        }
-    }
-
     pub fn snippet_details(&self) -> &'static str {
         match self.lang {
             Language::English => "Snippet details",
@@ -965,13 +1144,6 @@ impl Strings {
             (Language::German, FontScale::Large) => "Groß (120 %)",
             (Language::German, FontScale::ExtraLarge) => "Sehr groß (150 %)",
             (Language::German, FontScale::Huge) => "Riesig (200 %)",
-        }
-    }
-
-    pub fn settings_tooltip(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Appearance, language, and engine settings",
-            Language::German => "Erscheinungsbild, Sprache und Engine-Einstellungen",
         }
     }
 
