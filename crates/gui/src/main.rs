@@ -3273,6 +3273,62 @@ mod tests {
     }
 
     #[test]
+    fn failed_reload_leaves_the_loaded_editor_snapshot_untouched() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-failed-reload-{}.toml",
+            std::process::id()
+        ));
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: ":before".into(),
+                replacement: "original text".into(),
+                description: "original description".into(),
+                tags: vec!["preserve".into()],
+                category: "original category".into(),
+                app_filter: vec!["org.example.Editor".into()],
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let _ = fs::remove_file(&path);
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let original_config = app.config.clone();
+        let original_document = app.config_document.to_string();
+        let original_revision = app.config_revision.clone();
+        let original_selected_id = app.selected_id.clone();
+        let original_draft = app.draft.as_ref().unwrap().clone();
+        fs::write(&path, "[[expansion]\nthis is not valid TOML").unwrap();
+
+        app.perform_reload();
+
+        assert_eq!(
+            format!("{:?}", app.config),
+            format!("{:?}", original_config)
+        );
+        assert_eq!(app.config_document.to_string(), original_document);
+        assert_eq!(app.config_revision, original_revision);
+        assert_eq!(app.selected_id, original_selected_id);
+        let draft = app.draft.as_ref().unwrap();
+        assert_eq!(draft.trigger, original_draft.trigger);
+        assert_eq!(draft.description, original_draft.description);
+        assert_eq!(draft.replacement, original_draft.replacement);
+        assert_eq!(draft.tags, original_draft.tags);
+        assert_eq!(draft.app_filter, original_draft.app_filter);
+        assert_eq!(app.preview_input, original_draft.trigger);
+        assert_eq!(app.selected, Some(0));
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn gui_core_revision_guard_catches_a_write_after_the_early_check() {
         let path = std::env::temp_dir().join(format!(
             "wayexpand-gui-revision-race-{}.toml",
