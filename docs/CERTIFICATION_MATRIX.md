@@ -19,13 +19,13 @@ manual test is not certification; the machine-readable artifact from
 | **KDE Plasma** | 6.6.x | evdev | libei | KWin D-Bus | Manually tested; not certified | 2026-09 | evdev has no password-field awareness; automated certification pending |
 | **KDE Plasma** | 6.5.x | evdev | libei | KWin D-Bus | Experimental | pending | Likely compatible |
 | **KDE Plasma** | 6.7.x | evdev | libei | KWin D-Bus | Experimental | pending | Pre-release testing welcome |
-| **GNOME** | 47.x | input-method-v2 | input-method-v2 | N/A | Experimental | pending | Full text support, no keyboard capture |
-| **GNOME** | 46.x | input-method-v2 | input-method-v2 | N/A | Experimental | pending | Full text support, no keyboard capture |
-| **Sway** | 0.20.x | evdev/libei | libei | wlr-foreign-toplevel | Experimental | pending | Requires manual setup |
-| **Sway** | 0.19.x | evdev/libei | libei | wlr-foreign-toplevel | Experimental | pending | Requires manual setup |
-| **Hyprland** | 0.45.x | evdev/libei | libei | wlr-foreign-toplevel | Experimental | pending | Requires manual setup |
-| **Hyprland** | 0.40.x | evdev/libei | libei | wlr-foreign-toplevel | Experimental | pending | Requires manual setup |
-| **river** | 0.4.x | evdev/libei | libei | wlr-foreign-toplevel | Experimental | pending | Minimal testing |
+| **GNOME** | 47.x | input-method-v2 | input-method-v2 | Unavailable | Experimental | pending | No keyboard capture; filtered expansions fail closed |
+| **GNOME** | 46.x | input-method-v2 | input-method-v2 | Unavailable | Experimental | pending | No keyboard capture; filtered expansions fail closed |
+| **Sway** | 0.20.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
+| **Sway** | 0.19.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
+| **Hyprland** | 0.45.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
+| **Hyprland** | 0.40.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
+| **river** | 0.4.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
 | **X11** | any | evdev | clipboard | N/A | Unsupported | N/A | Legacy; not supported for v1.2+ |
 
 ## Detailed Certification Results
@@ -74,7 +74,7 @@ authoritative sensitive-field signal where available.
 
 **Known Limitations:**
 - **No keyboard capture:** Function keys, arrow keys, Escape cannot be expanded. Use text-based alternatives.
-- **No window-specific filtering:** `app_filter` does not work; expansions apply globally to all apps
+- **No window tracking:** `app_filter`-scoped expansions fail closed; they are not applied globally.
 - **No sensitive field detection:** Relies on GNOME's text input filtering (usually works, but not guaranteed)
 
 **When to Use:**
@@ -93,20 +93,25 @@ authoritative sensitive-field signal where available.
 
 **Configuration:**
 - Compositor: Sway 0.20.x
-- Capture: evdev + libei
-- Injection: libei
-- Window Tracking: wlr-foreign-toplevel protocol
+- Capture: evdev
+- Injection: wlroots virtual keyboard (experimental)
+- Window Tracking: unavailable (not shipped)
 
 **Known Limitations:**
 - **Untested at scale:** Limited real-world usage feedback
 - **Manual setup required:** Backend selection not automatic; requires explicit configuration
 - **Portal reconnection edge cases:** libei socket reconnection not fully tested
+- **No window tracking:** `app_filter`-scoped expansions fail closed on Sway.
 
 **Recommendation:** ⚠️ Experimental. Likely compatible based on architecture, but limited validation. Contributions and testing welcome.
 
 ### ⚠️ Hyprland 0.45.x - EXPERIMENTAL
 
 **Same as Sway 0.20.x**
+
+In particular, focused-window tracking is not shipped on Hyprland, so
+`app_filter`-scoped expansions fail closed rather than using the
+`wlr-foreign-toplevel-management` protocol.
 
 ### ❌ X11 - UNSUPPORTED
 

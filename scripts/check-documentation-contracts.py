@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -26,6 +27,14 @@ def main() -> int:
     architecture = (ROOT / "docs/ACTION_BROKER_ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
+    compositor_matrix = json.loads(
+        (ROOT / "tests/certification/compositor-matrix.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    certification_doc = (ROOT / "docs/CERTIFICATION_MATRIX.md").read_text(
+        encoding="utf-8"
+    )
 
     version_match = re.search(r'^version = "([^"]+)"', cargo, re.MULTILINE)
     version = version_match.group(1) if version_match else None
@@ -44,13 +53,47 @@ def main() -> int:
         if name not in gui_doc:
             errors.append(f"GUI documentation does not mention color pack {name!r}")
 
-    image = ROOT / "docs/images/gui-empty-library.png"
+    image = ROOT / "docs/archive/images/gui-empty-library-pre-settings-consolidation.png"
     if not image.is_file():
-        errors.append("GUI documentation screenshot is missing")
+        errors.append("archived GUI screenshot is missing")
     else:
-        for document in (ROOT / "README.md", ROOT / "docs/GUI.md", ROOT / "docs/GETTING_STARTED.md"):
-            if "gui-empty-library.png" not in document.read_text(encoding="utf-8"):
-                errors.append(f"{document.relative_to(ROOT)} does not reference the current GUI screenshot")
+        gui_doc = (ROOT / "docs/GUI.md").read_text(encoding="utf-8")
+        if "Historical GUI screenshot" not in gui_doc or image.relative_to(ROOT / "docs").as_posix() not in gui_doc:
+            errors.append("GUI documentation must label the archived screenshot as historical")
+        for document in (ROOT / "README.md", ROOT / "docs/GETTING_STARTED.md"):
+            if "gui-empty-library" in document.read_text(encoding="utf-8"):
+                errors.append(f"{document.relative_to(ROOT)} presents the historical screenshot as current")
+
+    # Window-tracker availability is security-sensitive: app_filter must fail
+    # closed where there is no shipped tracker. Keep the certification prose
+    # consistent with the machine-readable matrix used by certify.
+    quick_reference = certification_doc.split("## Quick Reference", 1)[-1].split(
+        "## Detailed Certification Results", 1
+    )[0]
+    for target in compositor_matrix["targets"]:
+        desktop = target["display"].split("/", 1)[0].strip().split()[0]
+        rows = [line for line in quick_reference.splitlines() if f"**{desktop}**" in line]
+        if target["application_filter"] == "unavailable":
+            if not rows or any("Unavailable" not in row for row in rows):
+                errors.append(
+                    f"certification matrix must mark {desktop} window tracking unavailable"
+                )
+            if any("wlr-foreign-toplevel" in row for row in rows):
+                errors.append(
+                    f"certification quick reference claims an unshipped tracker for {desktop}"
+                )
+            section = certification_doc.split(f"### ⚠️ {desktop}", 1)
+            section_text = section[1].split("\n### ", 1)[0] if len(section) == 2 else ""
+            if "app_filter" not in section_text or "fail closed" not in section_text.lower():
+                errors.append(
+                    f"certification details must explain fail-closed app_filter behavior for {desktop}"
+                )
+        if "evdev+wlroots" in target["input_paths"] and any(
+            "| evdev | wlroots virtual keyboard |" not in row for row in rows
+        ):
+            errors.append(
+                f"certification backend columns do not match the declared wlroots route for {desktop}"
+            )
 
     if not broker_source.is_file():
         errors.append("Action Broker standalone binary source is missing")

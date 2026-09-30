@@ -358,19 +358,17 @@ Potential color packs for future releases:
 - [ ] **Custom user themes** — User-defined color configurations
 - [ ] **Time-based auto-switching** — Dark at night, light during day
 
-## Current GUI screenshot
+## Historical GUI screenshot
 
-The following frame is captured from the current v1.2 GUI build. It shows the
-empty-library state, the two-level toolbar, the search field, and the primary
-first-snippet action:
+The archived image below predates the Settings-window consolidation and does
+not represent the current toolbar or first-run screen. It is retained only as
+visual history; a fresh screenshot will be added after the current GUI can be
+captured reliably in the release environment.
 
-![WayExpand GUI empty-library state](images/gui-empty-library.png)
+![Historical WayExpand GUI before Settings consolidation](archive/images/gui-empty-library-pre-settings-consolidation.png)
 
-The screenshot is intentionally a real empty state rather than a fabricated
-library: it is the first screen a new user sees after starting with a missing
-configuration. The Appearance tab of the Settings window uses the same
-surface, border, and focus system and previews each of the eight packs with a
-live swatch.
+The Appearance tab of the current Settings window previews each of the eight
+color packs with a live swatch.
 
 ## Retro Fonts for WayExpand Themes
 

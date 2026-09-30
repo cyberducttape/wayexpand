@@ -157,7 +157,8 @@ a list of case-insensitive substrings matched against the focused window's
 app id or title. This needs to know which window is focused, and unlike
 text capture and injection there is no Wayland protocol for that which
 works across compositors: `wlr-foreign-toplevel-management-unstable-v1`
-covers wlroots compositors (Sway, Hyprland), but KDE Plasma's KWin
+is implemented by some wlroots compositors (Sway, Hyprland), but WayExpand
+does not currently ship a tracker using it. KDE Plasma's KWin
 implements neither it nor the newer `ext-foreign-toplevel-list-v1`
 staging protocol -- a deliberate privacy stance, the same one that keeps
 KWin off `zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1`

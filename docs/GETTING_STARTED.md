@@ -49,8 +49,6 @@ the row below. Appearance, language, and engine preferences all live in the
 Settings window. A status line along the bottom of the window reports the
 result of the last action and the configuration file being edited.
 
-![WayExpand graphical editor](images/gui-empty-library.png)
-
 The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
 `WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
 They rewrite the complete TOML file in canonical formatting, so comments and

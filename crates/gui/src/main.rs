@@ -2083,6 +2083,12 @@ impl GuiApp {
     }
 
     fn render_snippet_list(&mut self, ctx: &egui::Context, palette: &Palette) {
+        // The first-run editor is already a focused setup surface with one
+        // explicit test-snippet action. Avoid a mostly empty library panel
+        // with a competing New button until there is a saved item to browse.
+        if self.config.expansion.is_empty() && !self.new_draft {
+            return;
+        }
         egui::SidePanel::left("snippets")
             .resizable(true)
             .default_width(340.0)

@@ -34,8 +34,6 @@ command-backed snippets, and fleet policy support. The backend engineering is
 there when you need to inspect it, but the goal is simple: type less, paste
 less, and keep your snippets local.
 
-![WayExpand GUI empty-library view](docs/images/gui-empty-library.png)
-
 > **Status:** WayExpand is usable today, but desktop integration is still
 > compositor-dependent. Run `wayexpand doctor` on your own session before
 > enabling a backend. No compositor is currently certified by automated
