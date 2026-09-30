@@ -23,6 +23,9 @@ jq -e --argjson expected "$expected" '
     (.wayexpand_version | type == "string") and
     (.wayexpand_commit | type == "string") and
     (.certified | type == "boolean") and
+    (.active_daemon | type == "object" and
+        (.connected | type == "boolean") and
+        (.state | type == "string")) and
     (.required_scenarios | sort == $expected) and
     ([.checks[] | select(.status == "not-run") | .name] | sort == $expected) and
     (.certified == false)

@@ -13,12 +13,15 @@ wayexpand certify
 wayexpand certify --json > wayexpand-certification.json
 ```
 
-The JSON record includes the detected desktop, selected input mode, every
-check with a stable status, and the limitations of the selected backend. It is
-safe to attach to a support report and contains no typed text or expansion
-contents. Certification scope is direct keyboard input and already-committed
-text. Active IME/preedit composition is intentionally out of scope and is
-reported as `unsupported-by-design`; a certification never implies otherwise.
+The JSON record includes the detected desktop, automatic input selection, the
+currently connected daemon route (reported separately from that selection),
+every check with a stable status, and the limitations of the selected backend.
+The daemon route is a point-in-time status probe, not proof of correct typing
+or insertion. The report is safe to attach to a support report and contains no
+typed text or expansion contents. Certification scope is direct keyboard
+input and already-committed text. Active IME/preedit composition is
+intentionally out of scope and is reported as `unsupported-by-design`; a
+certification never implies otherwise.
 
 For an operator evidence record after running the real-client scenarios, use
 the collector with `--format json` and a validated results file:

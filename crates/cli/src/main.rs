@@ -1508,6 +1508,56 @@ fn print_certification(json: bool) -> Result<bool> {
         &selection_detail,
     );
 
+    // Certification is often run after a user has explicitly enabled a
+    // backend. Report the live daemon route separately from automatic
+    // selection so a connected evdev/libei service is not presented as if the
+    // machine were currently stdin-only. A status response is observational;
+    // it never changes the certification result or promotes a probe to proof.
+    let active_daemon = match read_daemon_status() {
+        Ok(response) => {
+            let snapshot = status_as_json(&response)?;
+            let state = snapshot
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            let source = snapshot.get("source").and_then(serde_json::Value::as_str);
+            let backend = snapshot.get("backend").and_then(serde_json::Value::as_str);
+            let connected = state == "connected" && source.is_some() && backend.is_some();
+            let detail = match (source, backend) {
+                (Some(source), Some(backend)) => {
+                    format!("state={state}; active route is {source} + {backend}")
+                }
+                _ => format!("daemon returned state={state}, but no complete active route"),
+            };
+            add_check(
+                "runtime",
+                "active daemon route",
+                if connected { "verified" } else { "unavailable" },
+                &detail,
+            );
+            serde_json::json!({
+                "connected": connected,
+                "state": state,
+                "source": source,
+                "backend": backend,
+            })
+        }
+        Err(error) => {
+            add_check(
+                "runtime",
+                "active daemon route",
+                "unavailable",
+                &format!("could not query the daemon: {error}"),
+            );
+            serde_json::json!({
+                "connected": false,
+                "state": "unavailable",
+                "source": null,
+                "backend": null,
+            })
+        }
+    };
+
     // These checks intentionally remain NOT RUN until a compositor-specific
     // harness drives real GTK/Qt/Wayland clients. A preflight must never turn
     // protocol availability into a false CERTIFIED claim.
@@ -1532,10 +1582,17 @@ fn print_certification(json: bool) -> Result<bool> {
             "surrounding-text behavior depends on the client toolkit",
         ]
     } else if selected_capture == "stdin" {
-        vec![
-            "no automatic keyboard input path is selected",
-            "text expansion is available only through the stdin test harness",
-        ]
+        if active_daemon["connected"] == true {
+            vec![
+                "a manually configured daemon route is connected; automatic selection remains stdin-only",
+                "desktop client behavior still requires certification scenarios",
+            ]
+        } else {
+            vec![
+                "no automatic keyboard input path is selected",
+                "text expansion is available only through the stdin test harness",
+            ]
+        }
     } else {
         wayexpand_core::all_capabilities()
             .into_iter()
@@ -1551,6 +1608,7 @@ fn print_certification(json: bool) -> Result<bool> {
         "desktop": capabilities.compositor.name(),
         "config_path": certification_config,
         "selected_mode": selected_capture,
+        "active_daemon": active_daemon,
         "required_scenarios": required_scenarios,
         "checks": checks,
         "limitations": limitations,
@@ -1566,6 +1624,7 @@ fn print_certification(json: bool) -> Result<bool> {
         );
         println!("  Desktop: {}", report["desktop"]);
         println!("  Selected mode: {}", report["selected_mode"]);
+        println!("  Active daemon: {}", report["active_daemon"]);
         for check in report["checks"].as_array().into_iter().flatten() {
             println!(
                 "  [{:18}] {:32} {}",
@@ -1593,6 +1652,28 @@ fn certification_selection_status(selected_capture: &str) -> &'static str {
         "stdin" => "unsupported",
         _ => "available",
     }
+}
+
+fn read_daemon_status() -> Result<String> {
+    let path = env::var_os("WAYEXPAND_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
+        })
+        .context("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")?;
+    let mut stream = UnixStream::connect(&path)
+        .with_context(|| format!("connecting to daemon socket {}", path.display()))?;
+    stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
+    writeln!(stream, "status")?;
+    let mut response = Vec::with_capacity(MAX_CONTROL_RESPONSE_BYTES);
+    stream
+        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut response)?;
+    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
+        bail!("daemon status exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
+    }
+    String::from_utf8(response).context("daemon status is not valid UTF-8")
 }
 
 fn certification_scenarios() -> Result<Vec<String>> {
