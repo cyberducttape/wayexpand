@@ -3395,9 +3395,6 @@ impl eframe::App for GuiApp {
     }
 }
 
-/// Whether `text` is exactly `values` joined with `", "`, decided without
-/// building that joined string. The editor stores tags and app filters as one
-/// comma-separated line while the configuration stores them as a list, and
 fn expand_user_path(value: &str) -> PathBuf {
     expand_user_path_with_home(value, env::var_os("HOME").as_deref())
 }

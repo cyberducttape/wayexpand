@@ -35,7 +35,7 @@ Controls:
 - `n` creates a snippet, prompting for trigger and replacement
 - `e` edits the selected replacement
 - `D` edits the selected description
-- `t` edits comma-separated tags
+- `t` edits tags as a JSON string array (for example, `["ops", "customer, west"]`)
 - `Ctrl-U` clears the active prompt before entering replacement text
 - `m` toggles immediate and Unicode-aware word-boundary matching
 - `E` opens the selected replacement in `$VISUAL` or `$EDITOR` for multiline editing
@@ -81,10 +81,12 @@ configuration files receive IDs when loaded, and the next save writes them;
 the GUI uses these IDs to keep selection, undo snapshots, and TOML comments
 attached to the same snippet through trigger edits and reordering. IDs normally
 need no manual editing.
-It can also create and edit bounded direct-program expansions: enter the
-program, one argument per line, timeout, and optional successful-output cache
-duration. Shell syntax is never interpreted by this editor. Invalid command
-settings or unsafe limits are rejected before the file is changed.
+It can also create and edit bounded direct-program expansions. Each argument
+has its own editable row, so empty strings, whitespace, and embedded newlines
+are preserved exactly; rows can be reordered or removed. The editor also
+exposes the command environment policy and explicitly passed environment
+variables. Shell syntax is never interpreted. Invalid command settings or
+unsafe limits are rejected before the file is changed.
 The `Template variables` palette inserts supported built-ins such as date,
 time, hostname, username, newline, and tab directly into the replacement;
 unknown template syntax is still rejected by core validation.
