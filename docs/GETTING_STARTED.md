@@ -50,17 +50,18 @@ Settings window. A status line along the bottom of the window reports the
 result of the last action and the configuration file being edited.
 
 The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
-`WAYEXPAND_CONFIG`). Both editors save atomically and validate before writing.
-They rewrite the complete TOML file in canonical formatting, so comments and
-hand formatting are not preserved. If you maintain comments or formatting in
-the file, edit the TOML directly and keep a backup before saving through an
-editor.
+`WAYEXPAND_CONFIG`). The GUI validates and saves atomically while preserving
+unrelated TOML comments and formatting. The TUI and CLI use canonical TOML
+serialization, so prefer the GUI or direct TOML editing if preserving comments
+is important.
 
-### 3. Start the route selected for your session
+### 3. Configure and start a route for your session
 
-Automatic mode intentionally leaves raw evdev disabled, even when
-`/dev/input` is readable. If you choose to acknowledge global keyboard capture,
-install the evdev permission rule and start the explicit service:
+The guided `wayexpand setup` command recommends a detected route and explains
+its limits. Automatic mode intentionally leaves raw evdev disabled, even when
+`/dev/input` is readable. If you explicitly choose evdev and accept its global
+keyboard visibility/no-password-field-awareness tradeoff, install the
+permission rule and start that service:
 
 ```sh
 sudo ./scripts/install-evdev-permissions.sh --access=active-seat
@@ -68,12 +69,11 @@ systemctl --user enable --now wayexpand-evdev.service
 wayexpand status --json
 ```
 
-The status should report `state=connected`. If you do not acknowledge evdev,
-the automatic fallback is stdin and is intended for harnesses, not normal
-desktop capture. Input-method-v2 is an explicit experimental opt-in; read its
-experimental key pass-through and held-key/repeat limitations before starting
-`wayexpand-input-method.service`. For either route, read the security
-tradeoffs in [SECURITY.md](../SECURITY.md).
+The status should report `state=connected`. Stdin is only a test harness, not
+normal desktop capture. Input-method-v2 is an explicit experimental opt-in;
+read its key pass-through and held-key/repeat limitations before enabling its
+service. For any route, read the security tradeoffs in
+[SECURITY.md](../SECURITY.md).
 
 ### 4. Test without typing into an application
 

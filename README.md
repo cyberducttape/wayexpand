@@ -5,10 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
 
-## Fast, local text expansion for modern Linux desktops
+## Local text expansion for Linux desktops
 
-Type a short trigger and get the text you use every day — locally, instantly,
-and without sending anything to the cloud.
+Type a short trigger and get the text you use every day — locally, without
+sending anything to the cloud.
 
 ```text
 ;;sig   →  Stephan Loesevitz
@@ -29,10 +29,8 @@ No cloud. No account. No telemetry.
 Built to be boring to operate: local by default, explicit about permissions,
 and conservative when configuration or command execution looks unsafe.
 
-It includes a GUI, a scriptable CLI, Espanso import, templates,
-command-backed snippets, and fleet policy support. The backend engineering is
-there when you need to inspect it, but the goal is simple: type less, paste
-less, and keep your snippets local.
+It includes a GUI, a scriptable CLI, Espanso import, templates, and fleet
+policy support. The goal is simple: type less and keep your snippets local.
 
 > **Status:** WayExpand is usable today, but desktop integration is still
 > compositor-dependent. Run `wayexpand doctor` on your own session before
@@ -48,27 +46,6 @@ less, and keep your snippets local.
 > elsewhere. If either capability is essential
 > to your workflow, verify it with `wayexpand doctor` on the exact desktop
 > session before deployment.
-
-## Will it work on my desktop?
-
-WayExpand has experimental/backend paths for KDE Plasma/KWin, GNOME, Sway,
-Hyprland, and other wlroots compositors, but availability varies by desktop,
-version, and portal/protocol. This does not mean every feature is supported on
-each desktop: in particular, app filtering currently has a KWin-only window
-tracker, and IME preedit/composition is not supported.
-
-After installing, run:
-
-```sh
-wayexpand doctor
-wayexpand explain-backend
-```
-
-For the current desktop matrix, see:
-
-- [Getting started](docs/GETTING_STARTED.md)
-- [Support matrix](docs/SUPPORT_MATRIX.md)
-- [Certification matrix](docs/CERTIFICATION_MATRIX.md)
 
 ## Install
 
@@ -93,7 +70,7 @@ see [Packaging](docs/PACKAGING.md) for the verified options.
 For those release assets, install the downloaded local package with
 `sudo apt install ./wayexpand_*_amd64.deb` or
 `sudo dnf install ./wayexpand-*.x86_64.rpm`. These are per-release packages,
-not a signed auto-updating Debian/Fedora repository.
+not auto-updating Debian/Fedora repositories.
 
 From source:
 
@@ -108,78 +85,42 @@ wayexpand-gui
 The normal installers do not run as root, enable services automatically, grant
 raw-input permissions, or accept portal consent for you.
 
-Other paths:
-
-- Arch packaging preview: `makepkg -si` (AUR publication is pending)
-- Fedora/RHEL: build the maintained RPM spec (no official Copr repository yet)
-- Release tarballs: `./scripts/install-release.sh`
-- Packaging notes: [docs/PACKAGING.md](docs/PACKAGING.md)
-
-## Create your first snippet
-
-Create the file privately before adding this to it:
+## Enable WayExpand and create your first snippet
 
 ```sh
-install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
+wayexpand doctor       # inspect this desktop's available paths
+wayexpand setup        # choose/configure a path; review any security prompt
+wayexpand status       # confirm the selected service is running
+wayexpand-gui          # create and save a snippet
 ```
 
-Then add this to `~/.config/wayexpand/expansions.toml`:
+In the GUI, create a snippet with trigger `;;hello` and replacement
+`Hello, world!`, save it, then type `;;hello` in a plain-text field. You can
+also use `wayexpand-ui` for the terminal editor. `wayexpand test ';;hello'`
+checks matching in the config; it does not test desktop capture or injection.
 
-```toml
-[[expansion]]
-trigger = ";;email"
-replacement = """Hi,
-Stephan Loesevitz
-Cyberdeck Labs
-stephan@example.com"""
-```
+Automatic setup never grants raw-input access by itself. In particular,
+evdev can observe typing in password fields and is not password-safe. Read the
+backend warning shown by setup and run `wayexpand doctor` before relying on
+expansion. If no suitable route is available, setup reports that instead of
+silently enabling one.
 
-Then type `;;email` in a supported application.
+## Desktop compatibility
 
-Prefer the GUI?
+Desktop integration remains compositor- and session-dependent. No compositor
+is currently certified by automated end-to-end tests. Active IME/preedit
+composition is unsupported, and app-filtered snippets currently have a window
+tracker only on KDE/KWin. Check your exact session before relying on either
+feature:
 
 ```sh
-wayexpand-gui
+wayexpand doctor
+wayexpand explain-backend
 ```
 
-Prefer the terminal?
-
-```sh
-wayexpand setup
-wayexpand status
-wayexpand edit
-```
-
-## Common commands
-
-```sh
-wayexpand doctor                         # check desktop/backend availability
-wayexpand setup                          # guided setup
-wayexpand-gui                            # graphical snippet manager
-wayexpand test ';;email' expansions.toml # simulate a trigger
-wayexpand preview ':today' expansions.toml
-wayexpand validate expansions.toml
-wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
-# Migration counts and unmapped-option warnings are printed to stderr.
-```
-
-For stable JSON output and automation contracts, see
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-
-## Features
-
-- Fast local expansion for signatures, replies, dates, commands, and boilerplate
-- GUI and CLI over the same TOML configuration
-- Espanso YAML import
-- Unicode-aware trigger matching for committed text (not IME preedit)
-- Optional word-boundary matching
-- Case propagation
-- Template variables such as dates, username, and cursor placement when the
-  selected backend supports cursor positioning
-- Command-backed snippets without shell interpretation
-- App-filtered snippets with the currently KWin-only window tracker
-- Fleet configuration and organization policy
-- Hardened daemon units and bounded resource limits
+See the [support matrix](docs/SUPPORT_MATRIX.md) and
+[certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known
+limits.
 
 ## Security and operational safety
 
@@ -196,14 +137,6 @@ group cleanup, and organization policy that can either audit or enforce
 restrictions. These controls are intended to make everyday operation
 predictable, not to claim that WayExpand is a security sandbox.
 
-Start here:
-
-- [Threat model](THREAT_MODEL.md)
-- [Security policy](SECURITY.md)
-- [Sensitive-field behavior by backend](docs/BACKENDS_SENSITIVE_FIELDS.md)
-- [Evdev access design](docs/EVDEV_ACCESS_DESIGN.md)
-- [IME and composition roadmap](docs/IME_COMPOSITION_ROADMAP.md)
-
 ## Migrating from Espanso
 
 ```sh
@@ -216,16 +149,14 @@ CLI's migration report or GUI preview for unmapped features before applying.
 See
 [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
-## Where to go next
+## More information
 
-- New users: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
-- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- Backend details: [docs/BACKENDS.md](docs/BACKENDS.md)
-- Desktop support: [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md)
-- Fleet deployment: [docs/FLEET_CONFIG.md](docs/FLEET_CONFIG.md)
-- Organization policy: [docs/ORGANIZATION_POLICY.md](docs/ORGANIZATION_POLICY.md)
-- Sysadmin snippets: [docs/FOR_SYSADMINS.md](docs/FOR_SYSADMINS.md)
-- Full documentation index: [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md)
+- [Getting started and troubleshooting](docs/GETTING_STARTED.md)
+- [Security and threat model](SECURITY.md) · [Threat model](THREAT_MODEL.md)
+- [Backend details](docs/BACKENDS.md) · [Support matrix](docs/SUPPORT_MATRIX.md)
+- [Packaging status](docs/PACKAGING.md)
+- [Migration from Espanso](docs/MIGRATION_FROM_ESPANSO.md)
+- [Fleet deployment](docs/FLEET_CONFIG.md) · [Documentation index](docs/DOCUMENTATION_INDEX.md)
 
 Non-English documentation: [Deutsch](README.de.md).
 
