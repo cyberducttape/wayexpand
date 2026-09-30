@@ -965,7 +965,9 @@ impl GuiApp {
                             theme::tint(palette.warning, 38),
                         );
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(4.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Appearance, language, and engine preferences all live
                         // in one settings window; the theme toggle stays in the
@@ -993,7 +995,7 @@ impl GuiApp {
                         }
                     });
                 });
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.add(
                         TextEdit::singleline(&mut self.filter)
@@ -1385,8 +1387,8 @@ impl GuiApp {
                     } else {
                         self.strings.filtered_snippets()
                     })
-                    .small()
-                    .color(palette.muted),
+                    .size(15.0)
+                    .strong(),
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -1480,6 +1482,7 @@ impl GuiApp {
                         } else if response.row.clicked() {
                             self.request_action(PendingAction::Select(index));
                         }
+                        ui.add_space(3.0);
                     }
                     if self.config.expansion.is_empty() {
                         ui.add_space(16.0);
@@ -1568,7 +1571,7 @@ impl GuiApp {
                             .fill(palette.surface)
                             .stroke(egui::Stroke::new(1.0, palette.border))
                             .corner_radius(egui::CornerRadius::same(10))
-                            .inner_margin(egui::Margin::same(14))
+                            .inner_margin(egui::Margin::same(18))
                             .show(ui, |ui| {
                                 theme::section_header(ui, "", self.strings.snippet_details());
                                 ui.add_space(6.0);

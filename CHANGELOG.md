@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Polish the GUI's shared visual language: controls now have consistent sizing,
+  quieter hover states, visible keyboard focus rings, correctly composited
+  status pills, and more deliberate spacing across the toolbar, library, and
+  editor surfaces.
 - Fix the daemon reporting an incomplete, partly fabricated status while the
   input-method source is reconnecting: that one transition formatted its own
   status line, omitting `backend_mode` and all nine command-metric fields from

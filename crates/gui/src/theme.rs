@@ -138,17 +138,19 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
     visuals.widgets.inactive.fg_stroke = Stroke::new(2.0, palette.border);
 
-    // Enhanced hover state: stronger accent color + subtle shadow effect
-    visuals.widgets.hovered.bg_stroke = Stroke::new(2.0, palette.accent);
-    visuals.widgets.hovered.fg_stroke = Stroke::new(2.0, palette.accent);
+    // Hover should provide a clear change in state without making every
+    // toolbar control look selected. The selected/active state carries the
+    // heavier accent treatment below.
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.accent);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, palette.accent);
 
     // Active/focused state: brightest indicator for keyboard users
-    visuals.widgets.active.bg_stroke = Stroke::new(2.0, palette.accent);
-    visuals.widgets.active.fg_stroke = Stroke::new(2.5, palette.accent);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5, palette.accent);
+    visuals.widgets.active.fg_stroke = Stroke::new(2.0, palette.accent);
 
     style.visuals = visuals;
     style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-    style.spacing.button_padding = Vec2::new(12.0, 6.0);
+    style.spacing.button_padding = Vec2::new(12.0, 7.0);
 
     // Improved text input field sizing for better readability and editing
     style.spacing.text_edit_width = f32::INFINITY; // Use full available width
@@ -208,7 +210,7 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
     let background = blend_over(bg, ui.visuals().panel_fill);
     let fg = readable_text_color(fg, background);
     egui::Frame::new()
-        .fill(bg)
+        .fill(background)
         .corner_radius(CornerRadius::same(255))
         .inner_margin(Margin::symmetric(9, 3))
         .show(ui, |ui| {
@@ -271,6 +273,14 @@ pub fn chip_scaled(
         let fg = readable_text_color(fg, blend_over(bg, ui.visuals().panel_fill));
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(255), bg);
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect.expand(1.0),
+                CornerRadius::same(255),
+                Stroke::new(1.5, palette.accent),
+                egui::StrokeKind::Outside,
+            );
+        }
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, font, fg);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -314,6 +324,14 @@ pub fn colorpack_card(
             Stroke::new(if selected { 2.0 } else { 1.0 }, border),
             egui::StrokeKind::Inside,
         );
+        if response.has_focus() && !selected {
+            painter.rect_stroke(
+                rect.expand(1.0),
+                CornerRadius::same(10),
+                Stroke::new(1.5, palette.accent),
+                egui::StrokeKind::Outside,
+            );
+        }
         let swatch_rect = egui::Rect::from_min_size(
             rect.left_center() + Vec2::new(14.0 * scale, -16.0 * scale),
             Vec2::splat(32.0 * scale),
@@ -361,6 +379,7 @@ pub fn primary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui:
                 .strong(),
         )
         .fill(palette.accent)
+        .min_size(Vec2::new(0.0, 34.0))
         .stroke(Stroke::NONE),
     )
 }
@@ -372,6 +391,7 @@ pub fn secondary_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egu
     ui.add(
         egui::Button::new(egui::RichText::new(text).color(ui.visuals().text_color()))
             .fill(palette.surface_hover)
+            .min_size(Vec2::new(0.0, 34.0))
             .stroke(Stroke::new(1.0, palette.border)),
     )
 }
@@ -381,6 +401,7 @@ pub fn danger_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::
     ui.add(
         egui::Button::new(egui::RichText::new(text).color(palette.danger))
             .fill(Color32::TRANSPARENT)
+            .min_size(Vec2::new(0.0, 34.0))
             .stroke(Stroke::new(1.0, palette.danger)),
     )
 }
@@ -444,6 +465,14 @@ pub fn snippet_row_scaled(
         };
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(8), bg);
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect.expand(1.0),
+                CornerRadius::same(8),
+                Stroke::new(1.5, palette.accent),
+                egui::StrokeKind::Outside,
+            );
+        }
         if row.selected {
             let bar = egui::Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height()));
             painter.rect_filled(bar, CornerRadius::same(2), palette.accent);
