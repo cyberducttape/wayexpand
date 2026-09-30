@@ -1,6 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use wayexpand_core::{
     Config, ExpansionConfig, ExpansionEngine, InputEvent, OrganizationPolicy, Settings,
     WindowContext,
@@ -16,30 +13,6 @@ pub(crate) fn run_command_preview(draft: &Draft) -> Result<String, String> {
         Ok(None) => Err("Enable the dynamic command first".into()),
         Err(error) => Err(format!("Command settings invalid: {error}")),
     }
-}
-
-pub(crate) fn cache_key(draft: Option<&Draft>, app: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    if let Some(draft) = draft {
-        draft.trigger.hash(&mut hasher);
-        draft.replacement.hash(&mut hasher);
-        draft.match_mode.hash(&mut hasher);
-        draft.enabled.hash(&mut hasher);
-        draft.propagate_case.hash(&mut hasher);
-        draft.app_filter.hash(&mut hasher);
-        draft.description.hash(&mut hasher);
-        draft.tags.hash(&mut hasher);
-        draft.category.hash(&mut hasher);
-        draft.command_enabled.hash(&mut hasher);
-        draft.command_program.hash(&mut hasher);
-        draft.command_args.hash(&mut hasher);
-        draft.command_timeout_ms.hash(&mut hasher);
-        draft.command_cache_ms.hash(&mut hasher);
-        (draft.command_environment as u8).hash(&mut hasher);
-        draft.command_pass_env.hash(&mut hasher);
-    }
-    app.hash(&mut hasher);
-    hasher.finish()
 }
 
 pub(crate) fn render(
@@ -170,36 +143,6 @@ mod tests {
             ),
             "Hello"
         );
-    }
-
-    #[test]
-    fn cache_key_changes_when_preview_application_changes() {
-        assert_ne!(cache_key(None, "editor"), cache_key(None, "terminal"));
-    }
-
-    #[test]
-    fn cache_key_changes_when_command_draft_changes() {
-        let expansion = ExpansionConfig {
-            id: ExpansionConfig::new_id(),
-            trigger: ":hi".into(),
-            replacement: "Hello".into(),
-            description: String::new(),
-            tags: Vec::new(),
-            category: String::new(),
-            app_filter: Vec::new(),
-            match_mode: MatchMode::Immediate,
-            command: None,
-            enabled: true,
-            propagate_case: false,
-        };
-        let mut draft = Draft::from_expansion(&expansion);
-        let before = cache_key(Some(&draft), "");
-        draft.command_enabled = true;
-        draft.command_program = "/usr/bin/printf".into();
-        draft.command_args = vec!["changed".into()];
-        draft.command_timeout_ms = "1000".into();
-        draft.command_cache_ms = "500".into();
-        assert_ne!(before, cache_key(Some(&draft), ""));
     }
 
     #[test]

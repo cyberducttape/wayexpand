@@ -132,9 +132,13 @@ struct GuiApp {
     /// Reload can change the persisted font scale outside the settings dialog.
     /// Apply that style on the next frame after the config has been replaced.
     theme_refresh_pending: bool,
-    /// Cache of the last plain preview result. Stores (draft_hash, input, result)
-    /// to avoid rebuilding the ExpansionEngine on every repaint.
+    /// Cache of the last plain preview result. Stores (editor_revision, input,
+    /// result) to avoid rebuilding the ExpansionEngine on every repaint. The
+    /// revision is O(1), unlike hashing a potentially large draft.
     preview_cache: Option<(u64, String, String)>,
+    /// Incremented on editor input that may change the draft or preview app.
+    /// Preview cache validation therefore stays O(1) even for large snippets.
+    preview_revision: u64,
     /// A background "Use current app" detection in progress. KWin setup runs
     /// off the UI thread and is bounded by per-call D-Bus timeouts plus a
     /// total script-readiness deadline; the subsequent focused-window wait is
@@ -465,6 +469,7 @@ impl GuiApp {
             command_preview_cancel: None,
             theme_refresh_pending: false,
             preview_cache: None,
+            preview_revision: 0,
             app_detection: None,
             close_after_confirm: false,
             window_title: String::new(),
@@ -676,7 +681,7 @@ impl GuiApp {
     /// the daemon keeps expanding the old config, and the user has no way to
     /// know the two have diverged.
     fn set_saved_status(&mut self, status: Status) {
-        self.preview_cache = None;
+        self.invalidate_preview();
         self.clear_command_preview();
         let Some(sender) = self.runtime_sender.as_ref() else {
             self.status = status;
@@ -1430,9 +1435,8 @@ impl GuiApp {
             };
             Some(&self.config.expansion[index])
         };
-        let draft_hash = preview::cache_key(self.draft.as_ref(), &self.preview_app);
-        if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
-            if *cached_hash == draft_hash && cached_input == &self.preview_input {
+        if let Some((cached_revision, cached_input, cached_result)) = &self.preview_cache {
+            if *cached_revision == self.preview_revision && cached_input == &self.preview_input {
                 return cached_result.clone();
             }
         }
@@ -1444,8 +1448,17 @@ impl GuiApp {
             &self.preview_input,
             &self.preview_app,
         );
-        self.preview_cache = Some((draft_hash, self.preview_input.clone(), result.clone()));
+        self.preview_cache = Some((
+            self.preview_revision,
+            self.preview_input.clone(),
+            result.clone(),
+        ));
         result
+    }
+
+    fn invalidate_preview(&mut self) {
+        self.preview_revision = self.preview_revision.wrapping_add(1);
+        self.preview_cache = None;
     }
 
     /// Runs the draft's configured command exactly once, on explicit user
@@ -1457,7 +1470,7 @@ impl GuiApp {
         let Some(draft) = self.draft.as_ref() else {
             return;
         };
-        self.command_preview_key = Some(preview::cache_key(Some(draft), &self.preview_app));
+        self.command_preview_key = Some(self.preview_revision);
         let command = match draft.command_config() {
             Ok(Some(command)) => command,
             Ok(None) => {
@@ -2262,6 +2275,26 @@ impl GuiApp {
     }
 
     fn render_editor(&mut self, root: &mut egui::Ui, palette: &Palette) {
+        // egui sends text/key/paste/click events only on frames where user
+        // input can mutate an editor control. Advancing this scalar revision
+        // avoids hashing the full draft (which may contain megabytes of text)
+        // on every otherwise-idle repaint. Pointer movement is intentionally
+        // excluded so moving the mouse does not invalidate the preview.
+        let editor_input = root.ctx().input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Text(_)
+                        | egui::Event::Paste(_)
+                        | egui::Event::Cut
+                        | egui::Event::Key { pressed: true, .. }
+                        | egui::Event::PointerButton { pressed: true, .. }
+                )
+            })
+        });
+        if editor_input {
+            self.invalidate_preview();
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -2726,6 +2759,7 @@ impl GuiApp {
                                             if let Some(draft) = self.draft.as_mut() {
                                                 if !draft.app_filter.contains(&value) {
                                                     draft.app_filter.push(value.clone());
+                                                    self.invalidate_preview();
                                                 }
                                             }
                                             self.status = Status::success(
@@ -2985,11 +3019,8 @@ impl GuiApp {
                                     ui.label(self.strings.command_preview_help());
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
-                                        let preview_is_current = self.command_preview_key
-                                            == Some(preview::cache_key(
-                                                self.draft.as_ref(),
-                                                &self.preview_app,
-                                            ));
+                                        let preview_is_current =
+                                            self.command_preview_key == Some(self.preview_revision);
                                         if ui
                                             .add_enabled(
                                                 self.command_preview_receiver.is_none(),
