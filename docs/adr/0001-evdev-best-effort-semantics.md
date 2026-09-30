@@ -24,6 +24,13 @@ sensitive-field guarantees as input-method-v2. The bounded quiet period,
 terminator handling, and transaction safeguards remain useful mitigations but
 do not change the semantic guarantee.
 
+Evdev is a compatibility fallback, not the long-term safety flagship. The
+preferred direction for stronger guarantees is a compositor-mediated
+input-method/capture path with negotiated field semantics and replacement
+capabilities. That direction remains experimental until certified; it does
+not justify treating evdev mitigations as equivalent or weakening the opt-in
+and sensitive-field acknowledgement.
+
 ## Consequences
 
 - evdev remains available for compositors and sessions without a suitable

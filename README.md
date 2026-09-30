@@ -202,6 +202,7 @@ Start here:
 - [Security policy](SECURITY.md)
 - [Sensitive-field behavior by backend](docs/BACKENDS_SENSITIVE_FIELDS.md)
 - [Evdev access design](docs/EVDEV_ACCESS_DESIGN.md)
+- [IME and composition roadmap](docs/IME_COMPOSITION_ROADMAP.md)
 
 ## Migrating from Espanso
 

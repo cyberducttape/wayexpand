@@ -112,14 +112,14 @@ When deploying WayExpand in regions or environments with heavy IME usage:
 - **Describe the IBus engine accurately:** It is an available integration path, not evidence of active-preedit support or universal client compatibility
 - **Suggest complementary tools:** Many input methods (Fcitx, IBus) have built-in phrase expansion that can complement WayExpand
 
-### Future Possibility
+### Planned Architecture Work
 
-Supporting preedit composition would require:
-- Native IME protocol integration (Wayland text-input-v3 extensions)
-- Compositor-specific testing (GNOME IM, KDE IM, Fcitx, etc.)
-- Careful interaction with active composition state
-
-This is tracked as a future enhancement but is not on the current roadmap. Contributions welcome.
+Composition support is a deliberate future engineering direction, but it is
+not implemented and has no release guarantee. The staged architecture,
+security invariants, protocol-selection caveats, and promotion gates are in the
+[IME and composition roadmap](IME_COMPOSITION_ROADMAP.md). In particular,
+text-input-v3 is not by itself a universal global input-observation API, and
+passing protocol tests does not establish compositor/client compatibility.
 
 ### Check Your Environment
 
