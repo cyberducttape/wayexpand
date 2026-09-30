@@ -491,7 +491,7 @@ impl GuiApp {
             return;
         }
         let request = runtime::Request::Diagnostics {
-            config: self.config.clone(),
+            config_path: self.path.clone(),
             announce,
         };
         let Some(sender) = self.runtime_sender.as_ref() else {

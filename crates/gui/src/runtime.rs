@@ -21,7 +21,7 @@ const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 
 pub(crate) enum Request {
     Diagnostics {
-        config: Config,
+        config_path: PathBuf,
         announce: bool,
     },
     Control {
@@ -73,9 +73,10 @@ pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completi
         .spawn(move || {
             while let Ok(request) = request_receiver.recv() {
                 let completion = match request {
-                    Request::Diagnostics { config, announce } => {
-                        Completion::Diagnostics(run_diagnostics(config, announce))
-                    }
+                    Request::Diagnostics {
+                        config_path,
+                        announce,
+                    } => Completion::Diagnostics(run_diagnostics(config_path, announce)),
                     Request::Control { command, operation } => Completion::Control {
                         operation,
                         result: control_command(&command),
@@ -105,26 +106,29 @@ fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
     })
 }
 
-fn run_diagnostics(config: Config, announce: bool) -> DiagnosticsSnapshot {
+fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot {
     let backend_status = discover_backends();
-    let fleet_status = match wayexpand_core::load_organization_policy().and_then(|policy| {
-        FleetConfig::load_standard_with_base_and_policy(config, &policy)
-            .map_err(|error| error.to_string())
-    }) {
-        Ok(fleet) => {
-            let mut status = format!(
-                "active · {} files · {} expansions · {} hotkeys",
-                fleet.stats.total_files_loaded,
-                fleet.stats.total_expansions,
-                fleet.stats.total_hotkeys
-            );
-            if !fleet.policy_violations.is_empty() {
-                status.push_str(" · policy: ");
-                status.push_str(&fleet.policy_violations.join("; "));
+    let fleet_status = match Config::load(config_path) {
+        Ok(config) => match wayexpand_core::load_organization_policy().and_then(|policy| {
+            FleetConfig::load_standard_with_base_and_policy(config, &policy)
+                .map_err(|error| error.to_string())
+        }) {
+            Ok(fleet) => {
+                let mut status = format!(
+                    "active · {} files · {} expansions · {} hotkeys",
+                    fleet.stats.total_files_loaded,
+                    fleet.stats.total_expansions,
+                    fleet.stats.total_hotkeys
+                );
+                if !fleet.policy_violations.is_empty() {
+                    status.push_str(" · policy: ");
+                    status.push_str(&fleet.policy_violations.join("; "));
+                }
+                status
             }
-            status
-        }
-        Err(error) => format!("invalid: {error}"),
+            Err(error) => format!("invalid: {error}"),
+        },
+        Err(error) => format!("invalid: {}", error.safe_summary()),
     };
     let protocol_probes = diagnostics::probe_protocols();
     let daemon_response = control_command("status");
