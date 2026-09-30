@@ -1,4 +1,4 @@
-//! Bounded background runtime for daemon control and desktop probes.
+//! Bounded background runtime for daemon control, desktop probes, and config I/O.
 
 use crate::{diagnostics, status::Status};
 use anyhow::Context;
@@ -11,6 +11,7 @@ use std::{
     thread,
     time::Duration,
 };
+use toml_edit::DocumentMut;
 use wayexpand_core::{discover_backends, Config, FleetConfig};
 
 const REQUEST_CAPACITY: usize = 8;
@@ -27,6 +28,9 @@ pub(crate) enum Request {
         command: String,
         operation: Operation,
     },
+    ReloadConfig {
+        path: PathBuf,
+    },
 }
 
 pub(crate) enum Operation {
@@ -41,6 +45,14 @@ pub(crate) enum Completion {
         operation: Operation,
         result: anyhow::Result<String>,
     },
+    ConfigReloaded(Box<Result<ReloadSnapshot, String>>),
+}
+
+pub(crate) struct ReloadSnapshot {
+    pub config: Config,
+    pub revision: wayexpand_core::ConfigRevision,
+    pub document: DocumentMut,
+    pub search_index: crate::library::SearchIndex,
 }
 
 pub(crate) struct DiagnosticsSnapshot {
@@ -68,6 +80,9 @@ pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completi
                         operation,
                         result: control_command(&command),
                     },
+                    Request::ReloadConfig { path } => {
+                        Completion::ConfigReloaded(Box::new(load_config_snapshot(path)))
+                    }
                 };
                 if completion_sender.send(completion).is_err() {
                     break;
@@ -75,6 +90,19 @@ pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completi
             }
         })?;
     Ok((request_sender, completion_receiver))
+}
+
+fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
+    let loaded = Config::load_versioned(&path).map_err(|error| error.safe_summary())?;
+    let document = crate::persistence::read_config_document(loaded.source())
+        .map_err(|error| error.to_string())?;
+    let search_index = crate::library::SearchIndex::new(&loaded.config);
+    Ok(ReloadSnapshot {
+        config: loaded.config,
+        revision: loaded.revision,
+        document,
+        search_index,
+    })
 }
 
 fn run_diagnostics(config: Config, announce: bool) -> DiagnosticsSnapshot {

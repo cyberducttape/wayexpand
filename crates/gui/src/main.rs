@@ -73,6 +73,7 @@ const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
 struct GuiApp {
     path: PathBuf,
     config_revision: wayexpand_core::ConfigRevision,
+    pending_reload_revision: Option<wayexpand_core::ConfigRevision>,
     config_document: toml_edit::DocumentMut,
     config: Config,
     selected: Option<usize>,
@@ -419,6 +420,7 @@ impl GuiApp {
         Ok(Self {
             path,
             config_revision,
+            pending_reload_revision: None,
             config_document,
             config,
             selected,
@@ -530,6 +532,7 @@ impl GuiApp {
             self.runtime_sender = None;
             self.diagnostics_running = false;
             self.pending_control = 0;
+            self.pending_reload_revision = None;
             self.daemon_connected = Some(false);
             self.status = Status::error(self.strings.background_runtime_stopped());
         }
@@ -595,6 +598,26 @@ impl GuiApp {
                                 self.daemon_connected = Some(false);
                             }
                         },
+                    }
+                }
+                runtime::Completion::ConfigReloaded(result) => {
+                    self.pending_control = self.pending_control.saturating_sub(1);
+                    let Some(expected_revision) = self.pending_reload_revision.take() else {
+                        continue;
+                    };
+                    match *result {
+                        Ok(snapshot) => {
+                            if self.config_revision != expected_revision || self.draft_is_dirty() {
+                                self.status = Status::warning(
+                                    self.strings.status_reload_discarded_due_edits(),
+                                );
+                            } else {
+                                self.apply_reload_snapshot(snapshot);
+                            }
+                        }
+                        Err(error) => {
+                            self.status = Status::error(self.strings.status_reload_failed(&error));
+                        }
                     }
                 }
             }
@@ -1056,52 +1079,58 @@ impl GuiApp {
     }
 
     fn perform_reload(&mut self) {
-        match Config::load_versioned(&self.path) {
-            Ok(loaded) => {
-                let new_document = match persistence::read_config_document(loaded.source()) {
-                    Ok(document) => document,
-                    Err(error) => {
-                        self.status = Status::error(error.to_string());
-                        return;
-                    }
-                };
-                let new_config = loaded.config;
-                let new_revision = loaded.revision;
-                let new_selected = self
-                    .selected_id
-                    .as_ref()
-                    .and_then(|id| {
-                        new_config
-                            .expansion
-                            .iter()
-                            .position(|entry| &entry.id == id)
-                    })
-                    .or_else(|| (!new_config.expansion.is_empty()).then_some(0));
-                let new_draft =
-                    new_selected.map(|index| Draft::from_expansion(&new_config.expansion[index]));
-                let new_preview_input = new_selected
-                    .map(|index| new_config.expansion[index].trigger.clone())
-                    .unwrap_or_default();
-
-                self.config = new_config;
-                self.new_draft = false;
-                self.new_draft_origin = None;
-                self.rebuild_search_index();
-                self.config_document = new_document;
-                self.config_revision = new_revision;
-                self.set_selected_index(new_selected);
-                self.draft = new_draft;
-                self.preview_input = new_preview_input;
-                self.undo.clear();
-                self.undo_bytes = 0;
-                self.theme_refresh_pending = true;
-                self.status = Status::success(self.strings.status_config_reloaded());
-            }
-            Err(error) => {
-                self.status =
-                    Status::error(self.strings.status_reload_failed(&error.safe_summary()))
-            }
+        if self.pending_reload_revision.is_some() {
+            return;
         }
+        let Some(sender) = self.runtime_sender.as_ref() else {
+            self.status = Status::error(self.strings.background_runtime_stopped());
+            return;
+        };
+        match sender.try_send(runtime::Request::ReloadConfig {
+            path: self.path.clone(),
+        }) {
+            Ok(()) => {
+                self.pending_reload_revision = Some(self.config_revision.clone());
+                self.pending_control += 1;
+                self.status = Status::info(self.strings.config_reload_running());
+            }
+            Err(_) => self.status = Status::warning(self.strings.background_queue_full()),
+        }
+    }
+
+    fn apply_reload_snapshot(&mut self, snapshot: runtime::ReloadSnapshot) {
+        let new_config = snapshot.config;
+        let new_selected = self
+            .selected_id
+            .as_ref()
+            .and_then(|id| {
+                new_config
+                    .expansion
+                    .iter()
+                    .position(|entry| &entry.id == id)
+            })
+            .or_else(|| (!new_config.expansion.is_empty()).then_some(0));
+        let new_draft =
+            new_selected.map(|index| Draft::from_expansion(&new_config.expansion[index]));
+        let new_preview_input = new_selected
+            .map(|index| new_config.expansion[index].trigger.clone())
+            .unwrap_or_default();
+
+        self.config = new_config;
+        self.new_draft = false;
+        self.new_draft_origin = None;
+        self.search_index = snapshot.search_index;
+        self.config_document = snapshot.document;
+        self.config_revision = snapshot.revision;
+        self.set_selected_index(new_selected);
+        self.draft = new_draft;
+        self.preview_input = new_preview_input;
+        self.undo.clear();
+        self.undo_bytes = 0;
+        self.invalidate_preview();
+        self.clear_command_preview();
+        self.theme_refresh_pending = true;
+        self.status = Status::success(self.strings.status_config_reloaded());
     }
 
     fn save_selected(&mut self) {
@@ -3442,6 +3471,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::status::StatusTone;
     use std::os::unix::fs::PermissionsExt;
 
     fn run_gui_test_frame(
@@ -3876,7 +3906,21 @@ mod tests {
         let original_draft = app.draft.as_ref().unwrap().clone();
         fs::write(&path, "[[expansion]\nthis is not valid TOML").unwrap();
 
+        let (sender, receiver) = runtime::start().unwrap();
+        app.runtime_sender = Some(sender);
+        app.runtime_receiver = Some(receiver);
         app.perform_reload();
+        assert!(app.pending_reload_revision.is_some());
+        let ctx = egui::Context::default();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.pending_reload_revision.is_some() {
+            app.poll_runtime(&ctx);
+            assert!(
+                Instant::now() < deadline,
+                "background reload did not finish"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
 
         assert_eq!(
             format!("{:?}", app.config),
@@ -3895,6 +3939,66 @@ mod tests {
         assert_eq!(app.selected, Some(0));
         assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
 
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reload_completion_cannot_overwrite_edits_made_while_loading() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-reload-race-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: ":before".into(),
+                replacement: "original".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let original_revision = app.config_revision.clone();
+
+        let mut external_config = config;
+        external_config.expansion[0].replacement = "external version".into();
+        external_config.save_atomic(&path).unwrap();
+        let loaded = Config::load_versioned(&path).unwrap();
+        let snapshot = runtime::ReloadSnapshot {
+            document: persistence::read_config_document(loaded.source()).unwrap(),
+            search_index: library::SearchIndex::new(&loaded.config),
+            revision: loaded.revision,
+            config: loaded.config,
+        };
+        app.draft.as_mut().unwrap().replacement = "local unsaved edit".into();
+
+        let (completion_sender, completion_receiver) = mpsc::channel();
+        app.runtime_receiver = Some(completion_receiver);
+        app.pending_reload_revision = Some(original_revision.clone());
+        app.pending_control = 1;
+        completion_sender
+            .send(runtime::Completion::ConfigReloaded(Box::new(Ok(snapshot))))
+            .unwrap();
+        app.poll_runtime(&egui::Context::default());
+
+        assert_eq!(app.config_revision, original_revision);
+        assert_eq!(app.config.expansion[0].replacement, "original");
+        assert_eq!(
+            app.draft.as_ref().unwrap().replacement,
+            "local unsaved edit"
+        );
+        assert_eq!(app.status.tone_for_test(), StatusTone::Warning);
         fs::remove_file(path).unwrap();
     }
 

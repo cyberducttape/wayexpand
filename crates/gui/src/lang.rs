@@ -1388,6 +1388,20 @@ impl Strings {
         }
     }
 
+    pub fn config_reload_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Loading configuration…",
+            Language::German => "Konfiguration wird geladen…",
+        }
+    }
+
+    pub fn status_reload_discarded_due_edits(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Reload discarded because the configuration or draft changed while loading",
+            Language::German => "Neuladen verworfen, da sich Konfiguration oder Entwurf während des Ladens geändert hat",
+        }
+    }
+
     pub fn daemon_control_running(&self) -> &'static str {
         match self.lang {
             Language::English => "Updating daemon state…",
