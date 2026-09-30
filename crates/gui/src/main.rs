@@ -1307,6 +1307,11 @@ impl GuiApp {
                     theme::section_header(ui, "", self.strings.runtime_health());
                     ui.add_space(4.0);
                     ui.label(
+                        RichText::new(self.strings.onboarding_certification_note())
+                            .color(palette.warning)
+                            .small(),
+                    );
+                    ui.label(
                         RichText::new(self.strings.daemon())
                             .color(palette.muted)
                             .small(),
