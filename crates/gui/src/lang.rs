@@ -1425,8 +1425,8 @@ impl Strings {
 
     pub fn app_filter_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Comma separated. Leave empty to expand in every application.",
-            Language::German => "Kommagetrennt. Leer lassen, um in jeder Anwendung zu erweitern.",
+            Language::English => "Comma separated. Currently works only with the KWin window tracker; elsewhere filtered snippets fail closed. Leave empty to expand in every application.",
+            Language::German => "Kommagetrennt. Derzeit nur mit dem KWin-Fenster-Tracker verfügbar; sonst werden gefilterte Snippets nicht erweitert. Leer lassen, um in jeder Anwendung zu erweitern.",
         }
     }
 

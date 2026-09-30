@@ -300,6 +300,16 @@ Diagnostic output suitable for health checks and monitoring systems.
     "detail": "toolkit-aware committed text",
     "ready": true
   },
+  "feature_support": {
+    "ime_preedit": {
+      "status": "unsupported",
+      "detail": "Only committed text is processed; finish IME, dead-key, or Compose composition before typing a trigger."
+    },
+    "app_filter": {
+      "status": "kwin_only",
+      "detail": "Focused-window tracking is currently provided by the KWin bridge; filtered snippets fail closed when tracking is unavailable."
+    }
+  },
   "capture_readiness": {
     "state": "available-to-try",
     "detail": "a protocol or IBus probe succeeded; live client typing is not verified",
@@ -335,6 +345,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The setup mode selected from current capabilities; it never turns an experimental path into Recommended mode.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
+- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_only`. These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 The graphical diagnostics view uses the same IBus installation probe as the

@@ -690,6 +690,7 @@ fn run() -> Result<()> {
                 build_info::COMMIT
             );
             println!("Session: {}", session_description());
+            println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking is KWin-only (fails closed elsewhere).");
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
             let policy_ok = print_policy_diagnostics();
@@ -1733,6 +1734,16 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "ibus": {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },
+            },
+            "feature_support": {
+                "ime_preedit": {
+                    "status": "unsupported",
+                    "detail": "Only committed text is processed; finish IME, dead-key, or Compose composition before typing a trigger.",
+                },
+                "app_filter": {
+                    "status": "kwin_only",
+                    "detail": "Focused-window tracking is currently provided by the KWin bridge; filtered snippets fail closed when tracking is unavailable.",
+                },
             },
             "policy": policy_json,
             "backends": backends,

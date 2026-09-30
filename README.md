@@ -41,11 +41,21 @@ less, and keep your snippets local.
 > enabling a backend. No compositor is currently certified by automated
 > end-to-end tests; see the [support matrix](docs/SUPPORT_MATRIX.md).
 
+> **Important limitations:** WayExpand sees committed text, not active IME
+> preedit/composition. Complete CJK/IBus/Fcitx, dead-key, and Compose sequences
+> before expecting a trigger to match. App-filtered snippets require focused-
+> window tracking; that integration is currently available only through the
+> KWin bridge, and fails closed elsewhere. If either capability is essential
+> to your workflow, verify it with `wayexpand doctor` on the exact desktop
+> session before deployment.
+
 ## Will it work on my desktop?
 
-WayExpand has paths for KDE Plasma/KWin, GNOME, Sway, Hyprland, and other
-wlroots compositors, but Wayland input support varies by desktop, version, and
-portal/protocol availability.
+WayExpand has experimental/backend paths for KDE Plasma/KWin, GNOME, Sway,
+Hyprland, and other wlroots compositors, but availability varies by desktop,
+version, and portal/protocol. This does not mean every feature is supported on
+each desktop: in particular, app filtering currently has a KWin-only window
+tracker, and IME preedit/composition is not supported.
 
 After installing, run:
 
@@ -149,13 +159,13 @@ For stable JSON output and automation contracts, see
 - Fast local expansion for signatures, replies, dates, commands, and boilerplate
 - GUI and CLI over the same TOML configuration
 - Espanso YAML import
-- Unicode-aware trigger matching
+- Unicode-aware trigger matching for committed text (not IME preedit)
 - Optional word-boundary matching
 - Case propagation
 - Template variables such as dates, username, and cursor placement when the
   selected backend supports cursor positioning
 - Command-backed snippets without shell interpretation
-- App-filtered snippets where window tracking is available
+- App-filtered snippets with the currently KWin-only window tracker
 - Fleet configuration and organization policy
 - Hardened daemon units and bounded resource limits
 
