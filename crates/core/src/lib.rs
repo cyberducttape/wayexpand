@@ -1,4 +1,7 @@
-//! Platform-independent text expansion engine.
+//! Unix-only text expansion engine and secure configuration loader.
+
+#[cfg(not(unix))]
+compile_error!("wayexpand-core currently requires a Unix target");
 
 mod backend;
 mod capabilities;

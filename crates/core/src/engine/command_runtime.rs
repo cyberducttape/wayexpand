@@ -11,9 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(not(unix))]
-use std::sync::mpsc;
-
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
@@ -70,81 +67,26 @@ pub(super) fn run_command_with_shutdown(
     command: &CommandConfig,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
-    let mut process = Command::new(&command.program);
-    configure_command_environment(&mut process, command);
-    process
-        .args(&command.args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    configure_process_group(&mut process);
-    let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
-    let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
-
     #[cfg(unix)]
     {
+        let mut process = Command::new(&command.program);
+        configure_command_environment(&mut process, command);
+        process
+            .args(&command.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut process);
+        let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
+        let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
         run_command_unix(child, stdout, command.timeout_ms, shutdown)
     }
 
     #[cfg(not(unix))]
     {
-        run_command_fallback(child, stdout, command.timeout_ms, shutdown)
+        let _ = (command, shutdown);
+        unreachable!("wayexpand-core requires a Unix target")
     }
-}
-
-#[cfg(not(unix))]
-fn run_command_fallback(
-    mut child: Child,
-    stdout: ChildStdout,
-    timeout_ms: u64,
-    shutdown: Option<&AtomicBool>,
-) -> Result<String, CommandError> {
-    let (sender, receiver) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = stdout
-            .take((MAX_COMMAND_OUTPUT_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map(|_| bytes);
-        let _ = sender.send(result);
-    });
-
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let status = loop {
-        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-            kill_process_group(&child);
-            let _ = child.wait();
-            return Err(CommandError::StaleInput);
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-            Ok(None) => {
-                kill_process_group(&child);
-                let _ = child.wait();
-                return Err(CommandError::Timeout);
-            }
-            Err(error) => {
-                kill_process_group(&child);
-                let _ = child.wait();
-                return Err(CommandError::WaitFailed(error.to_string()));
-            }
-        }
-    };
-
-    kill_process_group(&child);
-    if !status.success() {
-        return Err(CommandError::NonZeroExit(status.code()));
-    }
-    let bytes = receiver
-        .recv_timeout(Duration::from_millis(100))
-        .map_err(|_| CommandError::OutputChannelLost)?
-        .map_err(|_| CommandError::OutputChannelLost)?;
-    if bytes.len() > MAX_COMMAND_OUTPUT_BYTES {
-        return Err(CommandError::OutputTooLarge);
-    }
-    let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
-    Ok(trim_trailing_newlines(output))
 }
 
 #[cfg(unix)]
@@ -290,9 +232,6 @@ pub(super) fn configure_process_group(command: &mut Command) {
     }
 }
 
-#[cfg(not(unix))]
-pub(super) fn configure_process_group(_command: &mut Command) {}
-
 #[cfg(unix)]
 pub(super) fn kill_process_group_by_pid(pid: u32) {
     if let Ok(pid) = libc::pid_t::try_from(pid) {
@@ -300,9 +239,4 @@ pub(super) fn kill_process_group_by_pid(pid: u32) {
             libc::kill(-pid, libc::SIGKILL);
         }
     }
-}
-
-#[cfg(not(unix))]
-pub(super) fn kill_process_group(child: &mut Child) {
-    let _ = child.kill();
 }
