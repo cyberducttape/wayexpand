@@ -45,6 +45,7 @@ fn kill_process_group(pid: u32) {
 #[derive(Debug)]
 enum ChildRunError {
     Timeout,
+    IncompleteOutput,
     Io(std::io::Error),
 }
 
@@ -175,6 +176,9 @@ fn run_child_unix(
         if !stdout_eof || !stderr_eof {
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+    if !stdout_eof || !stderr_eof {
+        return Err(ChildRunError::IncompleteOutput);
     }
     Ok((status, stdout_bytes, stderr_bytes))
 }
@@ -366,6 +370,9 @@ impl ActionExecutor {
                 action_id,
                 timeout_ms: timeout.as_millis() as u64,
             }),
+            Err(ChildRunError::IncompleteOutput) => Err(ActionError::Internal {
+                reason: "child output stream did not close before the drain deadline; output may be incomplete".to_string(),
+            }),
             Err(ChildRunError::Io(e)) => Err(ActionError::Internal {
                 reason: format!("child process error: {}", e),
             }),
@@ -500,6 +507,61 @@ mod tests {
         if let Err(ActionError::Timeout { timeout_ms, .. }) = &result {
             assert_eq!(*timeout_ms, 200);
         }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn executor_rejects_output_when_descendant_keeps_pipe_open() {
+        let pid_file = format!(
+            "/tmp/wayexpand-broker-incomplete-output-{}.pid",
+            std::process::id()
+        );
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "holds-output".to_string(),
+            ActionConfig {
+                program: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    format!(
+                        "/usr/bin/setsid /bin/sh -c '/bin/sleep 10 & echo $! > {pid_file}; wait' & while [ ! -s {pid_file} ]; do /bin/sleep 0.01; done; printf complete"
+                    ),
+                ],
+                timeout_ms: 5_000,
+                pass_env: vec![],
+                inherit_env: false,
+                cwd: None,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let request = ActionRequest {
+            action_id: "holds-output".to_string(),
+            timeout_ms: 5_000,
+            inherit_env: false,
+            env_vars: vec![],
+            stdout_capture: true,
+        };
+
+        let result = executor.execute(request).await;
+        if let Ok(pid) = std::fs::read_to_string(&pid_file).and_then(|text| {
+            text.trim()
+                .parse::<libc::pid_t>()
+                .map_err(std::io::Error::other)
+        }) {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+        let _ = std::fs::remove_file(pid_file);
+        assert!(
+            matches!(
+                &result,
+                Err(ActionError::Internal { reason }) if reason.contains("output may be incomplete")
+            ),
+            "unexpected result: {result:?}"
+        );
     }
 
     #[tokio::test]

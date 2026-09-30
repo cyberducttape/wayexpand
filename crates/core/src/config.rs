@@ -541,6 +541,8 @@ pub enum ConfigError {
     InsecurePermissions { path: String, mode: u32 },
     #[error("configuration {path} is owned by uid {uid}; expected the current user or root")]
     InsecureOwner { path: String, uid: u32 },
+    #[error("refusing to replace root-owned configuration {path} from an unprivileged process")]
+    RootOwnedWriteRequiresAdmin { path: String },
     #[error("configuration changed since it was loaded; reload before saving")]
     RevisionConflict,
     #[error(
@@ -636,6 +638,9 @@ impl ConfigError {
                 format!("file permissions are insecure (mode {mode:04o})")
             }
             Self::InsecureOwner { uid, .. } => format!("file owner is not trusted (uid {uid})"),
+            Self::RootOwnedWriteRequiresAdmin { .. } => {
+                "replacing an administrator-owned config requires an administrative process".into()
+            }
             Self::RevisionConflict => {
                 "configuration changed externally; reload before saving".into()
             }
@@ -909,6 +914,7 @@ impl Config {
         let path = path.as_ref();
         let resolved = resolve_config_target(path)?;
         validate_parent_directories(&resolved)?;
+        Self::validate_save_target_owner(&resolved)?;
         let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
         let file_name = resolved
             .file_name()
@@ -957,6 +963,11 @@ impl Config {
                     path: temp.display().to_string(),
                     source,
                 })?;
+                // Recheck immediately before replacement to avoid downgrading
+                // a target that became root-owned while the temporary file was
+                // being written. Descriptor-relative replacement would be
+                // needed to close the remaining path race completely.
+                Self::validate_save_target_owner(&resolved)?;
                 fs::rename(&temp, &resolved).map_err(|source| ConfigError::Read {
                     path: resolved.display().to_string(),
                     source,
@@ -981,6 +992,37 @@ impl Config {
                 "could not allocate a unique configuration temporary file",
             ),
         }))
+    }
+
+    fn validate_save_target_owner(path: &Path) -> Result<(), ConfigError> {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: path.display().to_string(),
+                    source,
+                });
+            }
+        };
+        if !metadata.file_type().is_file() {
+            return Err(ConfigError::NotRegular {
+                path: path.display().to_string(),
+            });
+        }
+        let current_uid = rustix::process::geteuid().as_raw();
+        if root_owned_target_requires_admin(metadata.uid(), current_uid) {
+            return Err(ConfigError::RootOwnedWriteRequiresAdmin {
+                path: path.display().to_string(),
+            });
+        }
+        if metadata.uid() != current_uid {
+            return Err(ConfigError::InsecureOwner {
+                path: path.display().to_string(),
+                uid: metadata.uid(),
+            });
+        }
+        Ok(())
     }
 
     /// Validate a configuration assembled through the public Rust API.
@@ -1549,6 +1591,10 @@ fn root_managed_parent_owner_allowed(uid: u32) -> bool {
     uid == 0
 }
 
+fn root_owned_target_requires_admin(target_uid: u32, current_uid: u32) -> bool {
+    target_uid == 0 && current_uid != 0
+}
+
 fn parent_mode_is_secure(mode: u32) -> bool {
     mode & 0o022 == 0 || mode & 0o1000 != 0
 }
@@ -1596,6 +1642,14 @@ mod tests {
     fn root_managed_configuration_requires_root_owned_parents() {
         assert!(root_managed_parent_owner_allowed(0));
         assert!(!root_managed_parent_owner_allowed(1000));
+    }
+
+    #[test]
+    fn generic_config_save_requires_admin_for_root_owned_target() {
+        assert!(root_owned_target_requires_admin(0, 1000));
+        assert!(!root_owned_target_requires_admin(0, 0));
+        assert!(!root_owned_target_requires_admin(1000, 1000));
+        assert!(!root_owned_target_requires_admin(1001, 1000));
     }
 
     #[test]

@@ -166,6 +166,9 @@ fn run_command_unix(
     if !status.success() {
         return Err(CommandError::NonZeroExit(status.code()));
     }
+    if !stdout_eof {
+        return Err(CommandError::IncompleteOutput);
+    }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     guard.child = None;
     Ok(trim_trailing_newlines(output))

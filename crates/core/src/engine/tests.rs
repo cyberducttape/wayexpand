@@ -2195,7 +2195,7 @@ fn hotkey_descendants_are_cleaned_up_on_successful_exit() {
 
 #[cfg(unix)]
 #[test]
-fn detached_stdout_holder_does_not_block_command_output() {
+fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     use std::fs::File;
     use std::io::Write;
 
@@ -2229,14 +2229,14 @@ fn detached_stdout_holder_does_not_block_command_output() {
     };
 
     let started = Instant::now();
-    let output = run_command(&command).unwrap();
+    let output = run_command(&command);
     let elapsed = started.elapsed();
 
     let _ = std::fs::remove_file(&script_path);
     thread::sleep(Duration::from_millis(1200));
     let _ = std::fs::remove_file(&escaped_marker);
 
-    assert_eq!(output, "ready");
+    assert_eq!(output, Err(CommandError::IncompleteOutput));
     assert!(
         elapsed < Duration::from_millis(1000),
         "detached stdout holder delayed command output for {elapsed:?}"
@@ -2541,6 +2541,41 @@ fn cancelling_a_running_command_returns_without_waiting_for_timeout() {
         started.elapsed() < Duration::from_secs(2),
         "cancellation waited for the command timeout"
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn command_rejects_output_when_descendant_keeps_stdout_open() {
+    let pid_file = format!(
+        "/tmp/wayexpand-incomplete-output-{}.pid",
+        std::process::id()
+    );
+    let command = CommandConfig {
+        program: "/bin/sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            format!(
+                "/usr/bin/setsid /bin/sh -c '/bin/sleep 10 & echo $! > {pid_file}; wait' & while [ ! -s {pid_file} ]; do /bin/sleep 0.01; done; printf complete"
+            ),
+        ],
+        timeout_ms: 5_000,
+        cache_ms: 0,
+        environment: CommandEnvironment::Minimal,
+        pass_env: vec![],
+    };
+
+    let result = run_command(&command);
+    if let Ok(pid) = std::fs::read_to_string(&pid_file).and_then(|text| {
+        text.trim()
+            .parse::<libc::pid_t>()
+            .map_err(std::io::Error::other)
+    }) {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    let _ = std::fs::remove_file(pid_file);
+    assert_eq!(result, Err(CommandError::IncompleteOutput));
 }
 
 #[test]

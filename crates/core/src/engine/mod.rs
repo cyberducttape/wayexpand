@@ -1488,6 +1488,9 @@ pub enum CommandError {
     /// case rather than folded into `Timeout` since it points at a bug in
     /// the reader thread, not a slow command).
     OutputChannelLost,
+    /// The process exited, but a descendant kept stdout open beyond the
+    /// bounded drain window, so captured output may be incomplete.
+    IncompleteOutput,
 }
 
 impl std::fmt::Display for CommandError {
@@ -1515,6 +1518,12 @@ impl std::fmt::Display for CommandError {
             CommandError::WorkerUnavailable => write!(f, "command workers are unavailable"),
             CommandError::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
             CommandError::OutputChannelLost => write!(f, "output could not be read back"),
+            CommandError::IncompleteOutput => {
+                write!(
+                    f,
+                    "output may be incomplete because the output stream did not close"
+                )
+            }
         }
     }
 }
