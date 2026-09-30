@@ -165,7 +165,9 @@ WayExpand is designed to run as the unprivileged desktop user, work offline,
 avoid telemetry, keep configuration files owner-checked, execute command
 snippets without a shell, and suspend matching in sensitive fields when the
 selected input backend can report them. The evdev fallback is different: it
-requires explicit raw input-event access and cannot detect password fields.
+requires explicit raw input-event access and an additional
+`--allow-evdev-sensitive-fields` acknowledgement because it cannot detect
+password fields.
 
 The daemon also uses bounded command queues, output limits, timeouts, process
 group cleanup, and organization policy that can either audit or enforce

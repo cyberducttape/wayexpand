@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Require a separate `--allow-evdev-sensitive-fields` acknowledgement before
+  starting evdev capture. Raw keyboard permission alone is not a sufficient
+  acknowledgement of evdev's inability to detect password fields; the shipped
+  evdev service declares the risk explicitly.
 - Protect deferred command reservations when an asynchronous command fails, so
   a failed or stale completion cannot leave its trigger missing from the
   matcher state.

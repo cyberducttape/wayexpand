@@ -157,7 +157,8 @@ impl EventError {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    let (path, explicit_source, explicit_backend, use_fleet) = parse_args()?;
+    let (path, explicit_source, explicit_backend, allow_evdev_sensitive_fields, use_fleet) =
+        parse_args()?;
 
     // Resolve automatic and partial explicit selections once. From this point
     // onward the daemon only consumes the canonical, compatible pair.
@@ -167,6 +168,20 @@ fn main() -> Result<()> {
     let resolved_pair = selection.pair;
     let source_name = resolved_pair.source();
     let backend_name = resolved_pair.backend();
+
+    if source_name == "evdev" && !allow_evdev_sensitive_fields {
+        anyhow::bail!(
+            "evdev cannot detect password or sensitive fields; refusing to start. ".to_owned()
+                + "Use --allow-evdev-sensitive-fields only when your deployment accepts "
+                + "that risk, or use --source=input-method for field-aware capture."
+        );
+    }
+    if source_name == "evdev" {
+        warn!(
+            "evdev sensitive-field protection is unavailable; the explicit \
+             --allow-evdev-sensitive-fields acknowledgement is active"
+        );
+    }
 
     // An absent policy is permissive; an existing invalid or insecure policy
     // is fatal so a management update cannot silently disable restrictions.
@@ -1347,19 +1362,24 @@ fn apply_results(
     Ok(())
 }
 
-fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>, bool)> {
+type DaemonArgs = (PathBuf, Option<String>, Option<String>, bool, bool);
+
+fn parse_args() -> Result<DaemonArgs> {
     let env_path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
     let mut path = env_path.clone();
     let mut explicit_path = env_path.is_some();
     let mut backend = env::var("WAYEXPAND_BACKEND").ok();
     let mut source = env::var("WAYEXPAND_SOURCE").ok();
+    let mut allow_evdev_sensitive_fields = false;
     for argument in env::args().skip(1) {
         if let Some(value) = argument.strip_prefix("--backend=") {
             backend = Some(value.to_string());
         } else if let Some(value) = argument.strip_prefix("--source=") {
             source = Some(value.to_string());
+        } else if argument == "--allow-evdev-sensitive-fields" {
+            allow_evdev_sensitive_fields = true;
         } else if matches!(argument.as_str(), "--help" | "-h") {
-            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [config]", env!("CARGO_PKG_VERSION"));
+            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [config]", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         } else if matches!(argument.as_str(), "--version" | "-V") {
             println!("wayexpand-daemon {}", env!("CARGO_PKG_VERSION"));
@@ -1377,6 +1397,7 @@ fn parse_args() -> Result<(PathBuf, Option<String>, Option<String>, bool)> {
         path.unwrap_or_else(default_config_path),
         source,
         backend,
+        allow_evdev_sensitive_fields,
         !explicit_path,
     ))
 }

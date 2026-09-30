@@ -127,7 +127,7 @@ sudo apt install wayexpand
 # or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
 
 # Start the explicit evdev route (after reviewing its raw-input tradeoff)
-wayexpand-daemon --source=evdev --backend=libei ~/.config/wayexpand/expansions.toml
+wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml
 
 # Launch the GUI
 wayexpand-gui
@@ -158,7 +158,7 @@ tracking is not currently shipped.
 **Getting started:**
 
 ```bash
-wayexpand-daemon --source=evdev --backend=libei ~/.config/wayexpand/expansions.toml
+wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml
 wayexpand doctor  # Shows what your session can use
 ```
 
@@ -279,7 +279,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, and [FOR_
 
 **Keys are lost (Escape, arrows, F-keys)?**
 - This is input-method-v2's limitation on some compositors
-- Use evdev as fallback: `wayexpand-daemon --source=evdev ~/.config/wayexpand/expansions.toml`
+- Use evdev as fallback only after explicitly accepting its sensitive-field limitation: `wayexpand-daemon --source=evdev --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml`
 - Remember: evdev has no password protection. Its installer uses active-seat
   ACLs by default; choose `--access=input-group` only when the broader legacy
   grant is acceptable.

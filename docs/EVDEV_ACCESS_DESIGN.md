@@ -5,7 +5,10 @@ WayExpand's raw evdev input path.
 
 ## Current state: active-seat default and legacy/simple fallback
 
-`--source=evdev` requires `scripts/install-evdev-permissions.sh`. The default
+`--source=evdev --allow-evdev-sensitive-fields` requires
+`scripts/install-evdev-permissions.sh`. The second flag is a separate operator
+acknowledgement: evdev cannot detect password fields, so the daemon refuses to
+start evdev without it. The default
 `--access=active-seat` mode installs a udev rule for keyboard-class event nodes
 and lets systemd-logind manage an ACL for the active local seat. It does not
 change permanent group membership. The explicit `--access=input-group` mode

@@ -232,7 +232,9 @@ implement `zwp_input_method_manager_v2` or
 **no way to detect password fields or sensitive inputs**, since field semantics
 are not available at the kernel level.
 
-**Requires:** Explicit raw input-event access. The default installer mode is
+**Requires:** Explicit raw input-event access and the daemon flag
+`--allow-evdev-sensitive-fields`, which acknowledges that password fields
+cannot be detected. The default installer mode is
 `--access=active-seat`, using logind/uaccess ACLs for keyboard-class event
 nodes (`ID_INPUT_KEYBOARD`) without permanent group membership. The explicit
 `--access=input-group` mode is a broader legacy fallback and may expose
@@ -253,6 +255,11 @@ of compositor certification.
 **Password-field protection:**
 Because the kernel provides no field-type information, the matcher **never**
 suspends matching in password fields. Sensitive-field detection is unavailable.
+For that reason the daemon refuses to start an evdev source unless the operator
+also passes `--allow-evdev-sensitive-fields`. This flag is an explicit
+acknowledgement that expansions may run in password fields; it is not a claim
+that evdev has acquired field awareness. Use `--source=input-method` when
+password-field protection is required.
 
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.

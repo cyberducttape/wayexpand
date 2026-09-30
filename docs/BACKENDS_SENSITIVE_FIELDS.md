@@ -44,7 +44,7 @@ When using `--source=input-method`:
 
 **Detection Status:** ❌ Not Supported
 
-When using `--source=evdev`:
+When using `--source=evdev --allow-evdev-sensitive-fields`:
 
 - WayExpand reads keyboard events directly from `/dev/input/event*`
 - These are raw kernel events with no semantic information
@@ -115,7 +115,9 @@ systemctl --user enable --now wayexpand-input-method.service
 
 ### "I'm on KDE Plasma and need reliable keyboards"
 
-Use `--source=evdev --backend=libei`. Accept no password protection.
+Use `--source=evdev --backend=libei --allow-evdev-sensitive-fields`. Accept no
+password protection; the explicit flag is required so this tradeoff is visible
+in service files and operator commands.
 
 ```bash
 sudo ./scripts/install-evdev-permissions.sh --access=active-seat
