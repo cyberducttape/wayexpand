@@ -1369,11 +1369,8 @@ impl InputSource for InputMethodSource {
 
     fn capabilities(&self) -> InputSourceCapabilities {
         InputSourceCapabilities {
-            sensitive_focus: true,
-            exclusive_capture: true,
-            reliable_key_state: true,
-            composition_aware: false,
-            reliable_app_identity: false,
+            key_passthrough: self.key_pass_through.is_some(),
+            ..InputSourceCapabilities::INPUT_METHOD_V2
         }
     }
 

@@ -247,12 +247,7 @@ fn main() -> Result<()> {
         InjectorCapabilities::default()
     };
     let preflight_source_capabilities = if source_name == "input-method" {
-        InputSourceCapabilities {
-            sensitive_focus: true,
-            exclusive_capture: true,
-            reliable_key_state: true,
-            ..InputSourceCapabilities::default()
-        }
+        InputSourceCapabilities::INPUT_METHOD_V2
     } else {
         InputSourceCapabilities::default()
     };

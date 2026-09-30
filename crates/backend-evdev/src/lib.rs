@@ -502,13 +502,7 @@ impl InputSource for EvdevSource {
     }
 
     fn capabilities(&self) -> InputSourceCapabilities {
-        InputSourceCapabilities {
-            sensitive_focus: false,
-            exclusive_capture: false,
-            reliable_key_state: true,
-            composition_aware: false,
-            reliable_app_identity: false,
-        }
+        InputSourceCapabilities::EVDEV
     }
 
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {

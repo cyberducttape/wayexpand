@@ -73,10 +73,36 @@ pub struct InputSourceCapabilities {
     pub exclusive_capture: bool,
     /// The source exposes reliable physical key press/release lifetimes.
     pub reliable_key_state: bool,
+    /// Capture can forward unsupported keys through its attached injector.
+    pub key_passthrough: bool,
     /// The source is aware of active IME/preedit composition.
     pub composition_aware: bool,
     /// The source provides trustworthy application identity for filtering.
     pub reliable_app_identity: bool,
+}
+
+impl InputSourceCapabilities {
+    /// Conservative, non-exclusive capture profile for raw evdev.
+    pub const EVDEV: Self = Self {
+        sensitive_focus: false,
+        exclusive_capture: false,
+        reliable_key_state: true,
+        key_passthrough: false,
+        composition_aware: false,
+        reliable_app_identity: false,
+    };
+
+    /// Capture profile for the currently shipped input-method-v2 source.
+    pub const INPUT_METHOD_V2: Self = Self {
+        sensitive_focus: true,
+        exclusive_capture: true,
+        reliable_key_state: true,
+        // This source can only claim pass-through when a compatible injector
+        // was explicitly attached to the live session.
+        key_passthrough: false,
+        composition_aware: false,
+        reliable_app_identity: false,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -560,6 +586,38 @@ fn discover_uinput() -> (BackendState, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_source_profiles_keep_security_guarantees_separate() {
+        fn assert_profile(
+            profile: InputSourceCapabilities,
+            sensitive_focus: bool,
+            exclusive_capture: bool,
+            key_passthrough: bool,
+            composition_aware: bool,
+        ) {
+            assert_eq!(profile.sensitive_focus, sensitive_focus);
+            assert_eq!(profile.exclusive_capture, exclusive_capture);
+            assert_eq!(profile.key_passthrough, key_passthrough);
+            assert_eq!(profile.composition_aware, composition_aware);
+        }
+
+        assert_profile(InputSourceCapabilities::EVDEV, false, false, false, false);
+        assert_profile(
+            InputSourceCapabilities::INPUT_METHOD_V2,
+            true,
+            true,
+            false,
+            false,
+        );
+        assert_profile(
+            InputSourceCapabilities::default(),
+            false,
+            false,
+            false,
+            false,
+        );
+    }
 
     #[test]
     fn unimplemented_backends_are_not_reported_as_available() {

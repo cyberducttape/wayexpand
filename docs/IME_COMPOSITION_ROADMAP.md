@@ -21,7 +21,9 @@ one input-method commit. It remains experimental and compositor-dependent;
 that protocol operation is not evidence of end-to-end rollback or universal
 atomicity.
 
-The next architectural step is to separate effective guarantees by role:
+The capture/output contract is now partially separated in the core. The next
+architectural step is to complete the pair/session model and report its
+negotiated guarantees consistently in diagnostics:
 
 - capture-source guarantees: exclusive capture, field-purpose signal,
   preedit visibility, committed-text semantics, and key pass-through;
@@ -30,13 +32,15 @@ The next architectural step is to separate effective guarantees by role:
 - pair/session guarantees: the guarantees actually negotiated for a connected
   capture/output pair on this compositor.
 
-`InjectorCapabilities` is an existing foundation, but it currently combines
-some pair-level claims (such as `sensitive_focus`) with output properties. A
-future contract should make those sources explicit and conservative by
-default. Policy must evaluate negotiated pair capabilities, not backend names.
-Evdev must continue to report no field-purpose awareness and best-effort,
-non-exclusive replacement; it is a compatibility fallback, not the safety
-flagship.
+`InputSourceCapabilities` now owns capture claims such as sensitive-field
+awareness, exclusivity, key-state reliability, and composition awareness;
+`InjectorCapabilities` owns output claims such as replacement, Unicode, and
+cursor behavior. These source and output profiles are still not a complete
+negotiated pair/session contract, and the CLI/GUI do not yet expose every
+runtime value. Policy must continue moving toward negotiated capabilities
+rather than backend-name inference. Evdev reports no field-purpose awareness
+and best-effort, non-exclusive replacement; it is a compatibility fallback,
+not the safety flagship.
 
 The Wayland [text-input-v3 protocol](https://wayland.app/protocols/text-input-unstable-v3)
 describes text-input state associated with a seat and text-entry focus, with
