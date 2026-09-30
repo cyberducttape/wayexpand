@@ -15,6 +15,8 @@ categories.workspace = true
 ab_glyph = "0.2.32"
 anyhow.workspace = true
 eframe = { version = "0.31.1", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
+serde.workspace = true
+serde_json.workspace = true
 toml_edit = { version = "0.25.15", features = ["serde"] }
 wayexpand-core = { path = "../core" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }

@@ -105,7 +105,7 @@ impl LoadedConfig {
 }
 
 /// A keyboard chord which invokes a bounded direct program action.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct HotkeyConfig {
     pub chord: String,

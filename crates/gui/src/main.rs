@@ -49,7 +49,8 @@ const FONT_SCALES: &[FontScale] = &[
     FontScale::ExtraLarge,
     FontScale::Huge,
 ];
-const MAX_UNDO_HISTORY: usize = 32;
+const MAX_UNDO_HISTORY: usize = 64;
+const MAX_UNDO_BYTES: usize = 16 * 1024 * 1024;
 const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("{{date}}", "UTC date"),
     ("{{time}}", "UTC time"),
@@ -86,7 +87,8 @@ struct GuiApp {
     /// A new snippet is held only in the editor until a valid explicit save.
     new_draft: bool,
     new_draft_origin: Option<String>,
-    undo: Vec<Config>,
+    undo: Vec<UndoEntry>,
+    undo_bytes: usize,
     status: Status,
     paused: bool,
     diagnostics_open: bool,
@@ -160,6 +162,172 @@ struct GuiApp {
 enum SettingsTab {
     Appearance,
     Engine,
+}
+
+/// A bounded inverse operation. Snippet edits retain only the prior versions
+/// of changed snippets; ordering is stored only for insert/delete/reorder
+/// operations. Settings and policy sections are copied only when changed.
+struct UndoEntry {
+    prior_expansions: Vec<ExpansionConfig>,
+    prior_order: Option<Vec<String>>,
+    prior_hotkeys: Option<Vec<wayexpand_core::HotkeyConfig>>,
+    prior_settings: Option<Settings>,
+    prior_organization: Option<OrganizationPolicy>,
+    estimated_bytes: usize,
+}
+
+impl UndoEntry {
+    fn between(previous: &Config, current: &Config) -> Option<Self> {
+        let current_by_id: std::collections::HashMap<_, _> = current
+            .expansion
+            .iter()
+            .map(|expansion| (expansion.id.as_str(), expansion))
+            .collect();
+        let prior_expansions: Vec<_> = previous
+            .expansion
+            .iter()
+            .filter(|expansion| current_by_id.get(expansion.id.as_str()) != Some(expansion))
+            .cloned()
+            .collect();
+        let order_unchanged = previous
+            .expansion
+            .iter()
+            .map(|expansion| expansion.id.as_str())
+            .eq(current
+                .expansion
+                .iter()
+                .map(|expansion| expansion.id.as_str()));
+        let prior_order = (!order_unchanged).then(|| {
+            previous
+                .expansion
+                .iter()
+                .map(|expansion| expansion.id.clone())
+                .collect()
+        });
+        let prior_hotkeys = (previous.hotkey != current.hotkey).then(|| previous.hotkey.clone());
+        let prior_settings =
+            (previous.settings != current.settings).then(|| previous.settings.clone());
+        let prior_organization =
+            (previous.organization != current.organization).then(|| previous.organization.clone());
+
+        if prior_expansions.is_empty()
+            && prior_order.is_none()
+            && prior_hotkeys.is_none()
+            && prior_settings.is_none()
+            && prior_organization.is_none()
+        {
+            return None;
+        }
+
+        let mut entry = Self {
+            prior_expansions,
+            prior_order,
+            prior_hotkeys,
+            prior_settings,
+            prior_organization,
+            estimated_bytes: 0,
+        };
+        entry.estimated_bytes = entry.estimate_retained_bytes();
+        Some(entry)
+    }
+
+    fn restore(&self, current: &Config) -> Result<Config, String> {
+        let mut restored = current.clone();
+        for previous in &self.prior_expansions {
+            if let Some(expansion) = restored
+                .expansion
+                .iter_mut()
+                .find(|expansion| expansion.id == previous.id)
+            {
+                *expansion = previous.clone();
+            } else {
+                restored.expansion.push(previous.clone());
+            }
+        }
+        if let Some(order) = &self.prior_order {
+            let by_id: std::collections::HashMap<_, _> = restored
+                .expansion
+                .into_iter()
+                .map(|expansion| (expansion.id.clone(), expansion))
+                .collect();
+            restored.expansion = order
+                .iter()
+                .map(|id| {
+                    by_id.get(id).cloned().ok_or_else(|| {
+                        "undo history no longer matches the snippet library".to_owned()
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+        }
+        if let Some(hotkeys) = &self.prior_hotkeys {
+            restored.hotkey.clone_from(hotkeys);
+        }
+        if let Some(settings) = &self.prior_settings {
+            restored.settings.clone_from(settings);
+        }
+        if let Some(organization) = &self.prior_organization {
+            restored.organization.clone_from(organization);
+        }
+        Ok(restored)
+    }
+
+    fn estimate_retained_bytes(&self) -> usize {
+        fn serialized_estimate<T: serde::Serialize>(value: &T) -> usize {
+            serde_json::to_vec(value)
+                .map(|serialized| serialized.len())
+                .unwrap_or(MAX_UNDO_BYTES.saturating_add(1))
+        }
+
+        let mut structural = std::mem::size_of::<Self>()
+            .saturating_add(
+                self.prior_expansions
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<ExpansionConfig>()),
+            )
+            .saturating_add(self.prior_order.as_ref().map_or(0, |order| {
+                order
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<String>())
+            }))
+            .saturating_add(self.prior_hotkeys.as_ref().map_or(0, |hotkeys| {
+                hotkeys
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<wayexpand_core::HotkeyConfig>())
+            }));
+        let nested_string_count = self
+            .prior_expansions
+            .iter()
+            .map(|expansion| {
+                expansion.tags.len()
+                    + expansion.app_filter.len()
+                    + expansion
+                        .command
+                        .as_ref()
+                        .map_or(0, |command| command.args.len() + command.pass_env.len())
+            })
+            .sum::<usize>()
+            .saturating_add(self.prior_hotkeys.as_ref().map_or(0, |hotkeys| {
+                hotkeys
+                    .iter()
+                    .map(|hotkey| hotkey.command.args.len() + hotkey.command.pass_env.len())
+                    .sum()
+            }))
+            .saturating_add(self.prior_organization.as_ref().map_or(0, |policy| {
+                policy.allowed_backends.len() + policy.allowed_packs.len()
+            }));
+        structural = structural
+            .saturating_add(nested_string_count.saturating_mul(std::mem::size_of::<String>()));
+        let payload = serialized_estimate(&self.prior_expansions)
+            .saturating_add(self.prior_order.as_ref().map_or(0, serialized_estimate))
+            .saturating_add(self.prior_hotkeys.as_ref().map_or(0, serialized_estimate))
+            .saturating_add(self.prior_settings.as_ref().map_or(0, serialized_estimate))
+            .saturating_add(
+                self.prior_organization
+                    .as_ref()
+                    .map_or(0, serialized_estimate),
+            );
+        structural.saturating_add(payload)
+    }
 }
 
 /// A detection worker cannot be forcefully cancelled while it is inside a
@@ -258,6 +426,7 @@ impl GuiApp {
             new_draft: false,
             new_draft_origin: None,
             undo: Vec::new(),
+            undo_bytes: 0,
             status: Status::info(strings.ready()),
             paused: false,
             diagnostics_open: false,
@@ -434,10 +603,25 @@ impl GuiApp {
     }
 
     fn remember_undo(&mut self, previous: Config) {
-        self.undo.push(previous);
-        if self.undo.len() > MAX_UNDO_HISTORY {
+        let Some(entry) = UndoEntry::between(&previous, &self.config) else {
+            return;
+        };
+        if entry.estimated_bytes > MAX_UNDO_BYTES {
+            self.undo.clear();
+            self.undo_bytes = 0;
+            return;
+        }
+        while self.undo.len() >= MAX_UNDO_HISTORY
+            || self.undo_bytes.saturating_add(entry.estimated_bytes) > MAX_UNDO_BYTES
+        {
+            let Some(oldest) = self.undo.first() else {
+                break;
+            };
+            self.undo_bytes = self.undo_bytes.saturating_sub(oldest.estimated_bytes);
             self.undo.remove(0);
         }
+        self.undo_bytes = self.undo_bytes.saturating_add(entry.estimated_bytes);
+        self.undo.push(entry);
     }
 
     /// Give the GUI a clear pre-save warning. The definitive check is repeated
@@ -888,6 +1072,7 @@ impl GuiApp {
                 self.draft = new_draft;
                 self.preview_input = new_preview_input;
                 self.undo.clear();
+                self.undo_bytes = 0;
                 self.theme_refresh_pending = true;
                 self.status = Status::success(self.strings.status_config_reloaded());
             }
@@ -985,9 +1170,16 @@ impl GuiApp {
     }
 
     fn undo(&mut self) {
-        let Some(previous) = self.undo.last().cloned() else {
+        let Some(entry) = self.undo.last() else {
             self.status = Status::warning(self.strings.status_nothing_to_undo());
             return;
+        };
+        let restored = match entry.restore(&self.config) {
+            Ok(config) => config,
+            Err(error) => {
+                self.status = Status::error(self.strings.status_undo_save_failed(&error));
+                return;
+            }
         };
         // Save the restored config to disk *before* committing it to GUI
         // state or popping it off the undo stack. Doing it in the opposite
@@ -997,12 +1189,13 @@ impl GuiApp {
         if !self.can_save_config() {
             return;
         }
-        if let Err(error) = self.save_config_candidate(&previous) {
+        if let Err(error) = self.save_config_candidate(&restored) {
             self.status = Status::error(self.strings.status_undo_save_failed(&error));
             return;
         }
-        let previous = self.undo.pop().expect("checked non-empty above");
-        self.config = previous;
+        let entry = self.undo.pop().expect("checked non-empty above");
+        self.undo_bytes = self.undo_bytes.saturating_sub(entry.estimated_bytes);
+        self.config = restored;
         self.rebuild_search_index();
         let restored_selection = self
             .selected_id
@@ -3678,14 +3871,155 @@ mod tests {
         let mut app = GuiApp::load(path.clone()).unwrap();
         for _ in 0..(MAX_UNDO_HISTORY + 8) {
             app.remember_undo(Config {
-                expansion: Vec::new(),
+                expansion: vec![ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
+                    trigger: ":undo-test".into(),
+                    replacement: "previous value".into(),
+                    description: String::new(),
+                    tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
+                    match_mode: MatchMode::Immediate,
+                    command: None,
+                    enabled: true,
+                    propagate_case: false,
+                }],
                 hotkey: Vec::new(),
                 settings: Settings::default(),
                 organization: OrganizationPolicy::default(),
             });
         }
         assert_eq!(app.undo.len(), MAX_UNDO_HISTORY);
+        assert!(app.undo_bytes <= MAX_UNDO_BYTES);
+        assert_eq!(
+            app.undo_bytes,
+            app.undo
+                .iter()
+                .map(|entry| entry.estimated_bytes)
+                .sum::<usize>()
+        );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn undo_history_respects_its_byte_budget() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-undo-bytes-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        for _ in 0..=MAX_UNDO_HISTORY {
+            app.remember_undo(Config {
+                expansion: vec![ExpansionConfig {
+                    id: ExpansionConfig::new_id(),
+                    trigger: ":large-undo".into(),
+                    replacement: "x".repeat(300_000),
+                    description: String::new(),
+                    tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
+                    match_mode: MatchMode::Immediate,
+                    command: None,
+                    enabled: true,
+                    propagate_case: false,
+                }],
+                hotkey: Vec::new(),
+                settings: Settings::default(),
+                organization: OrganizationPolicy::default(),
+            });
+        }
+        assert!(app.undo.len() < MAX_UNDO_HISTORY);
+        assert!(app.undo_bytes <= MAX_UNDO_BYTES);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn saved_snippet_edit_can_be_undone_back_to_disk() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-undo-save-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: ":undo-save".into(),
+                replacement: "before".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.config.expansion[0].replacement = "after".into();
+        let previous = Config::load(&path).unwrap();
+        app.remember_undo(previous);
+
+        app.undo();
+
+        assert_eq!(app.config.expansion[0].replacement, "before");
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "before"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
+        let existing = ExpansionConfig {
+            id: "stable-a".into(),
+            trigger: ":before".into(),
+            replacement: "old text".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+        };
+        let deleted = ExpansionConfig {
+            id: "stable-b".into(),
+            trigger: ":deleted".into(),
+            replacement: "restore me".into(),
+            ..existing.clone()
+        };
+        let mut modified = existing.clone();
+        modified.trigger = ":after".into();
+        modified.replacement = "new text".into();
+        let inserted = ExpansionConfig {
+            id: "stable-c".into(),
+            trigger: ":inserted".into(),
+            ..existing.clone()
+        };
+        let previous = Config {
+            expansion: vec![existing.clone(), deleted.clone()],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let current = Config {
+            expansion: vec![inserted, modified],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+
+        let entry = UndoEntry::between(&previous, &current).unwrap();
+        let restored = entry.restore(&current).unwrap();
+        assert_eq!(restored.expansion, [existing, deleted]);
     }
 
     #[test]

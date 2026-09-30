@@ -4378,6 +4378,8 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "eframe",
+ "serde",
+ "serde_json",
  "toml_edit",
  "wayexpand-backend-ibus",
  "wayexpand-backend-input-method",
