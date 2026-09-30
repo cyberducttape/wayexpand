@@ -1,4 +1,5 @@
 use anyhow::Result;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     collections::hash_map::DefaultHasher,
     fs,
@@ -6,23 +7,29 @@ use std::{
     io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
 use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, OrganizationPolicy};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
-const FINGERPRINT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
 
 pub struct ReloadableConfig {
     path: PathBuf,
     stamp: Option<FileStamp>,
     observed: Option<FileStamp>,
-    last_fingerprint_check: Option<Instant>,
-    last_metadata: Option<MetadataStamp>,
+    last_integrity_check: Instant,
+    watch_dirty: Arc<AtomicBool>,
+    watch_check_after: Option<Instant>,
+    _watcher: Option<RecommendedWatcher>,
     fleet: bool,
     fleet_signature: u64,
-    last_fleet_check: Instant,
     policy: OrganizationPolicy,
     pub engine: ExpansionEngine,
     healthy: bool,
@@ -36,46 +43,6 @@ struct FileStamp {
     change_time: i64,
     change_time_nsec: i64,
     fingerprint: u64,
-}
-
-/// Cheap metadata-only stamp (without reading content or computing fingerprint).
-/// Used for fast change detection before doing expensive file reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MetadataStamp {
-    modified: SystemTime,
-    length: u64,
-    inode: u64,
-    change_time: i64,
-    change_time_nsec: i64,
-}
-
-/// Fast metadata-only check without reading file contents. Used to detect if
-/// a full file_stamp() call is needed. This avoids reading large configs when
-/// metadata hasn't changed.
-fn metadata_stamp(path: &Path) -> Option<MetadataStamp> {
-    let descriptor = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
-        rustix::fs::Mode::empty(),
-    )
-    .ok()?;
-    let file = fs::File::from(descriptor);
-    let metadata = file.metadata().ok()?;
-    if !metadata.file_type().is_file() {
-        return None;
-    }
-    let modified = metadata.modified().ok()?;
-    let length = metadata.len();
-    let inode = metadata.ino();
-    let change_time = metadata.ctime();
-    let change_time_nsec = metadata.ctime_nsec();
-    Some(MetadataStamp {
-        modified,
-        length,
-        inode,
-        change_time,
-        change_time_nsec,
-    })
 }
 
 fn file_stamp(path: &Path) -> Option<FileStamp> {
@@ -121,6 +88,68 @@ fn stable_content_fingerprint(contents: &[u8]) -> u64 {
     })
 }
 
+fn start_config_watcher(
+    path: &Path,
+    fleet: bool,
+    dirty: Arc<AtomicBool>,
+) -> Option<RecommendedWatcher> {
+    let callback_dirty = Arc::clone(&dirty);
+    let mut watcher = match notify::recommended_watcher(
+        move |event: notify::Result<notify::Event>| {
+            // Errors can mean an event was lost (for example, the kernel watch
+            // queue overflowed), so they also request a secure rescan.
+            let _ = event;
+            callback_dirty.store(true, Ordering::Release);
+        },
+    ) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            warn!(%error, "configuration filesystem watcher unavailable; using integrity polling");
+            return None;
+        }
+    };
+
+    let mut watched_config = false;
+    let mut watched_paths = std::collections::HashSet::new();
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        watched_paths.insert(parent.to_path_buf());
+    } else {
+        watched_paths.insert(PathBuf::from("."));
+    }
+    if let Ok(resolved) = fs::canonicalize(path) {
+        if let Some(parent) = resolved.parent() {
+            watched_paths.insert(parent.to_path_buf());
+        }
+    }
+    for directory in watched_paths {
+        match watcher.watch(&directory, RecursiveMode::NonRecursive) {
+            Ok(()) => watched_config = true,
+            Err(error) => {
+                warn!(%error, path = %directory.display(), "could not watch configuration directory")
+            }
+        }
+    }
+    if !watched_config {
+        warn!("configuration file watch unavailable; using integrity polling");
+        return None;
+    }
+
+    if fleet {
+        for directory in FleetConfig::standard_source_directories() {
+            if !directory.is_dir() {
+                continue;
+            }
+            if let Err(error) = watcher.watch(&directory, RecursiveMode::Recursive) {
+                warn!(%error, path = %directory.display(), "could not watch fleet configuration directory; integrity polling remains enabled");
+            }
+        }
+    }
+    Some(watcher)
+}
+
 impl ReloadableConfig {
     pub fn load_with_fleet_and_policy(
         path: impl Into<PathBuf>,
@@ -141,24 +170,18 @@ impl ReloadableConfig {
         let (config, stamp) = load_for_mode(&path, fleet, &policy)?;
         let engine = ExpansionEngine::new(config)
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
-        let last_metadata = stamp.map(|s| MetadataStamp {
-            modified: s.modified,
-            length: s.length,
-            inode: s.inode,
-            change_time: s.change_time,
-            change_time_nsec: s.change_time_nsec,
-        });
+        let watch_dirty = Arc::new(AtomicBool::new(false));
+        let watcher = start_config_watcher(&path, fleet, Arc::clone(&watch_dirty));
         Ok(Self {
             path,
             stamp,
             observed: stamp,
-            // Force a content fingerprint on the first polling cycle. This
-            // catches same-size edits on filesystems with coarse timestamps.
-            last_fingerprint_check: None,
-            last_metadata,
+            last_integrity_check: Instant::now(),
+            watch_dirty,
+            watch_check_after: None,
+            _watcher: watcher,
             fleet,
             fleet_signature: standard_fleet_signature(),
-            last_fleet_check: Instant::now(),
             policy,
             engine,
             healthy: true,
@@ -168,12 +191,29 @@ impl ReloadableConfig {
     /// Parse first, then replace the live engine. Invalid edits leave the old
     /// configuration running and are reported to the operator.
     pub fn reload_if_changed(&mut self) {
-        let current = self.poll_stamp();
+        let now = Instant::now();
+        if self.watch_dirty.swap(false, Ordering::AcqRel) && self.watch_check_after.is_none() {
+            self.watch_check_after = Some(now + WATCH_DEBOUNCE);
+        }
+        let watch_due = self
+            .watch_check_after
+            .is_some_and(|deadline| now >= deadline);
+        let integrity_due =
+            now.duration_since(self.last_integrity_check) >= INTEGRITY_CHECK_INTERVAL;
+        if !watch_due && !integrity_due {
+            return;
+        }
+        if watch_due {
+            self.watch_check_after = None;
+        }
+        if integrity_due {
+            self.last_integrity_check = now;
+        }
+
+        let current = file_stamp(&self.path);
+        let fleet_signature = self.fleet.then(standard_fleet_signature);
         let fleet_changed =
-            self.fleet && self.last_fleet_check.elapsed() >= FINGERPRINT_REFRESH_INTERVAL && {
-                self.last_fleet_check = Instant::now();
-                standard_fleet_signature() != self.fleet_signature
-            };
+            fleet_signature.is_some_and(|signature| signature != self.fleet_signature);
         if current == self.observed && !fleet_changed {
             return;
         }
@@ -183,14 +223,9 @@ impl ReloadableConfig {
 
     pub fn reload_now(&mut self) {
         let current = file_stamp(&self.path);
-        self.last_fingerprint_check = Some(Instant::now());
-        self.last_metadata = current.map(|s| MetadataStamp {
-            modified: s.modified,
-            length: s.length,
-            inode: s.inode,
-            change_time: s.change_time,
-            change_time_nsec: s.change_time_nsec,
-        });
+        self.last_integrity_check = Instant::now();
+        self.watch_check_after = None;
+        self.watch_dirty.store(false, Ordering::Release);
         self.observed = current;
         self.reload_current(current);
     }
@@ -232,7 +267,7 @@ impl ReloadableConfig {
                         self.engine = engine;
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;
-                        self.last_fingerprint_check = Some(Instant::now());
+                        self.last_integrity_check = Instant::now();
                         self.fleet_signature = standard_fleet_signature();
                         self.healthy = true;
                         info!(expansions = count, "configuration reloaded");
@@ -266,46 +301,6 @@ impl ReloadableConfig {
 
     pub fn healthy(&self) -> bool {
         self.healthy
-    }
-
-    /// Check for file changes efficiently. First checks metadata only (cheap),
-    /// then only does full read-and-hash if metadata changed or if it's been
-    /// a full FINGERPRINT_REFRESH_INTERVAL since the last content check.
-    /// This avoids repeatedly reading/hashing large configs when they haven't
-    /// actually changed.
-    fn poll_stamp(&mut self) -> Option<FileStamp> {
-        let current_metadata = metadata_stamp(&self.path)?;
-
-        // Check if metadata changed since last check
-        let metadata_changed = self
-            .last_metadata
-            .is_none_or(|last| current_metadata != last);
-
-        // If metadata changed, we must compute new fingerprint to detect
-        // content changes. If metadata unchanged, still check fingerprint
-        // periodically to catch same-size edits on coarse-timestamp filesystems.
-        let time_to_recheck = self
-            .last_fingerprint_check
-            .is_none_or(|checked| checked.elapsed() >= FINGERPRINT_REFRESH_INTERVAL);
-
-        if !metadata_changed && !time_to_recheck {
-            // Metadata unchanged and enough time hasn't passed. Return cached stamp.
-            return self.observed;
-        }
-
-        // Either metadata changed or it's time to recheck fingerprint.
-        // Compute full file stamp with content hash.
-
-        let current = file_stamp(&self.path);
-        self.last_fingerprint_check = Some(Instant::now());
-        self.last_metadata = current.map(|s| MetadataStamp {
-            modified: s.modified,
-            length: s.length,
-            inode: s.inode,
-            change_time: s.change_time,
-            change_time_nsec: s.change_time_nsec,
-        });
-        current
     }
 }
 
@@ -383,6 +378,7 @@ mod tests {
         fs,
         os::unix::fs::PermissionsExt,
         sync::atomic::{AtomicU64, Ordering},
+        thread,
         time::{SystemTime, UNIX_EPOCH},
     };
     use wayexpand_core::InputEvent;
@@ -591,14 +587,54 @@ mod tests {
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, &config_text("new"));
-        config.reload_if_changed();
-
-        let result = config
-            .engine
-            .process(InputEvent::Text(":x".into()))
-            .pop()
-            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let result = loop {
+            config.reload_if_changed();
+            let result = config
+                .engine
+                .process(InputEvent::Text(":x".into()))
+                .pop()
+                .unwrap();
+            if result.insert == "new" {
+                break result;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "filesystem change was not observed"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
         assert_eq!(result.insert, "new");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn atomic_replacement_is_detected_by_watching_the_parent_directory() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        let replacement = path.with_extension("replacement");
+        write_config(&replacement, &config_text("new"));
+        fs::rename(&replacement, &path).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            config.reload_if_changed();
+            let result = config
+                .engine
+                .process(InputEvent::Text(":x".into()))
+                .pop()
+                .unwrap();
+            if result.insert == "new" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "atomic replacement was not observed"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         let _ = fs::remove_file(path);
     }
 
@@ -614,15 +650,36 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_metadata_reuses_existing_fingerprint() {
+    fn unchanged_configuration_does_not_scan_until_integrity_deadline() {
         let path = temporary_config();
         write_config(&path, &config_text("stable metadata"));
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         let stamp = config.observed.unwrap();
-        config.last_fingerprint_check = Some(Instant::now());
-        let reused = config.poll_stamp().unwrap();
-        assert_eq!(reused, stamp);
+        config.last_integrity_check = Instant::now();
+        config.reload_if_changed();
+        assert_eq!(config.observed, Some(stamp));
+        assert!(config.watch_check_after.is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn integrity_fallback_detects_changes_when_no_watch_event_arrives() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        write_config(&path, &config_text("new"));
+        config.last_integrity_check = Instant::now() - INTEGRITY_CHECK_INTERVAL;
+        config.watch_dirty.store(false, Ordering::Release);
+        config.reload_if_changed();
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new");
         let _ = fs::remove_file(path);
     }
 

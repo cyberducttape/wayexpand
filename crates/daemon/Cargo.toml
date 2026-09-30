@@ -28,3 +28,4 @@ wayexpand-backend-evdev = { path = "../backend-evdev" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 wayexpand-backend-selection = { path = "../backend-selection" }
 tokio = { version = "1", features = ["full"] }
+notify.workspace = true

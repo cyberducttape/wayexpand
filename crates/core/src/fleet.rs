@@ -182,6 +182,15 @@ impl FleetConfig {
         Ok(files)
     }
 
+    /// Return the standard fleet roots so long-running services can watch for
+    /// additions as well as edits to files already present in those roots.
+    pub fn standard_source_directories() -> Vec<PathBuf> {
+        [Layer::Organization, Layer::User, Layer::Pack]
+            .into_iter()
+            .filter_map(Layer::default_dir)
+            .collect()
+    }
+
     /// Load the standard fleet layers on top of the user's primary config.
     ///
     /// The primary config remains the lowest-priority layer so enabling fleet
