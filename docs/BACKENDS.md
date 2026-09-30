@@ -178,7 +178,8 @@ against a live KWin 6.6 session, where calling `run()` immediately after
 `loadScript` failed with "No such object path" for roughly the first second.
 The tracker therefore retries `run()` with a short bounded backoff instead of
 treating any specific KWin version as a fixed-delay contract.
-While connected, it checks KWin's `isScriptLoaded` state every three seconds.
+While connected, it checks KWin's `isScriptLoaded` state every 500 ms on the
+tracker worker (not the daemon's input loop).
 If the script unloads or the health check fails, the supervisor clears the
 cached window context and reconnects; app-filtered expansions fail closed
 until the new script reports its initial active window.

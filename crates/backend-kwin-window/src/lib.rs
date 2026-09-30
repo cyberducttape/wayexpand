@@ -29,12 +29,12 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
-const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(3);
+const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 /// Upper bound on how long `probe()` waits for the session bus / KWin to
 /// answer before giving up. A local D-Bus round trip normally completes in
 /// well under this; this exists specifically for the case where it does
 /// not (see `probe()`'s doc comment).
-const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(3);
+const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -396,6 +396,10 @@ mod tests {
         assert!(
             initial.is_some(),
             "KWin should report its initial active window"
+        );
+        assert!(
+            initial.flatten().is_some(),
+            "KWin should provide application or window identity for the focused window"
         );
 
         let deadline =
