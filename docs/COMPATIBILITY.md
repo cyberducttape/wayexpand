@@ -254,6 +254,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 {
   "healthy": true,
   "wayland": true,
+  "desktop": "KDE Plasma",
   "config": {
     "path": "/home/user/.config/wayexpand/expansions.toml",
     "valid": true,
@@ -321,6 +322,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 **Field stability:**
 - `healthy` (bool): Overall health (an active display session, config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
 - `wayland` (bool): Wayland session detected
+- `desktop` (string): Detected desktop/compositor identity used to bind certification evidence to the session actually probed (for example, `KDE Plasma`, `GNOME`, `Sway/wlroots`, or `Hyprland/wlroots`). `unknown` is not certifiable.
 - `config.path` (string): Configuration file path
 - `config.valid` (bool): Configuration syntax valid
 - `config.error` (string|null): Error message if invalid (safe summary, not a stack trace)

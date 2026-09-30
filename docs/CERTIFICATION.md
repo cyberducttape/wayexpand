@@ -38,11 +38,12 @@ That record is distinct from the CLI preflight: it includes the exact session
 metadata and one result for every scenario × layout × client cell, but remains
 `certified: false` unless every cell is explicitly passed, the doctor
 snapshot reports `healthy: true`, and the selected backend probe is consistent
-with the evidence metadata. Daemon-backed paths additionally require a status
-snapshot with `response: "running"` and the matching source/backend pair; IBus
-uses the doctor IBus-installation probe because it is not the daemon control
-socket path. Its stable `status` field is `certified`, `incomplete`, or
-`failed`.
+with the evidence metadata, including an exact match between the requested
+compositor and the desktop identity returned by `doctor --json`. Daemon-backed
+paths additionally require a status snapshot with `response: "running"`, the
+current status schema, and the matching source/backend pair; IBus uses the
+doctor IBus-installation probe because it is not the daemon control socket
+path. Its stable `status` field is `certified`, `incomplete`, or `failed`.
 
 Matrix-cell outcomes are deliberately more expressive than pass/fail: `pass`
 means the scenario passed, `fail` means it was exercised and failed,

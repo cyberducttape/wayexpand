@@ -20,6 +20,10 @@ fi
 # host has no usable compositor path; inspect the diagnostics separately.
 grep -F 'Config validation: OK' "$test_root/valid.out" >/dev/null
 
+WAYEXPAND_CONFIG="$config_path" "$project_dir/target/debug/wayexpand" doctor --json \
+    >"$test_root/doctor.json" || :
+jq -e '.desktop | type == "string" and length > 0' "$test_root/doctor.json" >/dev/null
+
 "$project_dir/target/debug/wayexpand" set-mode :doctor word-boundary "$config_path" \
     >"$test_root/set-mode.out"
 grep -F 'word-boundary :doctor' "$test_root/set-mode.out" >/dev/null

@@ -12,6 +12,7 @@
     {
       "id": "kde",
       "display": "KDE Plasma / KWin",
+      "detected_desktop": "KDE Plasma",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
@@ -24,6 +25,7 @@
     {
       "id": "gnome",
       "display": "GNOME Shell / Mutter",
+      "detected_desktop": "GNOME",
       "input_paths": ["ibus", "evdev+libei", "input-method-v2"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
@@ -36,6 +38,7 @@
     {
       "id": "sway",
       "display": "Sway / wlroots",
+      "detected_desktop": "Sway/wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
@@ -48,6 +51,7 @@
     {
       "id": "hyprland",
       "display": "Hyprland / wlroots",
+      "detected_desktop": "Hyprland/wlroots",
       "input_paths": ["evdev+wlroots"],
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],

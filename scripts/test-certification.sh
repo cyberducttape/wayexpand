@@ -36,7 +36,7 @@ certification_cli="$test_root/certification-cli"
 cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
-    "doctor --json") printf '%s\\n' '{"healthy":true,"ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
+    "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"KDE Plasma","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
     "status --json") printf '%s\\n' '{"response":"running","status_schema":1}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
@@ -62,6 +62,8 @@ jq -e --argjson expected_cases "$expected_cases" '
     .schema == 2 and .certified == true and .status == "certified" and
     ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and
     .compositor == "kde" and .backend == "ibus" and
+    .expected_desktop == "KDE Plasma" and .detected_desktop == "KDE Plasma" and
+    .desktop_probe_valid == true and
     .keyboard_layout == "us,de,fr,altgr,multi-layout-switching" and
     (.required_client_markers | sort) == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"] and
     .doctor_probe_valid == true and (.doctor_exit | type == "number") and
@@ -89,7 +91,7 @@ optional_status_cli="$test_root/optional-status-cli"
 cat >"$optional_status_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"ibus":{"installed":true}}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","ibus":{"installed":true}}' ;;
     "status --json") exit 1 ;;
 esac
 EOF
@@ -106,7 +108,7 @@ daemon_cli="$test_root/daemon-cli"
 cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -125,7 +127,7 @@ explicit_route_cli="$test_root/explicit-route-cli"
 cat >"$explicit_route_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":false,"wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -142,7 +144,7 @@ input_method_cli="$test_root/input-method-cli"
 cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"input-method","backend":"input-method-v2"}' ;;
 esac
 EOF
@@ -158,7 +160,7 @@ stale_daemon_cli="$test_root/stale-daemon-cli"
 cat >"$stale_daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":0,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -172,6 +174,27 @@ if "$project_dir/scripts/certify-compositor.sh" --format json \
     exit 1
 fi
 jq -e '.certified == false and .status_probe_valid == false' "$stale_daemon_json" >/dev/null
+
+wrong_desktop_cli="$test_root/wrong-desktop-cli"
+cat >"$wrong_desktop_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"GNOME"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"evdev","backend":"libei"}' ;;
+esac
+EOF
+chmod 0755 "$wrong_desktop_cli"
+wrong_desktop_json="$test_root/wrong-desktop-certification.json"
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend evdev+libei \
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
+    --results "$results" --cli "$wrong_desktop_cli" --output "$wrong_desktop_json" >/dev/null; then
+    printf '%s\n' 'certification accepted a mismatched live desktop' >&2
+    exit 1
+fi
+jq -e '.certified == false and .expected_desktop == "KDE Plasma" and
+    .detected_desktop == "GNOME" and .desktop_probe_valid == false and .doctor_probe_valid == false' \
+    "$wrong_desktop_json" >/dev/null
 
 invalid_probe_bin="$test_root/invalid-probe-bin"
 mkdir -p "$invalid_probe_bin"
@@ -197,7 +220,7 @@ unhealthy_probe="$test_root/unhealthy-probe"
 cat >"$unhealthy_probe" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":false}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":1}' ;;
 esac
 EOF

@@ -30,6 +30,7 @@ def render(matrix: dict[str, object]) -> str:
             raise ValueError("certification target must be an object")
         target_id = target.get("id")
         display = target.get("display")
+        detected_desktop = target.get("detected_desktop")
         paths = target.get("input_paths")
         tracker = target.get("window_tracker")
         app_filter = target.get("application_filter")
@@ -40,6 +41,8 @@ def render(matrix: dict[str, object]) -> str:
         seen.add(target_id)
         if not isinstance(display, str) or not display:
             raise ValueError(f"{target_id}: display must be a non-empty string")
+        if not isinstance(detected_desktop, str) or not detected_desktop:
+            raise ValueError(f"{target_id}: detected_desktop must be a non-empty string")
         if not isinstance(paths, list) or not paths or not all(
             isinstance(path, str) and path for path in paths
         ):

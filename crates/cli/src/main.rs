@@ -1845,6 +1845,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         serde_json::json!({
             "wayexpand_version": build_info::VERSION,
             "wayexpand_commit": build_info::COMMIT,
+            "desktop": live_capabilities.compositor.name(),
             "healthy": healthy,
             "wayland": std::env::var_os("WAYLAND_DISPLAY").is_some(),
             "config": {
@@ -2634,6 +2635,7 @@ mod tests {
             [
                 "healthy",
                 "wayland",
+                "desktop",
                 "config",
                 "control_socket",
                 "policy",

@@ -170,6 +170,8 @@ else
     status_json=null
 fi
 doctor_json=$(cat "$tmp/doctor.json")
+expected_desktop=$(jq -er --arg compositor "$compositor" \
+    '.targets[] | select(.id == $compositor) | .detected_desktop' "$matrix")
 if wayexpand_version=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_version // "unknown"' 2>/dev/null); then
     :
 else
@@ -180,9 +182,19 @@ if wayexpand_commit=$(printf '%s' "$doctor_json" | jq -r '.wayexpand_commit // "
 else
     wayexpand_commit=unknown
 fi
+detected_desktop=unknown
+if actual_desktop=$(printf '%s' "$doctor_json" | jq -er '.desktop | strings' 2>/dev/null); then
+    detected_desktop=$actual_desktop
+fi
 doctor_probe_valid=1
 if ! printf '%s' "$doctor_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     doctor_json=null
+    doctor_probe_valid=0
+fi
+desktop_probe_valid=1
+if ! printf '%s' "$doctor_json" | jq -e --arg desktop "$expected_desktop" \
+    '.desktop == $desktop' >/dev/null 2>&1; then
+    desktop_probe_valid=0
     doctor_probe_valid=0
 fi
 status_probe_valid=1
@@ -274,7 +286,8 @@ jq -Rsc '
         {name: $cell[0], layout_profile: $cell[1], target_app: $cell[2], result: $parts[1]})
 ' "$tmp/case-results.txt" >"$tmp/scenarios.json"
 certified=false
-[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
+[ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] \
+    && [ "$desktop_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
     && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
 if [ "$status_required" = true ] && [ "$status_probe_valid" -ne 1 ]; then
@@ -298,6 +311,8 @@ if [ "$format" = json ]; then
         --arg wayexpand_commit "$wayexpand_commit" \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
+        --arg expected_desktop "$expected_desktop" \
+        --arg detected_desktop "$detected_desktop" \
         --arg backend "$backend" \
         --arg keyboard_layout "$keyboard_layout" \
         --arg desktop "${XDG_CURRENT_DESKTOP:-unknown}" \
@@ -314,6 +329,7 @@ if [ "$format" = json ]; then
         --argjson certified "$certified" \
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
+        --argjson desktop_probe_valid "$desktop_probe_valid" \
         --argjson status_probe_valid "$status_probe_valid" \
         --argjson status_required "$status_required" \
         --argjson backend_probe_valid "$backend_probe_valid" \
@@ -321,6 +337,8 @@ if [ "$format" = json ]; then
         '{schema: 2, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
           compositor: $compositor,
+          expected_desktop: $expected_desktop,
+          detected_desktop: $detected_desktop,
           status: $certification_status,
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
@@ -332,6 +350,7 @@ if [ "$format" = json ]; then
           desktop: $desktop, session: $session, recorded_at_utc: $recorded_at_utc,
           doctor_exit: $doctor_exit,
           doctor_probe_valid: ($doctor_probe_valid == 1),
+          desktop_probe_valid: ($desktop_probe_valid == 1),
           status_probe_valid: ($status_probe_valid == 1),
           status_required: $status_required,
           backend_probe_valid: ($backend_probe_valid == 1),
@@ -342,6 +361,8 @@ else
     printf '%s\n' "- wayexpand_version: \`$wayexpand_version\`"
     printf '%s\n' "- wayexpand_commit: \`$wayexpand_commit\`"
     printf '%s\n' "- compositor_version: $compositor_version"
+    printf '%s\n' "- expected_desktop: $expected_desktop"
+    printf '%s\n' "- detected_desktop: $detected_desktop"
     printf '%s\n' "- backend: $backend"
     printf '%s\n' "- keyboard_layout: $keyboard_layout"
     required_layout_profiles=$(jq -r '.required_layout_profiles | map("`" + . + "`") | join(", ")' "$matrix")
@@ -374,7 +395,7 @@ if [ "$complete" -eq 0 ]; then
     if [ "$failed" -eq 1 ]; then
         printf '%s\n' "certification failed: one or more scenarios were explicitly marked fail" >&2
     elif [ "$doctor_probe_valid" -eq 0 ]; then
-        printf '%s\n' "certification remains incomplete: doctor did not produce valid JSON evidence" >&2
+        printf '%s\n' "certification remains incomplete: doctor evidence is invalid or does not identify the requested compositor" >&2
     else
         printf '%s\n' "certification remains incomplete: provide pass results for every in-scope scenario; out-of-scope capabilities are listed separately in the report" >&2
     fi
