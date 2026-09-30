@@ -81,6 +81,26 @@ spaced_json="$test_root/spaced-cli.json"
     --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null
 jq -e '.certified == true and .doctor_probe_valid == true' "$spaced_json" >/dev/null
 
+# IBus certification does not require a daemon status response. A missing
+# optional probe must neither invalidate a complete report nor produce a
+# contradictory `certified=true` artifact with a failing exit status.
+optional_status_cli="$test_root/optional-status-cli"
+cat >"$optional_status_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true,"ibus":{"installed":true}}' ;;
+    "status --json") exit 1 ;;
+esac
+EOF
+chmod 0755 "$optional_status_cli"
+optional_status_json="$test_root/optional-status-certification.json"
+"$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus \
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
+    --results "$results" --cli "$optional_status_cli" --output "$optional_status_json" >/dev/null
+jq -e '.certified == true and .status == "certified" and .status_required == false and .status_probe_valid == false' \
+    "$optional_status_json" >/dev/null
+
 daemon_cli="$test_root/daemon-cli"
 cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
@@ -96,6 +116,26 @@ daemon_json="$test_root/daemon-certification.json"
     --target-apps "$target_apps" --results "$results" \
     --cli "$daemon_cli" --output "$daemon_json" >/dev/null
 jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
+
+# An explicitly selected, already-running daemon route can be healthy even if
+# automatic selection remains conservative. Require valid underlying doctor
+# checks plus a matching live route rather than the unrelated auto-select bit.
+explicit_route_cli="$test_root/explicit-route-cli"
+cat >"$explicit_route_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":false,"wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
+    "status --json") printf '%s\n' '{"response":"running","source":"evdev","backend":"libei"}' ;;
+esac
+EOF
+chmod 0755 "$explicit_route_cli"
+explicit_route_json="$test_root/explicit-route-certification.json"
+"$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.6 --backend evdev+libei \
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
+    --results "$results" --cli "$explicit_route_cli" --output "$explicit_route_json" >/dev/null
+jq -e '.certified == true and .doctor.healthy == false and .doctor_probe_valid == true and .backend_probe_valid == true' \
+    "$explicit_route_json" >/dev/null
 
 input_method_cli="$test_root/input-method-cli"
 cat >"$input_method_cli" <<'EOF'

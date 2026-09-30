@@ -112,7 +112,9 @@ scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
     exit 2
 }
 
-case_keys=$(jq -nr \
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT INT TERM
+jq -nr \
     --arg scenarios "$scenarios" \
     --arg layouts "$layout_profiles_lower" \
     --arg apps "$target_apps" \
@@ -120,8 +122,8 @@ case_keys=$(jq -nr \
      ($layouts | split(",") | map(select(length > 0))) as $layouts |
      ($apps | split(",") | map(select(length > 0))) as $apps |
      $scenarios[] as $scenario | $layouts[] as $layout | $apps[] as $app |
-     "\($scenario)|\($layout)|\($app)"')
-[ -n "$case_keys" ] || { printf '%s\n' 'error: certification matrix has no scenario/layout/client cases' >&2; exit 2; }
+     "\($scenario)|\($layout)|\($app)"' >"$tmp/case-keys.txt"
+[ -s "$tmp/case-keys.txt" ] || { printf '%s\n' 'error: certification matrix has no scenario/layout/client cases' >&2; exit 2; }
 
 # Results are evidence, not free-form annotations. Reject malformed, unknown,
 # or duplicate matrix cells before collecting probes.
@@ -130,10 +132,10 @@ if [ -n "$results_file" ]; then
         printf '%s\n' "error: results file does not exist: $results_file" >&2
         exit 2
     }
-    awk -F= -v allowed="$case_keys" '
+    awk -F= -v allowed_file="$tmp/case-keys.txt" '
         BEGIN {
-            count = split(allowed, names, "\n")
-            for (i = 1; i <= count; i++) valid[names[i]] = 1
+            while ((getline name < allowed_file) > 0) valid[name] = 1
+            close(allowed_file)
         }
         NF == 0 { next }
         NF != 2 || $2 !~ /^(pass|fail|unsupported-by-design|UNVERIFIED)$/ {
@@ -154,8 +156,6 @@ if [ -n "$results_file" ]; then
     ' "$results_file" || exit 2
 fi
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certify.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT INT TERM
 doctor_status=0
 "$cli" doctor --json >"$tmp/doctor.json" 2>"$tmp/doctor.stderr" || doctor_status=$?
 status_json='unavailable'
@@ -176,7 +176,7 @@ else
     wayexpand_commit=unknown
 fi
 doctor_probe_valid=1
-if ! printf '%s' "$doctor_json" | jq -e 'type == "object" and (.healthy == true)' >/dev/null 2>&1; then
+if ! printf '%s' "$doctor_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     doctor_json=null
     doctor_probe_valid=0
 fi
@@ -190,21 +190,40 @@ backend_probe_valid=1
 case "$backend" in
     ibus)
         status_required=false
-        if ! printf '%s' "$doctor_json" | jq -e '.ibus.installed == true' >/dev/null 2>&1; then
+        if ! printf '%s' "$doctor_json" | jq -e '.healthy == true and .ibus.installed == true' >/dev/null 2>&1; then
             backend_probe_valid=0
+            doctor_probe_valid=0
         fi
         ;;
     evdev+libei)
+        if ! printf '%s' "$doctor_json" | jq -e '
+            .healthy == true or
+            (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
+        ' >/dev/null 2>&1; then
+            doctor_probe_valid=0
+        fi
         if ! printf '%s' "$status_json" | jq -e '.source == "evdev" and .backend == "libei"' >/dev/null 2>&1; then
             backend_probe_valid=0
         fi
         ;;
     evdev+wlroots)
+        if ! printf '%s' "$doctor_json" | jq -e '
+            .healthy == true or
+            (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
+        ' >/dev/null 2>&1; then
+            doctor_probe_valid=0
+        fi
         if ! printf '%s' "$status_json" | jq -e '.source == "evdev" and .backend == "wlroots"' >/dev/null 2>&1; then
             backend_probe_valid=0
         fi
         ;;
     input-method-v2)
+        if ! printf '%s' "$doctor_json" | jq -e '
+            .healthy == true or
+            (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
+        ' >/dev/null 2>&1; then
+            doctor_probe_valid=0
+        fi
         if ! printf '%s' "$status_json" | jq -e '.source == "input-method" and .backend == "input-method-v2"' >/dev/null 2>&1; then
             backend_probe_valid=0
         fi
@@ -217,10 +236,13 @@ esac
 complete=1
 failed=0
 results_input=${results_file:-/dev/null}
-case_results=$(awk -F= -v allowed="$case_keys" '
+awk -F= -v allowed_file="$tmp/case-keys.txt" '
     BEGIN {
-        count = split(allowed, keys, "\n")
-        for (i = 1; i <= count; i++) valid[keys[i]] = 1
+        while ((getline key < allowed_file) > 0) {
+            keys[++count] = key
+            valid[key] = 1
+        }
+        close(allowed_file)
     }
     NF == 2 && ($1 in valid) { result[$1] = $2 }
     END {
@@ -229,27 +251,29 @@ case_results=$(awk -F= -v allowed="$case_keys" '
             printf "%s=%s\n", key, (key in result ? result[key] : "UNVERIFIED")
         }
     }
-' "$results_input")
-result_state=$(printf '%s\n' "$case_results" | awk -F= '
+' "$results_input" >"$tmp/case-results.txt"
+result_state=$(awk -F= '
     BEGIN { complete = 1 }
     NF == 2 && $2 != "pass" { complete = 0 }
     NF == 2 && $2 == "fail" { failed = 1 }
     END { printf "%d %d", complete == 1, failed == 1 }
-')
+' "$tmp/case-results.txt")
 IFS=' ' read -r complete failed <<EOF
 $result_state
 EOF
-scenario_json=$(printf '%s\n' "$case_results" | jq -Rsc '
+jq -Rsc '
     split("\n") | map(select(length > 0) |
         split("=") as $parts |
         ($parts[0] | split("|")) as $cell |
         {name: $cell[0], layout_profile: $cell[1], target_app: $cell[2], result: $parts[1]})
-')
+' "$tmp/case-results.txt" >"$tmp/scenarios.json"
 certified=false
 [ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
     && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
-[ "$status_probe_valid" -eq 1 ] || complete=0
+if [ "$status_required" = true ] && [ "$status_probe_valid" -ne 1 ]; then
+    complete=0
+fi
 certification_status=incomplete
 [ "$failed" -eq 1 ] && certification_status=failed
 [ "$certified" = true ] && certification_status=certified
@@ -280,7 +304,7 @@ if [ "$format" = json ]; then
         --argjson out_of_scope_capabilities "$out_of_scope_capabilities_json" \
         --argjson doctor "$doctor_json" \
         --argjson status "$status_json" \
-        --argjson scenarios "$scenario_json" \
+        --slurpfile scenarios "$tmp/scenarios.json" \
         --argjson certified "$certified" \
         --argjson doctor_exit "$doctor_status" \
         --argjson doctor_probe_valid "$doctor_probe_valid" \
@@ -305,7 +329,7 @@ if [ "$format" = json ]; then
           status_probe_valid: ($status_probe_valid == 1),
           status_required: $status_required,
           backend_probe_valid: ($backend_probe_valid == 1),
-          doctor: $doctor, daemon_status: $status, scenarios: $scenarios}' >"$output"
+          doctor: $doctor, daemon_status: $status, scenarios: $scenarios[0]}' >"$output"
 else
 {
     printf '%s\n\n' "# WayExpand compositor certification evidence"
@@ -331,7 +355,7 @@ else
     printf '%s\n' '```'
     printf '%s\n\n' 'Daemon status: `'"$status_json"'`'
     printf '%s\n' '## Required scenario × layout × target-app cases'
-    printf '%s' "$scenario_json" | jq -r '.[] | "- " + .name + " / " + .layout_profile + " / " + .target_app + ": **" + .result + "**"'
+    jq -r '.[] | "- " + .name + " / " + .layout_profile + " / " + .target_app + ": **" + .result + "**"' "$tmp/scenarios.json"
     printf '\n%s\n' '## Explicitly out of scope'
     jq -r '.out_of_scope_capabilities[] | "- " + .id + " (" + .status + "): " + .description' "$matrix"
     printf '\n%s\n' 'A PASS result is valid only when the operator records the exact compositor version, backend, layout, target application, and observed behavior. **UNVERIFIED is not certified.**'

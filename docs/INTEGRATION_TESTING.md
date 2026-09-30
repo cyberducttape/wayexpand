@@ -114,6 +114,12 @@ snapshots, and one result object for every scenario × layout × client cell. It
 `incomplete` from `failed`. It does not replace the CLI preflight report or
 turn protocol availability into a certification.
 
+For daemon-backed paths, preflight validates the live route together with the
+doctor's Wayland, config, policy, and control-socket checks. A conservative
+automatic-selection recommendation alone does not invalidate an explicitly
+selected, healthy route; IBus still requires a healthy doctor report and an
+installed IBus integration.
+
 It captures the live doctor/status probes and writes every required
 scenario × layout × client cell as `UNVERIFIED`; it never treats a probe as
 certification. A compositor-specific
