@@ -1397,38 +1397,22 @@ impl GuiApp {
     }
 
     /// Renders a live preview for a plain (non-command) draft. Must never be
-    /// called for a command-backed draft: it builds a real `ExpansionEngine`
-    /// and calls it on every repaint, and for a command-backed expansion
-    /// that would mean spawning the configured program continuously while
-    /// the editor is simply open -- including any side-effecting script the
-    /// user has not even saved yet. Command previews are explicit and
-    /// user-triggered instead; see `run_command_preview`.
+    /// called for a command-backed draft: the engine could spawn the
+    /// configured program continuously while the editor is simply open --
+    /// including any side-effecting script the user has not even saved yet.
+    /// Command previews are explicit and user-triggered instead; see
+    /// `run_command_preview`.
     fn preview(&mut self) -> String {
-        let (config, index) = if self.new_draft {
-            let Some(draft) = self.draft.as_ref() else {
+        let source = if self.new_draft {
+            if self.draft.is_none() {
                 return self.strings.no_selection().into();
-            };
-            let mut config = self.config.clone();
-            config.expansion.push(ExpansionConfig {
-                id: ExpansionConfig::new_id(),
-                trigger: draft.trigger.clone(),
-                replacement: draft.replacement.clone(),
-                description: draft.description.clone(),
-                tags: draft.tags.clone(),
-                category: draft.category.clone(),
-                app_filter: draft.app_filter.clone(),
-                match_mode: draft.match_mode,
-                command: None,
-                enabled: draft.enabled,
-                propagate_case: draft.propagate_case,
-            });
-            let index = config.expansion.len() - 1;
-            (config, index)
+            }
+            None
         } else {
             let Some(index) = self.selected_index() else {
                 return self.strings.no_selection().into();
             };
-            (self.config.clone(), index)
+            Some(&self.config.expansion[index])
         };
         let draft_hash = preview::cache_key(self.draft.as_ref(), &self.preview_app);
         if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
@@ -1437,8 +1421,9 @@ impl GuiApp {
             }
         }
         let result = preview::render(
-            config,
-            index,
+            source,
+            &self.config.settings,
+            &self.config.organization,
             self.draft.as_ref(),
             &self.preview_input,
             &self.preview_app,

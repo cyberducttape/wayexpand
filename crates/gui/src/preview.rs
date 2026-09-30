@@ -1,7 +1,10 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use wayexpand_core::{Config, ExpansionEngine, InputEvent, WindowContext};
+use wayexpand_core::{
+    Config, ExpansionConfig, ExpansionEngine, InputEvent, OrganizationPolicy, Settings,
+    WindowContext,
+};
 
 use crate::editor::Draft;
 
@@ -40,27 +43,46 @@ pub(crate) fn cache_key(draft: Option<&Draft>, app: &str) -> u64 {
 }
 
 pub(crate) fn render(
-    mut config: Config,
-    index: usize,
+    source: Option<&ExpansionConfig>,
+    settings: &Settings,
+    organization: &OrganizationPolicy,
     draft: Option<&Draft>,
     input: &str,
     app: &str,
 ) -> String {
-    if let Some(draft) = draft {
-        config.expansion[index].trigger = draft.trigger.clone();
-        config.expansion[index].replacement = draft.replacement.clone();
-        config.expansion[index].match_mode = draft.match_mode;
-        config.expansion[index].enabled = draft.enabled;
-        config.expansion[index].propagate_case = draft.propagate_case;
-        config.expansion[index].app_filter = draft.app_filter.clone();
-        config.expansion[index].description = draft.description.clone();
-        config.expansion[index].tags = draft.tags.clone();
-        config.expansion[index].category = draft.category.clone();
-        config.expansion[index].command = match draft.command_config() {
-            Ok(command) => command,
-            Err(_) => return "Configuration is invalid".into(),
-        };
-    }
+    let expansion = match draft {
+        Some(draft) => Some(ExpansionConfig {
+            id: source
+                .map(|expansion| expansion.id.clone())
+                .unwrap_or_else(ExpansionConfig::new_id),
+            trigger: draft.trigger.clone(),
+            replacement: draft.replacement.clone(),
+            description: draft.description.clone(),
+            tags: draft.tags.clone(),
+            category: draft.category.clone(),
+            app_filter: draft.app_filter.clone(),
+            match_mode: draft.match_mode,
+            command: match draft.command_config() {
+                Ok(command) => command,
+                Err(_) => return "Configuration is invalid".into(),
+            },
+            enabled: draft.enabled,
+            propagate_case: draft.propagate_case,
+        }),
+        None => source.cloned(),
+    };
+    let Some(expansion) = expansion else {
+        return "Configuration is invalid".into();
+    };
+    // A preview is scoped to one expansion. Cloning the production Config and
+    // rebuilding its matcher on every preview-input edit made this path O(N)
+    // in the entire library despite only one snippet being evaluated.
+    let config = Config {
+        expansion: vec![expansion],
+        hotkey: Vec::new(),
+        settings: settings.clone(),
+        organization: organization.clone(),
+    };
     let Ok(mut engine) = ExpansionEngine::new(config) else {
         return "Configuration is invalid".into();
     };
@@ -81,7 +103,7 @@ pub(crate) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayexpand_core::{ExpansionConfig, MatchMode, OrganizationPolicy, Settings};
+    use wayexpand_core::{ExpansionConfig, MatchMode};
 
     fn config(app_filter: Vec<&str>) -> Config {
         Config {
@@ -106,13 +128,31 @@ mod tests {
 
     #[test]
     fn renders_committed_trigger_text() {
-        assert_eq!(render(config(Vec::new()), 0, None, ":hi", ""), "Hello");
+        let source = config(Vec::new()).expansion.remove(0);
+        assert_eq!(
+            render(
+                Some(&source),
+                &Settings::default(),
+                &OrganizationPolicy::default(),
+                None,
+                ":hi",
+                ""
+            ),
+            "Hello"
+        );
     }
 
     #[test]
     fn app_filter_preview_fails_closed_without_context() {
         assert_eq!(
-            render(config(vec!["editor"]), 0, None, ":hi", ""),
+            render(
+                Some(&config(vec!["editor"]).expansion[0]),
+                &Settings::default(),
+                &OrganizationPolicy::default(),
+                None,
+                ":hi",
+                ""
+            ),
             "No expansion matched"
         );
     }
@@ -120,7 +160,14 @@ mod tests {
     #[test]
     fn app_filter_preview_uses_selected_application() {
         assert_eq!(
-            render(config(vec!["editor"]), 0, None, ":hi", "org.editor"),
+            render(
+                Some(&config(vec!["editor"]).expansion[0]),
+                &Settings::default(),
+                &OrganizationPolicy::default(),
+                None,
+                ":hi",
+                "org.editor"
+            ),
             "Hello"
         );
     }
@@ -173,7 +220,14 @@ mod tests {
         let mut draft = Draft::from_expansion(&expansion);
         draft.command_enabled = true;
         assert_eq!(
-            render(config(Vec::new()), 0, Some(&draft), ":hi", ""),
+            render(
+                Some(&config(Vec::new()).expansion[0]),
+                &Settings::default(),
+                &OrganizationPolicy::default(),
+                Some(&draft),
+                ":hi",
+                ""
+            ),
             "Configuration is invalid"
         );
     }
