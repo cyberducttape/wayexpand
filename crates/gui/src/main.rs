@@ -97,6 +97,7 @@ struct GuiApp {
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
     daemon_status: String,
+    daemon_capabilities: Option<runtime::DaemonCapabilities>,
     fleet_status: String,
     backend_status: Vec<BackendStatus>,
     protocol_probes: Vec<(String, String)>,
@@ -443,6 +444,7 @@ impl GuiApp {
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
             daemon_status: strings.not_checked().into(),
+            daemon_capabilities: None,
             fleet_status: strings.not_checked().into(),
             backend_status: Vec::new(),
             protocol_probes: Vec::new(),
@@ -543,6 +545,7 @@ impl GuiApp {
                     self.fleet_status = snapshot.fleet_status;
                     self.protocol_probes = snapshot.protocol_probes;
                     self.daemon_status = snapshot.daemon_status;
+                    self.daemon_capabilities = snapshot.daemon_capabilities;
                     self.daemon_connected = snapshot.daemon_connected;
                     if let Some(paused) = snapshot.paused {
                         self.paused = paused;
@@ -587,6 +590,8 @@ impl GuiApp {
                         },
                         runtime::Operation::Status => match result {
                             Ok(response) => {
+                                self.daemon_capabilities =
+                                    runtime::DaemonCapabilities::parse(&response);
                                 self.daemon_status = response.trim().replace('\n', " · ");
                                 self.daemon_connected = runtime::parse_connected(&response);
                                 if let Some(paused) = runtime::parse_paused(&response) {
@@ -594,6 +599,7 @@ impl GuiApp {
                                 }
                             }
                             Err(error) => {
+                                self.daemon_capabilities = None;
                                 self.daemon_status = format!("Unavailable: {error}");
                                 self.daemon_connected = Some(false);
                             }
@@ -1785,6 +1791,33 @@ impl GuiApp {
                     theme::card(ui, palette, |ui| {
                         ui.label(RichText::new(&self.daemon_status).monospace());
                     });
+                    if self.daemon_connected == Some(true) {
+                        let capabilities = self.daemon_capabilities.unwrap_or_default();
+                        ui.add_space(8.0);
+                        theme::section_header(ui, "", self.strings.capture_guarantees());
+                        for (key, value) in [
+                            ("sensitive_focus", capabilities.capture_sensitive_focus),
+                            ("exclusive", capabilities.capture_exclusive),
+                            (
+                                "reliable_key_state",
+                                capabilities.capture_reliable_key_state,
+                            ),
+                            ("capture_passthrough", capabilities.capture_key_passthrough),
+                            ("composition", capabilities.capture_composition_aware),
+                            ("app_identity", capabilities.capture_app_identity),
+                        ] {
+                            self.render_capability_row(ui, palette, key, value);
+                        }
+                        theme::section_header(ui, "", self.strings.injection_guarantees());
+                        for (key, value) in [
+                            ("atomic_replace", capabilities.inject_atomic_replace),
+                            ("unicode", capabilities.inject_full_unicode),
+                            ("cursor", capabilities.inject_cursor_reposition),
+                            ("injection_passthrough", capabilities.inject_key_passthrough),
+                        ] {
+                            self.render_capability_row(ui, palette, key, value);
+                        }
+                    }
                     ui.label(
                         RichText::new(format!(
                             "{}: {}",
@@ -1863,6 +1896,26 @@ impl GuiApp {
                 });
             self.diagnostics_open = open;
         }
+    }
+
+    fn render_capability_row(
+        &self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        key: &str,
+        value: Option<bool>,
+    ) {
+        let (label, color) = match value {
+            Some(true) => (self.strings.capability_available(), palette.success),
+            Some(false) => (self.strings.capability_unavailable(), palette.warning),
+            None => (self.strings.capability_unknown(), palette.muted),
+        };
+        ui.horizontal(|ui| {
+            ui.label(self.strings.capability_label(key));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.colored_label(color, label);
+            });
+        });
     }
 
     fn render_import_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -4413,6 +4466,18 @@ mod tests {
         config.save_atomic(&path).unwrap();
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.diagnostics_open = true;
+        app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+            capture_sensitive_focus: Some(false),
+            capture_exclusive: Some(false),
+            capture_reliable_key_state: Some(true),
+            capture_key_passthrough: Some(false),
+            capture_composition_aware: Some(false),
+            capture_app_identity: None,
+            inject_atomic_replace: Some(false),
+            inject_full_unicode: Some(true),
+            inject_cursor_reposition: Some(true),
+            inject_key_passthrough: Some(true),
+        });
         app.import_open = true;
         app.settings_open = true;
         app.pending_action = Some(PendingAction::Delete);

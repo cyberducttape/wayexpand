@@ -60,9 +60,55 @@ pub(crate) struct DiagnosticsSnapshot {
     pub fleet_status: String,
     pub protocol_probes: Vec<(String, String)>,
     pub daemon_status: String,
+    pub daemon_capabilities: Option<DaemonCapabilities>,
     pub daemon_connected: Option<bool>,
     pub paused: Option<bool>,
     pub announce: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DaemonCapabilities {
+    pub capture_sensitive_focus: Option<bool>,
+    pub capture_exclusive: Option<bool>,
+    pub capture_reliable_key_state: Option<bool>,
+    pub capture_key_passthrough: Option<bool>,
+    pub capture_composition_aware: Option<bool>,
+    pub capture_app_identity: Option<bool>,
+    pub inject_atomic_replace: Option<bool>,
+    pub inject_full_unicode: Option<bool>,
+    pub inject_cursor_reposition: Option<bool>,
+    pub inject_key_passthrough: Option<bool>,
+}
+
+impl DaemonCapabilities {
+    pub fn parse(response: &str) -> Option<Self> {
+        let mut capabilities = Self::default();
+        let mut found = false;
+        for line in response.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let Ok(value) = value.parse::<bool>() else {
+                continue;
+            };
+            let slot = match key {
+                "capture_sensitive_focus" => &mut capabilities.capture_sensitive_focus,
+                "capture_exclusive" => &mut capabilities.capture_exclusive,
+                "capture_reliable_key_state" => &mut capabilities.capture_reliable_key_state,
+                "capture_key_passthrough" => &mut capabilities.capture_key_passthrough,
+                "capture_composition_aware" => &mut capabilities.capture_composition_aware,
+                "capture_app_identity" => &mut capabilities.capture_app_identity,
+                "inject_atomic_replace" => &mut capabilities.inject_atomic_replace,
+                "inject_full_unicode" => &mut capabilities.inject_full_unicode,
+                "inject_cursor_reposition" => &mut capabilities.inject_cursor_reposition,
+                "inject_key_passthrough" => &mut capabilities.inject_key_passthrough,
+                _ => continue,
+            };
+            *slot = Some(value);
+            found = true;
+        }
+        found.then_some(capabilities)
+    }
 }
 
 pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completion>)> {
@@ -139,18 +185,20 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
             .and_then(|response| parse_connected(response))
             .unwrap_or(false),
     );
-    let (daemon_status, paused) = match daemon_response {
+    let (daemon_status, daemon_capabilities, paused) = match daemon_response {
         Ok(response) => (
             response.trim().replace('\n', " · "),
+            DaemonCapabilities::parse(&response),
             parse_paused(&response),
         ),
-        Err(error) => (format!("Unavailable: {error}"), None),
+        Err(error) => (format!("Unavailable: {error}"), None, None),
     };
     DiagnosticsSnapshot {
         backend_status,
         fleet_status,
         protocol_probes,
         daemon_status,
+        daemon_capabilities,
         daemon_connected,
         paused,
         announce,
@@ -210,5 +258,20 @@ mod tests {
         assert_eq!(super::parse_connected("state=connected\n"), Some(true));
         assert_eq!(super::parse_connected("state=stopped\n"), Some(false));
         assert_eq!(super::parse_connected("running\npaused=false\n"), None);
+    }
+
+    #[test]
+    fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
+        let capabilities = super::DaemonCapabilities::parse(
+            "capture_sensitive_focus=false\ncapture_exclusive=true\ninject_atomic_replace=false\ninject_full_unicode=true\n",
+        )
+        .unwrap();
+        assert_eq!(capabilities.capture_sensitive_focus, Some(false));
+        assert_eq!(capabilities.capture_exclusive, Some(true));
+        assert_eq!(capabilities.capture_reliable_key_state, None);
+        assert_eq!(capabilities.inject_atomic_replace, Some(false));
+        assert_eq!(capabilities.inject_full_unicode, Some(true));
+        assert_eq!(capabilities.inject_key_passthrough, None);
+        assert_eq!(super::DaemonCapabilities::parse("state=connected\n"), None);
     }
 }

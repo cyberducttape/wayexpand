@@ -445,6 +445,67 @@ impl Strings {
         }
     }
 
+    pub fn capture_guarantees(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Keyboard capture",
+            Language::German => "Tastaturerfassung",
+        }
+    }
+
+    pub fn injection_guarantees(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Text output",
+            Language::German => "Textausgabe",
+        }
+    }
+
+    pub fn capability_label(&self, key: &str) -> &'static str {
+        match (self.lang, key) {
+            (Language::English, "sensitive_focus") => "Sensitive-field awareness",
+            (Language::German, "sensitive_focus") => "Erkennung sensibler Felder",
+            (Language::English, "exclusive") => "Exclusive keyboard capture",
+            (Language::German, "exclusive") => "Exklusive Tastaturerfassung",
+            (Language::English, "reliable_key_state") => "Key press/release tracking",
+            (Language::German, "reliable_key_state") => "Tastenanschlag/-loslassen verfolgen",
+            (Language::English, "capture_passthrough") => "Unsupported-key forwarding",
+            (Language::German, "capture_passthrough") => "Weitergabe nicht unterstützter Tasten",
+            (Language::English, "composition") => "IME composition awareness",
+            (Language::German, "composition") => "IME-Kompositionserkennung",
+            (Language::English, "app_identity") => "Focused application identity",
+            (Language::German, "app_identity") => "Erkennung der aktiven Anwendung",
+            (Language::English, "atomic_replace") => "Atomic text replacement",
+            (Language::German, "atomic_replace") => "Atomarer Textersatz",
+            (Language::English, "unicode") => "Layout-independent Unicode",
+            (Language::German, "unicode") => "Tastaturlayout-unabhängiges Unicode",
+            (Language::English, "cursor") => "Cursor repositioning",
+            (Language::German, "cursor") => "Cursorpositionierung",
+            (Language::English, "injection_passthrough") => "Key press/release forwarding",
+            (Language::German, "injection_passthrough") => "Weitergabe von Tastenanschlägen",
+            _ => "",
+        }
+    }
+
+    pub fn capability_available(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Available",
+            Language::German => "Verfügbar",
+        }
+    }
+
+    pub fn capability_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Not provided",
+            Language::German => "Nicht verfügbar",
+        }
+    }
+
+    pub fn capability_unknown(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unknown · update/restart daemon",
+            Language::German => "Unbekannt · Dienst aktualisieren/neu starten",
+        }
+    }
+
     pub fn daemon(&self) -> &'static str {
         match self.lang {
             Language::English => "Daemon",
