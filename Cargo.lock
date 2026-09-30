@@ -4085,6 +4085,8 @@ dependencies = [
 name = "wayexpand-backend-kwin-window"
 version = "1.2.0"
 dependencies = [
+ "async-io",
+ "futures-lite",
  "getrandom 0.4.3",
  "thiserror 2.0.20",
  "wayexpand-core",

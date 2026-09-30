@@ -29,6 +29,7 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
+const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 /// Upper bound on how long `probe()` waits for the session bus / KWin to
 /// answer before giving up. A local D-Bus round trip normally completes in
@@ -46,6 +47,8 @@ pub enum KwinWindowError {
     ScriptNotReady,
     #[error("KWin tracker setup exceeded its time limit")]
     SetupTimedOut,
+    #[error("session D-Bus connection setup exceeded its time limit")]
+    ConnectionTimedOut,
     #[error("KWin no longer reports the WayExpand window-tracker script as loaded")]
     ScriptStopped,
     #[error("org.kde.KWin's scripting interface is not reachable on the session bus")]
@@ -117,9 +120,10 @@ impl KwinWindowTracker {
     }
 
     fn probe_blocking() -> Result<(), KwinWindowError> {
-        let connection = zbus::blocking::connection::Builder::session()?
-            .method_timeout(DBUS_METHOD_TIMEOUT)
-            .build()?;
+        let connection = bounded_session_connection(
+            zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
+            DBUS_CONNECTION_TIMEOUT,
+        )?;
         let reply = connection
             .call_method(
                 Some("org.kde.KWin"),
@@ -164,11 +168,13 @@ impl KwinWindowTracker {
         let service = WindowTrackerService {
             sender: Mutex::new(sender),
         };
-        let connection = zbus::blocking::connection::Builder::session()?
-            .method_timeout(DBUS_METHOD_TIMEOUT)
-            .name(bus_name.clone())?
-            .serve_at("/WindowTracker", service)?
-            .build()?;
+        let connection = bounded_session_connection(
+            zbus::connection::Builder::session()?
+                .method_timeout(DBUS_METHOD_TIMEOUT)
+                .name(bus_name.clone())?
+                .serve_at("/WindowTracker", service)?,
+            DBUS_CONNECTION_TIMEOUT,
+        )?;
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce:x}");
         // The path is otherwise predictable (PID plus a fixed prefix, under
@@ -274,6 +280,27 @@ impl KwinWindowTracker {
     }
 }
 
+/// Build the session-bus connection without allowing authentication or socket
+/// setup to strand the tracker supervisor/UI worker indefinitely. `race`
+/// drops the unfinished connection future when the deadline wins.
+fn bounded_session_connection<'a>(
+    builder: zbus::connection::Builder<'a>,
+    timeout: Duration,
+) -> Result<Connection, KwinWindowError> {
+    let connect = async move {
+        builder
+            .build()
+            .await
+            .map(Connection::from)
+            .map_err(KwinWindowError::DBus)
+    };
+    let timeout = async {
+        async_io::Timer::after(timeout).await;
+        Err(KwinWindowError::ConnectionTimedOut)
+    };
+    futures_lite::future::block_on(futures_lite::future::race(connect, timeout))
+}
+
 impl Drop for KwinWindowTracker {
     fn drop(&mut self) {
         let _ = self.connection.call_method(
@@ -354,8 +381,16 @@ impl WindowTracker for KwinWindowTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::{window_context_from_signal, KwinWindowTracker, TRACKER_HEALTH_CHECK_INTERVAL};
-    use std::{thread, time::Instant};
+    use super::{
+        bounded_session_connection, window_context_from_signal, KwinWindowError, KwinWindowTracker,
+        TRACKER_HEALTH_CHECK_INTERVAL,
+    };
+    use std::{
+        io::Read,
+        os::unix::net::UnixListener,
+        thread,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
     use wayexpand_core::WindowTracker;
 
     #[test]
@@ -384,6 +419,33 @@ mod tests {
             window_context_from_signal("org.example.Editor".into(), "Document".into()).unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title.as_deref(), Some("Document"));
+    }
+
+    #[test]
+    fn session_bus_authentication_is_cancelled_at_connection_deadline() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-timeout-{}-{}.sock",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut ignored = Vec::new();
+            let _ = stream.read_to_end(&mut ignored);
+        });
+        let address = format!("unix:path={}", socket_path.display());
+        let builder = zbus::connection::Builder::address(address.as_str()).unwrap();
+        let started = Instant::now();
+        let result = bounded_session_connection(builder, Duration::from_millis(100));
+
+        assert!(matches!(result, Err(KwinWindowError::ConnectionTimedOut)));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        server.join().unwrap();
+        std::fs::remove_file(socket_path).unwrap();
     }
 
     #[test]
