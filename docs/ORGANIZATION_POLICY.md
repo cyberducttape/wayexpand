@@ -52,6 +52,12 @@ require_absolute_commands = false
 # Disable title-based fallback in app filtering (require app_id match only)
 disable_title_matching = false
 
+# Require a backend with a protocol-level atomic replacement transaction
+require_atomic_replace = false
+
+# Require the input source to report password/sensitive-field focus
+require_sensitive_focus = false
+
 # Maximum replacement text size in bytes (0 = unlimited)
 max_replacement_size = 65536
 
@@ -73,6 +79,8 @@ When `safe_mode = true`:
 - Policy violations **prevent** expansions from executing
 - Violations logged as **errors** to journald
 - Suitable for locked-down production environments
+- `require_atomic_replace` and `require_sensitive_focus` reject startup before
+  capture begins when the selected source/backend cannot provide the guarantee
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends
 - Can require absolute command paths so `program = "git"` is rejected
 
@@ -104,6 +112,8 @@ disable_commands = true
 disable_hotkeys = true
 require_absolute_commands = true
 disable_title_matching = false
+require_atomic_replace = true
+require_sensitive_focus = true
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]
 # Empty is unrestricted, so list the packs explicitly when restricting use.
@@ -119,6 +129,8 @@ disable_commands = false
 disable_hotkeys = false
 require_absolute_commands = true
 disable_title_matching = false
+require_atomic_replace = true
+require_sensitive_focus = true
 max_replacement_size = 65536
 allowed_backends = ["libei", "input-method-v2"]
 allowed_packs = ["sre-tools", "infrastructure-commands"]

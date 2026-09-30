@@ -10,7 +10,8 @@ use command_runtime::{
 };
 
 use crate::{
-    CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig, KeyChord, Matcher,
+    CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig, InjectorCapabilities,
+    KeyChord, Matcher,
 };
 use std::{
     collections::VecDeque,
@@ -699,6 +700,21 @@ impl ExpansionEngine {
 
     pub fn commands_disabled(&self) -> bool {
         self.config.organization.disable_commands
+    }
+
+    /// Check the active, enforcement-mode backend requirements against the
+    /// connected injector and input source. Keeping this decision in the
+    /// engine's policy snapshot ensures reloads and fleet policy cannot drift
+    /// from startup validation.
+    pub fn capability_violation(
+        &self,
+        injector: InjectorCapabilities,
+        sensitive_focus: bool,
+    ) -> Option<String> {
+        self.config
+            .organization
+            .effective_enforcement_policy()
+            .capability_violation(injector, sensitive_focus)
     }
 
     pub fn set_title_matching_disabled(&mut self, disabled: bool) {

@@ -72,6 +72,31 @@ impl fmt::Display for InputSourceError {
 
 impl std::error::Error for InputSourceError {}
 
+/// Guarantees provided by a text-injection backend.
+///
+/// These are deliberately capability values rather than backend-name checks.
+/// A backend may negotiate a different runtime mode (for example, libei can
+/// provide either direct UTF-8 text or a keyboard-layout fallback), so policy
+/// must be evaluated against the connected injector's actual contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InjectorCapabilities {
+    /// The backend can replace the trigger and replacement as one protocol
+    /// transaction, without an externally visible erase-then-insert gap.
+    pub atomic_replace: bool,
+    /// The input source paired with this injector reports sensitive-field
+    /// focus. This is false for output-only injectors.
+    pub sensitive_focus: bool,
+    /// Every valid Unicode replacement can be represented without depending
+    /// on the active keyboard layout.
+    pub full_unicode: bool,
+    /// The backend can reposition the insertion cursor after committing text.
+    pub cursor_reposition: bool,
+    /// The backend/source pair provides a trustworthy application identity.
+    pub reliable_app_identity: bool,
+    /// The backend can preserve unsupported physical key press/release events.
+    pub key_passthrough: bool,
+}
+
 /// The platform-independent operation required by the expansion engine.
 ///
 /// Requires `Send` so that a `Box<dyn TextInjector>` can be handed off to a
@@ -81,6 +106,12 @@ impl std::error::Error for InputSourceError {}
 /// without waiting on it.
 pub trait TextInjector: Send {
     fn name(&self) -> &'static str;
+    /// Report the negotiated guarantees of this connected injector.
+    /// Implementations default to the conservative profile so a new backend
+    /// cannot accidentally satisfy a security requirement by omission.
+    fn capabilities(&self) -> InjectorCapabilities {
+        InjectorCapabilities::default()
+    }
     /// Human-readable negotiated capability detail for diagnostics. Backends
     /// that have no additional runtime mode may use the stable default.
     fn status_detail(&self) -> &'static str {
@@ -170,6 +201,10 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
 
     fn status_detail(&self) -> &'static str {
         (**self).status_detail()
+    }
+
+    fn capabilities(&self) -> InjectorCapabilities {
+        (**self).capabilities()
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

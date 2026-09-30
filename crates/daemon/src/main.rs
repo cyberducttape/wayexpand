@@ -32,7 +32,7 @@ use wayexpand_backend_libei::portal_token_path;
 use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    InputEvent, TextInjector, WindowContext,
+    InjectorCapabilities, InputEvent, TextInjector, WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -227,6 +227,29 @@ fn main() -> Result<()> {
     config
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);
+
+    // Reject impossible deployment guarantees before opening either the input
+    // source or output backend. The input-method protocol is the only shipped
+    // source that can provide both guarantees; the connected injector is
+    // checked again below because output capabilities may be negotiated.
+    let preflight_capabilities = if source_name == "input-method" {
+        InjectorCapabilities {
+            atomic_replace: true,
+            sensitive_focus: true,
+            full_unicode: true,
+            ..InjectorCapabilities::default()
+        }
+    } else {
+        InjectorCapabilities::default()
+    };
+    if let Some(violation) = config
+        .engine
+        .capability_violation(preflight_capabilities, source_name == "input-method")
+    {
+        policy::log_violation(&policy, &violation);
+        anyhow::bail!("organization policy blocks startup: {violation}");
+    }
+
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
     let signal_stop = control.stop_requested.clone();
@@ -305,6 +328,19 @@ fn main() -> Result<()> {
             }
         }
     };
+
+    let injector_capabilities = input_method
+        .as_ref()
+        .map(TextInjector::capabilities)
+        .or_else(|| injector.as_ref().map(|backend| backend.capabilities()))
+        .unwrap_or_else(InjectorCapabilities::default);
+    if let Some(violation) = config
+        .engine
+        .capability_violation(injector_capabilities, input_method.is_some())
+    {
+        policy::log_violation(&policy, &violation);
+        anyhow::bail!("organization policy blocks startup: {violation}");
+    }
 
     let active_backend = input_method
         .as_ref()

@@ -14,7 +14,7 @@ use std::{
 };
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
-use wayexpand_core::{InjectorError, TextInjector};
+use wayexpand_core::{InjectorCapabilities, InjectorError, TextInjector};
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
     Connection, Dispatch, EventQueue, QueueHandle,
@@ -399,6 +399,17 @@ fn create_minimal_keymap() -> Result<File, WlrootsError> {
 impl TextInjector for WlrootsInjector {
     fn name(&self) -> &'static str {
         BACKEND_NAME
+    }
+
+    fn capabilities(&self) -> InjectorCapabilities {
+        InjectorCapabilities {
+            atomic_replace: false,
+            sensitive_focus: false,
+            full_unicode: false,
+            cursor_reposition: true,
+            reliable_app_identity: false,
+            key_passthrough: false,
+        }
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

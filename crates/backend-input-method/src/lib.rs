@@ -20,8 +20,8 @@ use std::{
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{
-    InjectorError, InputEvent, InputSource, InputSourceError, KeyChord, KeyEventState, Modifiers,
-    TextInjector,
+    InjectorCapabilities, InjectorError, InputEvent, InputSource, InputSourceError, KeyChord,
+    KeyEventState, Modifiers, TextInjector,
 };
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
@@ -1139,6 +1139,17 @@ impl TextInjector for InputMethodSource {
     // backends (libei, wlroots), which can synthesize an actual Left key.
     fn name(&self) -> &'static str {
         SOURCE_NAME
+    }
+
+    fn capabilities(&self) -> InjectorCapabilities {
+        InjectorCapabilities {
+            atomic_replace: true,
+            sensitive_focus: true,
+            full_unicode: true,
+            cursor_reposition: false,
+            reliable_app_identity: false,
+            key_passthrough: false,
+        }
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

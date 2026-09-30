@@ -270,6 +270,8 @@ Diagnostic output suitable for health checks and monitoring systems.
     "policy": {
       "valid": true,
       "require_absolute_commands": false,
+      "require_atomic_replace": false,
+      "require_sensitive_focus": false,
       "is_active": false
     }
   },
@@ -318,6 +320,8 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `policy.policy.require_absolute_commands` (bool): Whether command programs must use absolute paths; in audit mode this is reported but not enforced
+- `policy.policy.require_atomic_replace` (bool): Whether startup requires a protocol-level atomic replacement capability; enforced only when `safe_mode` is true
+- `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
   - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.

@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Add typed injector capability contracts and organization requirements for
+  atomic replacement and sensitive-field awareness. Safe-mode deployments now
+  fail before capture starts when their selected source/backend cannot meet the
+  requested guarantees; input-method-v2 is the current path satisfying both.
 - Require a separate `--allow-evdev-sensitive-fields` acknowledgement before
   starting evdev capture. Raw keyboard permission alone is not a sufficient
   acknowledgement of evdev's inability to detect password fields; the shipped

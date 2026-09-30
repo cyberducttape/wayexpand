@@ -45,7 +45,7 @@ use std::{
 };
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
-use wayexpand_core::{InjectorError, KeyEventState, Modifiers, TextInjector};
+use wayexpand_core::{InjectorCapabilities, InjectorError, KeyEventState, Modifiers, TextInjector};
 use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
 
 const BACKEND_NAME: &str = "libei";
@@ -1218,6 +1218,20 @@ fn connect_portal(
 impl TextInjector for LibeiInjector {
     fn name(&self) -> &'static str {
         BACKEND_NAME
+    }
+
+    fn capabilities(&self) -> InjectorCapabilities {
+        InjectorCapabilities {
+            // Even a single ei_text flush can fail after the target has
+            // processed part of the transaction; libei has no rollback
+            // primitive for arbitrary application text.
+            atomic_replace: false,
+            sensitive_focus: false,
+            full_unicode: matches!(self.mode, TextMode::Text(_)),
+            cursor_reposition: true,
+            reliable_app_identity: false,
+            key_passthrough: true,
+        }
     }
 
     fn status_detail(&self) -> &'static str {

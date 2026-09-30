@@ -164,6 +164,15 @@ pub struct OrganizationPolicy {
     /// user-editable window title. App IDs remain eligible for matching.
     pub disable_title_matching: bool,
 
+    /// Refuse startup unless the selected injector can replace text as one
+    /// externally atomic transaction. Enforced only in safe mode, like the
+    /// other administrator-owned requirements.
+    pub require_atomic_replace: bool,
+
+    /// Refuse startup unless the selected input source reports sensitive-field
+    /// focus (password, PIN, or equivalent).
+    pub require_sensitive_focus: bool,
+
     /// Maximum replacement size in bytes. Replacements larger than this
     /// are rejected. Prevents DoS via huge expansions. 0 = unlimited.
     pub max_replacement_size: usize,
@@ -189,6 +198,8 @@ impl Default for OrganizationPolicy {
             disable_hotkeys: false,
             require_absolute_commands: false,
             disable_title_matching: false,
+            require_atomic_replace: false,
+            require_sensitive_focus: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
             allowed_packs: Vec::new(),
@@ -214,6 +225,8 @@ impl OrganizationPolicy {
         effective.disable_hotkeys = false;
         effective.require_absolute_commands = false;
         effective.disable_title_matching = false;
+        effective.require_atomic_replace = false;
+        effective.require_sensitive_focus = false;
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
         effective.allowed_packs.clear();
@@ -227,6 +240,8 @@ impl OrganizationPolicy {
             || self.disable_hotkeys
             || self.require_absolute_commands
             || self.disable_title_matching
+            || self.require_atomic_replace
+            || self.require_sensitive_focus
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
             || !self.allowed_packs.is_empty()
@@ -239,6 +254,25 @@ impl OrganizationPolicy {
         } else {
             self.allowed_backends.iter().any(|b| b == backend)
         }
+    }
+
+    /// Return a human-readable capability violation for a selected deployment.
+    pub fn capability_violation(
+        &self,
+        injector: crate::InjectorCapabilities,
+        sensitive_focus: bool,
+    ) -> Option<String> {
+        if self.require_atomic_replace && !injector.atomic_replace {
+            return Some(
+                "selected injector cannot guarantee atomic replacement transactions".into(),
+            );
+        }
+        if self.require_sensitive_focus && !sensitive_focus {
+            return Some(
+                "selected input source cannot report password or sensitive-field focus".into(),
+            );
+        }
+        None
     }
 
     /// Explain a command-path policy violation. Callers enforce the result in
@@ -1533,6 +1567,31 @@ mod tests {
     }
 
     #[test]
+    fn capability_requirements_distinguish_atomic_and_sensitive_guarantees() {
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_atomic_replace: true,
+            require_sensitive_focus: true,
+            ..OrganizationPolicy::default()
+        };
+        let conservative = crate::InjectorCapabilities::default();
+        assert_eq!(
+            policy.capability_violation(conservative, false).as_deref(),
+            Some("selected injector cannot guarantee atomic replacement transactions")
+        );
+
+        let atomic = crate::InjectorCapabilities {
+            atomic_replace: true,
+            ..crate::InjectorCapabilities::default()
+        };
+        assert_eq!(
+            policy.capability_violation(atomic, false).as_deref(),
+            Some("selected input source cannot report password or sensitive-field focus")
+        );
+        assert!(policy.capability_violation(atomic, true).is_none());
+    }
+
+    #[test]
     fn audit_policy_has_no_effective_enforcement_values() {
         let policy = OrganizationPolicy {
             safe_mode: false,
@@ -1551,6 +1610,8 @@ mod tests {
         assert!(!effective.disable_hotkeys);
         assert!(!effective.require_absolute_commands);
         assert!(!effective.disable_title_matching);
+        assert!(!effective.require_atomic_replace);
+        assert!(!effective.require_sensitive_focus);
         assert_eq!(effective.max_replacement_size, 0);
         assert!(effective.allowed_backends.is_empty());
         assert!(effective.allowed_packs.is_empty());
