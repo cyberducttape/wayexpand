@@ -1226,10 +1226,8 @@ impl TextInjector for LibeiInjector {
             // processed part of the transaction; libei has no rollback
             // primitive for arbitrary application text.
             atomic_replace: false,
-            sensitive_focus: false,
             full_unicode: matches!(self.mode, TextMode::Text(_)),
             cursor_reposition: true,
-            reliable_app_identity: false,
             key_passthrough: true,
         }
     }

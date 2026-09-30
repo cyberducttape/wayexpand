@@ -323,12 +323,27 @@ impl OrganizationPolicy {
         injector: crate::InjectorCapabilities,
         sensitive_focus: bool,
     ) -> Option<String> {
+        self.capability_violation_for_source(
+            injector,
+            crate::InputSourceCapabilities {
+                sensitive_focus,
+                ..crate::InputSourceCapabilities::default()
+            },
+        )
+    }
+
+    /// Check guarantees against the explicit capture-source contract.
+    pub fn capability_violation_for_source(
+        &self,
+        injector: crate::InjectorCapabilities,
+        source: crate::InputSourceCapabilities,
+    ) -> Option<String> {
         if self.require_atomic_replace && !injector.atomic_replace {
             return Some(
                 "selected injector cannot guarantee atomic replacement transactions".into(),
             );
         }
-        if self.require_sensitive_focus && !sensitive_focus {
+        if self.require_sensitive_focus && !source.sensitive_focus {
             return Some(
                 "selected input source cannot report password or sensitive-field focus".into(),
             );
@@ -2078,6 +2093,25 @@ mod tests {
             Some("selected input source cannot report password or sensitive-field focus")
         );
         assert!(policy.capability_violation(atomic, true).is_none());
+        assert!(policy
+            .capability_violation_for_source(
+                atomic,
+                crate::InputSourceCapabilities {
+                    sensitive_focus: true,
+                    exclusive_capture: true,
+                    ..crate::InputSourceCapabilities::default()
+                }
+            )
+            .is_none());
+        assert!(policy
+            .capability_violation_for_source(
+                atomic,
+                crate::InputSourceCapabilities {
+                    exclusive_capture: true,
+                    ..crate::InputSourceCapabilities::default()
+                }
+            )
+            .is_some_and(|violation| violation.contains("sensitive-field focus")));
     }
 
     #[test]

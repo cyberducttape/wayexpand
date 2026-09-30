@@ -404,10 +404,8 @@ impl TextInjector for WlrootsInjector {
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
             atomic_replace: false,
-            sensitive_focus: false,
             full_unicode: false,
             cursor_reposition: true,
-            reliable_app_identity: false,
             key_passthrough: false,
         }
     }

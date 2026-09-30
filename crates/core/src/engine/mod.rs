@@ -744,6 +744,19 @@ impl ExpansionEngine {
             .capability_violation(injector, sensitive_focus)
     }
 
+    /// Check the active enforcement policy against the negotiated capture
+    /// and injection guarantees.
+    pub fn capability_violation_for_source(
+        &self,
+        injector: InjectorCapabilities,
+        source: crate::InputSourceCapabilities,
+    ) -> Option<String> {
+        self.config
+            .organization
+            .effective_enforcement_policy()
+            .capability_violation_for_source(injector, source)
+    }
+
     pub fn set_title_matching_disabled(&mut self, disabled: bool) {
         self.config.organization.disable_title_matching = disabled;
     }

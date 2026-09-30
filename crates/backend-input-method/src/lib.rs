@@ -20,8 +20,8 @@ use std::{
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{
-    InjectorCapabilities, InjectorError, InputEvent, InputSource, InputSourceError, KeyChord,
-    KeyEventState, Modifiers, TextInjector,
+    InjectorCapabilities, InjectorError, InputEvent, InputSource, InputSourceCapabilities,
+    InputSourceError, KeyChord, KeyEventState, Modifiers, TextInjector,
 };
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
@@ -1159,10 +1159,8 @@ impl TextInjector for InputMethodSource {
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
             atomic_replace: true,
-            sensitive_focus: true,
             full_unicode: true,
             cursor_reposition: false,
-            reliable_app_identity: false,
             key_passthrough: false,
         }
     }
@@ -1367,6 +1365,16 @@ fn validate_commit_text(text: &str) -> Result<(), InjectorError> {
 impl InputSource for InputMethodSource {
     fn name(&self) -> &'static str {
         SOURCE_NAME
+    }
+
+    fn capabilities(&self) -> InputSourceCapabilities {
+        InputSourceCapabilities {
+            sensitive_focus: true,
+            exclusive_capture: true,
+            reliable_key_state: true,
+            composition_aware: false,
+            reliable_app_identity: false,
+        }
     }
 
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {

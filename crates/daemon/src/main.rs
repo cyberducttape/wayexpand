@@ -33,7 +33,8 @@ use wayexpand_backend_libei::portal_token_path;
 use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    InjectorCapabilities, InputEvent, TextInjector, WindowContext,
+    InjectorCapabilities, InputEvent, InputSource, InputSourceCapabilities, TextInjector,
+    WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -239,16 +240,25 @@ fn main() -> Result<()> {
     let preflight_capabilities = if source_name == "input-method" {
         InjectorCapabilities {
             atomic_replace: true,
-            sensitive_focus: true,
             full_unicode: true,
             ..InjectorCapabilities::default()
         }
     } else {
         InjectorCapabilities::default()
     };
+    let preflight_source_capabilities = if source_name == "input-method" {
+        InputSourceCapabilities {
+            sensitive_focus: true,
+            exclusive_capture: true,
+            reliable_key_state: true,
+            ..InputSourceCapabilities::default()
+        }
+    } else {
+        InputSourceCapabilities::default()
+    };
     if let Some(violation) = config
         .engine
-        .capability_violation(preflight_capabilities, source_name == "input-method")
+        .capability_violation_for_source(preflight_capabilities, preflight_source_capabilities)
     {
         policy::log_violation(&policy, &violation);
         anyhow::bail!("organization policy blocks startup: {violation}");
@@ -338,9 +348,14 @@ fn main() -> Result<()> {
         .map(TextInjector::capabilities)
         .or_else(|| injector.as_ref().map(|backend| backend.capabilities()))
         .unwrap_or_else(InjectorCapabilities::default);
+    let source_capabilities = input_method
+        .as_ref()
+        .map(InputSource::capabilities)
+        .or_else(|| evdev.as_ref().map(InputSource::capabilities))
+        .unwrap_or_default();
     if let Some(violation) = config
         .engine
-        .capability_violation(injector_capabilities, input_method.is_some())
+        .capability_violation_for_source(injector_capabilities, source_capabilities)
     {
         policy::log_violation(&policy, &violation);
         anyhow::bail!("organization policy blocks startup: {violation}");

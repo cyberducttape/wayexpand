@@ -52,7 +52,7 @@ use std::{
 
 use thiserror::Error;
 use wayexpand_backend_input_method::{key_action, key_action_and_update, key_chord, KeyAction};
-use wayexpand_core::{InputEvent, InputSource, InputSourceError};
+use wayexpand_core::{InputEvent, InputSource, InputSourceCapabilities, InputSourceError};
 use wayland_client::protocol::wl_keyboard::KeyState;
 use xkbcommon_rs::{Context, Keymap, State};
 
@@ -499,6 +499,16 @@ impl EvdevSource {
 impl InputSource for EvdevSource {
     fn name(&self) -> &'static str {
         SOURCE_NAME
+    }
+
+    fn capabilities(&self) -> InputSourceCapabilities {
+        InputSourceCapabilities {
+            sensitive_focus: false,
+            exclusive_capture: false,
+            reliable_key_state: true,
+            composition_aware: false,
+            reliable_app_identity: false,
+        }
     }
 
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {

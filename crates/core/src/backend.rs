@@ -54,7 +54,29 @@ impl std::error::Error for WindowTrackerError {}
 /// or test-backed; the matcher must not know which.
 pub trait InputSource {
     fn name(&self) -> &'static str;
+    /// Report the negotiated guarantees of the capture source. New sources
+    /// default to the conservative profile so policy cannot assume safety
+    /// properties merely because a backend was added to the daemon.
+    fn capabilities(&self) -> InputSourceCapabilities {
+        InputSourceCapabilities::default()
+    }
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError>;
+}
+
+/// Guarantees provided by the active keyboard-capture source.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InputSourceCapabilities {
+    /// The source authoritatively reports password/sensitive content focus.
+    pub sensitive_focus: bool,
+    /// The source can prevent original physical keys reaching the application
+    /// until WayExpand has decided whether to pass them through.
+    pub exclusive_capture: bool,
+    /// The source exposes reliable physical key press/release lifetimes.
+    pub reliable_key_state: bool,
+    /// The source is aware of active IME/preedit composition.
+    pub composition_aware: bool,
+    /// The source provides trustworthy application identity for filtering.
+    pub reliable_app_identity: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,16 +105,11 @@ pub struct InjectorCapabilities {
     /// The backend can replace the trigger and replacement as one protocol
     /// transaction, without an externally visible erase-then-insert gap.
     pub atomic_replace: bool,
-    /// The input source paired with this injector reports sensitive-field
-    /// focus. This is false for output-only injectors.
-    pub sensitive_focus: bool,
     /// Every valid Unicode replacement can be represented without depending
     /// on the active keyboard layout.
     pub full_unicode: bool,
     /// The backend can reposition the insertion cursor after committing text.
     pub cursor_reposition: bool,
-    /// The backend/source pair provides a trustworthy application identity.
-    pub reliable_app_identity: bool,
     /// The backend can preserve unsupported physical key press/release events.
     pub key_passthrough: bool,
 }
