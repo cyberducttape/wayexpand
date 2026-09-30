@@ -502,7 +502,9 @@ fn rejected_command_job_does_not_consume_the_trigger() {
         command_workers: Vec::new(),
         hotkey_worker: None,
     });
-    engine.buffer.extend(":slow".chars());
+    for character in ":slow".chars() {
+        engine.push_buffered(character);
+    }
     let before = engine.buffer.clone();
 
     assert!(engine
@@ -2770,6 +2772,80 @@ fn deferred_rollback_restores_an_absorbed_delimiter_with_the_trigger() {
         .pop()
         .unwrap();
     assert_eq!(restored.matched_text, ":sig ");
+}
+
+#[test]
+fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
+    let config = Config::parse(
+        r#"
+        [settings]
+        max_buffer_chars = 4
+
+        [[expansion]]
+        trigger = ":abc"
+        replacement = "first"
+
+        [[expansion]]
+        trigger = ":def"
+        replacement = "second"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let assert_bounded = |engine: &ExpansionEngine| {
+        assert!(engine.buffer.len() <= engine.max_buffer_chars);
+    };
+
+    let first = engine.process_deferred(InputEvent::Text(":abc".into()));
+    assert_eq!(first.len(), 1);
+    assert_bounded(&engine);
+    let second = engine.process_deferred(InputEvent::Text(":def".into()));
+    assert_eq!(second.len(), 2);
+    assert_bounded(&engine);
+
+    engine.restore_deferred_match(":abc");
+    assert_bounded(&engine);
+    engine.restore_deferred_match(":def");
+    assert_bounded(&engine);
+    assert_eq!(engine.buffer.iter().collect::<String>(), ":def");
+    assert!(engine.buffer_truncated);
+
+    let mut bulk_engine = ExpansionEngine::new(
+        Config::parse(
+            r#"
+            [settings]
+            max_buffer_chars = 4
+
+            [[expansion]]
+            trigger = ":abc"
+            replacement = "first"
+
+            [[expansion]]
+            trigger = ":def"
+            replacement = "second"
+            "#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bulk_engine
+            .process_deferred(InputEvent::Text(":abc".into()))
+            .len(),
+        1
+    );
+    assert_bounded(&bulk_engine);
+    assert_eq!(
+        bulk_engine
+            .process_deferred(InputEvent::Text(":def".into()))
+            .len(),
+        2
+    );
+    assert_bounded(&bulk_engine);
+    bulk_engine.process_deferred(InputEvent::Key(KeyChord::parse("Ctrl+K").unwrap()));
+    assert_bounded(&bulk_engine);
+    assert_eq!(bulk_engine.buffer.iter().collect::<String>(), ":def");
+    assert!(bulk_engine.buffer_truncated);
 }
 
 #[test]

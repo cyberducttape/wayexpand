@@ -15,13 +15,17 @@ impl ExpansionEngine {
     /// separated from matching policy, transaction handling, and command
     /// runtime ownership as those implementations continue to be extracted.
     pub fn process(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
-        self.process_internal(event)
+        let results = self.process_internal(event);
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+        results
     }
 
     /// Process input while reserving command-backed matches for caller policy
     /// approval and later dispatch.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
-        self.process_deferred_internal(event)
+        let results = self.process_deferred_internal(event);
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+        results
     }
 }
 
@@ -61,18 +65,6 @@ impl ExpansionEngine {
             return;
         }
         self.last_expansion = None;
-    }
-
-    /// Appends a typed character to the rolling buffer, evicting from the
-    /// front once it exceeds the configured limit. `buffer_truncated` records
-    /// that an eviction happened so a word-boundary trigger can tell "start of
-    /// input" from "a preceding character existed but was dropped".
-    fn push_buffered(&mut self, character: char) {
-        self.buffer.push_back(character);
-        while self.buffer.len() > self.max_buffer_chars {
-            self.buffer.pop_front();
-            self.buffer_truncated = true;
-        }
     }
 
     fn on_backspace(&mut self) {

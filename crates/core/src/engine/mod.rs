@@ -966,8 +966,9 @@ impl ExpansionEngine {
     /// same as the non-exclusive application's input stream.
     pub fn restore_deferred_match(&mut self, matched_text: &str) {
         if self.take_deferred_reservation(matched_text).is_some() {
-            self.buffer.extend(matched_text.chars());
+            self.restore_buffered(matched_text);
         }
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
     /// Remove the reservation represented by a result. Evdev may absorb one
@@ -990,7 +991,27 @@ impl ExpansionEngine {
     fn restore_deferred_matches(&mut self) {
         let reservations = std::mem::take(&mut self.deferred_matches);
         for matched_text in reservations {
-            self.buffer.extend(matched_text.chars());
+            self.restore_buffered(&matched_text);
+        }
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// Append restored text through the same bounded path as ordinary input.
+    /// Deferred work may restore several reservations at once, so bypassing
+    /// this helper can temporarily violate the matcher's rolling-buffer cap.
+    fn restore_buffered(&mut self, text: &str) {
+        for character in text.chars() {
+            self.push_buffered(character);
+        }
+    }
+
+    /// Append one character while maintaining the configured rolling-buffer
+    /// bound and its word-boundary truncation metadata.
+    fn push_buffered(&mut self, character: char) {
+        self.buffer.push_back(character);
+        while self.buffer.len() > self.max_buffer_chars {
+            self.buffer.pop_front();
+            self.buffer_truncated = true;
         }
     }
 
