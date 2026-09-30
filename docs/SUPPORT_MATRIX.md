@@ -34,10 +34,19 @@ to the tested backend, compositor, client, and layout combinations.
 No compositor is currently certified by automated end-to-end tests. Before
 deploying desktop capture, test and record the exact compositor and version:
 
-- Sway / wlroots
-- Hyprland / wlroots
-- KDE Plasma Wayland
-- GNOME Shell Wayland
+The table below is generated from the certification target contract. Its
+paths are test targets, not a guarantee that the path is available or works on
+your session. E2E certification changes only after reviewed real-session
+evidence exists.
+
+<!-- generated:desktop-certification-matrix:start -->
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |
+| --- | --- | --- | --- | --- | --- |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | **Not certified** |
+| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+<!-- generated:desktop-certification-matrix:end -->
 
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not

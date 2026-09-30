@@ -14,23 +14,22 @@ manual test is not certification; the machine-readable artifact from
 
 ## Quick Reference
 
-| Desktop | Version | Capture | Injection | Window Track | Status | Tested | Notes |
-|---------|---------|---------|-----------|--------------|--------|--------|-------|
-| **KDE Plasma** | 6.6.x | evdev | libei | KWin D-Bus | Manually tested; not certified | 2026-09 | evdev has no password-field awareness; automated certification pending |
-| **KDE Plasma** | 6.5.x | evdev | libei | KWin D-Bus | Experimental | pending | Likely compatible |
-| **KDE Plasma** | 6.7.x | evdev | libei | KWin D-Bus | Experimental | pending | Pre-release testing welcome |
-| **GNOME** | 47.x | input-method-v2 | input-method-v2 | Unavailable | Experimental | pending | No keyboard capture; filtered expansions fail closed |
-| **GNOME** | 46.x | input-method-v2 | input-method-v2 | Unavailable | Experimental | pending | No keyboard capture; filtered expansions fail closed |
-| **Sway** | 0.20.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
-| **Sway** | 0.19.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
-| **Hyprland** | 0.45.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
-| **Hyprland** | 0.40.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
-| **river** | 0.4.x | evdev | wlroots virtual keyboard | Unavailable | Experimental | pending | Experimental output path; filtered expansions fail closed |
-| **X11** | any | evdev | clipboard | N/A | Unsupported | N/A | Legacy; not supported for v1.2+ |
+This target summary is generated from the same machine-readable contract used
+by the certification tools. Declared test paths are not per-session
+availability claims, and no target is certified without reviewed evidence.
+
+<!-- generated:desktop-certification-matrix:start -->
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |
+| --- | --- | --- | --- | --- | --- |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | **Not certified** |
+| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+<!-- generated:desktop-certification-matrix:end -->
 
 ## Detailed Certification Results
 
-### ⚠️ KDE Plasma 6.6.x - MANUALLY TESTED, NOT CERTIFIED
+### ⚠️ KDE Plasma 6.6.x - HISTORICAL MANUAL OBSERVATIONS, NOT CERTIFIED
 
 **Test Date:** 2026-09-26  
 **Configuration:**

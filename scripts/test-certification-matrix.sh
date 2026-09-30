@@ -14,6 +14,7 @@ jq -e '
   ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]) and (.requires_password_field_check == true))] | length == 4) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 2) and
+  ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
   ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and

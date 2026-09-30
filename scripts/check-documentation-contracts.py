@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,6 +36,19 @@ def main() -> int:
     certification_doc = (ROOT / "docs/CERTIFICATION_MATRIX.md").read_text(
         encoding="utf-8"
     )
+
+    generated_matrix_check = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate-desktop-matrix.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if generated_matrix_check.returncode:
+        errors.append(
+            "desktop support documentation is out of sync with the certification source: "
+            + generated_matrix_check.stderr.strip()
+        )
 
     version_match = re.search(r'^version = "([^"]+)"', cargo, re.MULTILINE)
     version = version_match.group(1) if version_match else None
@@ -72,11 +86,15 @@ def main() -> int:
     )[0]
     for target in compositor_matrix["targets"]:
         desktop = target["display"].split("/", 1)[0].strip().split()[0]
-        rows = [line for line in quick_reference.splitlines() if f"**{desktop}**" in line]
+        rows = [line for line in quick_reference.splitlines() if f"`{target['id']}`" in line]
+        if len(rows) != 1:
+            errors.append(
+                f"certification quick reference must contain exactly one generated row for {target['id']}"
+            )
         if target["application_filter"] == "unavailable":
-            if not rows or any("Unavailable" not in row for row in rows):
+            if not rows or any("| Unavailable |" not in row for row in rows):
                 errors.append(
-                    f"certification matrix must mark {desktop} window tracking unavailable"
+                    f"certification matrix must mark {desktop} application filtering unavailable"
                 )
             if any("wlr-foreign-toplevel" in row for row in rows):
                 errors.append(
@@ -89,7 +107,7 @@ def main() -> int:
                     f"certification details must explain fail-closed app_filter behavior for {desktop}"
                 )
         if "evdev+wlroots" in target["input_paths"] and any(
-            "| evdev | wlroots virtual keyboard |" not in row for row in rows
+            "evdev+wlroots" not in row for row in rows
         ):
             errors.append(
                 f"certification backend columns do not match the declared wlroots route for {desktop}"

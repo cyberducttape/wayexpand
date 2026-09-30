@@ -16,6 +16,8 @@
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
+      "certification_status": "not-certified",
+      "certification_evidence": null,
       "application_filter": "supported",
       "window_tracker": "KWin application tracker"
     },
@@ -26,6 +28,8 @@
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
+      "certification_status": "not-certified",
+      "certification_evidence": null,
       "application_filter": "unavailable",
       "window_tracker": "none"
     },
@@ -36,6 +40,8 @@
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
+      "certification_status": "not-certified",
+      "certification_evidence": null,
       "application_filter": "unavailable",
       "window_tracker": "none"
     },
@@ -46,6 +52,8 @@
       "toolkits": ["GTK", "Qt"],
       "required_client_markers": ["gtk", "qt", "browser", "terminal", "password", "electron", "editor"],
       "requires_password_field_check": true,
+      "certification_status": "not-certified",
+      "certification_evidence": null,
       "application_filter": "unavailable",
       "window_tracker": "none"
     }
