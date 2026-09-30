@@ -85,6 +85,9 @@ struct GuiApp {
     preview_input: String,
     preview_app: String,
     draft: Option<Draft>,
+    /// A new snippet is held only in the editor until a valid explicit save.
+    new_draft: bool,
+    new_draft_origin: Option<String>,
     undo: Vec<Config>,
     status: Status,
     paused: bool,
@@ -251,6 +254,8 @@ impl GuiApp {
             preview_input,
             preview_app: String::new(),
             draft,
+            new_draft: false,
+            new_draft_origin: None,
             undo: Vec::new(),
             status: Status::info(strings.ready()),
             paused: false,
@@ -568,6 +573,8 @@ impl GuiApp {
 
     fn select(&mut self, index: usize) {
         self.cancel_app_detection();
+        self.new_draft = false;
+        self.new_draft_origin = None;
         self.set_selected_index(Some(index));
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
         self.preview_input = self.config.expansion[index].trigger.clone();
@@ -631,6 +638,9 @@ impl GuiApp {
     /// call. The cheap scalar comparisons are ordered first so a draft that
     /// differs at all usually answers before touching a list at all.
     fn draft_is_dirty(&self) -> bool {
+        if self.new_draft {
+            return self.draft.is_some();
+        }
         let (Some(index), Some(draft)) = (self.selected_index(), self.draft.as_ref()) else {
             return false;
         };
@@ -680,7 +690,28 @@ impl GuiApp {
         let Some(action) = self.pending_action.take() else {
             return;
         };
+        if self.new_draft {
+            self.abandon_new_draft();
+        }
         self.execute_action(action);
+    }
+
+    fn abandon_new_draft(&mut self) {
+        if !self.new_draft {
+            return;
+        }
+        let origin_id = self.new_draft_origin.take();
+        let origin = origin_id
+            .as_ref()
+            .and_then(|id| self.config.expansion.iter().position(|item| &item.id == id))
+            .or_else(|| (!self.config.expansion.is_empty()).then_some(0));
+        self.new_draft = false;
+        self.set_selected_index(origin);
+        self.draft = origin.map(|index| Draft::from_expansion(&self.config.expansion[index]));
+        self.preview_input = origin
+            .map(|index| self.config.expansion[index].trigger.clone())
+            .unwrap_or_default();
+        self.clear_command_preview();
     }
 
     fn save_and_execute_pending(&mut self) {
@@ -724,6 +755,8 @@ impl GuiApp {
                     .unwrap_or_default();
 
                 self.config = new_config;
+                self.new_draft = false;
+                self.new_draft_origin = None;
                 self.rebuild_search_index();
                 self.config_document = new_document;
                 self.config_revision = new_revision;
@@ -742,21 +775,20 @@ impl GuiApp {
     }
 
     fn save_selected(&mut self) {
-        let (Some(index), Some(draft)) = (self.selected_index(), self.draft.as_ref()) else {
+        let Some(draft) = self.draft.as_ref().cloned() else {
+            self.status = Status::warning(self.strings.no_selection());
+            return;
+        };
+        let is_new = self.new_draft;
+        let Some(index) = self
+            .selected_index()
+            .or_else(|| is_new.then_some(self.config.expansion.len()))
+        else {
             self.status = Status::warning(self.strings.no_selection());
             return;
         };
         let mut candidate = self.config.clone();
-        candidate.expansion[index].trigger = draft.trigger.clone();
-        candidate.expansion[index].description = draft.description.clone();
-        candidate.expansion[index].tags = draft.tags.clone();
-        candidate.expansion[index].category = draft.category.clone();
-        candidate.expansion[index].app_filter = draft.app_filter.clone();
-        candidate.expansion[index].replacement = draft.replacement.clone();
-        candidate.expansion[index].enabled = draft.enabled;
-        candidate.expansion[index].match_mode = draft.match_mode;
-        candidate.expansion[index].propagate_case = draft.propagate_case;
-        candidate.expansion[index].command = match draft.command_config() {
+        let command = match draft.command_config() {
             Ok(command) => command,
             Err(error) => {
                 self.status =
@@ -764,6 +796,39 @@ impl GuiApp {
                 return;
             }
         };
+        if is_new {
+            if draft.replacement.is_empty() {
+                self.status = Status::error(
+                    self.strings
+                        .status_save_rejected(self.strings.new_snippet_replacement_required()),
+                );
+                return;
+            }
+            candidate.expansion.push(ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: draft.trigger.clone(),
+                replacement: draft.replacement.clone(),
+                description: draft.description.clone(),
+                tags: draft.tags.clone(),
+                category: draft.category.clone(),
+                app_filter: draft.app_filter.clone(),
+                match_mode: draft.match_mode,
+                command,
+                enabled: draft.enabled,
+                propagate_case: draft.propagate_case,
+            });
+        } else {
+            candidate.expansion[index].trigger = draft.trigger.clone();
+            candidate.expansion[index].description = draft.description.clone();
+            candidate.expansion[index].tags = draft.tags.clone();
+            candidate.expansion[index].category = draft.category.clone();
+            candidate.expansion[index].app_filter = draft.app_filter.clone();
+            candidate.expansion[index].replacement = draft.replacement.clone();
+            candidate.expansion[index].enabled = draft.enabled;
+            candidate.expansion[index].match_mode = draft.match_mode;
+            candidate.expansion[index].propagate_case = draft.propagate_case;
+            candidate.expansion[index].command = command;
+        }
         if let Err(error) = candidate.validate() {
             self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
             return;
@@ -776,9 +841,18 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.rebuild_search_index();
                 self.remember_undo(previous);
+                if is_new {
+                    self.new_draft = false;
+                    self.new_draft_origin = None;
+                    self.set_selected_index(Some(index));
+                }
                 self.draft = self
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
+                self.preview_input = self
+                    .selected
+                    .map(|selected| self.config.expansion[selected].trigger.clone())
+                    .unwrap_or_default();
                 self.clear_command_preview();
                 self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
             }
@@ -843,8 +917,7 @@ impl GuiApp {
             trigger = format!(":new-{suffix}");
             suffix += 1;
         }
-        let mut candidate = self.config.clone();
-        candidate.expansion.push(ExpansionConfig {
+        let draft_expansion = ExpansionConfig {
             id: ExpansionConfig::new_id(),
             trigger,
             replacement: String::new(),
@@ -856,20 +929,14 @@ impl GuiApp {
             command: None,
             enabled: true,
             propagate_case: false,
-        });
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                self.select(self.config.expansion.len() - 1);
-                self.set_saved_status(Status::success(self.strings.status_created()));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_create_failed(&error)),
-        }
+        };
+        self.new_draft_origin = self.selected_id.clone();
+        self.new_draft = true;
+        self.set_selected_index(None);
+        self.draft = Some(Draft::from_expansion(&draft_expansion));
+        self.preview_input = draft_expansion.trigger;
+        self.clear_command_preview();
+        self.status = Status::info(self.strings.new_snippet_draft());
     }
 
     fn create_test_snippet(&mut self) {
@@ -1020,8 +1087,31 @@ impl GuiApp {
     /// user has not even saved yet. Command previews are explicit and
     /// user-triggered instead; see `run_command_preview`.
     fn preview(&mut self) -> String {
-        let Some(index) = self.selected_index() else {
-            return self.strings.no_selection().into();
+        let (config, index) = if self.new_draft {
+            let Some(draft) = self.draft.as_ref() else {
+                return self.strings.no_selection().into();
+            };
+            let mut config = self.config.clone();
+            config.expansion.push(ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: draft.trigger.clone(),
+                replacement: draft.replacement.clone(),
+                description: draft.description.clone(),
+                tags: draft.tags.clone(),
+                category: draft.category.clone(),
+                app_filter: draft.app_filter.clone(),
+                match_mode: draft.match_mode,
+                command: None,
+                enabled: draft.enabled,
+                propagate_case: draft.propagate_case,
+            });
+            let index = config.expansion.len() - 1;
+            (config, index)
+        } else {
+            let Some(index) = self.selected_index() else {
+                return self.strings.no_selection().into();
+            };
+            (self.config.clone(), index)
         };
         let draft_hash = preview::cache_key(self.draft.as_ref(), &self.preview_app);
         if let Some((cached_hash, cached_input, cached_result)) = &self.preview_cache {
@@ -1030,7 +1120,7 @@ impl GuiApp {
             }
         }
         let result = preview::render(
-            self.config.clone(),
+            config,
             index,
             self.draft.as_ref(),
             &self.preview_input,
@@ -1829,13 +1919,19 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
             .show(ctx, |ui| {
-                if self.selected_index().is_none() && !self.config.expansion.is_empty() {
+                if self.selected_index().is_none()
+                    && !self.new_draft
+                    && !self.config.expansion.is_empty()
+                {
                     ui.centered_and_justified(|ui| {
                         ui.label(self.strings.select_snippet_prompt());
                     });
                     return;
                 }
-                let Some(index) = self.selected_index() else {
+                let Some(index) = self
+                    .selected_index()
+                    .or_else(|| self.new_draft.then_some(self.config.expansion.len()))
+                else {
                     let desktop = env::var("XDG_CURRENT_DESKTOP")
                         .or_else(|_| env::var("XDG_SESSION_DESKTOP"))
                         .unwrap_or_else(|_| "Linux desktop".into());
@@ -1963,16 +2059,19 @@ impl GuiApp {
                     });
                     return;
                 };
-                if index >= self.config.expansion.len() {
+                if index >= self.config.expansion.len() && !self.new_draft {
                     self.set_selected_index(None);
                     self.draft = None;
                     ui.label(self.strings.selection_stale());
                     return;
                 }
                 if self.draft.is_none() {
-                    self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
+                    self.draft = self.config.expansion.get(index).map(Draft::from_expansion);
                 }
-                let command_backed = self.config.expansion[index].command.is_some();
+                let command_backed = self
+                    .draft
+                    .as_ref()
+                    .is_some_and(|draft| draft.command_enabled);
                 let mut detect_app_clicked = false;
                 ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -2621,7 +2720,7 @@ impl GuiApp {
     /// row of the editor's scroll area so the primary action stays on screen
     /// however far the snippet's replacement text scrolls.
     fn render_editor_actions(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if self.selected_index().is_none() {
+        if self.selected_index().is_none() && !self.new_draft {
             return;
         }
         egui::TopBottomPanel::bottom("editor_actions")
@@ -2642,7 +2741,12 @@ impl GuiApp {
                     {
                         self.save_selected();
                     }
-                    if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
+                    if self.new_draft {
+                        if theme::secondary_button(ui, palette, self.strings.cancel()).clicked() {
+                            self.abandon_new_draft();
+                            self.status = Status::info(self.strings.ready());
+                        }
+                    } else if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
                         self.request_action(PendingAction::Delete);
                     }
                     if self.draft_is_dirty() {
@@ -3084,6 +3188,75 @@ mod tests {
         form.command_program.clear();
         assert!(!form.matches_command(source.command.as_ref()));
         assert!(form.command_config().is_err());
+    }
+
+    #[test]
+    fn new_snippet_stays_out_of_config_until_a_nonempty_replacement_is_saved() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-new-draft-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let original_file = fs::read(&path).unwrap();
+
+        app.create_new_snippet();
+
+        assert!(app.new_draft);
+        assert!(app.draft_is_dirty());
+        assert!(app.config.expansion.is_empty());
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert!(app.draft.as_ref().unwrap().replacement.is_empty());
+        assert!(app.draft.as_ref().unwrap().enabled);
+
+        app.save_selected();
+        assert!(app.new_draft);
+        assert!(app.config.expansion.is_empty());
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+
+        app.draft.as_mut().unwrap().replacement = "Finished snippet".into();
+        assert_eq!(app.preview(), "Finished snippet");
+        app.save_selected();
+
+        let saved = Config::load(&path).unwrap();
+        assert_eq!(saved.expansion.len(), 1);
+        assert_eq!(saved.expansion[0].trigger, ":new");
+        assert_eq!(saved.expansion[0].replacement, "Finished snippet");
+        assert!(saved.expansion[0].enabled);
+        assert!(!app.new_draft);
+        assert!(!app.draft_is_dirty());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn discarding_a_new_snippet_restores_the_previous_selection_without_writing() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-discard-new-draft-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: vec![import_expansion(":existing", "Existing text")],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let original_file = fs::read(&path).unwrap();
+
+        app.create_new_snippet();
+        app.draft.as_mut().unwrap().replacement = "discard me".into();
+        app.request_action(PendingAction::Select(0));
+        assert_eq!(app.pending_action, Some(PendingAction::Select(0)));
+        app.discard_pending();
+
+        assert!(!app.new_draft);
+        assert_eq!(app.selected_index(), Some(0));
+        assert_eq!(app.draft.as_ref().unwrap().trigger, ":existing");
+        assert_eq!(app.config.expansion.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -3645,6 +3818,19 @@ mod tests {
                 }
             }
         }
+        app.create_new_snippet();
+        let mut input = egui::RawInput::default();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(420.0, 760.0),
+        ));
+        let _ = ctx.run(input, |ctx| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_editor_actions(ctx, &palette);
+            app.render_editor(ctx, &palette);
+        });
+        assert!(app.new_draft);
+        assert_eq!(app.config.expansion.len(), 2);
         fs::remove_file(path).unwrap();
     }
 
