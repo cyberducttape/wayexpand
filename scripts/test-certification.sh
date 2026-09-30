@@ -37,7 +37,7 @@ cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\\n' '{"healthy":true,"ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
-    "status --json") printf '%s\\n' '{"response":"running"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":1}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
 EOF
@@ -107,7 +107,7 @@ cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true}' ;;
-    "status --json") printf '%s\n' '{"response":"running","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$daemon_cli"
@@ -126,7 +126,7 @@ cat >"$explicit_route_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
-    "status --json") printf '%s\n' '{"response":"running","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$explicit_route_cli"
@@ -143,7 +143,7 @@ cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true}' ;;
-    "status --json") printf '%s\n' '{"response":"running","source":"input-method","backend":"input-method-v2"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":1,"source":"input-method","backend":"input-method-v2"}' ;;
 esac
 EOF
 chmod 0755 "$input_method_cli"
@@ -153,6 +153,25 @@ input_method_json="$test_root/input-method-certification.json"
     --target-apps "$target_apps" --results "$results" \
     --cli "$input_method_cli" --output "$input_method_json" >/dev/null
 jq -e '.certified == true and .backend_probe_valid == true' "$input_method_json" >/dev/null
+
+stale_daemon_cli="$test_root/stale-daemon-cli"
+cat >"$stale_daemon_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":0,"source":"evdev","backend":"libei"}' ;;
+esac
+EOF
+chmod 0755 "$stale_daemon_cli"
+stale_daemon_json="$test_root/stale-daemon-certification.json"
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend evdev+libei \
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
+    --results "$results" --cli "$stale_daemon_cli" --output "$stale_daemon_json" >/dev/null; then
+    printf '%s\n' 'certification accepted an incompatible daemon status schema' >&2
+    exit 1
+fi
+jq -e '.certified == false and .status_probe_valid == false' "$stale_daemon_json" >/dev/null
 
 invalid_probe_bin="$test_root/invalid-probe-bin"
 mkdir -p "$invalid_probe_bin"
@@ -179,7 +198,7 @@ cat >"$unhealthy_probe" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false}' ;;
-    "status --json") printf '%s\n' '{"response":"running"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":1}' ;;
 esac
 EOF
 chmod 0755 "$unhealthy_probe"

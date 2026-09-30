@@ -1663,13 +1663,14 @@ mod tests {
                 "paused",
                 "source",
                 "state",
+                "status_schema",
                 "window_tracker_connected",
             ],
             "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
         );
         assert_eq!(
             body,
-            "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstate=connected\npaused=false\n\
+            "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=1\nstate=connected\npaused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
              capture_sensitive_focus=true\n\
              capture_exclusive=true\n\

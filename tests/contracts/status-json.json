@@ -1,9 +1,11 @@
 {
+  "schema_version": 1,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
     "backend_mode": "string",
+    "status_schema": "integer",
     "capture_sensitive_focus": "boolean",
     "capture_exclusive": "boolean",
     "capture_reliable_key_state": "boolean",

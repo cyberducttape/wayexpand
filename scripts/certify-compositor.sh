@@ -7,6 +7,11 @@ set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 matrix="$project_dir/tests/certification/compositor-matrix.json"
+status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
+    "$project_dir/tests/contracts/status-json.json") || {
+    printf '%s\n' 'error: status protocol contract has no valid schema_version' >&2
+    exit 2
+}
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
     exit 2
@@ -181,7 +186,8 @@ if ! printf '%s' "$doctor_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
     doctor_probe_valid=0
 fi
 status_probe_valid=1
-if ! printf '%s' "$status_json" | jq -e 'type == "object" and .response == "running"' >/dev/null 2>&1; then
+if ! printf '%s' "$status_json" | jq -e --argjson schema "$status_schema" \
+    'type == "object" and .response == "running" and .status_schema == $schema' >/dev/null 2>&1; then
     status_json=null
     status_probe_valid=0
 fi

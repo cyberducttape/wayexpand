@@ -381,6 +381,7 @@ below are exactly what that response currently carries -- nothing more.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
+  "status_schema": 1,
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
@@ -417,6 +418,7 @@ below are exactly what that response currently carries -- nothing more.
 - `source` (string): Active input source (`"input-method"`, `"stdin"`, `"evdev"`, ...)
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file

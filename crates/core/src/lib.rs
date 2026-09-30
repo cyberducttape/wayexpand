@@ -1,5 +1,9 @@
 //! Unix-only text expansion engine and secure configuration loader.
 
+/// Version of the daemon's stable key/value control-socket status contract.
+/// Increment when a consumer must distinguish a newer required field set.
+pub const CONTROL_STATUS_SCHEMA: u32 = 1;
+
 #[cfg(not(unix))]
 compile_error!("wayexpand-core currently requires a Unix target");
 

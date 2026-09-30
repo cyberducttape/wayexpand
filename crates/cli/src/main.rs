@@ -22,7 +22,7 @@ use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind, Config,
-    ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
+    ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy, CONTROL_STATUS_SCHEMA,
 };
 
 use args::{take_json_flag, take_option};
@@ -1523,21 +1523,36 @@ fn print_certification(json: bool) -> Result<bool> {
             let source = snapshot.get("source").and_then(serde_json::Value::as_str);
             let backend = snapshot.get("backend").and_then(serde_json::Value::as_str);
             let connected = state == "connected" && source.is_some() && backend.is_some();
+            let status_schema = snapshot
+                .get("status_schema")
+                .and_then(serde_json::Value::as_u64);
+            let compatible = status_schema_compatible(&snapshot);
             let runtime_capabilities = runtime_capabilities_from_status(&snapshot);
-            let detail = match (source, backend) {
-                (Some(source), Some(backend)) => {
-                    format!("state={state}; active route is {source} + {backend}")
+            let detail = match (source, backend, compatible) {
+                (Some(source), Some(backend), true) => {
+                    format!("state={state}; compatible active route is {source} + {backend}")
                 }
+                (Some(source), Some(backend), false) => format!(
+                    "route {source} + {backend} is connected, but daemon status schema is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
+                    status_schema,
+                    CONTROL_STATUS_SCHEMA
+                ),
                 _ => format!("daemon returned state={state}, but no complete active route"),
             };
             add_check(
                 "runtime",
                 "active daemon route",
-                if connected { "verified" } else { "unavailable" },
+                if connected && compatible {
+                    "verified"
+                } else {
+                    "unavailable"
+                },
                 &detail,
             );
             serde_json::json!({
                 "connected": connected,
+                "compatible": compatible,
+                "status_schema": status_schema,
                 "state": state,
                 "source": source,
                 "backend": backend,
@@ -1586,10 +1601,17 @@ fn print_certification(json: bool) -> Result<bool> {
         ]
     } else if selected_capture == "stdin" {
         if active_daemon["connected"] == true {
-            vec![
-                "a manually configured daemon route is connected; automatic selection remains stdin-only",
-                "desktop client behavior still requires certification scenarios",
-            ]
+            if active_daemon["compatible"] == true {
+                vec![
+                    "a manually configured daemon route is connected; automatic selection remains stdin-only",
+                    "desktop client behavior still requires certification scenarios",
+                ]
+            } else {
+                vec![
+                    "the running daemon status contract is missing or incompatible; restart/update it before relying on runtime diagnostics",
+                    "automatic selection remains stdin-only and desktop client behavior still requires certification scenarios",
+                ]
+            }
         } else {
             vec![
                 "no automatic keyboard input path is selected",
@@ -2011,6 +2033,7 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "command_queue_rejected_total"
                         | "command_timeout_total"
                         | "command_failure_total"
+                        | "status_schema"
                         | "injection_latency_sample_count"
                         | "injection_latency_window_count"
                         | "injection_latency_p50_us"
@@ -2055,6 +2078,13 @@ fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json:
             "key_passthrough": value("inject_key_passthrough"),
         },
     })
+}
+
+fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {
+    snapshot
+        .get("status_schema")
+        .and_then(serde_json::Value::as_u64)
+        == Some(u64::from(CONTROL_STATUS_SCHEMA))
 }
 
 fn print_config_diagnostics(path: &Path) -> bool {
@@ -2459,17 +2489,32 @@ mod tests {
     #[test]
     fn status_json_preserves_types_and_ignores_banner() {
         let value = status_as_json(
-            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\ninject_full_unicode=true\n",
+            "running\nsource=stdin\nstatus_schema=1\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\ninject_full_unicode=true\n",
         )
         .unwrap();
         assert_eq!(value["response"], "running");
         assert_eq!(value["source"], "stdin");
+        assert_eq!(value["status_schema"], 1);
         assert_eq!(value["paused"], true);
         assert_eq!(value["command_queue_depth"], 3);
         assert_eq!(value["config_state"], "ok");
         assert_eq!(value["capture_sensitive_focus"], false);
         assert_eq!(value["window_tracker_connected"], true);
         assert_eq!(value["inject_full_unicode"], true);
+    }
+
+    #[test]
+    fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
+        assert!(status_schema_compatible(
+            &serde_json::json!({ "status_schema": 1 })
+        ));
+        assert!(!status_schema_compatible(&serde_json::json!({})));
+        assert!(!status_schema_compatible(
+            &serde_json::json!({ "status_schema": 2 })
+        ));
+        assert!(!status_schema_compatible(
+            &serde_json::json!({ "status_schema": "1" })
+        ));
     }
 
     #[test]
@@ -2502,6 +2547,7 @@ mod tests {
              source=input-method\n\
              backend=input-method-v2\n\
              backend_mode=unknown\n\
+             status_schema=1\n\
              state=connected\n\
              paused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\n\
