@@ -48,6 +48,7 @@ pub(crate) struct DiagnosticsSnapshot {
     pub fleet_status: String,
     pub protocol_probes: Vec<(String, String)>,
     pub daemon_status: String,
+    pub daemon_connected: Option<bool>,
     pub paused: Option<bool>,
     pub announce: bool,
 }
@@ -99,6 +100,13 @@ fn run_diagnostics(config: Config, announce: bool) -> DiagnosticsSnapshot {
     };
     let protocol_probes = diagnostics::probe_protocols();
     let daemon_response = control_command("status");
+    let daemon_connected = Some(
+        daemon_response
+            .as_ref()
+            .ok()
+            .and_then(|response| parse_connected(response))
+            .unwrap_or(false),
+    );
     let (daemon_status, paused) = match daemon_response {
         Ok(response) => (
             response.trim().replace('\n', " · "),
@@ -111,9 +119,17 @@ fn run_diagnostics(config: Config, announce: bool) -> DiagnosticsSnapshot {
         fleet_status,
         protocol_probes,
         daemon_status,
+        daemon_connected,
         paused,
         announce,
     }
+}
+
+pub(crate) fn parse_connected(response: &str) -> Option<bool> {
+    response.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key == "state").then(|| value == "connected")
+    })
 }
 
 pub(crate) fn parse_paused(response: &str) -> Option<bool> {
@@ -155,5 +171,12 @@ mod tests {
         );
         assert_eq!(super::parse_paused("paused=false\n"), Some(false));
         assert_eq!(super::parse_paused("state=stopped\n"), None);
+    }
+
+    #[test]
+    fn connection_parser_requires_the_daemon_state_field() {
+        assert_eq!(super::parse_connected("state=connected\n"), Some(true));
+        assert_eq!(super::parse_connected("state=stopped\n"), Some(false));
+        assert_eq!(super::parse_connected("running\npaused=false\n"), None);
     }
 }

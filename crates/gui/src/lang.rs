@@ -127,6 +127,20 @@ impl Strings {
         }
     }
 
+    pub fn disconnected_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "● Disconnected",
+            Language::German => "● Getrennt",
+        }
+    }
+
+    pub fn status_unknown(&self) -> &'static str {
+        match self.lang {
+            Language::English => "◌ Checking",
+            Language::German => "◌ Wird geprüft",
+        }
+    }
+
     pub fn paused_status(&self) -> &'static str {
         match self.lang {
             Language::English => "● Paused",

@@ -91,6 +91,7 @@ struct GuiApp {
     undo_bytes: usize,
     status: Status,
     paused: bool,
+    daemon_connected: Option<bool>,
     diagnostics_open: bool,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
@@ -431,6 +432,7 @@ impl GuiApp {
             undo_bytes: 0,
             status: Status::info(strings.ready()),
             paused: false,
+            daemon_connected: None,
             diagnostics_open: false,
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
@@ -523,6 +525,7 @@ impl GuiApp {
             self.runtime_sender = None;
             self.diagnostics_running = false;
             self.pending_control = 0;
+            self.daemon_connected = Some(false);
             self.status = Status::error(self.strings.background_runtime_stopped());
         }
         for completion in completions {
@@ -532,6 +535,7 @@ impl GuiApp {
                     self.fleet_status = snapshot.fleet_status;
                     self.protocol_probes = snapshot.protocol_probes;
                     self.daemon_status = snapshot.daemon_status;
+                    self.daemon_connected = snapshot.daemon_connected;
                     if let Some(paused) = snapshot.paused {
                         self.paused = paused;
                     }
@@ -545,8 +549,12 @@ impl GuiApp {
                     self.pending_control = self.pending_control.saturating_sub(1);
                     match operation {
                         runtime::Operation::Reload(previous_status) => match result {
-                            Ok(_) => self.status = previous_status,
+                            Ok(_) => {
+                                self.daemon_connected = Some(true);
+                                self.status = previous_status;
+                            }
                             Err(error) => {
+                                self.daemon_connected = Some(false);
                                 self.status = previous_status.with_caveat(
                                     self.strings.status_daemon_not_reloaded(&error.to_string()),
                                 )
@@ -554,6 +562,7 @@ impl GuiApp {
                         },
                         runtime::Operation::Pause { paused } => match result {
                             Ok(_) => {
+                                self.daemon_connected = Some(true);
                                 self.paused = paused;
                                 self.status = Status::success(if paused {
                                     self.strings.status_paused()
@@ -562,6 +571,7 @@ impl GuiApp {
                                 });
                             }
                             Err(error) => {
+                                self.daemon_connected = Some(false);
                                 self.status = Status::error(
                                     self.strings.status_control_unavailable(&error.to_string()),
                                 )
@@ -570,12 +580,14 @@ impl GuiApp {
                         runtime::Operation::Status => match result {
                             Ok(response) => {
                                 self.daemon_status = response.trim().replace('\n', " · ");
+                                self.daemon_connected = runtime::parse_connected(&response);
                                 if let Some(paused) = runtime::parse_paused(&response) {
                                     self.paused = paused;
                                 }
                             }
                             Err(error) => {
                                 self.daemon_status = format!("Unavailable: {error}");
+                                self.daemon_connected = Some(false);
                             }
                         },
                     }
@@ -1600,24 +1612,29 @@ impl GuiApp {
                     ui.separator();
                     ui.add_space(4.0);
                     let ctx = ui.ctx().clone();
-                    theme::pill(
-                        ui,
-                        if self.paused {
-                            self.strings.paused_status()
-                        } else {
-                            self.strings.running_status()
-                        },
-                        if self.paused {
-                            palette.warning
-                        } else {
-                            palette.success
-                        },
-                        if self.paused {
-                            theme::tint(palette.warning, 38)
-                        } else {
-                            theme::tint(palette.success, 38)
-                        },
-                    );
+                    let (health_label, health_color) = match self.daemon_connected {
+                        Some(true) if self.paused => {
+                            (self.strings.paused_status(), palette.warning)
+                        }
+                        Some(true) => (self.strings.running_status(), palette.success),
+                        Some(false) => (self.strings.disconnected_status(), palette.danger),
+                        None => (self.strings.status_unknown(), palette.muted),
+                    };
+                    let health_bg = theme::tint(health_color, 38);
+                    if ui
+                        .add(
+                            egui::Button::new(health_label)
+                                .fill(health_bg)
+                                .stroke(egui::Stroke::NONE)
+                                .corner_radius(egui::CornerRadius::same(255))
+                                .min_size(egui::vec2(0.0, 30.0)),
+                        )
+                        .on_hover_text(self.daemon_status.clone())
+                        .clicked()
+                    {
+                        self.diagnostics_open = true;
+                        self.refresh_diagnostics(true);
+                    }
                     let more_actions = self.strings.more_actions();
                     let actions_response = ui
                         .menu_button(more_actions, |ui| {
