@@ -92,6 +92,8 @@ struct GuiApp {
     status: Status,
     paused: bool,
     diagnostics_open: bool,
+    evdev_setup_open: bool,
+    evdev_setup_acknowledged: bool,
     daemon_status: String,
     fleet_status: String,
     backend_status: Vec<BackendStatus>,
@@ -430,6 +432,8 @@ impl GuiApp {
             status: Status::info(strings.ready()),
             paused: false,
             diagnostics_open: false,
+            evdev_setup_open: false,
+            evdev_setup_acknowledged: false,
             daemon_status: strings.not_checked().into(),
             fleet_status: strings.not_checked().into(),
             backend_status: Vec::new(),
@@ -1527,7 +1531,7 @@ impl GuiApp {
     }
 
     fn any_dialog_open(&self) -> bool {
-        self.diagnostics_open || self.import_open || self.settings_open
+        self.diagnostics_open || self.import_open || self.settings_open || self.evdev_setup_open
     }
 
     /// Escape closes one dialog at a time, most recently opened first. The
@@ -1535,7 +1539,9 @@ impl GuiApp {
     /// library is not discarded by a keystroke meant to dismiss something
     /// else.
     fn close_topmost_dialog(&mut self) {
-        if self.settings_open {
+        if self.evdev_setup_open {
+            self.evdev_setup_open = false;
+        } else if self.settings_open {
             self.settings_open = false;
         } else if self.import_open {
             if self.import_preview.is_some() {
@@ -2374,6 +2380,10 @@ impl GuiApp {
                                     {
                                         self.create_test_snippet();
                                     }
+                                    if ui.link(self.strings.onboarding_evdev_setup()).clicked() {
+                                        self.evdev_setup_acknowledged = false;
+                                        self.evdev_setup_open = true;
+                                    }
                                     ui.add_space(8.0);
                                     ui.label(
                                         RichText::new(self.strings.onboarding_certification_note())
@@ -3198,6 +3208,44 @@ impl GuiApp {
                 });
         }
     }
+
+    fn render_evdev_setup(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.evdev_setup_open {
+            return;
+        }
+        egui::Window::new(self.strings.evdev_setup_title())
+            .collapsible(false)
+            .resizable(true)
+            .default_width(440.0)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(self.strings.evdev_setup_warning()).color(palette.warning));
+                ui.add_space(8.0);
+                ui.checkbox(
+                    &mut self.evdev_setup_acknowledged,
+                    self.strings.evdev_setup_acknowledge(),
+                );
+                ui.add_space(8.0);
+                ui.label(self.strings.evdev_setup_steps());
+                if self.evdev_setup_acknowledged {
+                    ui.horizontal(|ui| {
+                        ui.monospace("wayexpand setup --mode maximum");
+                        if ui.button(self.strings.copy()).clicked() {
+                            ui.ctx().copy_text("wayexpand setup --mode maximum".into());
+                            self.status = Status::info(self.strings.status_preview_copied());
+                        }
+                    });
+                    ui.label(
+                        RichText::new("This command is not run by the GUI.")
+                            .small()
+                            .color(palette.muted),
+                    );
+                }
+                ui.add_space(8.0);
+                if ui.button(self.strings.close()).clicked() {
+                    self.evdev_setup_open = false;
+                }
+            });
+    }
 }
 
 impl eframe::App for GuiApp {
@@ -3264,6 +3312,7 @@ impl eframe::App for GuiApp {
         self.render_editor_actions(ctx, &palette);
         self.render_editor(ctx, &palette);
         self.render_pending_action(ctx, &palette);
+        self.render_evdev_setup(ctx, &palette);
     }
 }
 
@@ -4242,6 +4291,28 @@ mod tests {
                 }
             }
         }
+        // Exercise the narrowest supported desktop window with 200% text;
+        // this is a render smoke test, not a pixel-perfect clipping oracle.
+        theme::install_pack(&ctx, app.colorpack, FontScale::Huge);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 480.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_toolbar(ctx, &palette);
+            app.render_diagnostics(ctx, &palette);
+            app.render_import_dialog(ctx, &palette);
+            app.render_settings_dialog(ctx, &palette);
+            app.render_status_bar(ctx, &palette);
+            app.render_snippet_list(ctx, &palette);
+            app.render_editor_actions(ctx, &palette);
+            app.render_editor(ctx, &palette);
+            app.render_pending_action(ctx, &palette);
+        });
         app.create_new_snippet();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -4294,6 +4365,38 @@ mod tests {
         app.search_fields.replacements = true;
         assert_eq!(app.visible_indices(), vec![0]);
         assert_eq!(Config::load(&path).unwrap().expansion.len(), 1);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn raw_input_setup_command_is_hidden_until_explicit_acknowledgement() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-evdev-consent-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.evdev_setup_open = true;
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let render = |app: &mut GuiApp| {
+            let output = ctx.run(egui::RawInput::default(), |ctx| {
+                app.render_evdev_setup(ctx, &Palette::for_pack(app.colorpack, app.dark_mode));
+            });
+            format!(
+                "{:?}",
+                output.platform_output.accesskit_update.unwrap().nodes
+            )
+        };
+
+        let before_acknowledgement = render(&mut app);
+        assert!(before_acknowledgement.contains("password-field"));
+        assert!(!before_acknowledgement.contains("wayexpand setup --mode maximum"));
+
+        app.evdev_setup_acknowledged = true;
+        let after_acknowledgement = render(&mut app);
+        assert!(after_acknowledgement.contains("wayexpand setup --mode maximum"));
+        assert!(after_acknowledgement.contains("not run by the GUI"));
         fs::remove_file(path).unwrap();
     }
 

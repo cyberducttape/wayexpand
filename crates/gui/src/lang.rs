@@ -381,6 +381,41 @@ impl Strings {
         }
     }
 
+    pub fn onboarding_evdev_setup(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Set up broad application coverage…",
+            Language::German => "Breite App-Unterstützung einrichten…",
+        }
+    }
+
+    pub fn evdev_setup_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Maximum compatibility uses raw keyboard input",
+            Language::German => "Maximale Kompatibilität verwendet rohe Tastatureingaben",
+        }
+    }
+
+    pub fn evdev_setup_warning(&self) -> &'static str {
+        match self.lang {
+            Language::English => "WayExpand can observe typing in password fields in this mode and cannot detect sensitive fields. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
+            Language::German => "WayExpand kann in diesem Modus Eingaben in Passwortfeldern beobachten und sensible Felder nicht erkennen. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
+        }
+    }
+
+    pub fn evdev_setup_acknowledge(&self) -> &'static str {
+        match self.lang {
+            Language::English => "I understand the raw-input and password-field limitations",
+            Language::German => "Ich verstehe die Einschränkungen bei Rohdaten und Passwortfeldern",
+        }
+    }
+
+    pub fn evdev_setup_steps(&self) -> &'static str {
+        match self.lang {
+            Language::English => "After acknowledging, copy the command below into a terminal. It enables the user service only; if device access is missing, follow the separately documented administrator permission step. Then return here, refresh diagnostics, and run the test expansion in a normal text field.",
+            Language::German => "Kopieren Sie nach der Bestätigung den folgenden Befehl in ein Terminal. Er aktiviert nur den Benutzerdienst; falls Gerätezugriff fehlt, folgen Sie separat der dokumentierten Administrator-Berechtigung. Kehren Sie danach zurück, aktualisieren Sie die Diagnose und testen Sie die Ersetzung in einem normalen Textfeld.",
+        }
+    }
+
     // Dialogs
     pub fn diagnostics_title(&self) -> &'static str {
         match self.lang {
