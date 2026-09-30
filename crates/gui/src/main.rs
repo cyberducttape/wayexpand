@@ -4466,6 +4466,7 @@ mod tests {
         config.save_atomic(&path).unwrap();
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.diagnostics_open = true;
+        app.daemon_connected = Some(true);
         app.daemon_capabilities = Some(runtime::DaemonCapabilities {
             capture_sensitive_focus: Some(false),
             capture_exclusive: Some(false),
