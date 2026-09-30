@@ -1,3 +1,5 @@
+use wayexpand_core::{BackendState, FontScale};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
     English,
@@ -127,8 +129,8 @@ impl Strings {
 
     pub fn search_placeholder(&self) -> &'static str {
         match self.lang {
-            Language::English => "Search triggers, descriptions, or tags…",
-            Language::German => "Nach Auslösern, Beschreibungen oder Tags suchen…",
+            Language::English => "Search snippets…",
+            Language::German => "Snippets durchsuchen…",
         }
     }
 
@@ -255,13 +257,6 @@ impl Strings {
             Language::German => {
                 "Direkt nach einer Erweiterung gedrückt (ohne dazwischen zu tippen), macht sie rückgängig. Leer lassen zum Deaktivieren."
             }
-        }
-    }
-
-    pub fn backend_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Backend status",
-            Language::German => "Backend-Status",
         }
     }
 
@@ -467,8 +462,8 @@ impl Strings {
 
     pub fn existing(&self) -> &'static str {
         match self.lang {
-            Language::English => "Existing ▾",
-            Language::German => "Vorhandene ▾",
+            Language::English => "Existing",
+            Language::German => "Vorhandene",
         }
     }
 
@@ -481,8 +476,8 @@ impl Strings {
 
     pub fn app_filter_hint(&self) -> &'static str {
         match self.lang {
-            Language::English => "thunderbird, konsole (leave empty to match everywhere)",
-            Language::German => "thunderbird, konsole (leer lassen, um überall zu passen)",
+            Language::English => "thunderbird, konsole",
+            Language::German => "thunderbird, konsole",
         }
     }
 
@@ -814,6 +809,615 @@ impl Strings {
         match self.lang {
             Language::English => "No snippet selected",
             Language::German => "Kein Snippet ausgewählt",
+        }
+    }
+
+    // Appearance and settings chrome
+    pub fn appearance(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Appearance",
+            Language::German => "Erscheinungsbild",
+        }
+    }
+
+    pub fn engine(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Typing engine",
+            Language::German => "Eingabe-Engine",
+        }
+    }
+
+    pub fn appearance_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Appearance changes apply and are saved immediately.",
+            Language::German => {
+                "Änderungen am Erscheinungsbild werden sofort übernommen und gespeichert."
+            }
+        }
+    }
+
+    pub fn engine_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "These values are stored in your configuration file. Press Save to apply them."
+            }
+            Language::German => {
+                "Diese Werte werden in der Konfigurationsdatei gespeichert. Zum Übernehmen auf Speichern klicken."
+            }
+        }
+    }
+
+    pub fn theme(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Theme",
+            Language::German => "Design",
+        }
+    }
+
+    pub fn theme_dark(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Dark",
+            Language::German => "Dunkel",
+        }
+    }
+
+    pub fn theme_light(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Light",
+            Language::German => "Hell",
+        }
+    }
+
+    pub fn language(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Language",
+            Language::German => "Sprache",
+        }
+    }
+
+    pub fn color_pack(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Color pack",
+            Language::German => "Farbschema",
+        }
+    }
+
+    pub fn color_pack_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Pick a visual style for the editor.",
+            Language::German => "Visuellen Stil für den Editor auswählen.",
+        }
+    }
+
+    pub fn font_size(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Font size",
+            Language::German => "Schriftgröße",
+        }
+    }
+
+    pub fn font_size_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Adjust text size for readability on your display.",
+            Language::German => "Textgröße für die Lesbarkeit auf Ihrem Bildschirm anpassen.",
+        }
+    }
+
+    pub fn font_scale_label(&self, scale: FontScale) -> &'static str {
+        match (self.lang, scale) {
+            (Language::English, FontScale::Small) => "Small (80%)",
+            (Language::English, FontScale::Normal) => "Normal (100%)",
+            (Language::English, FontScale::Large) => "Large (120%)",
+            (Language::English, FontScale::ExtraLarge) => "Extra large (150%)",
+            (Language::English, FontScale::Huge) => "Huge (200%)",
+            (Language::German, FontScale::Small) => "Klein (80 %)",
+            (Language::German, FontScale::Normal) => "Normal (100 %)",
+            (Language::German, FontScale::Large) => "Groß (120 %)",
+            (Language::German, FontScale::ExtraLarge) => "Sehr groß (150 %)",
+            (Language::German, FontScale::Huge) => "Riesig (200 %)",
+        }
+    }
+
+    pub fn settings_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Appearance, language, and engine settings",
+            Language::German => "Erscheinungsbild, Sprache und Engine-Einstellungen",
+        }
+    }
+
+    // Editor chrome
+    pub fn preview_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Preview app",
+            Language::German => "Vorschau-App",
+        }
+    }
+
+    pub fn preview_app_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "leave empty for no focused app",
+            Language::German => "leer lassen für keine fokussierte App",
+        }
+    }
+
+    pub fn run_once(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Run once",
+            Language::German => "Einmal ausführen",
+        }
+    }
+
+    pub fn running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Running…",
+            Language::German => "Läuft…",
+        }
+    }
+
+    pub fn command_preview_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "This snippet runs a program instead of inserting fixed text. Its output is not shown automatically — run it once to see what it currently produces."
+            }
+            Language::German => {
+                "Dieses Snippet führt ein Programm aus, statt festen Text einzufügen. Die Ausgabe wird nicht automatisch angezeigt — einmal ausführen, um das aktuelle Ergebnis zu sehen."
+            }
+        }
+    }
+
+    pub fn detecting_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Detecting focused application…",
+            Language::German => "Fokussierte Anwendung wird erkannt…",
+        }
+    }
+
+    pub fn no_description(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No description",
+            Language::German => "Keine Beschreibung",
+        }
+    }
+
+    pub fn click_to_enable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Click to enable",
+            Language::German => "Zum Aktivieren klicken",
+        }
+    }
+
+    pub fn click_to_disable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Click to disable",
+            Language::German => "Zum Deaktivieren klicken",
+        }
+    }
+
+    pub fn selection_stale(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Selection is out of date; choose a snippet again.",
+            Language::German => "Auswahl ist veraltet; bitte erneut ein Snippet wählen.",
+        }
+    }
+
+    pub fn draft_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Snippet draft unavailable; choose a snippet again.",
+            Language::German => "Snippet-Entwurf nicht verfügbar; bitte erneut ein Snippet wählen.",
+        }
+    }
+
+    pub fn no_snippets_match_filter(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No snippets match this filter.",
+            Language::German => "Keine Snippets entsprechen diesem Filter.",
+        }
+    }
+
+    pub fn configuration_file(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Configuration",
+            Language::German => "Konfiguration",
+        }
+    }
+
+    // Diagnostics
+    pub fn fleet_layers(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Fleet layers",
+            Language::German => "Flotten-Ebenen",
+        }
+    }
+
+    pub fn not_checked(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Not checked",
+            Language::German => "Nicht geprüft",
+        }
+    }
+
+    /// A readable label for a backend's state. The raw
+    /// `implementation/availability/permission` triple is still shown
+    /// verbatim next to it so the GUI stays a faithful mirror of
+    /// `wayexpand doctor` rather than paraphrasing it away.
+    pub fn backend_state(&self, state: BackendState) -> &'static str {
+        match (self.lang, state) {
+            (Language::English, BackendState::Available) => "Ready",
+            (Language::English, BackendState::RequiresPermission) => "Needs permission",
+            (Language::English, BackendState::Implemented) => "Not probed",
+            (Language::English, BackendState::Unavailable) => "Unavailable",
+            (Language::English, BackendState::NotImplemented) => "Not implemented",
+            (Language::German, BackendState::Available) => "Bereit",
+            (Language::German, BackendState::RequiresPermission) => "Berechtigung nötig",
+            (Language::German, BackendState::Implemented) => "Nicht geprüft",
+            (Language::German, BackendState::Unavailable) => "Nicht verfügbar",
+            (Language::German, BackendState::NotImplemented) => "Nicht implementiert",
+        }
+    }
+
+    // Import
+    pub fn import_preview_summary(&self, expansions: usize, skipped: usize) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Preview: {expansions} expansion(s), {skipped} unsupported match(es) skipped")
+            }
+            Language::German => format!(
+                "Vorschau: {expansions} Erweiterung(en), {skipped} nicht unterstützte Regel(n) übersprungen"
+            ),
+        }
+    }
+
+    // Status line
+    pub fn status_diagnostics_refreshed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Diagnostics refreshed",
+            Language::German => "Diagnose aktualisiert",
+        }
+    }
+
+    pub fn status_daemon_not_reloaded(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("daemon did not reload: {detail}"),
+            Language::German => format!("Daemon hat nicht neu geladen: {detail}"),
+        }
+    }
+
+    pub fn status_buffer_limit_not_a_number(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("buffer limit must be a whole number ({detail})"),
+            Language::German => format!("Puffergrenze muss eine ganze Zahl sein ({detail})"),
+        }
+    }
+
+    pub fn status_settings_invalid(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Settings invalid: {detail}"),
+            Language::German => format!("Einstellungen ungültig: {detail}"),
+        }
+    }
+
+    pub fn status_settings_rejected(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Settings rejected: {detail}"),
+            Language::German => format!("Einstellungen abgelehnt: {detail}"),
+        }
+    }
+
+    pub fn status_settings_saved(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Settings saved atomically",
+            Language::German => "Einstellungen atomar gespeichert",
+        }
+    }
+
+    pub fn status_settings_save_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Settings save failed: {detail}"),
+            Language::German => format!("Speichern der Einstellungen fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_font_size_saved(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Font size saved",
+            Language::German => "Schriftgröße gespeichert",
+        }
+    }
+
+    pub fn status_import_loaded(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Espanso library loaded for review",
+            Language::German => "Espanso-Bibliothek zur Prüfung geladen",
+        }
+    }
+
+    pub fn status_import_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Import failed: {detail}"),
+            Language::German => format!("Import fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_import_needs_clean_draft(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Save or discard the current draft before importing",
+            Language::German => "Aktuellen Entwurf vor dem Import speichern oder verwerfen",
+        }
+    }
+
+    pub fn status_import_rejected(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Import rejected: {detail}"),
+            Language::German => format!("Import abgelehnt: {detail}"),
+        }
+    }
+
+    pub fn status_import_save_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Import save failed: {detail}"),
+            Language::German => format!("Speichern des Imports fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_imported(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Espanso library imported",
+            Language::German => "Espanso-Bibliothek importiert",
+        }
+    }
+
+    pub fn status_imported_with_skips(&self, skipped: usize) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Espanso library imported; skipped {skipped} unsupported match(es)")
+            }
+            Language::German => format!(
+                "Espanso-Bibliothek importiert; {skipped} nicht unterstützte Regel(n) übersprungen"
+            ),
+        }
+    }
+
+    pub fn status_config_reloaded(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Configuration reloaded",
+            Language::German => "Konfiguration neu geladen",
+        }
+    }
+
+    pub fn status_reload_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Reload failed: {detail}"),
+            Language::German => format!("Neu laden fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_command_invalid(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Command settings invalid: {detail}"),
+            Language::German => format!("Befehlseinstellungen ungültig: {detail}"),
+        }
+    }
+
+    pub fn status_save_rejected(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Save rejected: {detail}"),
+            Language::German => format!("Speichern abgelehnt: {detail}"),
+        }
+    }
+
+    pub fn status_save_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Save failed: {detail}"),
+            Language::German => format!("Speichern fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_snippet_saved(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Snippet saved atomically",
+            Language::German => "Snippet atomar gespeichert",
+        }
+    }
+
+    pub fn status_nothing_to_undo(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Nothing to undo",
+            Language::German => "Nichts zum Rückgängigmachen",
+        }
+    }
+
+    pub fn status_undo_save_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Undo save failed: {detail}"),
+            Language::German => format!("Rückgängig-Speichern fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_undone(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Undid the last saved change",
+            Language::German => "Letzte gespeicherte Änderung rückgängig gemacht",
+        }
+    }
+
+    pub fn status_created(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Created a new snippet",
+            Language::German => "Neues Snippet erstellt",
+        }
+    }
+
+    pub fn status_create_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Create failed: {detail}"),
+            Language::German => format!("Erstellen fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_duplicated(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Duplicated snippet",
+            Language::German => "Snippet dupliziert",
+        }
+    }
+
+    pub fn status_duplicate_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Duplicate failed: {detail}"),
+            Language::German => format!("Duplizieren fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_deleted(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("Deleted {trigger}"),
+            Language::German => format!("{trigger} gelöscht"),
+        }
+    }
+
+    pub fn status_delete_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Delete failed: {detail}"),
+            Language::German => format!("Löschen fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_snippet_enabled(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("{trigger} enabled"),
+            Language::German => format!("{trigger} aktiviert"),
+        }
+    }
+
+    pub fn status_snippet_disabled(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("{trigger} disabled"),
+            Language::German => format!("{trigger} deaktiviert"),
+        }
+    }
+
+    pub fn status_toggle_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Toggle failed: {detail}"),
+            Language::German => format!("Umschalten fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_paused(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Expansion paused",
+            Language::German => "Erweiterung angehalten",
+        }
+    }
+
+    pub fn status_resumed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Expansion resumed",
+            Language::German => "Erweiterung fortgesetzt",
+        }
+    }
+
+    pub fn status_control_unavailable(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Daemon control unavailable: {detail}"),
+            Language::German => format!("Daemon-Steuerung nicht verfügbar: {detail}"),
+        }
+    }
+
+    pub fn status_app_filter_added(&self, value: &str) -> String {
+        match self.lang {
+            Language::English => format!("Added \"{value}\" to the app filter"),
+            Language::German => format!("\"{value}\" zum App-Filter hinzugefügt"),
+        }
+    }
+
+    pub fn status_window_unidentified(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Could not identify the focused window",
+            Language::German => "Fokussiertes Fenster konnte nicht ermittelt werden",
+        }
+    }
+
+    pub fn status_no_focused_window(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No focused window to detect (focus is on the desktop)",
+            Language::German => {
+                "Kein fokussiertes Fenster erkennbar (Fokus liegt auf der Arbeitsfläche)"
+            }
+        }
+    }
+
+    pub fn status_detection_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Window detection is unavailable here (KDE Plasma only for now)",
+            Language::German => {
+                "Fenstererkennung ist hier nicht verfügbar (derzeit nur KDE Plasma)"
+            }
+        }
+    }
+
+    pub fn status_detection_failed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Window detection failed unexpectedly",
+            Language::German => "Fenstererkennung ist unerwartet fehlgeschlagen",
+        }
+    }
+
+    pub fn status_preview_copied(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Preview copied to clipboard",
+            Language::German => "Vorschau in die Zwischenablage kopiert",
+        }
+    }
+
+    pub fn status_enable_command_first(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Enable the dynamic command first",
+            Language::German => "Zuerst den dynamischen Befehl aktivieren",
+        }
+    }
+
+    pub fn status_command_failed(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("Command failed: {detail}"),
+            Language::German => format!("Befehl fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_command_preview_failed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Command preview failed unexpectedly",
+            Language::German => "Befehlsvorschau ist unerwartet fehlgeschlagen",
+        }
+    }
+
+    pub fn search_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Search triggers, descriptions, tags, and categories (Ctrl+F)",
+            Language::German => {
+                "Trigger, Beschreibungen, Schlagwörter und Kategorien durchsuchen (Strg+F)"
+            }
+        }
+    }
+
+    pub fn command_backed_summary(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Command-backed snippet",
+            Language::German => "Befehlsgestütztes Snippet",
+        }
+    }
+
+    pub fn app_filter_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Comma separated. Leave empty to expand in every application.",
+            Language::German => "Kommagetrennt. Leer lassen, um in jeder Anwendung zu erweitern.",
+        }
+    }
+
+    pub fn matching(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Matching",
+            Language::German => "Erkennung",
         }
     }
 }

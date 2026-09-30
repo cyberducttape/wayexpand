@@ -8,6 +8,7 @@ mod lang;
 mod library;
 mod preview;
 mod settings;
+mod status;
 mod theme;
 
 use anyhow::{Context, Result};
@@ -17,6 +18,7 @@ use editor::Draft;
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
+use status::Status;
 use std::{
     env, fs,
     io::{Read, Write},
@@ -33,6 +35,16 @@ use wayexpand_core::{
 };
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+/// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
+const SEARCH_FIELD_SALT: &str = "wayexpand-search-field";
+/// Every font scale, in the order the settings dialog offers them.
+const FONT_SCALES: &[FontScale] = &[
+    FontScale::Small,
+    FontScale::Normal,
+    FontScale::Large,
+    FontScale::ExtraLarge,
+    FontScale::Huge,
+];
 const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 const MAX_UNDO_HISTORY: usize = 32;
 const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
@@ -64,7 +76,7 @@ struct GuiApp {
     preview_app: String,
     draft: Option<Draft>,
     undo: Vec<Config>,
-    message: String,
+    status: Status,
     paused: bool,
     diagnostics_open: bool,
     daemon_status: String,
@@ -76,6 +88,7 @@ struct GuiApp {
     import_path: String,
     import_preview: Option<(Config, usize)>,
     settings_open: bool,
+    settings_tab: SettingsTab,
     settings_buffer: String,
     settings_undo_chord: String,
     settings_font_scale: FontScale,
@@ -83,9 +96,7 @@ struct GuiApp {
     dark_mode: bool,
     language: Language,
     strings: Strings,
-    language_selector_open: bool,
     colorpack: ColorPack,
-    colorpack_selector_open: bool,
     /// Cached result of an explicit, user-triggered "Run once" command
     /// preview (`Ok` output or a `Err` message to display). `None` means no
     /// run has happened yet for the current draft. Cleared on selection
@@ -116,6 +127,22 @@ struct GuiApp {
     /// one -- which will not be cancelled again since the draft is no
     /// longer dirty by that point.
     close_after_confirm: bool,
+    /// Last title pushed to the compositor. The window title carries the
+    /// configuration file name and an unsaved-changes marker, and
+    /// `ViewportCommand::Title` is only sent when that text actually
+    /// changes rather than on every frame.
+    window_title: String,
+}
+
+/// The two halves of the settings window: display preferences that take
+/// effect (and persist) the moment they are clicked, and configuration
+/// values that are validated and written to the configuration file by an
+/// explicit Save. Separating them keeps one dialog from silently mixing two
+/// different commit models.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsTab {
+    Appearance,
+    Engine,
 }
 
 impl GuiApp {
@@ -177,11 +204,11 @@ impl GuiApp {
             preview_app: String::new(),
             draft,
             undo: Vec::new(),
-            message: strings.ready().into(),
+            status: Status::info(strings.ready()),
             paused: false,
             diagnostics_open: false,
-            daemon_status: "Not checked".into(),
-            fleet_status: "Not checked".into(),
+            daemon_status: strings.not_checked().into(),
+            fleet_status: strings.not_checked().into(),
             backend_status: discover_backends(),
             protocol_probes: Vec::new(),
             pending_action: None,
@@ -189,6 +216,7 @@ impl GuiApp {
             import_path: String::new(),
             import_preview: None,
             settings_open: false,
+            settings_tab: SettingsTab::Appearance,
             settings_buffer,
             settings_undo_chord,
             settings_font_scale,
@@ -196,9 +224,7 @@ impl GuiApp {
             dark_mode: prefs.dark_mode.unwrap_or(true),
             language: prefs.language,
             strings,
-            language_selector_open: false,
             colorpack: prefs.colorpack,
-            colorpack_selector_open: false,
             command_preview_result: None,
             command_preview_key: None,
             command_preview_receiver: None,
@@ -206,6 +232,7 @@ impl GuiApp {
             preview_cache: None,
             app_detection: None,
             close_after_confirm: false,
+            window_title: String::new(),
         })
     }
 
@@ -235,7 +262,7 @@ impl GuiApp {
             Ok(response) => response.trim().replace('\n', " · "),
             Err(error) => format!("Unavailable: {error}"),
         };
-        self.message = "Diagnostics refreshed".into();
+        self.status = Status::success(self.strings.status_diagnostics_refreshed());
     }
 
     fn remember_undo(&mut self, previous: Config) {
@@ -245,17 +272,81 @@ impl GuiApp {
         }
     }
 
-    /// Sets the status message for a config change that was just saved to
-    /// disk, then asks the running daemon to reload it. A failed reload
-    /// request is appended to the message rather than discarded: otherwise
-    /// the GUI reports success while the daemon keeps expanding the old
-    /// config, and the user has no way to know the two have diverged.
-    fn set_message_and_reload(&mut self, message: impl Into<String>) {
+    /// Reports a config change that was just saved to disk, then asks the
+    /// running daemon to reload it. A failed reload request is appended to
+    /// the status line rather than discarded -- and downgrades the tone from
+    /// success to warning -- because otherwise the GUI reports success while
+    /// the daemon keeps expanding the old config, and the user has no way to
+    /// know the two have diverged.
+    fn set_saved_status(&mut self, status: Status) {
         self.preview_cache = None;
         self.clear_command_preview();
-        self.message = message.into();
-        if let Err(error) = control_command("reload") {
-            self.message = format!("{} (daemon did not reload: {error})", self.message);
+        self.status = match control_command("reload") {
+            Ok(_) => status,
+            Err(error) => {
+                status.with_caveat(self.strings.status_daemon_not_reloaded(&error.to_string()))
+            }
+        };
+    }
+
+    /// Opens the settings window with the editable fields reset to what is
+    /// currently persisted, so a previously abandoned edit never reappears.
+    fn open_settings(&mut self) {
+        self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+        self.settings_undo_chord = self.config.settings.undo_chord.clone().unwrap_or_default();
+        self.settings_font_scale = self.config.settings.font_scale;
+        self.settings_error = None;
+        self.settings_open = true;
+    }
+
+    fn set_dark_mode(&mut self, ctx: &egui::Context, dark: bool) {
+        self.dark_mode = dark;
+        ctx.set_theme(if dark {
+            egui::ThemePreference::Dark
+        } else {
+            egui::ThemePreference::Light
+        });
+        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+    }
+
+    fn set_language(&mut self, language: Language) {
+        self.language = language;
+        self.strings.set_language(language);
+        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+    }
+
+    fn set_colorpack(&mut self, ctx: &egui::Context, pack: ColorPack) {
+        self.colorpack = pack;
+        theme::install_pack(ctx, pack, self.config.settings.font_scale);
+        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+    }
+
+    /// Applies a font scale immediately and persists it, so it behaves like
+    /// the rest of the appearance settings rather than waiting on a Save
+    /// button sitting under a different tab. Unlike a library edit this does
+    /// not push an undo entry: the undo stack exists to recover snippet
+    /// content, and filling it with display-preference steps would bury the
+    /// change the user actually wants back.
+    fn apply_font_scale(&mut self, ctx: &egui::Context, scale: FontScale) {
+        self.settings_font_scale = scale;
+        let mut candidate = self.config.clone();
+        candidate.settings.font_scale = scale;
+        // Apply the style first: the preference is visible even in the
+        // unlikely case that persisting it fails, and the failure is
+        // reported rather than silently producing a scale that resets on
+        // the next launch.
+        theme::install_pack(ctx, self.colorpack, scale);
+        match candidate.save_atomic(&self.path) {
+            Ok(()) => {
+                self.config = candidate;
+                self.status = Status::success(self.strings.status_font_size_saved());
+            }
+            Err(error) => {
+                self.status = Status::error(
+                    self.strings
+                        .status_settings_save_failed(&error.safe_summary()),
+                )
+            }
         }
     }
 
@@ -263,9 +354,11 @@ impl GuiApp {
         let max_buffer_chars = match self.settings_buffer.trim().parse::<usize>() {
             Ok(value) => value,
             Err(error) => {
-                let error = format!("buffer limit must be an integer ({error})");
-                self.message = format!("Settings invalid: {error}");
-                self.settings_error = Some(error);
+                let detail = self
+                    .strings
+                    .status_buffer_limit_not_a_number(&error.to_string());
+                self.status = Status::error(self.strings.status_settings_invalid(&detail));
+                self.settings_error = Some(detail);
                 return;
             }
         };
@@ -276,9 +369,9 @@ impl GuiApp {
         candidate.settings.undo_chord =
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
         if let Err(error) = candidate.validate() {
-            let error = error.safe_summary();
-            self.message = format!("Settings rejected: {error}");
-            self.settings_error = Some(error);
+            let detail = error.safe_summary();
+            self.status = Status::error(self.strings.status_settings_rejected(&detail));
+            self.settings_error = Some(detail);
             return;
         }
         match candidate.save_atomic(&self.path) {
@@ -292,12 +385,12 @@ impl GuiApp {
                 self.settings_open = false;
                 self.settings_error = None;
                 theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
-                self.set_message_and_reload("Settings saved atomically");
+                self.set_saved_status(Status::success(self.strings.status_settings_saved()));
             }
             Err(error) => {
-                let error = error.safe_summary();
-                self.message = format!("Settings save failed: {error}");
-                self.settings_error = Some(error);
+                let detail = error.safe_summary();
+                self.status = Status::error(self.strings.status_settings_save_failed(&detail));
+                self.settings_error = Some(detail);
             }
         }
     }
@@ -307,22 +400,24 @@ impl GuiApp {
         match import::preview_espanso(&source) {
             Ok((config, skipped)) => {
                 self.import_preview = Some((config, skipped));
-                self.message = "Espanso library loaded for review".into();
+                self.status = Status::success(self.strings.status_import_loaded());
             }
-            Err(error) => self.message = format!("Import failed: {error}"),
+            Err(error) => {
+                self.status = Status::error(self.strings.status_import_failed(&error.to_string()))
+            }
         }
     }
 
     fn apply_import(&mut self) {
         if self.draft_is_dirty() {
-            self.message = "Save or discard the current draft before importing".into();
+            self.status = Status::warning(self.strings.status_import_needs_clean_draft());
             return;
         }
         let Some((imported, skipped)) = self.import_preview.take() else {
             return;
         };
         if let Err(error) = imported.validate() {
-            self.message = format!("Import rejected: {}", error.safe_summary());
+            self.status = Status::error(self.strings.status_import_rejected(&error.safe_summary()));
             return;
         }
         match imported.save_atomic(&self.path) {
@@ -335,14 +430,17 @@ impl GuiApp {
                     .map(|index| Draft::from_expansion(&self.config.expansion[index]));
                 self.import_open = false;
                 let message = if skipped == 0 {
-                    "Espanso library imported".to_owned()
+                    self.strings.status_imported().to_owned()
                 } else {
-                    format!("Espanso library imported; skipped {skipped} unsupported match(es)")
+                    self.strings.status_imported_with_skips(skipped)
                 };
-                self.set_message_and_reload(message);
+                self.set_saved_status(Status::success(message));
             }
             Err(error) => {
-                self.message = format!("Import save failed: {}", error.safe_summary());
+                self.status = Status::error(
+                    self.strings
+                        .status_import_save_failed(&error.safe_summary()),
+                );
                 self.import_preview = Some((imported, skipped));
             }
         }
@@ -366,34 +464,39 @@ impl GuiApp {
         self.clear_command_preview();
     }
 
+    /// The selected index, but only while it still addresses a snippet.
+    /// Every action that indexes `config.expansion` goes through this, so a
+    /// selection left behind by a reload or an external edit reports "no
+    /// snippet selected" instead of panicking on an out-of-range index.
+    fn selected_index(&self) -> Option<usize> {
+        self.selected
+            .filter(|index| *index < self.config.expansion.len())
+    }
+
+    /// Whether the editor holds edits that are not yet in the configuration.
+    ///
+    /// Called several times per frame (toolbar badge, action bar, window
+    /// title), so the comma-separated fields are compared in place instead of
+    /// rebuilding a joined `String` -- and a `Vec` to join from -- on each
+    /// call. The cheap scalar comparisons are ordered first so a draft that
+    /// differs at all usually answers before touching a list at all.
     fn draft_is_dirty(&self) -> bool {
-        let (Some(index), Some(draft)) = (self.selected, self.draft.as_ref()) else {
+        let (Some(index), Some(draft)) = (self.selected_index(), self.draft.as_ref()) else {
             return false;
         };
         let expansion = &self.config.expansion[index];
-        let command = draft.command_config().ok().flatten();
         draft.trigger != expansion.trigger
             || draft.description != expansion.description
-            || draft.tags
-                != expansion
-                    .tags
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
             || draft.category != expansion.category
-            || draft.app_filter
-                != expansion
-                    .app_filter
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
             || draft.replacement != expansion.replacement
+            || !equals_comma_list(&draft.tags, &expansion.tags)
+            || !equals_comma_list(&draft.app_filter, &expansion.app_filter)
             || draft.enabled != expansion.enabled
             || draft.match_mode != expansion.match_mode
             || draft.propagate_case != expansion.propagate_case
-            || command != expansion.command
+            // Building the command last means the parse and its allocations
+            // are skipped entirely whenever any earlier field already differs.
+            || draft.command_config().ok().flatten() != expansion.command
     }
 
     fn request_action(&mut self, action: PendingAction) {
@@ -456,15 +559,18 @@ impl GuiApp {
                     .unwrap_or_default();
                 self.undo.clear();
                 self.theme_refresh_pending = true;
-                self.message = "Configuration reloaded".into();
+                self.status = Status::success(self.strings.status_config_reloaded());
             }
-            Err(error) => self.message = format!("Reload failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_reload_failed(&error.safe_summary()))
+            }
         }
     }
 
     fn save_selected(&mut self) {
-        let (Some(index), Some(draft)) = (self.selected, self.draft.as_ref()) else {
-            self.message = self.strings.no_selection().into();
+        let (Some(index), Some(draft)) = (self.selected_index(), self.draft.as_ref()) else {
+            self.status = Status::warning(self.strings.no_selection());
             return;
         };
         let mut candidate = self.config.clone();
@@ -492,12 +598,13 @@ impl GuiApp {
         candidate.expansion[index].command = match draft.command_config() {
             Ok(command) => command,
             Err(error) => {
-                self.message = format!("Command settings invalid: {error}");
+                self.status =
+                    Status::error(self.strings.status_command_invalid(&error.to_string()));
                 return;
             }
         };
         if let Err(error) = candidate.validate() {
-            self.message = format!("Save rejected: {}", error.safe_summary());
+            self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
             return;
         }
         match candidate.save_atomic(&self.path) {
@@ -508,15 +615,17 @@ impl GuiApp {
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
                 self.clear_command_preview();
-                self.set_message_and_reload("Snippet saved atomically");
+                self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
             }
-            Err(error) => self.message = format!("Save failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status = Status::error(self.strings.status_save_failed(&error.safe_summary()))
+            }
         }
     }
 
     fn undo(&mut self) {
         let Some(previous) = self.undo.last() else {
-            self.message = "Nothing to undo".into();
+            self.status = Status::warning(self.strings.status_nothing_to_undo());
             return;
         };
         // Save the restored config to disk *before* committing it to GUI
@@ -525,7 +634,8 @@ impl GuiApp {
         // consumed and the in-memory config changed, with disk untouched --
         // GUI, daemon, and disk would all disagree about what the config is.
         if let Err(error) = previous.save_atomic(&self.path) {
-            self.message = format!("Undo save failed: {}", error.safe_summary());
+            self.status =
+                Status::error(self.strings.status_undo_save_failed(&error.safe_summary()));
             return;
         }
         let previous = self.undo.pop().expect("checked non-empty above");
@@ -541,7 +651,7 @@ impl GuiApp {
             .map(|index| self.config.expansion[index].trigger.clone())
             .unwrap_or_default();
         self.clear_command_preview();
-        self.set_message_and_reload("Undid the last saved change");
+        self.set_saved_status(Status::success(self.strings.status_undone()));
     }
 
     fn create_new_snippet(&mut self) {
@@ -574,15 +684,18 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
-                self.set_message_and_reload("Created a new snippet");
+                self.set_saved_status(Status::success(self.strings.status_created()));
             }
-            Err(error) => self.message = format!("Create failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_create_failed(&error.safe_summary()))
+            }
         }
     }
 
     fn duplicate_selected(&mut self) {
-        let Some(index) = self.selected else {
-            self.message = self.strings.no_selection().into();
+        let Some(index) = self.selected_index() else {
+            self.status = Status::warning(self.strings.no_selection());
             return;
         };
         let mut duplicate = self.config.expansion[index].clone();
@@ -609,15 +722,18 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.select(self.config.expansion.len() - 1);
-                self.set_message_and_reload("Duplicated snippet");
+                self.set_saved_status(Status::success(self.strings.status_duplicated()));
             }
-            Err(error) => self.message = format!("Duplicate failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_duplicate_failed(&error.safe_summary()))
+            }
         }
     }
 
     fn perform_delete_selected(&mut self) {
-        let Some(index) = self.selected else {
-            self.message = self.strings.no_selection().into();
+        let Some(index) = self.selected_index() else {
+            self.status = Status::warning(self.strings.no_selection());
             return;
         };
         let mut candidate = self.config.clone();
@@ -633,9 +749,12 @@ impl GuiApp {
                     .selected
                     .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
                 self.clear_command_preview();
-                self.set_message_and_reload(format!("Deleted {trigger}"));
+                self.set_saved_status(Status::success(self.strings.status_deleted(&trigger)));
             }
-            Err(error) => self.message = format!("Delete failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_delete_failed(&error.safe_summary()))
+            }
         }
     }
 
@@ -644,6 +763,10 @@ impl GuiApp {
     /// unsaved draft. If the toggled row is the one currently being edited,
     /// only its `enabled` field is synced so other unsaved edits survive.
     fn toggle_enabled(&mut self, index: usize) {
+        if index >= self.config.expansion.len() {
+            self.status = Status::warning(self.strings.no_selection());
+            return;
+        }
         let mut candidate = self.config.clone();
         candidate.expansion[index].enabled = !candidate.expansion[index].enabled;
         let now_enabled = candidate.expansion[index].enabled;
@@ -657,12 +780,17 @@ impl GuiApp {
                         draft.enabled = now_enabled;
                     }
                 }
-                self.set_message_and_reload(format!(
-                    "{trigger} {}",
-                    if now_enabled { "enabled" } else { "disabled" }
-                ));
+                let message = if now_enabled {
+                    self.strings.status_snippet_enabled(&trigger)
+                } else {
+                    self.strings.status_snippet_disabled(&trigger)
+                };
+                self.set_saved_status(Status::success(message));
             }
-            Err(error) => self.message = format!("Toggle failed: {}", error.safe_summary()),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_toggle_failed(&error.safe_summary()))
+            }
         }
     }
 
@@ -674,7 +802,7 @@ impl GuiApp {
     /// user has not even saved yet. Command previews are explicit and
     /// user-triggered instead; see `run_command_preview`.
     fn preview(&mut self) -> String {
-        let Some(index) = self.selected else {
+        let Some(index) = self.selected_index() else {
             return self.strings.no_selection().into();
         };
         let draft_hash = preview::cache_key(self.draft.as_ref(), &self.preview_app);
@@ -706,21 +834,25 @@ impl GuiApp {
         let command = match draft.command_config() {
             Ok(Some(command)) => command,
             Ok(None) => {
-                self.command_preview_result = Some(Err("Enable the dynamic command first".into()));
+                self.command_preview_result =
+                    Some(Err(self.strings.status_enable_command_first().into()));
                 return;
             }
             Err(error) => {
                 self.command_preview_result =
-                    Some(Err(format!("Command settings invalid: {error}")));
+                    Some(Err(self.strings.status_command_invalid(&error.to_string())));
                 return;
             }
         };
         let (sender, receiver) = mpsc::channel();
         self.command_preview_result = None;
         self.command_preview_receiver = Some(receiver);
+        // `Strings` is a plain language tag, so the worker can phrase its own
+        // failure in the user's language without borrowing the app.
+        let strings = Strings::new(self.language);
         thread::spawn(move || {
             let result = wayexpand_core::run_command(&command)
-                .map_err(|error| format!("Command failed: {error}"));
+                .map_err(|error| strings.status_command_failed(&error.to_string()));
             let _ = sender.send(result);
         });
     }
@@ -740,7 +872,7 @@ impl GuiApp {
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.command_preview_receiver = None;
                 self.command_preview_result =
-                    Some(Err("Command preview failed unexpectedly".into()));
+                    Some(Err(self.strings.status_command_preview_failed().into()));
             }
         }
     }
@@ -756,14 +888,38 @@ impl GuiApp {
         match control_command(command) {
             Ok(_) => {
                 self.paused = !self.paused;
-                self.message = if self.paused {
-                    "Expansion paused"
+                self.status = Status::success(if self.paused {
+                    self.strings.status_paused()
                 } else {
-                    "Expansion resumed"
-                }
-                .into();
+                    self.strings.status_resumed()
+                });
             }
-            Err(error) => self.message = format!("Control unavailable: {error}"),
+            Err(error) => {
+                self.status =
+                    Status::error(self.strings.status_control_unavailable(&error.to_string()))
+            }
+        }
+    }
+
+    fn any_dialog_open(&self) -> bool {
+        self.diagnostics_open || self.import_open || self.settings_open
+    }
+
+    /// Escape closes one dialog at a time, most recently opened first. The
+    /// import dialog keeps its preview open on the first Escape so a loaded
+    /// library is not discarded by a keystroke meant to dismiss something
+    /// else.
+    fn close_topmost_dialog(&mut self) {
+        if self.settings_open {
+            self.settings_open = false;
+        } else if self.import_open {
+            if self.import_preview.is_some() {
+                self.import_preview = None;
+            } else {
+                self.import_open = false;
+            }
+        } else if self.diagnostics_open {
+            self.diagnostics_open = false;
         }
     }
 
@@ -810,35 +966,30 @@ impl GuiApp {
                         );
                     }
                     ui.add_space(8.0);
-                    ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Appearance, language, and engine preferences all live
+                        // in one settings window; the theme toggle stays in the
+                        // toolbar because it is the one display preference
+                        // people flip several times a day.
+                        if theme::secondary_button(ui, palette, self.strings.settings())
+                            .on_hover_text(self.strings.settings_tooltip())
+                            .clicked()
+                        {
+                            self.open_settings();
+                        }
                         if theme::secondary_button(
                             ui,
                             palette,
-                            if self.dark_mode { "Light" } else { "Dark" },
+                            if self.dark_mode {
+                                self.strings.theme_light()
+                            } else {
+                                self.strings.theme_dark()
+                            },
                         )
                         .on_hover_text(self.strings.toggle_theme())
                         .clicked()
                         {
-                            self.dark_mode = !self.dark_mode;
-                            ui.ctx().set_theme(if self.dark_mode {
-                                egui::ThemePreference::Dark
-                            } else {
-                                egui::ThemePreference::Light
-                            });
-                            save_gui_prefs(self.language, self.colorpack, self.dark_mode);
-                        }
-                        if theme::secondary_button(ui, palette, "Language")
-                            .on_hover_text("Switch language")
-                            .clicked()
-                        {
-                            self.language_selector_open = !self.language_selector_open;
-                        }
-                        if theme::secondary_button(ui, palette, "Color pack")
-                            .on_hover_text("Switch color pack")
-                            .clicked()
-                        {
-                            self.colorpack_selector_open = !self.colorpack_selector_open;
+                            self.set_dark_mode(ui.ctx(), !self.dark_mode);
                         }
                     });
                 });
@@ -846,9 +997,11 @@ impl GuiApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.add(
                         TextEdit::singleline(&mut self.filter)
+                            .id(egui::Id::new(SEARCH_FIELD_SALT))
                             .hint_text(self.strings.search_placeholder())
                             .desired_width(260.0),
-                    );
+                    )
+                    .on_hover_text(self.strings.search_tooltip());
                     if theme::secondary_button(ui, palette, self.strings.reload()).clicked() {
                         self.request_action(PendingAction::Reload);
                     }
@@ -874,14 +1027,6 @@ impl GuiApp {
                         self.import_open = true;
                         self.import_preview = None;
                     }
-                    if theme::secondary_button(ui, palette, self.strings.settings()).clicked() {
-                        self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
-                        self.settings_undo_chord =
-                            self.config.settings.undo_chord.clone().unwrap_or_default();
-                        self.settings_font_scale = self.config.settings.font_scale;
-                        self.settings_error = None;
-                        self.settings_open = true;
-                    }
                 });
             });
     }
@@ -891,8 +1036,11 @@ impl GuiApp {
             let mut open = self.diagnostics_open;
             egui::Window::new(self.strings.diagnostics_title())
                 .open(&mut open)
+                .collapsible(false)
                 .resizable(true)
-                .min_width(420.0)
+                .min_width(460.0)
+                .max_height(560.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
                     theme::section_header(ui, "", self.strings.runtime_health());
                     ui.add_space(4.0);
@@ -905,9 +1053,13 @@ impl GuiApp {
                         ui.label(RichText::new(&self.daemon_status).monospace());
                     });
                     ui.label(
-                        RichText::new(format!("Fleet layers: {}", self.fleet_status))
-                            .small()
-                            .color(palette.muted),
+                        RichText::new(format!(
+                            "{}: {}",
+                            self.strings.fleet_layers(),
+                            self.fleet_status
+                        ))
+                        .small()
+                        .color(palette.muted),
                     );
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
@@ -929,20 +1081,28 @@ impl GuiApp {
                         ui.horizontal(|ui| {
                             theme::pill(
                                 ui,
-                                format!(
-                                    "{:?} · {} / {} / {}",
-                                    status.state,
-                                    status.implementation(),
-                                    status.availability(),
-                                    status.permission()
-                                ),
+                                self.strings.backend_state(status.state),
                                 color,
                                 theme::tint(color, 32),
                             );
                             ui.label(RichText::new(status.kind.to_string()).strong());
                         });
                         ui.label(RichText::new(&status.detail).small().color(palette.muted));
-                        ui.add_space(4.0);
+                        // The exact triple `wayexpand doctor` reports, kept
+                        // verbatim so the GUI mirrors the documented
+                        // diagnostic vocabulary instead of paraphrasing it.
+                        ui.label(
+                            RichText::new(format!(
+                                "implementation={} · availability={} · permission={}",
+                                status.implementation(),
+                                status.availability(),
+                                status.permission()
+                            ))
+                            .monospace()
+                            .small()
+                            .color(palette.muted),
+                        );
+                        ui.add_space(6.0);
                     }
                     ui.separator();
                     theme::section_header(ui, "", self.strings.protocol_probes());
@@ -963,8 +1123,10 @@ impl GuiApp {
             let mut open = self.import_open;
             egui::Window::new(self.strings.import_dialog_title())
                 .open(&mut open)
+                .collapsible(false)
                 .resizable(false)
-                .min_width(420.0)
+                .min_width(460.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
                     ui.label(self.strings.source_yaml());
                     ui.add(
@@ -990,11 +1152,10 @@ impl GuiApp {
                     });
                     if let Some((config, skipped)) = self.import_preview.as_ref() {
                         ui.separator();
-                        ui.label(format!(
-                            "Preview: {} expansion(s), {} skipped unsupported match(es)",
-                            config.expansion.len(),
-                            skipped
-                        ));
+                        ui.label(
+                            self.strings
+                                .import_preview_summary(config.expansion.len(), *skipped),
+                        );
                         if theme::primary_button(ui, palette, self.strings.replace_library())
                             .clicked()
                         {
@@ -1007,186 +1168,205 @@ impl GuiApp {
     }
 
     fn render_settings_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if self.settings_open {
-            let mut open = self.settings_open;
-            egui::Window::new(self.strings.settings_title())
-                .open(&mut open)
-                .resizable(false)
-                .min_width(360.0)
-                .show(ctx, |ui| {
-                    ui.label(self.strings.buffer_limit());
-                    ui.add(TextEdit::singleline(&mut self.settings_buffer).desired_width(120.0));
-                    ui.label(
-                        RichText::new(self.strings.buffer_limit_help())
-                            .small()
-                            .color(palette.muted),
-                    );
-
-                    ui.add_space(8.0);
-                    ui.label(self.strings.undo_chord());
-                    ui.add(
-                        TextEdit::singleline(&mut self.settings_undo_chord)
-                            .hint_text("Ctrl+Z")
-                            .desired_width(120.0),
-                    );
-                    ui.label(
-                        RichText::new(self.strings.undo_chord_help())
-                            .small()
-                            .color(palette.muted),
-                    );
-
-                    ui.add_space(8.0);
-                    ui.label("Font size");
-                    ui.horizontal(|ui| {
-                        for scale in &[
-                            FontScale::Small,
-                            FontScale::Normal,
-                            FontScale::Large,
-                            FontScale::ExtraLarge,
-                            FontScale::Huge,
-                        ] {
-                            let label = match scale {
-                                FontScale::Small => "Small (80%)",
-                                FontScale::Normal => "Normal",
-                                FontScale::Large => "Large (120%)",
-                                FontScale::ExtraLarge => "Extra Large (150%)",
-                                FontScale::Huge => "Huge (200%)",
-                            };
-                            if ui
-                                .selectable_label(*scale == self.settings_font_scale, label)
-                                .clicked()
-                            {
-                                self.settings_font_scale = *scale;
-                            }
-                        }
-                    });
-                    ui.label(
-                        RichText::new("Adjust text size for readability on your display")
-                            .small()
-                            .color(palette.muted),
-                    );
-
-                    if let Some(error) = &self.settings_error {
-                        ui.add_space(4.0);
-                        ui.colored_label(palette.danger, format!("Warning: {error}"));
-                    }
-
-                    ui.add_space(12.0);
-                    theme::section_header(ui, "", self.strings.backend_status());
-                    ui.add_space(6.0);
-
-                    for status in &self.backend_status {
-                        use wayexpand_core::BackendState;
-                        let status_color = match status.state {
-                            BackendState::Available | BackendState::Implemented => palette.success,
-                            _ => palette.muted,
-                        };
-                        let state_text = format!(
-                            "{:?}; implementation={}, availability={}, permission={}",
-                            status.state,
-                            status.implementation(),
-                            status.availability(),
-                            status.permission()
-                        );
-                        ui.horizontal(|ui| {
-                            ui.colored_label(status_color, "Status:");
-                            ui.label(format!("{:?}: {}", status.kind, state_text));
-                        });
-                    }
-
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if theme::primary_button(ui, palette, self.strings.save_settings())
-                            .clicked()
-                        {
-                            self.save_settings(ctx);
-                        }
-                        if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
-                            self.settings_open = false;
-                        }
-                    });
-                });
-            self.settings_open = open && self.settings_open;
+        if !self.settings_open {
+            return;
         }
-    }
-
-    fn render_language_selector(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if self.language_selector_open {
-            let mut open = self.language_selector_open;
-            egui::Window::new("Language / Sprache")
-                .open(&mut open)
-                .resizable(false)
-                .min_width(200.0)
-                .show(ctx, |ui| {
-                    ui.label("Choose your language:");
-                    ui.add_space(6.0);
-                    if ui
-                        .selectable_label(self.language == Language::English, "English")
-                        .clicked()
-                    {
-                        self.language = Language::English;
-                        self.strings.set_language(Language::English);
-                        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
-                    }
-                    if ui
-                        .selectable_label(self.language == Language::German, "Deutsch")
-                        .clicked()
-                    {
-                        self.language = Language::German;
-                        self.strings.set_language(Language::German);
-                        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
-                    }
-                    ui.add_space(6.0);
-                    if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
-                        self.language_selector_open = false;
-                    }
-                });
-            self.language_selector_open = open && self.language_selector_open;
-        }
-    }
-
-    fn render_colorpack_selector(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if self.colorpack_selector_open {
-            let mut open = self.colorpack_selector_open;
-            egui::Window::new("Color Pack / Farbschema")
-                .open(&mut open)
-                .resizable(true)
-                .min_width(340.0)
-                .show(ctx, |ui| {
-                    ui.label("Choose your color scheme:");
-                    ui.label(
-                        RichText::new("Pick a visual style; this preference is saved locally.")
-                            .small()
-                            .color(palette.muted),
-                    );
-                    ui.add_space(10.0);
-                    for pack in ColorPack::all() {
-                        let selected = self.colorpack == *pack;
-                        let scheme = ColorScheme::for_pack(*pack, self.dark_mode);
-                        if theme::colorpack_card(
+        let mut open = self.settings_open;
+        egui::Window::new(self.strings.settings_title())
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .min_width(420.0)
+            .max_height(560.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for (tab, label) in [
+                        (SettingsTab::Appearance, self.strings.appearance()),
+                        (SettingsTab::Engine, self.strings.engine()),
+                    ] {
+                        if theme::chip_scaled(
                             ui,
                             palette,
-                            pack.name(),
-                            pack.description(),
-                            scheme.accent,
-                            selected,
+                            label,
+                            self.settings_tab == tab,
                             self.config.settings.font_scale.multiplier(),
                         )
                         .clicked()
                         {
-                            self.colorpack = *pack;
-                            theme::install_pack(ui.ctx(), *pack, self.config.settings.font_scale);
-                            save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+                            self.settings_tab = tab;
                         }
-                        ui.add_space(6.0);
-                    }
-                    ui.add_space(6.0);
-                    if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
-                        self.colorpack_selector_open = false;
                     }
                 });
-            self.colorpack_selector_open = open && self.colorpack_selector_open;
+                ui.add_space(10.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("settings_scroll")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| match self.settings_tab {
+                        SettingsTab::Appearance => self.render_appearance_settings(ui, palette),
+                        SettingsTab::Engine => self.render_engine_settings(ui, palette),
+                    });
+            });
+        self.settings_open = open && self.settings_open;
+    }
+
+    /// Display preferences. Everything here applies and persists on click:
+    /// the theme, language, and color pack live in the GUI preferences file,
+    /// and the font scale is written straight to the configuration.
+    fn render_appearance_settings(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        ui.label(
+            RichText::new(self.strings.appearance_note())
+                .small()
+                .color(palette.muted),
+        );
+        ui.add_space(10.0);
+
+        theme::section_header(ui, "", self.strings.theme());
+        ui.horizontal(|ui| {
+            for (dark, label) in [
+                (false, self.strings.theme_light()),
+                (true, self.strings.theme_dark()),
+            ] {
+                if theme::chip_scaled(
+                    ui,
+                    palette,
+                    label,
+                    self.dark_mode == dark,
+                    self.config.settings.font_scale.multiplier(),
+                )
+                .clicked()
+                {
+                    self.set_dark_mode(ui.ctx(), dark);
+                }
+            }
+        });
+
+        ui.add_space(12.0);
+        theme::section_header(ui, "", self.strings.language());
+        ui.horizontal(|ui| {
+            for (language, label) in [
+                (Language::English, "English"),
+                (Language::German, "Deutsch"),
+            ] {
+                if theme::chip_scaled(
+                    ui,
+                    palette,
+                    label,
+                    self.language == language,
+                    self.config.settings.font_scale.multiplier(),
+                )
+                .clicked()
+                {
+                    self.set_language(language);
+                }
+            }
+        });
+
+        ui.add_space(12.0);
+        theme::section_header(ui, "", self.strings.font_size());
+        ui.horizontal_wrapped(|ui| {
+            for scale in FONT_SCALES {
+                if theme::chip_scaled(
+                    ui,
+                    palette,
+                    self.strings.font_scale_label(*scale),
+                    *scale == self.settings_font_scale,
+                    self.config.settings.font_scale.multiplier(),
+                )
+                .clicked()
+                {
+                    self.apply_font_scale(ui.ctx(), *scale);
+                }
+            }
+        });
+        ui.label(
+            RichText::new(self.strings.font_size_help())
+                .small()
+                .color(palette.muted),
+        );
+
+        ui.add_space(12.0);
+        theme::section_header(ui, "", self.strings.color_pack());
+        ui.label(
+            RichText::new(self.strings.color_pack_help())
+                .small()
+                .color(palette.muted),
+        );
+        ui.add_space(6.0);
+        for pack in ColorPack::all() {
+            let scheme = ColorScheme::for_pack(*pack, self.dark_mode);
+            if theme::colorpack_card(
+                ui,
+                palette,
+                pack.name(),
+                pack.description(),
+                scheme.accent,
+                self.colorpack == *pack,
+                self.config.settings.font_scale.multiplier(),
+            )
+            .clicked()
+            {
+                self.set_colorpack(ui.ctx(), *pack);
+            }
+            ui.add_space(6.0);
         }
+    }
+
+    /// Configuration values the daemon reads. These are validated as a whole
+    /// and written by an explicit Save, so the dialog says so rather than
+    /// leaving the user to discover that half the window commits instantly
+    /// and half does not.
+    fn render_engine_settings(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        ui.label(
+            RichText::new(self.strings.engine_note())
+                .small()
+                .color(palette.muted),
+        );
+        ui.add_space(10.0);
+
+        ui.label(self.strings.buffer_limit());
+        ui.add(TextEdit::singleline(&mut self.settings_buffer).desired_width(120.0));
+        ui.label(
+            RichText::new(self.strings.buffer_limit_help())
+                .small()
+                .color(palette.muted),
+        );
+
+        ui.add_space(10.0);
+        ui.label(self.strings.undo_chord());
+        ui.add(
+            TextEdit::singleline(&mut self.settings_undo_chord)
+                .hint_text("Ctrl+Z")
+                .desired_width(120.0),
+        );
+        ui.label(
+            RichText::new(self.strings.undo_chord_help())
+                .small()
+                .color(palette.muted),
+        );
+
+        if let Some(error) = self.settings_error.clone() {
+            ui.add_space(8.0);
+            egui::Frame::new()
+                .fill(theme::tint(palette.danger, 26))
+                .stroke(egui::Stroke::new(1.0, palette.danger))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(10, 7))
+                .show(ui, |ui| {
+                    ui.colored_label(palette.danger, error);
+                });
+        }
+
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if theme::primary_button(ui, palette, self.strings.save_settings()).clicked() {
+                let ctx = ui.ctx().clone();
+                self.save_settings(&ctx);
+            }
+            if theme::secondary_button(ui, palette, self.strings.close()).clicked() {
+                self.settings_open = false;
+            }
+        });
     }
 
     fn render_snippet_list(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -1263,12 +1443,16 @@ impl GuiApp {
                     });
                     ui.add_space(6.0);
                 }
+                // Filtering walks the whole library, so it happens once per
+                // frame and the same result answers both the list and the
+                // empty-state check below.
                 let visible_indices = self.visible_indices();
+                let nothing_visible = visible_indices.is_empty();
                 ScrollArea::vertical().show(ui, |ui| {
                     for index in visible_indices {
                         let expansion = &self.config.expansion[index];
                         let detail = if expansion.command.is_some() {
-                            "Command-backed snippet".to_owned()
+                            self.strings.command_backed_summary().to_owned()
                         } else {
                             expansion.description.clone()
                         };
@@ -1282,6 +1466,12 @@ impl GuiApp {
                                 trigger: &expansion.trigger,
                                 detail: &detail,
                                 category: &expansion.category,
+                                detail_placeholder: self.strings.no_description(),
+                                toggle_hint: if expansion.enabled {
+                                    self.strings.click_to_disable()
+                                } else {
+                                    self.strings.click_to_enable()
+                                },
                             },
                             font_scale,
                         );
@@ -1305,7 +1495,7 @@ impl GuiApp {
                                 self.request_action(PendingAction::New);
                             }
                         });
-                    } else if self.visible_indices().is_empty() {
+                    } else if nothing_visible {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
                             ui.label(RichText::new("🔍").size(28.0));
@@ -1317,7 +1507,7 @@ impl GuiApp {
                                 (true, Some(category)) => {
                                     self.strings.no_snippets_category(category)
                                 }
-                                (true, None) => "No snippets match this filter.".to_owned(),
+                                (true, None) => self.strings.no_snippets_match_filter().to_owned(),
                             };
                             ui.label(RichText::new(reason).color(palette.muted));
                             ui.add_space(6.0);
@@ -1362,7 +1552,7 @@ impl GuiApp {
                 if index >= self.config.expansion.len() {
                     self.selected = None;
                     self.draft = None;
-                    ui.label("Selection is out of date; choose a snippet again.");
+                    ui.label(self.strings.selection_stale());
                     return;
                 }
                 if self.draft.is_none() {
@@ -1383,133 +1573,176 @@ impl GuiApp {
                                 theme::section_header(ui, "", self.strings.snippet_details());
                                 ui.add_space(6.0);
                                 let categories = self.categories();
+                                let duplicate_trigger = self.draft.as_ref().is_some_and(|draft| {
+                                    !draft.trigger.is_empty()
+                                        && self.config.expansion.iter().enumerate().any(
+                                            |(other_index, other)| {
+                                                other_index != index
+                                                    && other.trigger == draft.trigger
+                                            },
+                                        )
+                                });
+                                let strings = &self.strings;
+                                let app_detecting = self.app_detection.is_some();
+                                let mut cancel_detection = false;
                                 let Some(draft) = self.draft.as_mut() else {
-                                    ui.label("Snippet draft unavailable; choose a snippet again.");
+                                    ui.label(strings.draft_unavailable());
                                     return;
                                 };
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.trigger());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.trigger)
-                                            .hint_text(self.strings.trigger_hint())
-                                            .font(egui::TextStyle::Monospace)
-                                            .desired_width(300.0),
-                                    );
-                                });
-                                let duplicate_trigger = !draft.trigger.is_empty()
-                                    && self.config.expansion.iter().enumerate().any(
-                                        |(other_index, other)| {
-                                            other_index != index && other.trigger == draft.trigger
-                                        },
-                                    );
-                                if duplicate_trigger {
-                                    ui.colored_label(
-                                        palette.danger,
-                                        self.strings.duplicate_trigger(),
-                                    );
-                                } else {
-                                    ui.label(
-                                        RichText::new(self.strings.trigger_tip())
-                                            .small()
-                                            .color(palette.muted),
-                                    );
-                                }
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.description());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.description)
-                                            .desired_width(420.0),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.tags());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.tags)
-                                            .hint_text(self.strings.tags_hint())
-                                            .desired_width(420.0),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.category());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.category)
-                                            .hint_text(self.strings.category_hint())
-                                            .desired_width(260.0),
-                                    );
-                                    if !categories.is_empty() {
-                                        egui::ComboBox::from_id_salt("category_picker")
-                                            .selected_text(self.strings.existing())
-                                            .width(140.0)
-                                            .show_ui(ui, |ui| {
-                                                for category in &categories {
-                                                    if ui
-                                                        .selectable_label(
-                                                            draft.category == *category,
-                                                            category,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        draft.category = category.clone();
-                                                    }
-                                                }
-                                            });
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.app_filter());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.app_filter)
-                                            .hint_text(self.strings.app_filter_hint())
-                                            .desired_width(300.0),
-                                    );
-                                    if self.app_detection.is_some() {
-                                        ui.spinner();
-                                        ui.label("Detecting focused application…");
-                                        if ui.small_button("Cancel").clicked() {
-                                            // The spawned thread is not joined/cancelled --
-                                            // it may itself be stuck in a hung D-Bus call --
-                                            // just stop waiting on it and discard whatever
-                                            // it eventually sends.
-                                            self.app_detection = None;
+                                // A two-column grid rather than a stack of
+                                // `horizontal` rows: with free-form rows every
+                                // field started at a different x depending on
+                                // how long its label happened to be in the
+                                // selected language, which read as a form
+                                // nobody had laid out.
+                                egui::Grid::new("snippet_details_grid")
+                                    .num_columns(2)
+                                    .spacing([12.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label(strings.trigger());
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.trigger)
+                                                .hint_text(strings.trigger_hint())
+                                                .font(egui::TextStyle::Monospace)
+                                                .desired_width(f32::INFINITY),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label("");
+                                        if duplicate_trigger {
+                                            ui.colored_label(
+                                                palette.danger,
+                                                strings.duplicate_trigger(),
+                                            );
+                                        } else {
+                                            ui.label(
+                                                RichText::new(strings.trigger_tip())
+                                                    .small()
+                                                    .color(palette.muted),
+                                            );
                                         }
-                                    } else if ui
-                                        .button(self.strings.detect_app())
-                                        .on_hover_text(self.strings.detect_app_tooltip())
-                                        .clicked()
-                                    {
-                                        detect_app_clicked = true;
-                                    }
-                                });
-                                if !draft.app_filter.trim().is_empty() {
-                                    ui.label(
-                                        RichText::new(self.strings.window_tracking_warning())
+                                        ui.end_row();
+
+                                        ui.label(strings.description());
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.description)
+                                                .desired_width(f32::INFINITY),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(strings.tags());
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.tags)
+                                                .hint_text(strings.tags_hint())
+                                                .desired_width(f32::INFINITY),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(strings.category());
+                                        ui.horizontal(|ui| {
+                                            let picker_width =
+                                                if categories.is_empty() { 0.0 } else { 150.0 };
+                                            ui.add(
+                                                TextEdit::singleline(&mut draft.category)
+                                                    .hint_text(strings.category_hint())
+                                                    .desired_width(
+                                                        (ui.available_width() - picker_width)
+                                                            .max(120.0),
+                                                    ),
+                                            );
+                                            if !categories.is_empty() {
+                                                egui::ComboBox::from_id_salt("category_picker")
+                                                    .selected_text(strings.existing())
+                                                    .width(110.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for category in &categories {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    draft.category == *category,
+                                                                    category,
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                draft.category = category.clone();
+                                                            }
+                                                        }
+                                                    });
+                                            }
+                                        });
+                                        ui.end_row();
+
+                                        ui.label(strings.app_filter());
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                TextEdit::singleline(&mut draft.app_filter)
+                                                    .hint_text(strings.app_filter_hint())
+                                                    .desired_width(
+                                                        (ui.available_width() - 190.0).max(120.0),
+                                                    ),
+                                            );
+                                            if app_detecting {
+                                                ui.spinner();
+                                                ui.label(strings.detecting_app())
+                                                    .on_hover_text(strings.detect_app_tooltip());
+                                                if ui.small_button(strings.cancel()).clicked() {
+                                                    // The spawned thread is not joined/cancelled --
+                                                    // it may itself be stuck in a hung D-Bus call --
+                                                    // just stop waiting on it and discard whatever
+                                                    // it eventually sends.
+                                                    cancel_detection = true;
+                                                }
+                                            } else if ui
+                                                .button(strings.detect_app())
+                                                .on_hover_text(strings.detect_app_tooltip())
+                                                .clicked()
+                                            {
+                                                detect_app_clicked = true;
+                                            }
+                                        });
+                                        ui.end_row();
+
+                                        ui.label("");
+                                        ui.label(
+                                            RichText::new(if draft.app_filter.trim().is_empty() {
+                                                strings.app_filter_help()
+                                            } else {
+                                                strings.window_tracking_warning()
+                                            })
                                             .small()
                                             .color(palette.muted),
-                                    );
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(strings.matching());
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.checkbox(&mut draft.enabled, strings.enabled());
+                                            ui.separator();
+                                            ui.radio_value(
+                                                &mut draft.match_mode,
+                                                MatchMode::Immediate,
+                                                strings.immediate(),
+                                            );
+                                            ui.radio_value(
+                                                &mut draft.match_mode,
+                                                MatchMode::WordBoundary,
+                                                strings.word_boundary(),
+                                            );
+                                            ui.separator();
+                                            ui.checkbox(
+                                                &mut draft.propagate_case,
+                                                strings.propagate_case(),
+                                            )
+                                            .on_hover_text(strings.propagate_case_tooltip());
+                                        });
+                                        ui.end_row();
+                                    });
+                                if cancel_detection {
+                                    self.app_detection = None;
                                 }
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut draft.enabled, self.strings.enabled());
-                                    ui.separator();
-                                    ui.radio_value(
-                                        &mut draft.match_mode,
-                                        MatchMode::Immediate,
-                                        self.strings.immediate(),
-                                    );
-                                    ui.radio_value(
-                                        &mut draft.match_mode,
-                                        MatchMode::WordBoundary,
-                                        self.strings.word_boundary(),
-                                    );
-                                    ui.separator();
-                                    ui.checkbox(
-                                        &mut draft.propagate_case,
-                                        self.strings.propagate_case(),
-                                    )
-                                    .on_hover_text(self.strings.propagate_case_tooltip());
-                                });
-                                ui.add_space(4.0);
+                                let Some(draft) = self.draft.as_mut() else {
+                                    return;
+                                };
+                                ui.add_space(8.0);
                                 ui.label(self.strings.replacement());
                                 ui.add(
                                     TextEdit::multiline(&mut draft.replacement)
@@ -1558,30 +1791,33 @@ impl GuiApp {
                                     self.app_detection = None;
                                     let value = window.app_id.or(window.title).unwrap_or_default();
                                     if value.is_empty() {
-                                        self.message =
-                                            "Could not identify the focused window".into();
-                                    } else if let Some(draft) = self.draft.as_mut() {
-                                        if draft.app_filter.trim().is_empty() {
-                                            draft.app_filter = value.clone();
-                                        } else {
-                                            draft.app_filter.push_str(", ");
-                                            draft.app_filter.push_str(&value);
+                                        self.status = Status::warning(
+                                            self.strings.status_window_unidentified(),
+                                        );
+                                    } else {
+                                        if let Some(draft) = self.draft.as_mut() {
+                                            if draft.app_filter.trim().is_empty() {
+                                                draft.app_filter = value.clone();
+                                            } else {
+                                                draft.app_filter.push_str(", ");
+                                                draft.app_filter.push_str(&value);
+                                            }
                                         }
-                                        self.message =
-                                            format!("Added \"{value}\" to the app filter");
+                                        self.status = Status::success(
+                                            self.strings.status_app_filter_added(&value),
+                                        );
                                     }
                                 }
                                 Ok(AppDetection::NoWindow) => {
                                     self.app_detection = None;
-                                    self.message =
-                                        "No focused window to detect (focus is on the desktop)"
-                                            .into();
+                                    self.status =
+                                        Status::warning(self.strings.status_no_focused_window());
                                 }
                                 Ok(AppDetection::Unavailable) => {
                                     self.app_detection = None;
-                                    self.message =
-                            "Window detection is unavailable here (KDE Plasma only for now)"
-                                .into();
+                                    self.status = Status::warning(
+                                        self.strings.status_detection_unavailable(),
+                                    );
                                 }
                                 Err(mpsc::TryRecvError::Empty) => {
                                     // Still waiting: request another repaint soon so
@@ -1595,7 +1831,8 @@ impl GuiApp {
                                     // sends before exiting) -- treat it the same as an
                                     // explicit Unavailable rather than waiting forever.
                                     self.app_detection = None;
-                                    self.message = "Window detection failed unexpectedly".into();
+                                    self.status =
+                                        Status::error(self.strings.status_detection_failed());
                                 }
                             }
                         }
@@ -1628,17 +1865,17 @@ impl GuiApp {
                             });
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Preview app");
+                            ui.label(self.strings.preview_app());
                             ui.add(
                                 TextEdit::singleline(&mut self.preview_app)
-                                    .hint_text("leave empty for no focused app")
+                                    .hint_text(self.strings.preview_app_hint())
                                     .desired_width(300.0),
                             );
                         });
                         ui.add_space(4.0);
                         ui.collapsing(self.strings.dynamic_command(), |ui| {
                             let Some(draft) = self.draft.as_mut() else {
-                                ui.label("Snippet draft unavailable; choose a snippet again.");
+                                ui.label(self.strings.draft_unavailable());
                                 return;
                             };
                             ui.checkbox(
@@ -1691,18 +1928,11 @@ impl GuiApp {
                                 );
                             });
                         });
-                        ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            if theme::primary_button(ui, palette, self.strings.save_changes())
-                                .on_hover_text(self.strings.save_tooltip())
-                                .clicked()
-                            {
-                                self.save_selected();
-                            }
-                            if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
-                                self.request_action(PendingAction::Delete);
-                            }
-                        });
+                        // Save and Delete are a pinned action bar under this
+                        // scroll area (`render_editor_actions`): with a long
+                        // replacement open they used to scroll out of reach,
+                        // so the primary action of the window depended on
+                        // where the user happened to be scrolled to.
                         ui.add_space(14.0);
                         theme::section_header(ui, "", self.strings.preview());
                         ui.add_space(6.0);
@@ -1739,11 +1969,7 @@ impl GuiApp {
                                 .corner_radius(egui::CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
-                                    ui.label(
-                            "This snippet runs a program instead of inserting fixed text. \
-                             Its output is not shown automatically -- run it once to see \
-                             what it currently produces.",
-                        );
+                                    ui.label(self.strings.command_preview_help());
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
                                         let preview_is_current = self.command_preview_key
@@ -1756,9 +1982,9 @@ impl GuiApp {
                                                 self.command_preview_receiver.is_none(),
                                                 egui::Button::new(
                                                     if self.command_preview_receiver.is_some() {
-                                                        "Running…"
+                                                        self.strings.running()
                                                     } else {
-                                                        "Run once"
+                                                        self.strings.run_once()
                                                     },
                                                 ),
                                             )
@@ -1807,25 +2033,120 @@ impl GuiApp {
                                                     .clicked()
                                                 {
                                                     ui.ctx().copy_text(preview_text.clone());
-                                                    self.message =
-                                                        "Preview copied to clipboard".into();
+                                                    self.status = Status::success(
+                                                        self.strings.status_preview_copied(),
+                                                    );
                                                 }
                                             },
                                         );
                                     });
                                 });
                         }
-                        ui.add_space(12.0);
-                        let (message_color, message_bg) = status_tone(&self.message, palette);
-                        egui::Frame::new()
-                            .fill(message_bg)
-                            .corner_radius(egui::CornerRadius::same(6))
-                            .inner_margin(egui::Margin::symmetric(10, 6))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(&self.message).color(message_color));
-                            });
+                        // The status line is a persistent bottom panel
+                        // (`render_status_bar`) rather than the tail of this
+                        // scroll area: a message about a failed save was
+                        // previously only visible after scrolling down to it.
+                        ui.add_space(4.0);
                     });
             });
+    }
+
+    /// The editor's pinned action bar. It is a panel rather than the last
+    /// row of the editor's scroll area so the primary action stays on screen
+    /// however far the snippet's replacement text scrolls.
+    fn render_editor_actions(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if self.selected_index().is_none() {
+            return;
+        }
+        egui::TopBottomPanel::bottom("editor_actions")
+            // Without the rule the editor's content scrolls flush against the
+            // buttons and the bar stops reading as a fixed surface.
+            .show_separator_line(true)
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.surface)
+                    .inner_margin(egui::Margin::symmetric(22, 10))
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if theme::primary_button(ui, palette, self.strings.save_changes())
+                        .on_hover_text(self.strings.save_tooltip())
+                        .clicked()
+                    {
+                        self.save_selected();
+                    }
+                    if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
+                        self.request_action(PendingAction::Delete);
+                    }
+                    if self.draft_is_dirty() {
+                        theme::pill(
+                            ui,
+                            self.strings.unsaved_changes(),
+                            palette.warning,
+                            theme::tint(palette.warning, 38),
+                        );
+                    }
+                });
+            });
+    }
+
+    /// The always-visible status line: the outcome of the last action on
+    /// the left, and which configuration file this window is editing on the
+    /// right, so a second instance opened on a different file is never
+    /// mistaken for the first.
+    fn render_status_bar(&mut self, ctx: &egui::Context, palette: &Palette) {
+        let (text_color, accent) = self.status.colors(palette);
+        egui::TopBottomPanel::bottom("status")
+            .show_separator_line(true)
+            .frame(
+                egui::Frame::new()
+                    .fill(self.status.background(palette))
+                    .inner_margin(egui::Margin::symmetric(18, 8))
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (bar, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(3.0, ui.text_style_height(&egui::TextStyle::Body)),
+                        egui::Sense::hover(),
+                    );
+                    if let Some(accent) = accent {
+                        ui.painter()
+                            .rect_filled(bar, egui::CornerRadius::same(2), accent);
+                    }
+                    ui.label(RichText::new(self.status.text()).color(text_color));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(self.path.display().to_string())
+                                .monospace()
+                                .small()
+                                .color(palette.muted),
+                        )
+                        .on_hover_text(self.strings.configuration_file());
+                    });
+                });
+            });
+    }
+
+    /// Keeps the window title in step with which file is open and whether it
+    /// has unsaved edits, the way any other editor does, instead of showing
+    /// a constant application name.
+    fn sync_window_title(&mut self, ctx: &egui::Context) {
+        let name = self
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.path.display().to_string());
+        let title = if self.draft_is_dirty() {
+            format!("• {name} — WayExpand")
+        } else {
+            format!("{name} — WayExpand")
+        };
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
     }
 
     fn render_pending_action(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -1833,6 +2154,7 @@ impl GuiApp {
             egui::Window::new(self.strings.unsaved_title())
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
                     let action = match self.pending_action {
                         Some(PendingAction::Select(_)) => self.strings.unsaved_switching(),
@@ -1892,14 +2214,14 @@ impl eframe::App for GuiApp {
             self.theme_refresh_pending = false;
         }
         let palette = Palette::for_pack(self.colorpack, self.dark_mode);
-        let modal_open = self.diagnostics_open
-            || self.import_open
-            || self.settings_open
-            || self.pending_action.is_some();
-        let (want_save, want_new, want_escape, close_requested) = ctx.input(|input| {
+        // Any open dialog swallows the editor accelerators, so Ctrl+S in the
+        // settings window does not silently save the snippet behind it.
+        let modal_open = self.any_dialog_open() || self.pending_action.is_some();
+        let (want_save, want_new, want_search, want_escape, close_requested) = ctx.input(|input| {
             (
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::S),
                 !modal_open && input.modifiers.command && input.key_pressed(egui::Key::N),
+                !modal_open && input.modifiers.command && input.key_pressed(egui::Key::F),
                 input.key_pressed(egui::Key::Escape),
                 input.viewport().close_requested(),
             )
@@ -1926,20 +2248,24 @@ impl eframe::App for GuiApp {
         if want_new {
             self.request_action(PendingAction::New);
         }
-        if want_escape {
-            if self.diagnostics_open {
-                self.diagnostics_open = false;
-            } else if self.import_open && self.import_preview.is_none() {
-                self.import_open = false;
-            }
+        if want_search {
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(SEARCH_FIELD_SALT)));
         }
+        if want_escape {
+            self.close_topmost_dialog();
+        }
+        self.sync_window_title(ctx);
         self.render_toolbar(ctx, &palette);
         self.render_diagnostics(ctx, &palette);
         self.render_import_dialog(ctx, &palette);
         self.render_settings_dialog(ctx, &palette);
-        self.render_language_selector(ctx, &palette);
-        self.render_colorpack_selector(ctx, &palette);
+        // Panel order decides how the remaining space is carved up: the
+        // status line spans the full width, the sidebar then claims the left
+        // edge, and the editor's action bar sits above the status line but
+        // only across the editor itself.
+        self.render_status_bar(ctx, &palette);
         self.render_snippet_list(ctx, &palette);
+        self.render_editor_actions(ctx, &palette);
         self.render_editor(ctx, &palette);
         self.render_pending_action(ctx, &palette);
     }
@@ -1980,40 +2306,28 @@ fn control_command(command: &str) -> Result<String> {
     String::from_utf8(response).context("daemon returned a non-UTF-8 control response")
 }
 
-/// Colors the status bar from the free-form message text set throughout this
-/// file (e.g. "Snippet saved atomically", "Save failed: ..."). Wording
-/// changes to a message stay in whatever function sets it; this only needs
-/// to recognize the handful of words those messages already consistently
-/// use for success versus failure.
-fn status_tone(message: &str, palette: &Palette) -> (Color32, Color32) {
-    let lower = message.to_lowercase();
-    let is_failure = ["failed", "invalid", "rejected", "unavailable", "error"]
-        .iter()
-        .any(|word| lower.contains(word));
-    let is_success = !is_failure
-        && [
-            "saved",
-            "created",
-            "duplicated",
-            "reloaded",
-            "imported",
-            "deleted",
-            "undid",
-            "enabled",
-            "copied",
-            "paused",
-            "resumed",
-            "refreshed",
-        ]
-        .iter()
-        .any(|word| lower.contains(word));
-    if is_failure {
-        (palette.danger, theme::tint(palette.danger, 26))
-    } else if is_success {
-        (palette.success, theme::tint(palette.success, 26))
-    } else {
-        (palette.muted, Color32::TRANSPARENT)
+/// Whether `text` is exactly `values` joined with `", "`, decided without
+/// building that joined string. The editor stores tags and app filters as one
+/// comma-separated line while the configuration stores them as a list, and
+/// this comparison runs on every frame.
+fn equals_comma_list(text: &str, values: &[String]) -> bool {
+    // Consume the joined form one literal piece at a time rather than
+    // splitting on the separator: a value that itself contains ", " joins back
+    // to exactly the same text, and splitting would call that a difference.
+    let mut rest = text;
+    for (position, value) in values.iter().enumerate() {
+        if position > 0 {
+            let Some(remainder) = rest.strip_prefix(", ") else {
+                return false;
+            };
+            rest = remainder;
+        }
+        let Some(remainder) = rest.strip_prefix(value.as_str()) else {
+            return false;
+        };
+        rest = remainder;
     }
+    rest.is_empty()
 }
 
 fn expand_user_path(value: &str) -> PathBuf {
@@ -2233,6 +2547,38 @@ mod tests {
     }
 
     #[test]
+    fn comma_list_comparison_matches_the_joined_form_it_replaces() {
+        let cases: &[(&str, &[&str])] = &[
+            ("", &[]),
+            ("one", &["one"]),
+            ("one, two", &["one", "two"]),
+            ("one, two, three", &["one", "two", "three"]),
+            // A value that itself contains the separator joins back to the
+            // same text, so it must still compare equal.
+            ("a, b", &["a, b"]),
+            ("a, b, c", &["a, b", "c"]),
+            (" one", &["one"]),
+            ("one,two", &["one", "two"]),
+            ("one, two, ", &["one", "two"]),
+            ("", &["one"]),
+            ("one", &[]),
+        ];
+        for (text, values) in cases {
+            let owned: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
+            let joined = owned
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            assert_eq!(
+                equals_comma_list(text, &owned),
+                *text == joined,
+                "disagreed with the joined form for {text:?} vs {values:?}"
+            );
+        }
+    }
+
+    #[test]
     fn undo_history_is_bounded() {
         let path =
             std::env::temp_dir().join(format!("wayexpand-gui-undo-{}.toml", std::process::id()));
@@ -2261,7 +2607,250 @@ mod tests {
         app.settings_buffer = "0".into();
         app.save_settings(&egui::Context::default());
         assert_eq!(app.config.settings.max_buffer_chars, 128);
-        assert!(app.message.contains("outside the allowed range"));
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+        assert!(app.status.text().contains("outside the allowed range"));
+        // The dialog keeps the reason next to the field that caused it, not
+        // only on the status line at the far edge of the window.
+        assert!(app
+            .settings_error
+            .as_deref()
+            .is_some_and(|error| error.contains("outside the allowed range")));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_non_numeric_buffer_limit_is_reported_without_touching_the_configuration() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-gui-buffer-{}.toml", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let before = app.config.settings.max_buffer_chars;
+        app.settings_open = true;
+
+        app.settings_buffer = "half a screen".into();
+        app.save_settings(&egui::Context::default());
+
+        assert_eq!(app.config.settings.max_buffer_chars, before);
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+        // The dialog stays open so the value can be corrected in place.
+        assert!(app.settings_open);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn escape_closes_one_dialog_at_a_time_and_keeps_a_loaded_import() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-gui-dialogs-{}.toml", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.diagnostics_open = true;
+        app.import_open = true;
+        app.import_preview = Some((app.config.clone(), 0));
+        app.settings_open = true;
+        assert!(app.any_dialog_open());
+
+        app.close_topmost_dialog();
+        assert!(!app.settings_open);
+        assert!(app.import_open);
+
+        // The first Escape on the import dialog drops the preview, not the
+        // dialog: a loaded library is expensive to reproduce.
+        app.close_topmost_dialog();
+        assert!(app.import_open);
+        assert!(app.import_preview.is_none());
+
+        app.close_topmost_dialog();
+        assert!(!app.import_open);
+        assert!(app.diagnostics_open);
+
+        app.close_topmost_dialog();
+        assert!(!app.any_dialog_open());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn the_window_title_names_the_open_file_and_marks_unsaved_edits() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-gui-title-{}.toml", std::process::id()));
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                trigger: ":one".into(),
+                replacement: "one".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let _ = fs::remove_file(&path);
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let ctx = egui::Context::default();
+
+        app.sync_window_title(&ctx);
+        let clean = app.window_title.clone();
+        assert!(clean.contains(path.file_name().unwrap().to_str().unwrap()));
+        assert!(!clean.starts_with('•'));
+
+        app.draft.as_mut().unwrap().replacement = "changed".into();
+        app.sync_window_title(&ctx);
+        assert!(app.window_title.starts_with('•'));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_font_scale_change_persists_without_consuming_the_undo_history() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-fontscale-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        let ctx = egui::Context::default();
+
+        app.apply_font_scale(&ctx, FontScale::Large);
+
+        assert_eq!(app.config.settings.font_scale, FontScale::Large);
+        assert_eq!(app.settings_font_scale, FontScale::Large);
+        assert!(app.undo.is_empty());
+        assert_eq!(
+            Config::load(&path).unwrap().settings.font_scale,
+            FontScale::Large
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    /// Renders every panel and dialog headlessly. Layout code is not
+    /// otherwise exercised by the unit tests, so this is what catches an
+    /// out-of-range index, a mismatched `Grid`/`ScrollArea` id, or a
+    /// borrow-order mistake in a dialog that is only reachable by clicking.
+    #[test]
+    fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-gui-render-{}.toml", std::process::id()));
+        let config = Config {
+            expansion: vec![
+                ExpansionConfig {
+                    trigger: ":plain".into(),
+                    replacement: "plain text".into(),
+                    description: "A plain snippet".into(),
+                    tags: vec!["demo".into()],
+                    category: "email".into(),
+                    app_filter: vec!["konsole".into()],
+                    match_mode: MatchMode::Immediate,
+                    command: None,
+                    enabled: true,
+                    propagate_case: false,
+                },
+                ExpansionConfig {
+                    trigger: ":cmd".into(),
+                    replacement: "fallback".into(),
+                    description: String::new(),
+                    tags: Vec::new(),
+                    category: String::new(),
+                    app_filter: Vec::new(),
+                    match_mode: MatchMode::WordBoundary,
+                    command: Some(wayexpand_core::CommandConfig {
+                        program: "uname".into(),
+                        args: vec!["-s".into()],
+                        timeout_ms: 500,
+                        cache_ms: 0,
+                        environment: wayexpand_core::CommandEnvironment::default(),
+                        pass_env: Vec::new(),
+                    }),
+                    enabled: false,
+                    propagate_case: true,
+                },
+            ],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        let _ = fs::remove_file(&path);
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        app.diagnostics_open = true;
+        app.import_open = true;
+        app.settings_open = true;
+        app.pending_action = Some(PendingAction::Delete);
+
+        let ctx = egui::Context::default();
+        for language in [Language::English, Language::German] {
+            // Set the pair directly rather than through `set_language`: that
+            // would persist to the real user preferences file.
+            app.language = language;
+            app.strings.set_language(language);
+            for tab in [SettingsTab::Appearance, SettingsTab::Engine] {
+                app.settings_tab = tab;
+                for selected in [Some(0), Some(1), None] {
+                    app.selected = selected;
+                    app.draft =
+                        selected.map(|index| Draft::from_expansion(&app.config.expansion[index]));
+                    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                        let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                        app.sync_window_title(ctx);
+                        app.render_toolbar(ctx, &palette);
+                        app.render_diagnostics(ctx, &palette);
+                        app.render_import_dialog(ctx, &palette);
+                        app.render_settings_dialog(ctx, &palette);
+                        app.render_status_bar(ctx, &palette);
+                        app.render_snippet_list(ctx, &palette);
+                        app.render_editor_actions(ctx, &palette);
+                        app.render_editor(ctx, &palette);
+                        app.render_pending_action(ctx, &palette);
+                    });
+                }
+            }
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_selection_left_behind_by_a_shrinking_library_is_reported_not_indexed() {
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-gui-stale-{}.toml", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+        // A configuration reloaded from disk (or replaced by an import) can
+        // be shorter than the one the selection was made against.
+        app.selected = Some(4);
+
+        assert!(app.selected_index().is_none());
+        assert!(!app.draft_is_dirty());
+        app.save_selected();
+        app.duplicate_selected();
+        app.perform_delete_selected();
+        app.toggle_enabled(4);
+
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Warning);
+        assert!(app.config.expansion.is_empty());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn switching_language_retranslates_the_status_line_wording() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-language-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+
+        app.language = Language::German;
+        app.strings.set_language(Language::German);
+        app.undo.clear();
+        app.undo();
+
+        assert_eq!(app.status.tone_for_test(), status::StatusTone::Warning);
+        assert_eq!(app.status.text(), "Nichts zum Rückgängigmachen");
         fs::remove_file(path).unwrap();
     }
 }

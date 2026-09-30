@@ -132,10 +132,20 @@ pub fn connect_input_method_with_retry(
             }
             Err(error) if error.is_retryable() => {
                 warn!(%error, ?retry_delay, "input-method unavailable at startup; retrying");
-                control.set_status(format!(
-                    "source=input-method\nbackend=input-method-v2\nstate=reconnecting\npaused=false\nconfig={}\nconfig_state=ok",
-                    config_path.display()
-                ));
+                // Build this through the shared status writer like every other
+                // transition. Hand-formatting it here dropped `backend_mode`
+                // and all nine command-metric fields from the documented
+                // control-socket contract, and asserted `paused=false` and
+                // `config_state=ok` regardless of whether the user had paused
+                // or the last reload had been rejected.
+                status::set_daemon_status_direct(
+                    control,
+                    "input-method",
+                    "input-method-v2",
+                    "reconnecting",
+                    config_path,
+                    config_healthy,
+                );
                 if !wait_for_retry(&control.stop_requested, retry_delay) {
                     anyhow::bail!("input-method startup cancelled while waiting to reconnect");
                 }

@@ -27,13 +27,23 @@ impl ExpansionEngine {
         injector: &mut I,
         result: &ExpansionResult,
     ) -> Result<(), ExpansionError> {
-        let mut erase = result.matched_text.clone();
-        let mut insert = result.insert.clone();
-        if let Some(character) = result.reinsert_after {
-            erase.push(character);
-            insert.push(character);
+        // Only a match that has to carry a terminating character through needs
+        // new strings. The common case borrows the result directly rather than
+        // copying the matched text and the whole replacement on every
+        // expansion just to hand out references to the copies.
+        match result.reinsert_after {
+            None => injector.replace(&result.matched_text, &result.insert)?,
+            Some(character) => {
+                let mut erase =
+                    String::with_capacity(result.matched_text.len() + character.len_utf8());
+                erase.push_str(&result.matched_text);
+                erase.push(character);
+                let mut insert = String::with_capacity(result.insert.len() + character.len_utf8());
+                insert.push_str(&result.insert);
+                insert.push(character);
+                injector.replace(&erase, &insert)?;
+            }
         }
-        injector.replace(&erase, &insert)?;
         let trailing_offset = usize::from(result.reinsert_after.is_some());
         if let Some(offset) = result
             .cursor_offset

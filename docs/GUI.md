@@ -75,11 +75,37 @@ unknown template syntax is still rejected by core validation.
 The preview input is editable, allowing a trigger to be tested inside larger
 text and making word-boundary behavior visible before saving.
 
-The `Settings` window exposes the bounded matcher buffer limit (1–4096
-characters), the undo chord, and five font-scale choices from Small (80%) to
-Huge (200%). Changes use the same validation, atomic save, undo history, and
-daemon reload path as snippet edits. The selected font scale is applied to
-standard and custom widgets immediately after saving.
+The `Settings` window is the single place for preferences and has two tabs:
+
+- **Appearance** — theme (light/dark), interface language, font scale, and
+  color pack. Everything on this tab applies to the running window and is
+  persisted the moment it is clicked. Theme, language, and color pack are
+  stored in the GUI preferences file; the font scale is stored in the
+  expansion configuration, and unlike a snippet edit it does not consume an
+  undo step, because the undo history exists to recover snippet content.
+- **Typing engine** — the bounded matcher buffer limit (1–4096 characters)
+  and the undo chord. These are validated together and written by an explicit
+  `Save`, using the same validation, atomic save, undo history, and daemon
+  reload path as snippet edits. A rejected value is reported next to the
+  fields and on the status line, and the window stays open for correction.
+
+A light/dark toggle also remains in the toolbar, next to `Settings`, because
+it is the one display preference people flip repeatedly during a day.
+
+The window title names the configuration file being edited and marks unsaved
+edits with a leading `•`, so a second editor opened on a different file is
+not mistaken for the first. A status line is pinned along the bottom of the
+window: it reports the outcome of the last action — colored by outcome rather
+than by matching words in the sentence, so translated messages are classified
+correctly — and shows the full path of the open configuration on the right.
+`Save changes` and `Delete` sit in their own bar pinned below the editor, so
+the primary action stays reachable with a long replacement open.
+
+Keyboard shortcuts: `Ctrl+S` saves the selected snippet, `Ctrl+N` creates one,
+`Ctrl+F` focuses the search field, and `Esc` closes the topmost open dialog.
+The editor accelerators are suppressed while a dialog is open. The first `Esc`
+in the import dialog discards a loaded preview rather than the dialog itself,
+so a library that took a moment to load is not lost to a stray keystroke.
 
 The `Diagnostics` window reports daemon control-socket connectivity and the
 currently discoverable input/output backends, including permission and
@@ -158,7 +184,7 @@ navy surfaces.
 ### Switching in the GUI
 
 1. Open `wayexpand-gui`
-2. Click **Color pack** in the toolbar
+2. Click **Settings** in the toolbar and stay on the **Appearance** tab
 3. Select a card showing the pack's live accent swatch and description
 4. The colors update instantly and the preference is saved to the GUI
    preferences file
@@ -233,7 +259,8 @@ To add a new color pack:
 1. Add a variant to the `ColorPack` enum
 2. Implement the pack in `ColorScheme` (add a `fn new_pack_name()` method)
 3. Add the pack to the `all()` method
-4. Update the colorpack selector dialog in `main.rs`
+4. No dialog change is needed: the Appearance tab renders every pack
+   returned by `all()`
 
 Example:
 
@@ -296,8 +323,9 @@ first-snippet action:
 
 The screenshot is intentionally a real empty state rather than a fabricated
 library: it is the first screen a new user sees after starting with a missing
-configuration. The Color pack dialog uses the same surface, border, and focus
-system and previews each of the eight packs with a live swatch.
+configuration. The Appearance tab of the Settings window uses the same
+surface, border, and focus system and previews each of the eight packs with a
+live swatch.
 
 ## Retro Fonts for WayExpand Themes
 
@@ -465,9 +493,9 @@ WayExpand GUI now supports multiple languages with automatic detection and manua
 The easiest way to switch languages is to use the GUI:
 
 1. Open `wayexpand-gui`
-2. Click **Language** in the toolbar
+2. Click **Settings** in the toolbar and stay on the **Appearance** tab
 3. Select your preferred language
-4. The UI updates immediately
+4. The UI updates immediately, including the status line and dialogs
 
 ### Environment Variable
 

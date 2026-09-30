@@ -37,9 +37,11 @@ wayexpand-gui
 ```
 
 The graphical editor opens with the snippet library on the left and the
-editor workspace on the right. The **Color pack**, **Language**, and **Light /
-Dark** controls are available in the toolbar; the search and daemon actions
-are arranged on the row below.
+editor workspace on the right. **Settings** and the light/dark toggle sit at
+the right of the toolbar; the search field and daemon actions are arranged on
+the row below. Appearance, language, and engine preferences all live in the
+Settings window. A status line along the bottom of the window reports the
+result of the last action and the configuration file being edited.
 
 ![WayExpand graphical editor](images/gui-empty-library.png)
 

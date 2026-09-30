@@ -142,10 +142,16 @@ pub struct MatchPlan {
     pub terminating_char: Option<char>,
     pub cursor_offset: Option<usize>,
 
-    // State snapshot at match time (used for policy decisions)
+    /// Input generation at match time. A command-backed expansion is only
+    /// injected while this still matches the engine's generation, so output
+    /// that arrives after the user has typed on is discarded.
+    ///
+    /// Pause and sensitive-focus state are deliberately *not* snapshotted
+    /// here: `preflight_allows` refuses to plan a match at all while either is
+    /// active, so the snapshot would always be "neither", and comparing it
+    /// afterwards is exactly equivalent to asking whether either is active now
+    /// -- which is what `postflight_allows` does directly.
     pub generation: u64,
-    pub sensitive_focus: bool,
-    pub user_paused: bool,
 
     // Expansion details (cloned for lifetime independence)
     pub trigger_config: String,
@@ -595,17 +601,23 @@ impl ExpansionEngine {
                     }
                 }
             });
-        if hotkey_worker.is_err() {
-            // The command worker has already started, but async mode is not
-            // usable without both workers. Close its queue and join it before
-            // falling back, otherwise every partial startup leaks a thread
-            // until the process exits (especially harmful during reloads or
-            // under a tight systemd TasksMax).
-            shutdown.store(true, Ordering::Release);
-            drop(command_sender);
-            let _ = command_worker.join();
-            return false;
-        }
+        // Bind the worker here rather than testing `is_err()` and unwrapping
+        // at the struct literal below, which would silently become a panic if
+        // anything were ever inserted between the two.
+        let hotkey_worker = match hotkey_worker {
+            Ok(worker) => worker,
+            Err(_) => {
+                // The command worker has already started, but async mode is
+                // not usable without both workers. Close its queue and join it
+                // before falling back, otherwise every partial startup leaks a
+                // thread until the process exits (especially harmful during
+                // reloads or under a tight systemd TasksMax).
+                shutdown.store(true, Ordering::Release);
+                drop(command_sender);
+                let _ = command_worker.join();
+                return false;
+            }
+        };
         self.async_commands = Some(AsyncCommandRuntime {
             command_sender,
             hotkey_sender,
@@ -615,7 +627,7 @@ impl ExpansionEngine {
             hotkey_metrics,
             shutdown,
             command_worker: Some(command_worker),
-            hotkey_worker: Some(hotkey_worker.unwrap()),
+            hotkey_worker: Some(hotkey_worker),
         });
         true
     }
@@ -692,32 +704,17 @@ impl ExpansionEngine {
                 continue;
             };
 
-            // Reconstruct MatchPlan context from completion for postflight checks
-            let plan = MatchPlan {
-                matched_text: completion.result.matched_text.clone(),
-                terminating_char: completion.result.reinsert_after,
-                cursor_offset: completion.result.cursor_offset,
-                generation: completion.generation,
-                sensitive_focus: false, // snapshot from queue time (conservative)
-                user_paused: false,     // snapshot from queue time (conservative)
-                trigger_config: self.config.expansion[completion.config_index]
-                    .trigger
-                    .clone(),
-                replacement_text: self.config.expansion[completion.config_index]
-                    .replacement
-                    .clone(),
-                command: self.config.expansion[completion.config_index]
-                    .command
-                    .as_ref()
-                    .map(|c| Arc::new(c.clone())),
-                propagate_case: self.config.expansion[completion.config_index].propagate_case,
-            };
-
-            // Apply postflight policy: check generation, output size, state changes
-            let Some(validated_output) = self.apply_postflight_policy(&plan, &output) else {
+            // Postflight policy: the output must still belong to the current
+            // input generation, fit the configured limit, and the session must
+            // not have become paused or sensitive while the command ran. This
+            // used to rebuild a whole `MatchPlan` from the configuration --
+            // deep-copying the trigger, the replacement, and the command on
+            // every completion -- although the check reads none of those.
+            if !self.postflight_allows(completion.generation, &output) {
                 self.restore_deferred_match(&completion.result.matched_text);
                 continue;
-            };
+            }
+            let validated_output = output;
             if completion.additional_max_size > 0
                 && validated_output.len() > completion.additional_max_size
             {
@@ -734,8 +731,8 @@ impl ExpansionEngine {
             }
 
             // Apply case propagation
-            let final_output = if plan.propagate_case {
-                matching::apply_case_style(&plan.matched_text, &validated_output)
+            let final_output = if self.config.expansion[completion.config_index].propagate_case {
+                matching::apply_case_style(&completion.result.matched_text, &validated_output)
             } else {
                 validated_output
             };
@@ -1167,7 +1164,10 @@ impl ExpansionEngine {
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
     /// This is the single path for committing any expansion (static or command-backed).
     /// Handles case propagation, undo state, and result metadata.
-    fn commit_expansion(&mut self, plan: &MatchPlan, insert: String) -> ExpansionResult {
+    /// Takes the plan by value: it is always the caller's last use of it, and
+    /// the trigger and matched text move straight into the result instead of
+    /// being copied out of a plan that is dropped on the next line.
+    fn commit_expansion(&mut self, plan: MatchPlan, insert: String) -> ExpansionResult {
         let mut final_insert = insert;
 
         // Apply case propagation if configured (applies to all expansion types)
@@ -1190,12 +1190,12 @@ impl ExpansionEngine {
         }
 
         ExpansionResult {
-            trigger: plan.trigger_config.clone(),
-            matched_text: plan.matched_text.clone(),
+            command_backed: plan.is_command_backed(),
+            trigger: plan.trigger_config,
+            matched_text: plan.matched_text,
             insert: final_insert,
             cursor_offset: plan.cursor_offset,
             reinsert_after,
-            command_backed: plan.is_command_backed(),
             undoable: true,
         }
     }
@@ -1207,10 +1207,12 @@ impl ExpansionEngine {
         terminating_char: Option<char>,
     ) -> Option<ExpansionResult> {
         // Generate match plan with full context
-        let plan = self.take_match_plan(config_index, length, terminating_char)?;
+        let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
 
         // Apply preflight policy
-        self.apply_preflight_policy(plan.clone())?;
+        if !self.preflight_allows(&plan) {
+            return None;
+        }
 
         let expansion = &self.config.expansion[config_index];
 
@@ -1229,27 +1231,30 @@ impl ExpansionEngine {
                 self.buffer.pop_back();
             }
             // Commit with cached value (already cached, no re-caching needed)
-            return Some(self.commit_expansion(&plan, cached_value));
+            return Some(self.commit_expansion(plan, cached_value));
         }
 
         // Async command: queue and return empty
         if let Some(runtime) = self.async_commands.as_ref() {
-            if expansion.command.is_some() {
-                let result = ExpansionResult {
-                    trigger: plan.trigger_config.clone(),
-                    matched_text: plan.matched_text.clone(),
-                    insert: String::new(),
-                    cursor_offset: None,
-                    reinsert_after: plan.terminating_char.filter(|_| self.reinsert_terminators),
-                    command_backed: true,
-                    undoable: true,
-                };
+            // Binding the command here rather than testing `is_some()` and
+            // unwrapping below keeps the queueing path free of a panic that
+            // only a future edit could ever trigger.
+            if let Some(command) = expansion.command.as_ref() {
+                let reinsert_after = plan.terminating_char.filter(|_| self.reinsert_terminators);
                 let job = AsyncCommandJob::Expansion {
                     config_index,
                     generation: self.input_generation,
                     additional_max_size: 0,
-                    command: expansion.command.clone().unwrap(),
-                    result,
+                    command: command.clone(),
+                    result: ExpansionResult {
+                        trigger: plan.trigger_config,
+                        matched_text: plan.matched_text,
+                        insert: String::new(),
+                        cursor_offset: None,
+                        reinsert_after,
+                        command_backed: true,
+                        undoable: true,
+                    },
                 };
                 if runtime.try_send_command(job).is_err() {
                     return None;
@@ -1265,15 +1270,18 @@ impl ExpansionEngine {
 
         // Sync fallback: static templates were rendered as part of the plan;
         // command output still executes here (or uses its cache above).
+        // The rendered template moves out of the plan -- `commit_expansion`
+        // never reads it back, so copying it here allocated a second full
+        // replacement string on every plain-text expansion.
         let insert = if expansion.command.is_some() {
             self.render_expansion(config_index).ok()?
         } else {
-            plan.replacement_text.clone()
+            std::mem::take(&mut plan.replacement_text)
         };
         for _ in 0..length {
             self.buffer.pop_back();
         }
-        Some(self.commit_expansion(&plan, insert))
+        Some(self.commit_expansion(plan, insert))
     }
 
     /// Deferred execution variant: returns pending results without executing commands.

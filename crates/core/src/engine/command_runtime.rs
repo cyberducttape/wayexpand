@@ -144,7 +144,7 @@ fn run_command_fallback(
         return Err(CommandError::OutputTooLarge);
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
-    Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+    Ok(trim_trailing_newlines(output))
 }
 
 #[cfg(unix)]
@@ -213,7 +213,17 @@ fn run_command_unix(
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     guard.child = None;
-    Ok(output.trim_end_matches(['\r', '\n']).to_owned())
+    Ok(trim_trailing_newlines(output))
+}
+
+/// Drops trailing CR/LF in place. Command output is bounded at one megabyte,
+/// and copying all of it into a second allocation to remove a trailing newline
+/// is the kind of waste that only shows up under a command run on every
+/// expansion.
+fn trim_trailing_newlines(mut output: String) -> String {
+    let trimmed = output.trim_end_matches(['\r', '\n']).len();
+    output.truncate(trimmed);
+    output
 }
 
 #[cfg(unix)]

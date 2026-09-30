@@ -25,26 +25,154 @@ impl ExpansionEngine {
     }
 }
 
+/// What the buffer's current suffix means once a character has been appended.
+enum SettledMatch {
+    /// Keep buffering: nothing matched, a longer trigger could still follow,
+    /// or a word-boundary trigger is still waiting for its boundary.
+    Continue,
+    /// The matcher pointed at an expansion that the current configuration no
+    /// longer has. Drop the buffered text instead of matching it.
+    Stale,
+    /// Take this match, then clear the buffer.
+    Take { config_index: usize, length: usize },
+}
+
+/// Event handling shared by the immediate and deferred processors.
+///
+/// These two processors differ only in how a match is taken and reported;
+/// every event that merely advances engine state behaves identically in both.
+/// Keeping those bodies in one place is not tidiness -- a fix applied to one
+/// copy and missed in the other is a silent behavioural split between the
+/// immediate path and the deferred path the daemon actually runs.
+impl ExpansionEngine {
+    fn bump_generation(&mut self) {
+        self.input_generation = self.input_generation.wrapping_add(1);
+    }
+
+    /// A pending undo is valid only immediately after the expansion it would
+    /// revert, with no other event in between. Undo survives only if the key
+    /// event is the undo chord itself; any other key (navigation, text,
+    /// application shortcuts, ...) invalidates it because the cursor position
+    /// may have changed.
+    fn invalidate_undo_unless_undo_chord(&mut self, event: &InputEvent) {
+        if matches!(event, InputEvent::Key(chord) if self.is_undo_chord(chord)) {
+            return;
+        }
+        self.last_expansion = None;
+    }
+
+    /// Appends a typed character to the rolling buffer, evicting from the
+    /// front once it exceeds the configured limit. `buffer_truncated` records
+    /// that an eviction happened so a word-boundary trigger can tell "start of
+    /// input" from "a preceding character existed but was dropped".
+    fn push_buffered(&mut self, character: char) {
+        self.buffer.push_back(character);
+        while self.buffer.len() > self.max_buffer_chars {
+            self.buffer.pop_front();
+            self.buffer_truncated = true;
+        }
+    }
+
+    fn on_backspace(&mut self) {
+        self.bump_generation();
+        self.buffer.pop_back();
+    }
+
+    fn on_reset(&mut self) {
+        self.bump_generation();
+        self.clear_buffer();
+    }
+
+    fn on_focus_changed(&mut self, sensitive: bool) {
+        self.bump_generation();
+        self.sensitive_focus = sensitive;
+        self.clear_buffer();
+    }
+
+    fn on_pause_changed(&mut self, paused: bool) {
+        self.bump_generation();
+        self.user_paused = paused;
+        self.clear_buffer();
+    }
+
+    /// Whether the suffix already in the buffer must be taken as a match now
+    /// that `character` has been typed but not yet appended.
+    ///
+    /// This is the "a longer trigger could still have followed, but did not"
+    /// case: `:a` matches only once the next character rules out `:address`.
+    /// Returns the configured expansion and the matched suffix length.
+    fn match_completed_by(&self, character: char) -> Option<(usize, usize)> {
+        let (index, length) = self
+            .matcher
+            .find_suffix(self.buffer.iter().rev().copied())?;
+        let config_index = self.matcher_indices.get(index).copied()?;
+        // The configured trigger is the lowercase form. With propagate_case
+        // the pending suffix may instead be `:A` or `:AB`, so continuation is
+        // checked against the text the user actually typed -- that is the
+        // string present in the forward trie, not the generated sibling. The
+        // suffix is read straight out of the rolling buffer; collecting it
+        // into a `String` first cost one allocation per keystroke.
+        let typed_start = self.buffer.len().saturating_sub(length);
+        if self
+            .matcher
+            .can_continue(self.buffer.iter().skip(typed_start).copied(), character)
+        {
+            return None;
+        }
+        let match_mode = self.config.expansion[config_index].match_mode;
+        if match_mode == MatchMode::WordBoundary && matching::is_word_character(character) {
+            return None;
+        }
+        Some((config_index, length))
+    }
+
+    /// Whether the buffer, with `character` already appended, now ends in a
+    /// complete trigger that nothing can extend.
+    fn settled_match(&self) -> SettledMatch {
+        let Some((index, length)) = self.matcher.find_suffix(self.buffer.iter().rev().copied())
+        else {
+            return SettledMatch::Continue;
+        };
+        let Some(config_index) = self.matcher_indices.get(index).copied() else {
+            return SettledMatch::Stale;
+        };
+        let typed_start = self.buffer.len().saturating_sub(length);
+        if self
+            .matcher
+            .has_continuation(self.buffer.iter().skip(typed_start).copied())
+        {
+            return SettledMatch::Continue;
+        }
+        if self.config.expansion[config_index].match_mode == MatchMode::WordBoundary {
+            // A word-boundary trigger waits for its boundary character, which
+            // arrives through `match_completed_by` on a later keystroke.
+            return SettledMatch::Continue;
+        }
+        SettledMatch::Take {
+            config_index,
+            length,
+        }
+    }
+
+    fn on_window_changed(&mut self, window: Option<super::WindowContext>) {
+        self.bump_generation();
+        // The text in the buffer belongs to the previously-focused
+        // application. Text expansion state must be scoped to the focused
+        // window, not to the desktop session. Even if app_filter would
+        // correctly re-evaluate against the new window, the physical
+        // characters in the buffer are from the old application and must not
+        // be used to compute replacements for the new one. This prevents
+        // cross-window trigger matches that can cause unrelated text deletion.
+        self.set_window_context(window);
+        self.clear_buffer();
+    }
+}
+
 impl ExpansionEngine {
     /// Process an event stream. A text event may contain multiple Unicode
     /// scalar values; matching is performed after each one.
     pub(super) fn process_internal(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
-        // A pending undo is valid only immediately after the expansion it
-        // would revert, with no other event in between. Undo is preserved only
-        // if the key event is the undo chord itself; any other key (navigation,
-        // text, application shortcuts, etc.) invalidates it because the cursor
-        // position may have changed.
-        match &event {
-            InputEvent::Key(chord) if !self.is_undo_chord(chord) => {
-                self.last_expansion = None;
-            }
-            InputEvent::Key(_) => {
-                // Undo chord preserves last_expansion (if any)
-            }
-            _ => {
-                self.last_expansion = None;
-            }
-        }
+        self.invalidate_undo_unless_undo_chord(&event);
         match event {
             InputEvent::Key(_) => {
                 self.note_key_event();
@@ -62,96 +190,55 @@ impl ExpansionEngine {
                     if !results.is_empty() {
                         self.last_expansion = None;
                     }
-                    self.input_generation = self.input_generation.wrapping_add(1);
-                    let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
-                    if let Some((index, length)) = pending {
-                        if let Some(config_index) = self.matcher_indices.get(index).copied() {
-                            let match_mode = self.config.expansion[config_index].match_mode;
-                            // `trigger` is the configured lowercase form.
-                            // With propagate_case, the pending suffix may
-                            // instead be `:A` or `:AB`; continuation must be
-                            // checked against the text the user actually
-                            // typed, not the generated trie sibling.
-                            let typed: String = {
-                                let start = self.buffer.len().saturating_sub(length);
-                                self.buffer.iter().skip(start).collect()
-                            };
-                            if !self.matcher.can_continue(&typed, character) {
-                                let trailing_word_character = match_mode == MatchMode::WordBoundary
-                                    && matching::is_word_character(character);
-                                if !trailing_word_character {
-                                    if let Some(result) =
-                                        self.take_match(config_index, length, Some(character))
-                                    {
-                                        let bytes = result
-                                            .trigger
-                                            .len()
-                                            .saturating_add(result.insert.len());
-                                        if results.len() >= MAX_RESULTS_PER_EVENT
-                                            || result_bytes.saturating_add(bytes)
-                                                > MAX_RESULT_BYTES_PER_EVENT
-                                        {
-                                            self.clear_buffer();
-                                            break;
-                                        }
-                                        result_bytes = result_bytes.saturating_add(bytes);
-                                        results.push(result);
-                                    }
-                                }
+                    self.bump_generation();
+                    if let Some((config_index, length)) = self.match_completed_by(character) {
+                        if let Some(result) = self.take_match(config_index, length, Some(character))
+                        {
+                            // `result.trigger` is the configured trigger the
+                            // plan carried, so the byte budget no longer
+                            // clones it out of the config just to measure it.
+                            let bytes = result.trigger.len().saturating_add(result.insert.len());
+                            if results.len() >= MAX_RESULTS_PER_EVENT
+                                || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
+                            {
+                                self.clear_buffer();
+                                break;
                             }
+                            result_bytes = result_bytes.saturating_add(bytes);
+                            results.push(result);
                         }
                     }
                     if results.len() >= MAX_RESULTS_PER_EVENT {
                         self.clear_buffer();
                         break;
                     }
-                    self.buffer.push_back(character);
-                    while self.buffer.len() > self.max_buffer_chars {
-                        self.buffer.pop_front();
-                        self.buffer_truncated = true;
-                    }
-                    if let Some((index, length)) =
-                        self.matcher.find_suffix(self.buffer.iter().rev().copied())
-                    {
-                        let config_index = self.matcher_indices.get(index).copied();
-                        let Some(config_index) = config_index else {
+                    self.push_buffered(character);
+                    match self.settled_match() {
+                        SettledMatch::Continue => {}
+                        SettledMatch::Stale => {
                             self.clear_buffer();
                             continue;
-                        };
-                        let (trigger, match_mode) = {
-                            let expansion = &self.config.expansion[config_index];
-                            (expansion.trigger.clone(), expansion.match_mode)
-                        };
-                        // The actually-typed suffix, which may be an
-                        // uppercase or capitalized variant of `trigger` for
-                        // a `propagate_case` expansion (see
-                        // `ExpansionEngine::new`): `has_continuation` must
-                        // be checked against what was typed, since that is
-                        // the string actually present in the forward trie,
-                        // not necessarily `trigger` itself.
-                        let typed: String = {
-                            let start = self.buffer.len().saturating_sub(length);
-                            self.buffer.iter().skip(start).collect()
-                        };
-                        if self.matcher.has_continuation(&typed)
-                            || match_mode == MatchMode::WordBoundary
-                        {
-                            continue;
                         }
-                        if let Some(result) = self.take_match(config_index, length, None) {
-                            let expansion_bytes = trigger.len().saturating_add(result.insert.len());
-                            if result_bytes.saturating_add(expansion_bytes)
-                                > MAX_RESULT_BYTES_PER_EVENT
-                            {
-                                self.clear_buffer();
-                                break;
+                        SettledMatch::Take {
+                            config_index,
+                            length,
+                        } => {
+                            if let Some(result) = self.take_match(config_index, length, None) {
+                                let expansion_bytes =
+                                    result.trigger.len().saturating_add(result.insert.len());
+                                if result_bytes.saturating_add(expansion_bytes)
+                                    > MAX_RESULT_BYTES_PER_EVENT
+                                {
+                                    self.clear_buffer();
+                                    break;
+                                }
+                                result_bytes = result_bytes.saturating_add(expansion_bytes);
+                                results.push(result);
                             }
-                            result_bytes = result_bytes.saturating_add(expansion_bytes);
-                            results.push(result);
+                            // Do not allow a replacement to combine with the
+                            // next typed text and accidentally trigger again.
+                            self.clear_buffer();
                         }
-                        // Do not allow a replacement to combine with the
-                        // next typed text and accidentally trigger again.
-                        self.clear_buffer();
                     }
                 }
                 results
@@ -160,12 +247,11 @@ impl ExpansionEngine {
                 self.process_internal(InputEvent::Text(character.to_string()))
             }
             InputEvent::Backspace => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.buffer.pop_back();
+                self.on_backspace();
                 Vec::new()
             }
             InputEvent::EndOfInput => {
-                self.input_generation = self.input_generation.wrapping_add(1);
+                self.bump_generation();
                 let result = self
                     .matcher
                     .find_suffix(self.buffer.iter().rev().copied())
@@ -179,34 +265,19 @@ impl ExpansionEngine {
                 result.into_iter().collect()
             }
             InputEvent::Reset => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.clear_buffer();
+                self.on_reset();
                 Vec::new()
             }
             InputEvent::FocusChanged { sensitive } => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.sensitive_focus = sensitive;
-                self.clear_buffer();
+                self.on_focus_changed(sensitive);
                 Vec::new()
             }
             InputEvent::PauseChanged(paused) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.user_paused = paused;
-                self.clear_buffer();
+                self.on_pause_changed(paused);
                 Vec::new()
             }
             InputEvent::WindowChanged(window) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                // The text in the buffer belongs to the previously-focused
-                // application. Text expansion state must be scoped to the
-                // focused window, not to the desktop session. Even if
-                // app_filter would correctly re-evaluate against the new
-                // window, the physical characters in the buffer are from the
-                // old application and must not be used to compute replacements
-                // for the new one. This prevents cross-window trigger matches
-                // that can cause unrelated text deletion.
-                self.set_window_context(window);
-                self.clear_buffer();
+                self.on_window_changed(window);
                 Vec::new()
             }
         }
@@ -220,18 +291,7 @@ impl ExpansionEngine {
         event: InputEvent,
     ) -> Vec<PendingExpansionResult> {
         self.restore_deferred_matches();
-        // Same undo validity rules as process(): only the undo chord preserves undo.
-        match &event {
-            InputEvent::Key(chord) if !self.is_undo_chord(chord) => {
-                self.last_expansion = None;
-            }
-            InputEvent::Key(_) => {
-                // Undo chord preserves last_expansion (if any)
-            }
-            _ => {
-                self.last_expansion = None;
-            }
-        }
+        self.invalidate_undo_unless_undo_chord(&event);
         match event {
             InputEvent::Key(_) => {
                 self.note_key_event();
@@ -252,85 +312,58 @@ impl ExpansionEngine {
                             result.undoable = false;
                         }
                     }
-                    self.input_generation = self.input_generation.wrapping_add(1);
-                    let pending = self.matcher.find_suffix(self.buffer.iter().rev().copied());
-                    if let Some((index, length)) = pending {
-                        if let Some(config_index) = self.matcher_indices.get(index).copied() {
-                            let match_mode = self.config.expansion[config_index].match_mode;
-                            let typed: String = {
-                                let start = self.buffer.len().saturating_sub(length);
-                                self.buffer.iter().skip(start).collect()
-                            };
-                            if !self.matcher.can_continue(&typed, character) {
-                                let trailing_word_character = match_mode == MatchMode::WordBoundary
-                                    && matching::is_word_character(character);
-                                if !trailing_word_character {
-                                    if let Some(result) = self.take_match_deferred(
-                                        config_index,
-                                        length,
-                                        Some(character),
-                                    ) {
-                                        let bytes = result
-                                            .trigger
-                                            .len()
-                                            .saturating_add(result.template_text.len());
-                                        if results.len() >= MAX_RESULTS_PER_EVENT
-                                            || result_bytes.saturating_add(bytes)
-                                                > MAX_RESULT_BYTES_PER_EVENT
-                                        {
-                                            self.clear_buffer();
-                                            break;
-                                        }
-                                        result_bytes = result_bytes.saturating_add(bytes);
-                                        results.push(result);
-                                    }
-                                }
+                    self.bump_generation();
+                    if let Some((config_index, length)) = self.match_completed_by(character) {
+                        if let Some(result) =
+                            self.take_match_deferred(config_index, length, Some(character))
+                        {
+                            let bytes = result
+                                .trigger
+                                .len()
+                                .saturating_add(result.template_text.len());
+                            if results.len() >= MAX_RESULTS_PER_EVENT
+                                || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
+                            {
+                                self.clear_buffer();
+                                break;
                             }
+                            result_bytes = result_bytes.saturating_add(bytes);
+                            results.push(result);
                         }
                     }
                     if results.len() >= MAX_RESULTS_PER_EVENT {
                         self.clear_buffer();
                         break;
                     }
-                    self.buffer.push_back(character);
-                    while self.buffer.len() > self.max_buffer_chars {
-                        self.buffer.pop_front();
-                        self.buffer_truncated = true;
-                    }
-                    if let Some((index, length)) =
-                        self.matcher.find_suffix(self.buffer.iter().rev().copied())
-                    {
-                        let config_index = self.matcher_indices.get(index).copied();
-                        let Some(config_index) = config_index else {
+                    self.push_buffered(character);
+                    match self.settled_match() {
+                        SettledMatch::Continue => {}
+                        SettledMatch::Stale => {
                             self.clear_buffer();
                             continue;
-                        };
-                        let (trigger, match_mode) = {
-                            let expansion = &self.config.expansion[config_index];
-                            (expansion.trigger.clone(), expansion.match_mode)
-                        };
-                        let typed: String = {
-                            let start = self.buffer.len().saturating_sub(length);
-                            self.buffer.iter().skip(start).collect()
-                        };
-                        if self.matcher.has_continuation(&typed)
-                            || match_mode == MatchMode::WordBoundary
-                        {
-                            continue;
                         }
-                        if let Some(result) = self.take_match_deferred(config_index, length, None) {
-                            let expansion_bytes =
-                                trigger.len().saturating_add(result.template_text.len());
-                            if result_bytes.saturating_add(expansion_bytes)
-                                > MAX_RESULT_BYTES_PER_EVENT
+                        SettledMatch::Take {
+                            config_index,
+                            length,
+                        } => {
+                            if let Some(result) =
+                                self.take_match_deferred(config_index, length, None)
                             {
-                                self.clear_buffer();
-                                break;
+                                let expansion_bytes = result
+                                    .trigger
+                                    .len()
+                                    .saturating_add(result.template_text.len());
+                                if result_bytes.saturating_add(expansion_bytes)
+                                    > MAX_RESULT_BYTES_PER_EVENT
+                                {
+                                    self.clear_buffer();
+                                    break;
+                                }
+                                result_bytes = result_bytes.saturating_add(expansion_bytes);
+                                results.push(result);
                             }
-                            result_bytes = result_bytes.saturating_add(expansion_bytes);
-                            results.push(result);
+                            self.clear_buffer();
                         }
-                        self.clear_buffer();
                     }
                 }
                 results
@@ -339,12 +372,11 @@ impl ExpansionEngine {
                 self.process_deferred_internal(InputEvent::Text(character.to_string()))
             }
             InputEvent::Backspace => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.buffer.pop_back();
+                self.on_backspace();
                 Vec::new()
             }
             InputEvent::EndOfInput => {
-                self.input_generation = self.input_generation.wrapping_add(1);
+                self.bump_generation();
                 let result = self
                     .matcher
                     .find_suffix(self.buffer.iter().rev().copied())
@@ -366,26 +398,19 @@ impl ExpansionEngine {
                     .collect()
             }
             InputEvent::Reset => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.clear_buffer();
+                self.on_reset();
                 Vec::new()
             }
             InputEvent::FocusChanged { sensitive } => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.sensitive_focus = sensitive;
-                self.clear_buffer();
+                self.on_focus_changed(sensitive);
                 Vec::new()
             }
             InputEvent::PauseChanged(paused) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.user_paused = paused;
-                self.clear_buffer();
+                self.on_pause_changed(paused);
                 Vec::new()
             }
             InputEvent::WindowChanged(window) => {
-                self.input_generation = self.input_generation.wrapping_add(1);
-                self.set_window_context(window);
-                self.clear_buffer();
+                self.on_window_changed(window);
                 Vec::new()
             }
         }

@@ -1446,6 +1446,7 @@ mod tests {
             "unknown",
             CommandMetrics::default(),
         );
+        let body = body.as_str();
         let mut fields: Vec<&str> = body
             .lines()
             .filter_map(|line| line.split_once('=').map(|(key, _)| key))

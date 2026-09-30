@@ -122,11 +122,13 @@ impl ControlServer {
         self.path.as_ref()
     }
 
-    pub fn set_status(&self, status: impl Into<String>) {
+    /// Publishes a status body. Taking `StatusBody` rather than any string
+    /// keeps `crate::status`'s builder the single producer of the documented
+    /// control-socket field set.
+    pub fn set_status(&self, status: crate::status::StatusBody) {
         if let Ok(mut current) = self.status.lock() {
-            let status = status.into();
-            if *current != status {
-                *current = status;
+            if current.as_str() != status.as_str() {
+                *current = status.into_string();
             }
         }
     }

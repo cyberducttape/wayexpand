@@ -6,6 +6,74 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Fix the daemon reporting an incomplete, partly fabricated status while the
+  input-method source is reconnecting: that one transition formatted its own
+  status line, omitting `backend_mode` and all nine command-metric fields from
+  the documented control-socket contract and asserting `paused=false` and
+  `config_state=ok` whatever the real state was. `ControlServer::set_status`
+  now accepts only a `StatusBody` built by the shared writer, so the contract
+  test that covered the builder can no longer be bypassed.
+- Remove per-keystroke allocations from the expansion hot path. Continuation
+  checks read the matched suffix straight out of the rolling buffer instead of
+  collecting it into a `String`, and the byte budget measures the trigger the
+  match plan already carries instead of cloning it out of the configuration.
+- Stop deep-copying the match plan on every expansion. The preflight policy
+  check borrowed nothing and returned the plan it was handed, so every match
+  copied three strings and the command `Arc` only to drop the copy; the
+  rendered replacement and the trigger now move into the result rather than
+  being cloned beside it.
+- Stop rebuilding a `MatchPlan` from the configuration for each completed
+  asynchronous command. The postflight check reads only the input generation
+  and the output, so the trigger, replacement, and command copies it forced
+  are gone.
+- Apply an expansion without copying the matched text and the replacement when
+  no terminating character has to be carried through, and trim command output
+  in place instead of copying up to a megabyte to drop a trailing newline.
+- Unify the immediate and deferred event processors, which carried two copies
+  of the same matching policy — a fix applied to one could silently miss the
+  other, and the daemon runs the deferred one. Buffer maintenance, undo
+  invalidation, the state-only events, and both match decisions are now shared,
+  with a test asserting the two paths agree on what matches.
+- Avoid re-filtering the whole GUI snippet library twice per frame, and search
+  each field in turn instead of building a joined, lowercased copy of every
+  snippet's searchable text on every frame.
+- Compare the GUI's comma-separated tag and app-filter fields in place rather
+  than rebuilding the joined strings on each of the several dirty checks per
+  frame, and only parse the draft command once every cheaper field has matched.
+- Remove two empty crate directories (`backend-clipboard`,
+  `backend-wlroots-toplevel`) that no longer held any source and were not
+  workspace members, and drop the two write-only snapshot fields from
+  `MatchPlan`.
+- Consolidate GUI preferences into one tabbed `Settings` window: an Appearance
+  tab (theme, language, font scale, color pack) that applies and persists on
+  click, and a Typing engine tab (buffer limit, undo chord) committed by an
+  explicit Save. The separate `Language` and `Color pack` toolbar buttons and
+  their standalone windows are gone; a light/dark toggle remains in the
+  toolbar. Font scale no longer consumes an undo step.
+- Give the GUI a pinned status line that reports the outcome of the last
+  action and the configuration file in use. The outcome is now recorded
+  explicitly by whatever performed the action instead of being guessed from
+  English keywords in the rendered sentence, which silently mis-coloured every
+  German message and any reworded English one. A failed daemon reload after a
+  successful save now downgrades the line to a warning rather than reading as
+  an unqualified success.
+- Show the open configuration file, with an unsaved-changes marker, in the GUI
+  window title, and pin `Save changes`/`Delete` to a bar below the editor so
+  the primary action no longer scrolls out of reach behind a long replacement.
+- Lay the GUI snippet form out on an aligned two-column grid, so fields no
+  longer start at a different horizontal position depending on how long each
+  label happens to be in the selected language.
+- Translate the remaining hardcoded English in the GUI — status messages,
+  settings and appearance chrome, command preview, window detection, sidebar
+  placeholders, and diagnostics — so a German session is no longer half
+  English. Backend states are shown as readable labels next to the verbatim
+  `doctor` triple rather than as raw Rust debug output.
+- Add GUI keyboard handling for `Ctrl+F` (focus search) and make `Esc` close
+  the topmost dialog; editor accelerators are now suppressed behind every
+  dialog, not just three of them.
+- Fix GUI details that clipped or rendered twice: the category picker drew two
+  dropdown arrows, and the search and app-filter placeholders were cut off
+  mid-word.
 - Improve GUI font coverage with validated platform fallbacks for symbols and
   CJK text, and use the shared card/secondary-control treatment in diagnostics.
 - Fix Action Broker IPC parsing for valid UTF-8 frames whose characters are

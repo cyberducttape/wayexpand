@@ -392,6 +392,13 @@ pub struct SnippetRow<'a> {
     pub trigger: &'a str,
     pub detail: &'a str,
     pub category: &'a str,
+    /// Shown in place of `detail` when the snippet has no description.
+    /// Passed in rather than hardcoded so the list honours the selected
+    /// interface language like every other part of the window.
+    pub detail_placeholder: &'a str,
+    /// Hover text for the status dot, already chosen by the caller for the
+    /// current `enabled` value.
+    pub toggle_hint: &'a str,
 }
 
 /// The two independently clickable zones of a `snippet_row`: the row body
@@ -423,11 +430,7 @@ pub fn snippet_row_scaled(
     let toggle_rect = egui::Rect::from_center_size(dot_center, Vec2::splat(20.0 * scale));
     let toggle_response = ui
         .interact(toggle_rect, response.id.with("toggle"), Sense::click())
-        .on_hover_text(if row.enabled {
-            "Click to disable"
-        } else {
-            "Click to enable"
-        })
+        .on_hover_text(row.toggle_hint)
         .on_hover_cursor(egui::CursorIcon::PointingHand);
 
     if ui.is_rect_visible(rect) {
@@ -519,7 +522,7 @@ pub fn snippet_row_scaled(
             );
         }
         let detail = if row.detail.is_empty() {
-            "No description"
+            row.detail_placeholder
         } else {
             row.detail
         };

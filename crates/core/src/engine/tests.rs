@@ -45,6 +45,87 @@ fn dispatch_and_wait(
     result
 }
 
+/// The immediate and deferred processors are two entry points onto one
+/// matching policy: `process` is what the settings frontends preview with, and
+/// `process_deferred` is what the daemon actually runs. They used to carry
+/// separate copies of that policy, so a fix applied to one could silently miss
+/// the other. This pins the property those copies were supposed to maintain --
+/// for the same input, both must match the same triggers, consume the same
+/// text, and reinsert the same terminator.
+#[test]
+fn the_immediate_and_deferred_processors_agree_on_what_matches() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":a"
+        replacement = "alpha"
+
+        [[expansion]]
+        trigger = ":address"
+        replacement = "1 Example Street"
+
+        [[expansion]]
+        trigger = "btw"
+        replacement = "by the way"
+        match_mode = "word-boundary"
+
+        [[expansion]]
+        trigger = ":cafe"
+        replacement = "café"
+    "#,
+    )
+    .unwrap();
+
+    let mut total_matches = 0usize;
+    // Prefix families, a word-boundary trigger with and without a preceding
+    // word character, a non-matching tail, and multi-scalar text.
+    for input in [
+        ":a ",
+        ":address ",
+        ":addr",
+        "say :a then :address.",
+        "btw ",
+        "abtw ",
+        " btw,",
+        "btw",
+        ":cafe",
+        "nothing here",
+        "::a",
+    ] {
+        let mut immediate = ExpansionEngine::new(config.clone()).unwrap();
+        let mut deferred = ExpansionEngine::new(config.clone()).unwrap();
+
+        let immediate_matches: Vec<(String, String, Option<char>)> = immediate
+            .process(InputEvent::Text(input.into()))
+            .into_iter()
+            .map(|result| (result.trigger, result.matched_text, result.reinsert_after))
+            .collect();
+        let deferred_matches: Vec<(String, String, Option<char>)> = deferred
+            .process_deferred(InputEvent::Text(input.into()))
+            .into_iter()
+            .map(|pending| {
+                (
+                    pending.trigger.clone(),
+                    pending.matched_text.clone(),
+                    pending.reinsert_after,
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            immediate_matches, deferred_matches,
+            "immediate and deferred processing disagreed on {input:?}"
+        );
+        total_matches += immediate_matches.len();
+    }
+    // Guards against the comparison above passing because both paths matched
+    // nothing at all.
+    assert!(
+        total_matches >= 6,
+        "expected the sample inputs to exercise real matches, saw {total_matches}"
+    );
+}
+
 #[test]
 fn expands_unicode_replacement() {
     let mut engine = engine();

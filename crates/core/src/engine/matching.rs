@@ -30,30 +30,32 @@ pub(super) fn apply_case_style(typed: &str, text: &str) -> String {
 }
 
 impl ExpansionEngine {
-    /// Apply preflight policy to a match plan without causing side effects.
-    pub(super) fn apply_preflight_policy(&self, plan: MatchPlan) -> Option<MatchPlan> {
+    /// Whether a match may proceed, judged before any side effect. The plan is
+    /// borrowed and the answer is a plain yes/no: an earlier signature took the
+    /// plan by value and handed it back, which forced every caller to deep-copy
+    /// a plan (three `String`s and the command `Arc`) on each match only to
+    /// throw the copy away.
+    pub(super) fn preflight_allows(&self, plan: &MatchPlan) -> bool {
         if plan.is_command_backed() && self.config.organization.disable_commands {
-            return None;
+            return false;
         }
-        if self.user_paused || self.sensitive_focus {
-            return None;
-        }
-        Some(plan)
+        !self.user_paused && !self.sensitive_focus
     }
 
-    /// Validate command output after execution and before injection.
-    pub(super) fn apply_postflight_policy(&self, plan: &MatchPlan, output: &str) -> Option<String> {
+    /// Whether command output produced after the match may still be injected.
+    ///
+    /// `generation` is the input generation the command was queued against.
+    /// The session must not have entered a paused or sensitive state while the
+    /// command was running, and the output must fit the configured limit.
+    pub(super) fn postflight_allows(&self, generation: u64, output: &str) -> bool {
         let max_size = self.config.organization.max_replacement_size;
         if max_size > 0 && output.len() > max_size {
-            return None;
+            return false;
         }
-        if plan.generation != self.input_generation {
-            return None;
+        if generation != self.input_generation {
+            return false;
         }
-        if plan.sensitive_focus != self.sensitive_focus || plan.user_paused != self.user_paused {
-            return None;
-        }
-        Some(output.to_string())
+        !self.sensitive_focus && !self.user_paused
     }
 
     /// Build the side-effect-free plan shared by immediate and deferred paths.
@@ -84,8 +86,6 @@ impl ExpansionEngine {
             terminating_char,
             cursor_offset,
             generation: self.input_generation,
-            sensitive_focus: self.sensitive_focus,
-            user_paused: self.user_paused,
             trigger_config: expansion.trigger.clone(),
             replacement_text,
             command: expansion
