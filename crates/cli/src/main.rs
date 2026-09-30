@@ -1523,6 +1523,7 @@ fn print_certification(json: bool) -> Result<bool> {
             let source = snapshot.get("source").and_then(serde_json::Value::as_str);
             let backend = snapshot.get("backend").and_then(serde_json::Value::as_str);
             let connected = state == "connected" && source.is_some() && backend.is_some();
+            let runtime_capabilities = runtime_capabilities_from_status(&snapshot);
             let detail = match (source, backend) {
                 (Some(source), Some(backend)) => {
                     format!("state={state}; active route is {source} + {backend}")
@@ -1540,6 +1541,7 @@ fn print_certification(json: bool) -> Result<bool> {
                 "state": state,
                 "source": source,
                 "backend": backend,
+                "capabilities": runtime_capabilities,
             })
         }
         Err(error) => {
@@ -1554,6 +1556,7 @@ fn print_certification(json: bool) -> Result<bool> {
                 "state": "unavailable",
                 "source": null,
                 "backend": null,
+                "capabilities": null,
             })
         }
     };
@@ -2027,6 +2030,31 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
     Ok(serde_json::Value::Object(object))
 }
 
+fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+    let value = |key: &str| {
+        snapshot
+            .get(key)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
+    serde_json::json!({
+        "capture": {
+            "sensitive_focus": value("capture_sensitive_focus"),
+            "exclusive": value("capture_exclusive"),
+            "reliable_key_state": value("capture_reliable_key_state"),
+            "key_passthrough": value("capture_key_passthrough"),
+            "composition_aware": value("capture_composition_aware"),
+            "app_identity": value("capture_app_identity"),
+        },
+        "injection": {
+            "atomic_replace": value("inject_atomic_replace"),
+            "full_unicode": value("inject_full_unicode"),
+            "cursor_reposition": value("inject_cursor_reposition"),
+            "key_passthrough": value("inject_key_passthrough"),
+        },
+    })
+}
+
 fn print_config_diagnostics(path: &Path) -> bool {
     match fs::metadata(path) {
         Ok(metadata) => {
@@ -2429,7 +2457,7 @@ mod tests {
     #[test]
     fn status_json_preserves_types_and_ignores_banner() {
         let value = status_as_json(
-            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\n",
+            "running\nsource=stdin\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\ninject_full_unicode=true\n",
         )
         .unwrap();
         assert_eq!(value["response"], "running");
@@ -2437,6 +2465,25 @@ mod tests {
         assert_eq!(value["paused"], true);
         assert_eq!(value["command_queue_depth"], 3);
         assert_eq!(value["config_state"], "ok");
+        assert_eq!(value["capture_sensitive_focus"], false);
+        assert_eq!(value["inject_full_unicode"], true);
+    }
+
+    #[test]
+    fn certification_separates_capture_and_injection_capabilities() {
+        let status = status_as_json(
+            "running\nsource=evdev\nbackend=libei\ncapture_sensitive_focus=false\ncapture_exclusive=false\ninject_full_unicode=true\ninject_atomic_replace=false\n",
+        )
+        .unwrap();
+        let capabilities = runtime_capabilities_from_status(&status);
+        assert_eq!(capabilities["capture"]["sensitive_focus"], false);
+        assert_eq!(capabilities["capture"]["exclusive"], false);
+        assert_eq!(
+            capabilities["capture"]["composition_aware"],
+            serde_json::Value::Null
+        );
+        assert_eq!(capabilities["injection"]["full_unicode"], true);
+        assert_eq!(capabilities["injection"]["atomic_replace"], false);
     }
 
     /// Contract test for docs/COMPATIBILITY.md's `wayexpand status --json`
@@ -2456,6 +2503,16 @@ mod tests {
              paused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\n\
              config_state=ok\n\
+             capture_sensitive_focus=true\n\
+             capture_exclusive=true\n\
+             capture_reliable_key_state=true\n\
+             capture_key_passthrough=false\n\
+             capture_composition_aware=false\n\
+             capture_app_identity=false\n\
+             inject_atomic_replace=true\n\
+             inject_full_unicode=true\n\
+             inject_cursor_reposition=false\n\
+             inject_key_passthrough=false\n\
              command_queue_depth=0\n\
              command_in_flight=0\n\
              expansion_command_queue_depth=0\n\
@@ -2557,6 +2614,16 @@ mod tests {
                 "paused",
                 "config",
                 "config_state",
+                "capture_sensitive_focus",
+                "capture_exclusive",
+                "capture_reliable_key_state",
+                "capture_key_passthrough",
+                "capture_composition_aware",
+                "capture_app_identity",
+                "inject_atomic_replace",
+                "inject_full_unicode",
+                "inject_cursor_reposition",
+                "inject_key_passthrough",
                 "command_queue_depth",
                 "command_in_flight",
                 "expansion_command_queue_depth",

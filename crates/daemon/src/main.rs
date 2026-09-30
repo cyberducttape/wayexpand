@@ -83,12 +83,15 @@ struct StatusPublisher {
 struct StatusSnapshot {
     source: String,
     backend: String,
+    backend_mode: String,
     state: String,
     paused: bool,
     config_path: PathBuf,
     config_healthy: bool,
     metrics: CommandMetrics,
     latency: latency::Snapshot,
+    capture_capabilities: InputSourceCapabilities,
+    injection_capabilities: InjectorCapabilities,
 }
 
 impl StatusPublisher {
@@ -98,14 +101,18 @@ impl StatusPublisher {
         control: &control::ControlServer,
         source: &str,
         backend: &str,
+        backend_mode: &str,
         state: &str,
         config_path: &Path,
         config_healthy: bool,
         metrics: CommandMetrics,
+        capture_capabilities: InputSourceCapabilities,
+        injection_capabilities: InjectorCapabilities,
     ) {
         let snapshot = StatusSnapshot {
             source: source.to_owned(),
             backend: backend.to_owned(),
+            backend_mode: backend_mode.to_owned(),
             state: state.to_owned(),
             paused: control
                 .pause_requested
@@ -114,20 +121,25 @@ impl StatusPublisher {
             config_healthy,
             metrics,
             latency: latency::snapshot(),
+            capture_capabilities,
+            injection_capabilities,
         };
         if self.last.as_ref() == Some(&snapshot) {
             return;
         }
-        status::set_daemon_status_with_latency(
-            control,
+        control.set_status(status::daemon_status_body_with_runtime_capabilities(
             &snapshot.source,
             &snapshot.backend,
             &snapshot.state,
+            snapshot.paused,
             snapshot.config_path.as_path(),
             snapshot.config_healthy,
+            &snapshot.backend_mode,
             snapshot.metrics,
             snapshot.latency,
-        );
+            snapshot.capture_capabilities,
+            snapshot.injection_capabilities,
+        ));
         self.last = Some(snapshot);
     }
 }
@@ -512,7 +524,7 @@ fn main() -> Result<()> {
                 active_backend,
             )?;
         }
-        set_daemon_status_with_metrics(
+        set_daemon_status_with_runtime_capabilities(
             &mut status_publisher,
             &control,
             active_source,
@@ -521,6 +533,22 @@ fn main() -> Result<()> {
             &path,
             config.healthy(),
             metrics,
+            input_method
+                .as_ref()
+                .map(TextInjector::status_detail)
+                .or_else(|| injector.as_ref().map(|backend| backend.status_detail()))
+                .filter(|detail| !detail.is_empty())
+                .unwrap_or("unknown"),
+            input_method
+                .as_ref()
+                .map(InputSource::capabilities)
+                .or_else(|| evdev.as_ref().map(InputSource::capabilities))
+                .unwrap_or_default(),
+            input_method
+                .as_ref()
+                .map(TextInjector::capabilities)
+                .or_else(|| injector.as_ref().map(|backend| backend.capabilities()))
+                .unwrap_or_default(),
         );
         if input_method_mode {
             if input_method.is_none() {
@@ -1100,10 +1128,41 @@ fn set_daemon_status_with_metrics(
         control,
         source,
         backend,
+        "unknown",
         state,
         config_path,
         config_healthy,
         metrics,
+        InputSourceCapabilities::default(),
+        InjectorCapabilities::default(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_daemon_status_with_runtime_capabilities(
+    publisher: &mut StatusPublisher,
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_healthy: bool,
+    metrics: CommandMetrics,
+    backend_mode: &str,
+    capture_capabilities: InputSourceCapabilities,
+    injection_capabilities: InjectorCapabilities,
+) {
+    publisher.publish(
+        control,
+        source,
+        backend,
+        backend_mode,
+        state,
+        config_path,
+        config_healthy,
+        metrics,
+        capture_capabilities,
+        injection_capabilities,
     );
 }
 
@@ -1504,7 +1563,7 @@ mod tests {
     /// docs by construction, rather than each drifting independently.
     #[test]
     fn daemon_status_body_matches_documented_stable_contract() {
-        let body = status::daemon_status_body_with_latency(
+        let body = status::daemon_status_body_with_runtime_capabilities(
             "input-method",
             "input-method-v2",
             "connected",
@@ -1514,6 +1573,12 @@ mod tests {
             "unknown",
             CommandMetrics::default(),
             latency::Snapshot::default(),
+            InputSourceCapabilities::INPUT_METHOD_V2,
+            InjectorCapabilities {
+                atomic_replace: true,
+                full_unicode: true,
+                ..InjectorCapabilities::default()
+            },
         );
         let body = body.as_str();
         let mut fields: Vec<&str> = body
@@ -1526,6 +1591,12 @@ mod tests {
             vec![
                 "backend",
                 "backend_mode",
+                "capture_app_identity",
+                "capture_composition_aware",
+                "capture_exclusive",
+                "capture_key_passthrough",
+                "capture_reliable_key_state",
+                "capture_sensitive_focus",
                 "command_failure_total",
                 "command_in_flight",
                 "command_queue_depth",
@@ -1537,6 +1608,10 @@ mod tests {
                 "expansion_command_queue_depth",
                 "hotkey_in_flight",
                 "hotkey_queue_depth",
+                "inject_atomic_replace",
+                "inject_cursor_reposition",
+                "inject_full_unicode",
+                "inject_key_passthrough",
                 "injection_latency_p50_us",
                 "injection_latency_p95_us",
                 "injection_latency_p99_us",
@@ -1552,6 +1627,16 @@ mod tests {
             body,
             "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstate=connected\npaused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
+             capture_sensitive_focus=true\n\
+             capture_exclusive=true\n\
+             capture_reliable_key_state=true\n\
+             capture_key_passthrough=false\n\
+             capture_composition_aware=false\n\
+             capture_app_identity=false\n\
+             inject_atomic_replace=true\n\
+             inject_full_unicode=true\n\
+             inject_cursor_reposition=false\n\
+             inject_key_passthrough=false\n\
              command_queue_depth=0\ncommand_in_flight=0\n\
              expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\
              hotkey_queue_depth=0\nhotkey_in_flight=0\n\

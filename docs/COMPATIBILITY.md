@@ -385,6 +385,16 @@ below are exactly what that response currently carries -- nothing more.
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
   "config_state": "ok",
+  "capture_sensitive_focus": true,
+  "capture_exclusive": true,
+  "capture_reliable_key_state": true,
+  "capture_key_passthrough": false,
+  "capture_composition_aware": false,
+  "capture_app_identity": false,
+  "inject_atomic_replace": true,
+  "inject_full_unicode": true,
+  "inject_cursor_reposition": false,
+  "inject_key_passthrough": false,
   "command_queue_depth": 0,
   "command_in_flight": 0,
   "expansion_command_queue_depth": 0,
@@ -411,6 +421,8 @@ below are exactly what that response currently carries -- nothing more.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
+- `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware`, `capture_app_identity` (bool): Negotiated input-source guarantees. Conservative false values are published while the source is disconnected or unknown.
+- `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
 - `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
 - `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing
 - `expansion_command_queue_depth` (integer): Accepted command-backed expansions waiting for the expansion worker
