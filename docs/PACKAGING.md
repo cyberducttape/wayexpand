@@ -4,10 +4,10 @@ This guide covers building and maintaining WayExpand packages for different Linu
 
 ## Rust toolchain policy
 
-WayExpand supports Rust **1.87 or newer**. This is the project MSRV and is
-declared in the workspace `Cargo.toml`; CI checks Rust 1.87 and the pinned
+WayExpand supports Rust **1.95 or newer**. This is the project MSRV and is
+declared in the workspace `Cargo.toml`; CI checks Rust 1.95 and the pinned
 project toolchain in `rust-toolchain.toml` (currently Rust 1.96.0).
-Distribution packages must provide at least `rustc 1.87` and `cargo 1.87`.
+Distribution packages must provide at least `rustc 1.95` and `cargo 1.95`.
 Older Debian/Ubuntu releases may need a maintained Rust toolchain from the
 distribution backports or an isolated toolchain installation.
 
@@ -113,7 +113,7 @@ rpmbuild -ba wayexpand.spec
 The release workflow builds on native x86_64 and aarch64 runners and attaches
 both archives to new tagged releases. Older releases may have only x86_64.
 On an aarch64 Fedora, Debian, Ubuntu, or Arch system, either use the matching
-release archive or build from source after installing Rust 1.87+ and native
+release archive or build from source after installing Rust 1.95+ and native
 Wayland dependencies:
 
 ```bash

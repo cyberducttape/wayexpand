@@ -12,6 +12,14 @@ WayExpand does **not** provide built-in secret management. This is intentional:
 2. **Separation of concerns:** Use dedicated secret managers for sensitive data
 3. **Audit trails:** Secret retrieval should be logged separately from expansions
 
+**Production boundary:** Do not use command-backed expansions to retrieve or
+insert credentials, tokens, passwords, or other secret values. The normal
+command runner is intentionally confined by the daemon's systemd sandbox; the
+Action Broker is an experimental prototype that is not routed by the daemon and
+does not yet provide an independent sandbox or durable audit sink. Neither is
+a supported networked/credentialed action boundary. See
+[Operations](OPERATIONS.md) and the [Action Broker status](ACTION_BROKER_ARCHITECTURE.md).
+
 ## Recommended Approach
 
 ### For Individual Users
@@ -26,52 +34,13 @@ Do NOT embed secrets in expansion replacements.
 
 ### For Organizations (SREs/DevOps)
 
-**Pattern 1: Command-Based Retrieval**
-
-Use expansion **commands** to retrieve secrets dynamically:
-
-```toml
-[[expansion]]
-trigger = ";aws-account"
-replacement = ""
-command = { program = "/usr/bin/aws", args = ["sts", "get-caller-identity"] }
-# Returns: {"UserId":"...","Account":"123456789","Arn":"arn:aws:iam::..."}
-```
-
-Requirements:
-- Command output is pasted as-is (use trusted scripts)
-- Commands must be enabled in organization policy: `disable_commands = false`
-- Suitable backends: libei, input-method-v2, wlroots
-- Timeout: 5 seconds max (prevent hanging)
-
-**Pattern 2: Authentication Context**
-
-Let credentials flow through environment variables:
-
-```toml
-[[expansion]]
-trigger = ";git-commit"
-replacement = "git commit --author \"$GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>\""
-```
-
-Requirements:
-- Environment variables set before daemon start
-- Daemon must have access to credentials (systemd User environment)
-- Keep credentials in systemd user environment, not shell profile
-
-**Pattern 3: Future Action Broker (v1.3+)**
-
-When implemented, will support per-action secret management:
-
-```toml
-# Proposed for future versions
-[action.vault_read]
-program = "/usr/bin/vault"
-args = ["kv", "get"]
-secrets = ["VAULT_TOKEN", "VAULT_ADDR"]  # Injected automatically
-```
-
-Future versions (v1.3+) will support per-action permission control via an Action Broker, tracked in [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md).
+Use the secret manager's supported CLI, agent, or application integration
+directly in the application/workflow that needs the credential. Do not route
+secret retrieval through a WayExpand snippet. Command-backed expansions can
+run only within the restrictive daemon environment and are not an audited
+credential-release mechanism. For networked or credentialed actions, use a
+separately deployed and reviewed service until the broker's production gates
+are complete.
 
 ## Security Best Practices
 
@@ -99,24 +68,9 @@ Future versions (v1.3+) will support per-action permission control via an Action
 - Provides encryption, rotation, audit trails
 - Integrates with orchestration systems
 
-✅ Retrieve secrets via commands when needed
-- Use short timeout (5 seconds max)
-- Return only what the command outputs
-- Script handles formatting and validation
-
-✅ Use environment variables for deployment context
-- Set in systemd user environment
-- Passed to daemon at startup
-- Keep credentials outside version control
-
-✅ Enable command security policies
-```toml
-[organization]
-safe_mode = true
-disable_commands = false  # Allow retrieval commands
-allowed_backends = ["libei"]  # Restrict to safe output
-max_replacement_size = 65536
-```
+✅ Use separate, reviewed workflows for credentials and privileged actions.
+Keep their policy, authorization, and audit trail in the secret manager or
+action service that owns those responsibilities.
 
 ⚠️ **Do not treat the WayExpand journal as a command audit trail.** Policy
 violations and selected lifecycle messages may be logged, but WayExpand does
@@ -124,60 +78,13 @@ not record every command, argument, secret, or expansion. Use the secret
 manager's own audit device and a privacy-reviewed wrapper when command
 execution must be audited.
 
-## Example: Vault Integration
-
-### Setup
-
-```bash
-# 1. Configure Vault credentials
-export VAULT_ADDR="https://vault.example.com"
-export VAULT_TOKEN="s.xxxxxxxxxx"
-
-# 2. Create systemd user service
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/wayexpand-vault.env << 'EOF'
-VAULT_ADDR=https://vault.example.com
-VAULT_TOKEN=s.xxxxxxxxxx
-EOF
-chmod 0600 ~/.config/systemd/user/wayexpand-vault.env
-
-# 3. Load environment
-systemctl --user import-environment VAULT_ADDR VAULT_TOKEN
-```
-
-### Snippet Configuration
-
-```toml
-[[expansion]]
-trigger = ";db-pass"
-replacement = ""
-command = {
-  program = "/usr/bin/vault",
-  args = ["kv", "get", "-field=password", "secret/database/prod"]
-}
-
-[[expansion]]
-trigger = ";api-key"
-replacement = ""
-command = {
-  program = "/usr/bin/vault",
-  args = ["kv", "get", "-field=key", "secret/api/anthropic"]
-}
-```
-
-### Audit Logging
+## Audit Logging
 
 WayExpand does not provide a complete command-execution or secret-retrieval
-audit sink. The input-method service journal may contain lifecycle or policy
-messages, but it must not be treated as a record of every command, argument,
-secret, or expansion. Enable auditing in the secret manager itself (for
-example, Vault's audit devices) and in any wrapper that invokes it; avoid
-logging secret values or full command environments.
-
-```bash
-# Inspect WayExpand diagnostics only; this is not a Vault audit record.
-journalctl --user -u wayexpand-input-method.service -f
-```
+audit sink. The service journal may contain lifecycle or policy messages, but
+must not be treated as a record of each command, argument, secret, or
+expansion. Enable auditing in the system that actually authorizes and releases
+credentials; avoid logging secret values or full command environments.
 
 ## Compliance and Audit
 
@@ -190,15 +97,17 @@ If using WayExpand in regulated environments:
 3. **Command audit trails** - Use an external, privacy-reviewed audit system
    for command usage; WayExpand does not currently log every expansion or
    command execution
-4. **Policy enforcement** - Use `safe_mode = true`
-5. **Network isolation** - Restricted backends, no clipboard leaks
+4. **Policy enforcement** - Disable command-backed expansions unless reviewed
+   for the specific deployment; this does not replace a sandbox or audit sink
+5. **Network isolation** - Keep credentialed/network actions in a separately
+   reviewed service; the WayExpand command backend is not that boundary
 
 ### Example Compliance Policy
 
 ```toml
 [organization]
 safe_mode = true
-disable_commands = false
+disable_commands = true
 disable_hotkeys = false
 disable_title_matching = false
 max_replacement_size = 8192

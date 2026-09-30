@@ -19,7 +19,7 @@ members = [
 [workspace.package]
 version = "1.2.0"
 edition = "2021"
-rust-version = "1.87"
+rust-version = "1.95"
 license = "MIT"
 description = "A privacy-first, Wayland-native text expander for Linux"
 repository = "https://github.com/cyberducttape/wayexpand"

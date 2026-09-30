@@ -25,7 +25,7 @@ bumped `Cargo.toml` shipped a stale Launchpad build more than once before
 this check was added. Bump both in the same commit you tag.
 
 The release workflow uses the pinned Rust 1.96.0 toolchain and separately
-checks the declared Rust 1.87 MSRV in CI. A release must not depend on
+checks the declared Rust 1.95 MSRV in CI. A release must not depend on
 whichever `stable` toolchain happens to be installed on the runner; update the
 workflow pin deliberately when changing the release compiler.
 

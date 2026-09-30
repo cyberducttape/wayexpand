@@ -12,9 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-ab_glyph = "0.2.32"
+read-fonts = "0.41.0"
 anyhow.workspace = true
-eframe = { version = "0.31.1", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
 serde.workspace = true
 serde_json.workspace = true
 toml_edit = { version = "0.25.15", features = ["serde"] }

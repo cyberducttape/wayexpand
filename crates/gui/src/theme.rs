@@ -639,8 +639,8 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let palette = Palette::for_pack(ColorPack::Default, true);
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 snippet_row_scaled(
                     ui,
                     &palette,
@@ -658,6 +658,7 @@ mod tests {
                 );
             });
         });
+        output.textures_delta.clear();
         let tree = output
             .platform_output
             .accesskit_update

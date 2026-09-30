@@ -109,8 +109,8 @@ deployment recommendation.
 What will be implemented:
 - **Policy Integration**
   - Wire `action_broker_socket` configuration to daemon
-  - Route commands based on policy decisions
-  - Fallback to local execution if broker unavailable
+  - Route explicitly broker-eligible actions based on policy decisions
+  - Fail closed when the broker is unavailable; never fall back to local daemon execution
 
 - **Per-Action Permissions**
   - Environment variable filtering
@@ -119,9 +119,12 @@ What will be implemented:
   - Timeout enforcement per action
 
 - **Audit Logging**
-  - Log all action executions to syslog/journald
-  - Track: action ID, parameters, execution time, exit code
-  - Integration with organization audit trail
+  - Add a durable, bounded, privacy-reviewed audit sink
+  - Record action identity, policy decision, requesting daemon identity, timing,
+    termination/exit status, and broker correlation ID; do not record secrets,
+    arbitrary arguments, environment values, or action output by default
+  - Define retention, rotation, integrity, and behavior when audit persistence fails
+  - Integration with organization audit trail only after those guarantees are tested
 
 - **Standalone Broker Deployment**
   - Add a systemd user service and optional socket activation

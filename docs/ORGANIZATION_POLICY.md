@@ -121,7 +121,13 @@ allowed_packs = ["approved-pack-1"]
 audit_prefix = "corp-policy"
 ```
 
-### Example 2: SRE-Friendly Policy
+### Example 2: Sandboxed Local Commands (Not Networked SRE Actions)
+
+This permits command-backed expansions only inside the daemon's existing
+systemd restrictions. It does **not** enable network access, credential access,
+home-directory writes, or a supported `kubectl`/cloud/Vault workflow. The broker
+is not yet a production command boundary.
+
 ```toml
 [organization]
 safe_mode = true
@@ -132,8 +138,8 @@ disable_title_matching = false
 require_atomic_replace = true
 require_sensitive_focus = true
 max_replacement_size = 65536
-allowed_backends = ["libei", "input-method-v2"]
-allowed_packs = ["sre-tools", "infrastructure-commands"]
+allowed_backends = ["input-method-v2"]
+allowed_packs = ["approved-local-tools"]
 audit_prefix = "sre-policy"
 ```
 

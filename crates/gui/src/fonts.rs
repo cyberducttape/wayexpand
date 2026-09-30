@@ -85,7 +85,7 @@ fn load_font(path: &Path, index: u32) -> Option<Vec<u8>> {
         return None;
     }
     let bytes = std::fs::read(path).ok()?;
-    ab_glyph::FontVec::try_from_vec_and_index(bytes.clone(), index).ok()?;
+    read_fonts::FontRef::from_index(&bytes, index).ok()?;
     Some(bytes)
 }
 
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn invalid_and_missing_fonts_are_skipped() {
-        assert!(ab_glyph::FontVec::try_from_vec_and_index(b"not a font".to_vec(), 0).is_err());
+        assert!(read_fonts::FontRef::from_index(b"not a font", 0).is_err());
         assert!(load_font(Path::new("/nonexistent/font.ttf"), 0).is_none());
     }
 
@@ -144,10 +144,11 @@ mod tests {
     fn discovered_fonts_can_be_installed_and_rendered() {
         let context = egui::Context::default();
         install(&context);
-        let _ = context.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.label("→ ✓ ● ◌ ⊘ 郵件 受信箱");
             });
         });
+        output.textures_delta.clear();
     }
 }

@@ -1554,8 +1554,8 @@ impl GuiApp {
         }
     }
 
-    fn render_toolbar(&mut self, ctx: &egui::Context, palette: &Palette) {
-        egui::TopBottomPanel::top("toolbar")
+    fn render_toolbar(&mut self, root: &mut egui::Ui, palette: &Palette) {
+        egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(palette.surface)
@@ -1568,7 +1568,7 @@ impl GuiApp {
                         color: Color32::from_black_alpha(if self.dark_mode { 60 } else { 18 }),
                     }),
             )
-            .show(ctx, |ui| {
+            .show(root, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
                     ui.label(RichText::new("WayExpand").heading().strong());
@@ -1623,7 +1623,7 @@ impl GuiApp {
                         .menu_button(more_actions, |ui| {
                             if ui.button(self.strings.reload()).clicked() {
                                 self.request_action(PendingAction::Reload);
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui
                                 .add_enabled(
@@ -1637,22 +1637,22 @@ impl GuiApp {
                                 .clicked()
                             {
                                 self.toggle_pause();
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.button(self.strings.diagnostics()).clicked() {
                                 self.diagnostics_open = true;
                                 self.refresh_diagnostics(true);
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.button(self.strings.import_espanso()).clicked() {
                                 self.import_open = true;
                                 self.import_preview = None;
-                                ui.close_menu();
+                                ui.close();
                             }
                             ui.separator();
                             if ui.button(self.strings.settings()).clicked() {
                                 self.open_settings();
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui
                                 .button(if self.dark_mode {
@@ -1663,7 +1663,7 @@ impl GuiApp {
                                 .clicked()
                             {
                                 self.set_dark_mode(&ctx, !self.dark_mode);
-                                ui.close_menu();
+                                ui.close();
                             }
                         })
                         .response;
@@ -2088,22 +2088,22 @@ impl GuiApp {
         });
     }
 
-    fn render_snippet_list(&mut self, ctx: &egui::Context, palette: &Palette) {
+    fn render_snippet_list(&mut self, root: &mut egui::Ui, palette: &Palette) {
         // The first-run editor is already a focused setup surface with one
         // explicit test-snippet action. Avoid a mostly empty library panel
         // with a competing New button until there is a saved item to browse.
         if self.config.expansion.is_empty() && !self.new_draft {
             return;
         }
-        egui::SidePanel::left("snippets")
+        egui::Panel::left("snippets")
             .resizable(true)
-            .default_width(340.0)
+            .default_size(340.0)
             .frame(
                 egui::Frame::new()
                     .fill(palette.surface)
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
-            .show(ctx, |ui| {
+            .show(root, |ui| {
                 ui.label(
                     RichText::new(if self.filter.is_empty() {
                         self.strings.your_library()
@@ -2244,14 +2244,14 @@ impl GuiApp {
             });
     }
 
-    fn render_editor(&mut self, ctx: &egui::Context, palette: &Palette) {
+    fn render_editor(&mut self, root: &mut egui::Ui, palette: &Palette) {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
                     .fill(palette.background)
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
-            .show(ctx, |ui| {
+            .show(root, |ui| {
                 if self.selected_index().is_none()
                     && !self.new_draft
                     && !self.config.expansion.is_empty()
@@ -3050,11 +3050,11 @@ impl GuiApp {
     /// The editor's pinned action bar. It is a panel rather than the last
     /// row of the editor's scroll area so the primary action stays on screen
     /// however far the snippet's replacement text scrolls.
-    fn render_editor_actions(&mut self, ctx: &egui::Context, palette: &Palette) {
+    fn render_editor_actions(&mut self, root: &mut egui::Ui, palette: &Palette) {
         if self.selected_index().is_none() && !self.new_draft {
             return;
         }
-        egui::TopBottomPanel::bottom("editor_actions")
+        egui::Panel::bottom("editor_actions")
             // Without the rule the editor's content scrolls flush against the
             // buttons and the bar stops reading as a fixed surface.
             .show_separator_line(true)
@@ -3064,7 +3064,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 10))
                     .stroke(egui::Stroke::NONE),
             )
-            .show(ctx, |ui| {
+            .show(root, |ui| {
                 ui.horizontal(|ui| {
                     if theme::primary_button(ui, palette, self.strings.save_changes())
                         .on_hover_text(self.strings.save_tooltip())
@@ -3096,9 +3096,9 @@ impl GuiApp {
     /// the left, and which configuration file this window is editing on the
     /// right, so a second instance opened on a different file is never
     /// mistaken for the first.
-    fn render_status_bar(&mut self, ctx: &egui::Context, palette: &Palette) {
+    fn render_status_bar(&mut self, root: &mut egui::Ui, palette: &Palette) {
         let (text_color, accent) = self.status.colors(palette);
-        egui::TopBottomPanel::bottom("status")
+        egui::Panel::bottom("status")
             .show_separator_line(true)
             .frame(
                 egui::Frame::new()
@@ -3106,7 +3106,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(18, 8))
                     .stroke(egui::Stroke::NONE),
             )
-            .show(ctx, |ui| {
+            .show(root, |ui| {
                 ui.horizontal(|ui| {
                     let (bar, _) = ui.allocate_exact_size(
                         egui::Vec2::new(3.0, ui.text_style_height(&egui::TextStyle::Body)),
@@ -3249,7 +3249,9 @@ impl GuiApp {
 }
 
 impl eframe::App for GuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = root.ctx().clone();
+        let ctx = &ctx;
         self.poll_runtime(ctx);
         self.poll_command_preview(ctx);
         self.reap_app_detection_without_editor(ctx);
@@ -3299,7 +3301,7 @@ impl eframe::App for GuiApp {
             self.close_topmost_dialog();
         }
         self.sync_window_title(ctx);
-        self.render_toolbar(ctx, &palette);
+        self.render_toolbar(root, &palette);
         self.render_diagnostics(ctx, &palette);
         self.render_import_dialog(ctx, &palette);
         self.render_settings_dialog(ctx, &palette);
@@ -3307,10 +3309,10 @@ impl eframe::App for GuiApp {
         // status line spans the full width, the sidebar then claims the left
         // edge, and the editor's action bar sits above the status line but
         // only across the editor itself.
-        self.render_status_bar(ctx, &palette);
-        self.render_snippet_list(ctx, &palette);
-        self.render_editor_actions(ctx, &palette);
-        self.render_editor(ctx, &palette);
+        self.render_status_bar(root, &palette);
+        self.render_snippet_list(root, &palette);
+        self.render_editor_actions(root, &palette);
+        self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
     }
@@ -3393,6 +3395,18 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    fn run_gui_test_frame(
+        ctx: &egui::Context,
+        input: egui::RawInput,
+        draw: impl FnMut(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(input, draw);
+        // Headless tests inspect semantics/layout, not renderer texture uploads.
+        // epaint 0.36 asserts if its unapplied font-atlas delta is dropped.
+        output.textures_delta.clear();
+        output
+    }
 
     fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::ExpansionConfig {
         wayexpand_core::ExpansionConfig {
@@ -4274,18 +4288,19 @@ mod tests {
                             )),
                             ..Default::default()
                         };
-                        let _ = ctx.run(input, |ctx| {
+                        let _ = run_gui_test_frame(&ctx, input, |ui| {
+                            let frame_ctx = ui.ctx().clone();
                             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-                            app.sync_window_title(ctx);
-                            app.render_toolbar(ctx, &palette);
-                            app.render_diagnostics(ctx, &palette);
-                            app.render_import_dialog(ctx, &palette);
-                            app.render_settings_dialog(ctx, &palette);
-                            app.render_status_bar(ctx, &palette);
-                            app.render_snippet_list(ctx, &palette);
-                            app.render_editor_actions(ctx, &palette);
-                            app.render_editor(ctx, &palette);
-                            app.render_pending_action(ctx, &palette);
+                            app.sync_window_title(&frame_ctx);
+                            app.render_toolbar(ui, &palette);
+                            app.render_diagnostics(&frame_ctx, &palette);
+                            app.render_import_dialog(&frame_ctx, &palette);
+                            app.render_settings_dialog(&frame_ctx, &palette);
+                            app.render_status_bar(ui, &palette);
+                            app.render_snippet_list(ui, &palette);
+                            app.render_editor_actions(ui, &palette);
+                            app.render_editor(ui, &palette);
+                            app.render_pending_action(&frame_ctx, &palette);
                         });
                     }
                 }
@@ -4301,17 +4316,18 @@ mod tests {
             )),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = run_gui_test_frame(&ctx, input, |ui| {
+            let frame_ctx = ui.ctx().clone();
             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-            app.render_toolbar(ctx, &palette);
-            app.render_diagnostics(ctx, &palette);
-            app.render_import_dialog(ctx, &palette);
-            app.render_settings_dialog(ctx, &palette);
-            app.render_status_bar(ctx, &palette);
-            app.render_snippet_list(ctx, &palette);
-            app.render_editor_actions(ctx, &palette);
-            app.render_editor(ctx, &palette);
-            app.render_pending_action(ctx, &palette);
+            app.render_toolbar(ui, &palette);
+            app.render_diagnostics(&frame_ctx, &palette);
+            app.render_import_dialog(&frame_ctx, &palette);
+            app.render_settings_dialog(&frame_ctx, &palette);
+            app.render_status_bar(ui, &palette);
+            app.render_snippet_list(ui, &palette);
+            app.render_editor_actions(ui, &palette);
+            app.render_editor(ui, &palette);
+            app.render_pending_action(&frame_ctx, &palette);
         });
         app.create_new_snippet();
         let input = egui::RawInput {
@@ -4321,10 +4337,10 @@ mod tests {
             )),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = run_gui_test_frame(&ctx, input, |ui| {
             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-            app.render_editor_actions(ctx, &palette);
-            app.render_editor(ctx, &palette);
+            app.render_editor_actions(ui, &palette);
+            app.render_editor(ui, &palette);
         });
         assert!(app.new_draft);
         assert_eq!(app.config.expansion.len(), 2);
@@ -4351,9 +4367,9 @@ mod tests {
                 )),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
+            let _ = run_gui_test_frame(&ctx, input, |ui| {
                 let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-                app.render_editor(ctx, &palette);
+                app.render_editor(ui, &palette);
             });
         }
         app.create_test_snippet();
@@ -4380,8 +4396,11 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let render = |app: &mut GuiApp| {
-            let output = ctx.run(egui::RawInput::default(), |ctx| {
-                app.render_evdev_setup(ctx, &Palette::for_pack(app.colorpack, app.dark_mode));
+            let output = run_gui_test_frame(&ctx, egui::RawInput::default(), |ui| {
+                app.render_evdev_setup(
+                    &ui.ctx().clone(),
+                    &Palette::for_pack(app.colorpack, app.dark_mode),
+                );
             });
             format!(
                 "{:?}",
