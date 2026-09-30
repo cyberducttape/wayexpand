@@ -32,6 +32,7 @@ pub(crate) enum Request {
 pub(crate) enum Operation {
     Reload(Status),
     Pause { paused: bool },
+    Status,
 }
 
 pub(crate) enum Completion {
@@ -115,7 +116,7 @@ fn run_diagnostics(config: Config, announce: bool) -> DiagnosticsSnapshot {
     }
 }
 
-fn parse_paused(response: &str) -> Option<bool> {
+pub(crate) fn parse_paused(response: &str) -> Option<bool> {
     response.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
         (key == "paused").then(|| value == "true")

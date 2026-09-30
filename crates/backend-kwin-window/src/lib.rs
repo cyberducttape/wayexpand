@@ -18,7 +18,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
@@ -28,6 +28,7 @@ const BACKEND_NAME: &str = "kwin-window";
 const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
+const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
 /// Upper bound on how long `probe()` waits for the session bus / KWin to
 /// answer before giving up. A local D-Bus round trip normally completes in
 /// well under this; this exists specifically for the case where it does
@@ -42,6 +43,8 @@ pub enum KwinWindowError {
     ScriptWrite(#[source] std::io::Error),
     #[error("KWin did not finish registering the loaded script in time")]
     ScriptNotReady,
+    #[error("KWin tracker setup exceeded its time limit")]
+    SetupTimedOut,
     #[error("org.kde.KWin's scripting interface is not reachable on the session bus")]
     NotAvailable,
     #[error("could not generate a unique KWin tracker nonce: {0}")]
@@ -141,6 +144,9 @@ impl KwinWindowTracker {
     /// readiness retry loop. An in-flight D-Bus call is bounded by
     /// `DBUS_METHOD_TIMEOUT`.
     pub fn new_cancellable(cancelled: Option<&AtomicBool>) -> Result<Self, KwinWindowError> {
+        if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(KwinWindowError::ScriptNotReady);
+        }
         let pid = process::id();
         // Reconnects may overlap cleanup of a failed tracker. Give each
         // attempt distinct D-Bus and KWin script identities so a delayed
@@ -179,7 +185,13 @@ impl KwinWindowTracker {
         file.write_all(script_contents.as_bytes())
             .map_err(KwinWindowError::ScriptWrite)?;
 
-        if let Err(error) = Self::load_and_run(&connection, &script_path, &plugin_name, cancelled) {
+        if let Err(error) = Self::load_and_run(
+            &connection,
+            &script_path,
+            &plugin_name,
+            cancelled,
+            Instant::now() + TRACKER_SETUP_TIMEOUT,
+        ) {
             let _ = connection.call_method(
                 Some("org.kde.KWin"),
                 "/Scripting",
@@ -210,7 +222,14 @@ impl KwinWindowTracker {
         script_path: &std::path::Path,
         plugin_name: &str,
         cancelled: Option<&AtomicBool>,
+        deadline: Instant,
     ) -> Result<(), KwinWindowError> {
+        if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(KwinWindowError::ScriptNotReady);
+        }
+        if Instant::now() >= deadline {
+            return Err(KwinWindowError::SetupTimedOut);
+        }
         let script_id: i32 = connection
             .call_method(
                 Some("org.kde.KWin"),
@@ -227,6 +246,9 @@ impl KwinWindowTracker {
             if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
                 return Err(KwinWindowError::ScriptNotReady);
             }
+            if Instant::now() >= deadline {
+                return Err(KwinWindowError::SetupTimedOut);
+            }
             match connection.call_method(
                 Some("org.kde.KWin"),
                 script_object_path.as_str(),
@@ -236,7 +258,9 @@ impl KwinWindowTracker {
             ) {
                 Ok(_) => return Ok(()),
                 Err(_) if attempt + 1 < LOAD_RETRY_ATTEMPTS => {
-                    std::thread::sleep(LOAD_RETRY_DELAY);
+                    std::thread::sleep(
+                        LOAD_RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now())),
+                    );
                 }
                 Err(_) => return Err(KwinWindowError::ScriptNotReady),
             }

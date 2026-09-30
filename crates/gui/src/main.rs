@@ -30,7 +30,7 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use theme::Palette;
@@ -98,6 +98,7 @@ struct GuiApp {
     runtime_receiver: Option<mpsc::Receiver<runtime::Completion>>,
     diagnostics_running: bool,
     pending_control: usize,
+    next_status_poll: Instant,
     pending_action: Option<PendingAction>,
     import_open: bool,
     import_path: String,
@@ -129,14 +130,12 @@ struct GuiApp {
     /// Cache of the last plain preview result. Stores (draft_hash, input, result)
     /// to avoid rebuilding the ExpansionEngine on every repaint.
     preview_cache: Option<(u64, String, String)>,
-    /// A background "Use current app" detection in progress: `KwinWindowTracker::new()`
-    /// itself has no bound on its D-Bus connection/script-loading step (only
-    /// the window-wait after it is bounded), so this runs off the UI thread
-    /// with the receiver polled each frame instead of calling it inline,
-    /// which could otherwise freeze the whole GUI indefinitely rather than
-    /// for the intended few seconds. The task remains present after a UI
-    /// cancellation until its worker reports completion, preventing retries
-    /// from accumulating detached threads.
+    /// A background "Use current app" detection in progress. KWin setup runs
+    /// off the UI thread and is bounded by per-call D-Bus timeouts plus a
+    /// total script-readiness deadline; the subsequent focused-window wait is
+    /// also bounded. The task remains present after UI cancellation until its
+    /// worker reports completion, preventing retries from accumulating
+    /// detached threads.
     app_detection: Option<AppDetectionTask>,
     /// Set by `execute_action(PendingAction::Close)` once the user has
     /// confirmed closing with an unsaved draft (or there was nothing to
@@ -270,6 +269,7 @@ impl GuiApp {
             runtime_receiver: None,
             diagnostics_running: false,
             pending_control: 0,
+            next_status_poll: Instant::now() + Duration::from_secs(2),
             pending_action: None,
             import_open: false,
             import_path: String::new(),
@@ -363,6 +363,7 @@ impl GuiApp {
                         self.paused = paused;
                     }
                     self.diagnostics_running = false;
+                    self.next_status_poll = Instant::now() + Duration::from_secs(2);
                     if snapshot.announce {
                         self.status = Status::success(self.strings.status_diagnostics_refreshed());
                     }
@@ -393,12 +394,42 @@ impl GuiApp {
                                 )
                             }
                         },
+                        runtime::Operation::Status => match result {
+                            Ok(response) => {
+                                self.daemon_status = response.trim().replace('\n', " · ");
+                                if let Some(paused) = runtime::parse_paused(&response) {
+                                    self.paused = paused;
+                                }
+                            }
+                            Err(error) => {
+                                self.daemon_status = format!("Unavailable: {error}");
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        let now = Instant::now();
+        if now >= self.next_status_poll {
+            self.next_status_poll = now + Duration::from_secs(2);
+            if self.pending_control == 0 && !self.diagnostics_running {
+                if let Some(sender) = self.runtime_sender.as_ref() {
+                    if sender
+                        .try_send(runtime::Request::Control {
+                            command: "status".into(),
+                            operation: runtime::Operation::Status,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_control += 1;
                     }
                 }
             }
         }
         if self.diagnostics_running || self.pending_control > 0 {
             ctx.request_repaint_after(Duration::from_millis(50));
+        } else if self.runtime_receiver.is_some() {
+            ctx.request_repaint_after(self.next_status_poll.saturating_duration_since(now));
         }
     }
 
@@ -2423,16 +2454,10 @@ impl GuiApp {
                                 );
                             });
                         if detect_app_clicked && self.app_detection.is_none() {
-                            // Run entirely off the UI thread: KwinWindowTracker::new()
-                            // itself (D-Bus connection, script load, name registration)
-                            // has no bound of its own -- only the window-wait after it
-                            // does -- so calling it inline here could freeze the whole
-                            // GUI indefinitely rather than for the intended few
-                            // seconds, exactly the failure mode found and fixed in the
-                            // daemon's KwinWindowTracker::probe() (a hung session bus
-                            // or leftover KWin script state from a prior instance can
-                            // make the D-Bus call itself never return). The receiver is
-                            // polled below on every frame instead.
+                            // Run entirely off the UI thread. Tracker setup has
+                            // bounded D-Bus calls and a total readiness deadline,
+                            // but a slow session bus can still consume several
+                            // seconds. The receiver is polled below on every frame.
                             use wayexpand_backend_kwin_window::KwinWindowTracker;
                             use wayexpand_core::WindowTracker;
                             let (sender, receiver) = mpsc::channel();
