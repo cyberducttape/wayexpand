@@ -6,6 +6,7 @@ mod fonts;
 mod import;
 mod lang;
 mod library;
+mod persistence;
 mod preview;
 mod settings;
 mod status;
@@ -19,7 +20,6 @@ use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
-use std::str::FromStr;
 use std::{
     env, fs,
     io::{Read, Write},
@@ -220,138 +220,6 @@ impl Drop for GuiApp {
     }
 }
 
-fn read_config_document(text: &str) -> Result<toml_edit::DocumentMut> {
-    toml_edit::DocumentMut::from_str(text)
-        .map_err(|error| anyhow::anyhow!("could not parse configuration document: {error}"))
-}
-
-/// Merge the canonical representation of a new Config into the document that
-/// the user opened. Reusing existing TOML items keeps their decorations
-/// (comments, whitespace, and quoting) while still making additions and
-/// deletions reflect the Rust configuration exactly.
-fn merge_config_document(
-    mut original: toml_edit::DocumentMut,
-    replacement: toml_edit::DocumentMut,
-) -> toml_edit::DocumentMut {
-    merge_toml_item(original.as_item_mut(), replacement.into_item());
-    original
-}
-
-fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
-    match replacement {
-        toml_edit::Item::Table(new_table) => {
-            if let toml_edit::Item::Table(old_table) = old {
-                merge_toml_table(old_table, new_table);
-            } else {
-                *old = toml_edit::Item::Table(new_table);
-            }
-        }
-        toml_edit::Item::ArrayOfTables(new_array) => {
-            if let toml_edit::Item::ArrayOfTables(old_array) = old {
-                let mut merged = Vec::new();
-                let mut used = vec![false; old_array.len()];
-                let mut by_id: std::collections::HashMap<&str, std::collections::VecDeque<usize>> =
-                    std::collections::HashMap::new();
-                let mut by_trigger: std::collections::HashMap<
-                    &str,
-                    std::collections::VecDeque<usize>,
-                > = std::collections::HashMap::new();
-                for (old_index, old_table) in old_array.iter().enumerate() {
-                    if let Some(id) = old_table
-                        .get("id")
-                        .and_then(toml_edit::Item::as_value)
-                        .and_then(toml_edit::Value::as_str)
-                    {
-                        by_id.entry(id).or_default().push_back(old_index);
-                    }
-                    if let Some(trigger) = old_table
-                        .get("trigger")
-                        .and_then(toml_edit::Item::as_value)
-                        .and_then(toml_edit::Value::as_str)
-                    {
-                        by_trigger.entry(trigger).or_default().push_back(old_index);
-                    }
-                }
-                for (index, new_table) in new_array.iter().enumerate() {
-                    let id_match = new_table
-                        .get("id")
-                        .and_then(toml_edit::Item::as_value)
-                        .and_then(toml_edit::Value::as_str)
-                        .and_then(|id| {
-                            let candidates = by_id.get_mut(id)?;
-                            while let Some(candidate) = candidates.pop_front() {
-                                if !used[candidate] {
-                                    return Some(candidate);
-                                }
-                            }
-                            None
-                        });
-                    let matching_index = id_match
-                        .or_else(|| {
-                            new_table
-                                .get("trigger")
-                                .and_then(toml_edit::Item::as_value)
-                                .and_then(toml_edit::Value::as_str)
-                                .and_then(|trigger| {
-                                    let candidates = by_trigger.get_mut(trigger)?;
-                                    while let Some(candidate) = candidates.pop_front() {
-                                        if !used[candidate] {
-                                            return Some(candidate);
-                                        }
-                                    }
-                                    None
-                                })
-                        })
-                        .or_else(|| (index < old_array.len() && !used[index]).then_some(index));
-                    let mut table = matching_index
-                        .and_then(|old_index| {
-                            used[old_index] = true;
-                            old_array.get(old_index).cloned()
-                        })
-                        .unwrap_or_else(|| new_table.clone());
-                    table.set_position(None);
-                    merge_toml_table(&mut table, new_table.clone());
-                    merged.push(table);
-                }
-                old_array.clear();
-                for table in merged {
-                    old_array.push(table);
-                }
-            } else {
-                *old = toml_edit::Item::ArrayOfTables(new_array);
-            }
-        }
-        toml_edit::Item::Value(mut new_value) => {
-            if let toml_edit::Item::Value(old_value) = old {
-                *new_value.decor_mut() = old_value.decor().clone();
-            }
-            *old = toml_edit::Item::Value(new_value);
-        }
-        toml_edit::Item::None => *old = toml_edit::Item::None,
-    }
-}
-
-fn merge_toml_table(old: &mut toml_edit::Table, replacement: toml_edit::Table) {
-    let replacement_keys: Vec<String> = replacement.iter().map(|(key, _)| key.to_owned()).collect();
-    let replacement_key_set: std::collections::HashSet<&str> =
-        replacement_keys.iter().map(String::as_str).collect();
-    let old_keys: Vec<String> = old.iter().map(|(key, _)| key.to_owned()).collect();
-    for key in old_keys {
-        if !replacement_key_set.contains(key.as_str()) {
-            old.remove(&key);
-        }
-    }
-    for key in replacement_keys {
-        if let Some(item) = replacement.get(&key).cloned() {
-            if let Some(existing) = old.get_mut(&key) {
-                merge_toml_item(existing, item);
-            } else {
-                old.insert(&key, item);
-            }
-        }
-    }
-}
-
 impl GuiApp {
     fn load(path: PathBuf) -> Result<Self> {
         let loaded = match Config::load_versioned(&path) {
@@ -396,7 +264,7 @@ impl GuiApp {
                 ))
             }
         };
-        let config_document = read_config_document(loaded.source())?;
+        let config_document = persistence::read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;
         let search_index = library::SearchIndex::new(&config);
@@ -511,7 +379,8 @@ impl GuiApp {
         candidate.validate().map_err(|error| error.safe_summary())?;
         let replacement = toml_edit::ser::to_document(candidate)
             .map_err(|error| format!("could not serialize configuration: {error}"))?;
-        let document = merge_config_document(self.config_document.clone(), replacement);
+        let document =
+            persistence::merge_config_document(self.config_document.clone(), replacement);
         let revision = Config::save_atomic_text_if_revision_matches(
             &self.path,
             &document.to_string(),
@@ -871,7 +740,7 @@ impl GuiApp {
     fn perform_reload(&mut self) {
         match Config::load_versioned(&self.path) {
             Ok(loaded) => {
-                let new_document = match read_config_document(loaded.source()) {
+                let new_document = match persistence::read_config_document(loaded.source()) {
                     Ok(document) => document,
                     Err(error) => {
                         self.status = Status::error(error.to_string());
@@ -3881,15 +3750,15 @@ mod tests {
 
     #[test]
     fn format_merge_matches_duplicate_triggers_in_order() {
-        let old = read_config_document(
+        let old = persistence::read_config_document(
             "[[expansion]]\n# disabled duplicate one\ntrigger = ':dup'\nenabled = false\n\n[[expansion]]\n# disabled duplicate two\ntrigger = ':dup'\nenabled = false\n",
         )
         .unwrap();
-        let new = read_config_document(
+        let new = persistence::read_config_document(
             "[[expansion]]\ntrigger = ':dup'\nenabled = false\n\n[[expansion]]\ntrigger = ':dup'\nenabled = false\n",
         )
         .unwrap();
-        let merged = merge_config_document(old, new).to_string();
+        let merged = persistence::merge_config_document(old, new).to_string();
         assert!(
             merged.find("# disabled duplicate one").unwrap()
                 < merged.find("# disabled duplicate two").unwrap()
@@ -3899,16 +3768,16 @@ mod tests {
 
     #[test]
     fn format_merge_follows_stable_ids_when_triggers_change_and_reorder() {
-        let old = read_config_document(
+        let old = persistence::read_config_document(
             "# note for A\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':old-a'\n\n# note for B\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000002'\ntrigger = ':old-b'\n",
         )
         .unwrap();
-        let new = read_config_document(
+        let new = persistence::read_config_document(
             "[[expansion]]\nid = '00000000-0000-4000-8000-000000000002'\ntrigger = ':new-b'\n\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':new-a'\n",
         )
         .unwrap();
 
-        let merged = merge_config_document(old, new).to_string();
+        let merged = persistence::merge_config_document(old, new).to_string();
         let b_id = merged.find("00000000-0000-4000-8000-000000000002").unwrap();
         let b_note = merged.find("# note for B").unwrap();
         let a_id = merged.find("00000000-0000-4000-8000-000000000001").unwrap();
