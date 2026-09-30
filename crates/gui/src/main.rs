@@ -34,52 +34,10 @@ use std::{
 };
 
 use theme::Palette;
-use wayexpand_core::EspansoImportReport;
 use wayexpand_core::{
     default_config_path, discover_backends, BackendState, BackendStatus, Config, ConfigError,
     ExpansionConfig, FleetConfig, FontScale, MatchMode, OrganizationPolicy, Settings,
 };
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct ImportMergeStats {
-    added: usize,
-    identical_duplicates: usize,
-    conflicts_kept: usize,
-}
-
-fn merge_imported_expansions(current: &Config, imported: &Config) -> (Config, ImportMergeStats) {
-    let mut merged = current.clone();
-    let mut stats = ImportMergeStats::default();
-    for candidate in &imported.expansion {
-        let candidate_triggers = candidate.effective_triggers();
-        match merged.expansion.iter().find(|existing| {
-            existing.id == candidate.id
-                || existing.trigger == candidate.trigger
-                || (existing.enabled
-                    && candidate.enabled
-                    && existing
-                        .effective_triggers()
-                        .iter()
-                        .any(|trigger| candidate_triggers.contains(trigger)))
-        }) {
-            Some(existing) if expansion_content_equal(existing, candidate) => {
-                stats.identical_duplicates += 1
-            }
-            Some(_) => stats.conflicts_kept += 1,
-            None => {
-                merged.expansion.push(candidate.clone());
-                stats.added += 1;
-            }
-        }
-    }
-    (merged, stats)
-}
-
-fn expansion_content_equal(left: &ExpansionConfig, right: &ExpansionConfig) -> bool {
-    let mut left_without_identity = left.clone();
-    left_without_identity.id = right.id.clone();
-    left_without_identity == *right
-}
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 /// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
@@ -138,7 +96,7 @@ struct GuiApp {
     pending_action: Option<PendingAction>,
     import_open: bool,
     import_path: String,
-    import_preview: Option<(Config, EspansoImportReport)>,
+    import_preview: Option<(Config, wayexpand_core::EspansoImportReport)>,
     settings_open: bool,
     settings_tab: SettingsTab,
     settings_buffer: String,
@@ -542,7 +500,7 @@ impl GuiApp {
         let (candidate, merge_stats) = if replace_library {
             (imported.clone(), None)
         } else {
-            let (merged, stats) = merge_imported_expansions(&self.config, &imported);
+            let (merged, stats) = import::merge_imported_expansions(&self.config, &imported);
             (merged, Some(stats))
         };
         if let Err(error) = candidate.validate() {
@@ -3045,7 +3003,7 @@ mod tests {
             organization: wayexpand_core::OrganizationPolicy::default(),
         };
 
-        let (merged, stats) = merge_imported_expansions(&current, &imported);
+        let (merged, stats) = import::merge_imported_expansions(&current, &imported);
         assert_eq!(stats.added, 1);
         assert_eq!(stats.identical_duplicates, 1);
         assert_eq!(stats.conflicts_kept, 2);
@@ -3448,7 +3406,10 @@ mod tests {
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.diagnostics_open = true;
         app.import_open = true;
-        app.import_preview = Some((app.config.clone(), EspansoImportReport::default()));
+        app.import_preview = Some((
+            app.config.clone(),
+            wayexpand_core::EspansoImportReport::default(),
+        ));
         app.settings_open = true;
         assert!(app.any_dialog_open());
 
