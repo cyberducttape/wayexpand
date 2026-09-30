@@ -37,6 +37,7 @@ struct SearchEntry {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SearchIndex {
     entries: Vec<SearchEntry>,
+    categories: Vec<String>,
 }
 
 impl SearchIndex {
@@ -53,7 +54,12 @@ impl SearchIndex {
                     replacement: item.replacement.to_lowercase(),
                 })
                 .collect(),
+            categories: categories(config),
         }
+    }
+
+    pub fn categories(&self) -> &[String] {
+        &self.categories
     }
 
     pub fn visible_indices(
@@ -69,14 +75,14 @@ impl SearchIndex {
             .expansion
             .iter()
             .enumerate()
-            .filter_map(|(index, expansion)| {
+            .filter_map(|(index, _expansion)| {
+                let entry = self.entries.get(index)?;
                 if category
                     .as_ref()
-                    .is_some_and(|category| expansion.category.to_lowercase() != *category)
+                    .is_some_and(|category| entry.category != *category)
                 {
                     return None;
                 }
-                let entry = self.entries.get(index)?;
                 let matches = query.is_empty()
                     || (fields.triggers && entry.trigger.contains(&query))
                     || (fields.descriptions
@@ -257,7 +263,7 @@ mod tests {
         let matches = index.visible_indices(
             &config,
             "replacement body 9876",
-            None,
+            Some("BULK"),
             SearchFields {
                 replacements: true,
                 ..SearchFields::default()

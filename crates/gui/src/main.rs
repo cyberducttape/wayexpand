@@ -563,7 +563,7 @@ impl GuiApp {
     /// Distinct, sorted, non-empty categories currently in use — drives the
     /// sidebar filter chips and the editor's "pick existing" combo box.
     fn categories(&self) -> Vec<String> {
-        library::categories(&self.config)
+        self.search_index.categories().to_vec()
     }
 
     fn select(&mut self, index: usize) {
