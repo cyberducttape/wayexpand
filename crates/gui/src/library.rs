@@ -234,6 +234,40 @@ mod tests {
     }
 
     #[test]
+    fn indexed_search_finds_exact_matches_in_a_ten_thousand_snippet_library() {
+        let expansions = (0..10_000)
+            .map(|index| {
+                let mut item = expansion(
+                    &format!(":snippet-{index}"),
+                    &format!("Description {index}"),
+                    "Bulk",
+                    &["generated"],
+                );
+                item.replacement = format!("replacement body {index}");
+                item
+            })
+            .collect();
+        let config = Config {
+            expansion: expansions,
+            hotkey: Vec::new(),
+            settings: wayexpand_core::Settings::default(),
+            organization: wayexpand_core::OrganizationPolicy::default(),
+        };
+        let index = SearchIndex::new(&config);
+        let matches = index.visible_indices(
+            &config,
+            "replacement body 9876",
+            None,
+            SearchFields {
+                replacements: true,
+                ..SearchFields::default()
+            },
+        );
+
+        assert_eq!(matches, vec![9876]);
+    }
+
+    #[test]
     fn categories_are_sorted_deduplicated_and_skip_the_uncategorized() {
         let config = Config {
             expansion: vec![
