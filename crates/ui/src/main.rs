@@ -503,7 +503,16 @@ fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     }
 }
 
-fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
+#[derive(Debug, PartialEq, Eq)]
+enum UiEffect {
+    Continue,
+    Quit,
+    OpenExternalEditor,
+}
+
+/// Apply one user event to the TUI state. Rendering and terminal I/O consume
+/// the returned effect, leaving state transitions directly testable.
+fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
     if let Some(index) = app.confirm_delete {
         match key.code {
             KeyCode::Char('d') | KeyCode::Enter => app.delete_confirmed(index),
@@ -513,7 +522,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         }
-        return Ok(false);
+        return Ok(UiEffect::Continue);
     }
     if app.prompt.is_some() {
         match key.code {
@@ -538,7 +547,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         }
-        return Ok(false);
+        return Ok(UiEffect::Continue);
     }
     if app.searching {
         match key.code {
@@ -557,18 +566,18 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         }
-        return Ok(false);
+        return Ok(UiEffect::Continue);
     }
     match key {
         KeyEvent {
             code: KeyCode::Char('q') | KeyCode::Esc,
             ..
-        } => return Ok(true),
+        } => return Ok(UiEffect::Quit),
         KeyEvent {
             code: KeyCode::Char('c'),
             modifiers: KeyModifiers::CONTROL,
             ..
-        } => return Ok(true),
+        } => return Ok(UiEffect::Quit),
         KeyEvent {
             code: KeyCode::Char('/'),
             ..
@@ -608,7 +617,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyEvent {
             code: KeyCode::Char('E'),
             ..
-        } => app.external_edit = true,
+        } => return Ok(UiEffect::OpenExternalEditor),
         KeyEvent {
             code: KeyCode::Char('d'),
             ..
@@ -649,7 +658,18 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         _ => {}
     }
-    Ok(false)
+    Ok(UiEffect::Continue)
+}
+
+fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match update(app, key)? {
+        UiEffect::Quit => Ok(true),
+        UiEffect::OpenExternalEditor => {
+            app.external_edit = true;
+            Ok(false)
+        }
+        UiEffect::Continue => Ok(false),
+    }
 }
 
 fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
@@ -868,6 +888,90 @@ fn decode_tags(input: &str) -> serde_json::Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_app() -> (App, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-tui-reducer-{}-{:?}.toml",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = \":one\"\nreplacement = \"first\"\n\n[[expansion]]\ntrigger = \":two\"\nreplacement = \"second\"\n",
+        )
+        .unwrap();
+        config.save_atomic(&path).unwrap();
+        (App::load(path.clone()).unwrap(), path)
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn reducer_delete_cancel_preserves_selection_and_config() {
+        let (mut app, path) = test_app();
+        update(&mut app, key(KeyCode::Char('d'))).unwrap();
+        assert_eq!(app.confirm_delete, Some(0));
+        update(&mut app, key(KeyCode::Esc)).unwrap();
+        assert_eq!(app.confirm_delete, None);
+        assert_eq!(app.config.expansion.len(), 2);
+        assert_eq!(Config::load(path).unwrap().expansion.len(), 2);
+    }
+
+    #[test]
+    fn reducer_delete_confirm_then_undo_restores_the_config() {
+        let (mut app, path) = test_app();
+        update(&mut app, key(KeyCode::Char('d'))).unwrap();
+        update(&mut app, key(KeyCode::Char('d'))).unwrap();
+        assert_eq!(app.config.expansion.len(), 1);
+        update(&mut app, key(KeyCode::Char('u'))).unwrap();
+        assert_eq!(app.config.expansion.len(), 2);
+        assert_eq!(Config::load(path).unwrap().expansion.len(), 2);
+    }
+
+    #[test]
+    fn reducer_search_then_edit_updates_the_matching_snippet() {
+        let (mut app, path) = test_app();
+        update(&mut app, key(KeyCode::Char('/'))).unwrap();
+        update(&mut app, key(KeyCode::Char('t'))).unwrap();
+        update(&mut app, key(KeyCode::Char('w'))).unwrap();
+        update(&mut app, key(KeyCode::Enter)).unwrap();
+        update(&mut app, key(KeyCode::Char('e'))).unwrap();
+        update(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        )
+        .unwrap();
+        update(&mut app, key(KeyCode::Char('u'))).unwrap();
+        update(&mut app, key(KeyCode::Char('p'))).unwrap();
+        update(&mut app, key(KeyCode::Char('d'))).unwrap();
+        update(&mut app, key(KeyCode::Char('a'))).unwrap();
+        update(&mut app, key(KeyCode::Char('t'))).unwrap();
+        update(&mut app, key(KeyCode::Char('e'))).unwrap();
+        update(&mut app, key(KeyCode::Enter)).unwrap();
+        assert_eq!(app.config.expansion[1].replacement, "update");
+        assert_eq!(Config::load(path).unwrap().expansion[1].replacement, "update");
+    }
+
+    #[test]
+    fn external_edits_prefer_the_private_runtime_directory() {
+        let runtime = std::env::temp_dir();
+        assert_eq!(
+            external_edit_directory(Some(runtime.clone().into_os_string())),
+            runtime
+        );
+        // Unset, relative, or missing runtime directories fall back to /tmp.
+        assert_eq!(external_edit_directory(None), std::env::temp_dir());
+        assert_eq!(
+            external_edit_directory(Some("relative/dir".into())),
+            std::env::temp_dir()
+        );
+        assert_eq!(
+            external_edit_directory(Some("/nonexistent/wayexpand-runtime".into())),
+            std::env::temp_dir()
+        );
+    }
     use std::fs;
 
     #[test]
