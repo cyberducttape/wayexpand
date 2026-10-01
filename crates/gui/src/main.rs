@@ -92,7 +92,8 @@ struct GuiApp {
     undo_bytes: usize,
     status: Status,
     paused: bool,
-    daemon_connected: Option<bool>,
+    daemon_reachable: Option<bool>,
+    route_state: Option<runtime::RouteState>,
     diagnostics_open: bool,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
@@ -500,7 +501,8 @@ impl GuiApp {
             self.diagnostics_running = false;
             self.pending_control = 0;
             self.pending_reload_revision = None;
-            self.daemon_connected = Some(false);
+            self.daemon_reachable = Some(false);
+            self.route_state = None;
             self.status = Status::error(self.strings.background_runtime_stopped());
         }
         for completion in completions {
@@ -511,7 +513,8 @@ impl GuiApp {
                     self.protocol_probes = snapshot.protocol_probes;
                     self.daemon_status = snapshot.daemon_status;
                     self.daemon_capabilities = snapshot.daemon_capabilities;
-                    self.daemon_connected = snapshot.daemon_connected;
+                    self.daemon_reachable = snapshot.daemon_reachable;
+                    self.route_state = snapshot.route_state;
                     if let Some(paused) = snapshot.paused {
                         self.paused = paused;
                     }
@@ -526,11 +529,11 @@ impl GuiApp {
                     match operation {
                         runtime::Operation::Reload(previous_status) => match result {
                             Ok(_) => {
-                                self.daemon_connected = Some(true);
+                                self.daemon_reachable = Some(true);
                                 self.status = previous_status;
                             }
                             Err(error) => {
-                                self.daemon_connected = Some(false);
+                                self.daemon_reachable = Some(false);
                                 self.status = previous_status.with_caveat(
                                     self.strings.status_daemon_not_reloaded(&error.to_string()),
                                 )
@@ -538,7 +541,7 @@ impl GuiApp {
                         },
                         runtime::Operation::Pause { paused } => match result {
                             Ok(_) => {
-                                self.daemon_connected = Some(true);
+                                self.daemon_reachable = Some(true);
                                 self.paused = paused;
                                 self.status = Status::success(if paused {
                                     self.strings.status_paused()
@@ -547,7 +550,7 @@ impl GuiApp {
                                 });
                             }
                             Err(error) => {
-                                self.daemon_connected = Some(false);
+                                self.daemon_reachable = Some(false);
                                 self.status = Status::error(
                                     self.strings.status_control_unavailable(&error.to_string()),
                                 )
@@ -558,7 +561,8 @@ impl GuiApp {
                                 self.daemon_capabilities =
                                     runtime::DaemonCapabilities::parse(&response);
                                 self.daemon_status = response.trim().replace('\n', " · ");
-                                self.daemon_connected = runtime::parse_connected(&response);
+                                self.daemon_reachable = Some(true);
+                                self.route_state = runtime::parse_route_state(&response);
                                 if let Some(paused) = runtime::parse_paused(&response) {
                                     self.paused = paused;
                                 }
@@ -566,7 +570,8 @@ impl GuiApp {
                             Err(error) => {
                                 self.daemon_capabilities = None;
                                 self.daemon_status = format!("Unavailable: {error}");
-                                self.daemon_connected = Some(false);
+                                self.daemon_reachable = Some(false);
+                                self.route_state = None;
                             }
                         },
                     }
@@ -1594,140 +1599,189 @@ impl GuiApp {
                     }),
             )
             .show(root, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
-                    ui.label(RichText::new("WayExpand").heading().strong());
-                    ui.label(RichText::new(self.strings.title()).color(palette.muted));
-                    ui.add_space(8.0);
-                    theme::pill(
-                        ui,
-                        self.strings.snippets_count(self.config.expansion.len()),
-                        palette.muted,
-                        palette.surface_hover,
-                    );
-                    if !self.config.hotkey.is_empty() {
-                        theme::pill(
-                            ui,
-                            self.strings.hotkeys_count(self.config.hotkey.len()),
-                            palette.muted,
-                            palette.surface_hover,
-                        );
-                    }
-                    if self.draft_is_dirty() {
-                        theme::pill(
-                            ui,
-                            self.strings.unsaved_changes(),
-                            palette.warning,
-                            theme::tint(palette.warning, 38),
-                        );
-                    }
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    let ctx = ui.ctx().clone();
-                    let (health_label, health_color) = match self.daemon_connected {
-                        Some(true) if self.paused => {
-                            (self.strings.paused_status(), palette.warning)
+                // One row when there is room: identity on the left, the
+                // controls people reach for on the right. Narrow windows fall
+                // back to a second row for search instead of overlapping.
+                let single_row = ui.available_width() >= 980.0;
+                ui.horizontal(|ui| {
+                    self.render_toolbar_brand(ui, palette);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.render_toolbar_controls(ui, palette);
+                        if single_row {
+                            ui.add_space(4.0);
+                            self.render_search(ui);
                         }
-                        Some(true) => (self.strings.running_status(), palette.success),
-                        Some(false) => (self.strings.disconnected_status(), palette.danger),
-                        None => (self.strings.status_unknown(), palette.muted),
-                    };
-                    let health_bg = theme::tint(health_color, 38);
-                    if ui
-                        .add(
-                            egui::Button::new(health_label)
-                                .fill(health_bg)
-                                .stroke(egui::Stroke::NONE)
-                                .corner_radius(egui::CornerRadius::same(255))
-                                .min_size(egui::vec2(0.0, 30.0)),
-                        )
-                        .on_hover_text(self.daemon_status.clone())
-                        .clicked()
-                    {
-                        self.diagnostics_open = true;
-                        self.refresh_diagnostics(true);
-                    }
-                    let more_actions = self.strings.more_actions();
-                    let actions_response = ui
-                        .menu_button(more_actions, |ui| {
-                            if ui.button(self.strings.reload()).clicked() {
-                                self.request_action(PendingAction::Reload);
-                                ui.close();
-                            }
-                            if ui
-                                .add_enabled(
-                                    self.pending_control == 0 && !self.diagnostics_running,
-                                    egui::Button::new(if self.paused {
-                                        self.strings.resume()
-                                    } else {
-                                        self.strings.pause()
-                                    }),
-                                )
-                                .clicked()
-                            {
-                                self.toggle_pause();
-                                ui.close();
-                            }
-                            if ui.button(self.strings.diagnostics()).clicked() {
-                                self.diagnostics_open = true;
-                                self.refresh_diagnostics(true);
-                                ui.close();
-                            }
-                            if ui.button(self.strings.import_espanso()).clicked() {
-                                self.import_open = true;
-                                self.import_preview = None;
-                                ui.close();
-                            }
-                            ui.separator();
-                            if ui.button(self.strings.settings()).clicked() {
-                                self.open_settings();
-                                ui.close();
-                            }
-                            if ui
-                                .button(if self.dark_mode {
-                                    self.strings.theme_light()
-                                } else {
-                                    self.strings.theme_dark()
-                                })
-                                .clicked()
-                            {
-                                self.set_dark_mode(&ctx, !self.dark_mode);
-                                ui.close();
-                            }
-                        })
-                        .response;
-                    actions_response.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
-                    });
-                    actions_response.on_hover_text(more_actions);
-                });
-                ui.add_space(10.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.add(
-                        TextEdit::singleline(&mut self.filter)
-                            .id(egui::Id::new(SEARCH_FIELD_SALT))
-                            .hint_text(self.strings.search_placeholder())
-                            .desired_width(260.0),
-                    )
-                    .on_hover_text(self.strings.search_tooltip());
-                    ui.menu_button(self.strings.search_fields(), |ui| {
-                        ui.checkbox(
-                            &mut self.search_fields.triggers,
-                            self.strings.search_triggers(),
-                        );
-                        ui.checkbox(
-                            &mut self.search_fields.descriptions,
-                            self.strings.search_descriptions(),
-                        );
-                        ui.checkbox(&mut self.search_fields.tags, self.strings.search_tags());
-                        ui.checkbox(
-                            &mut self.search_fields.replacements,
-                            self.strings.search_replacements(),
-                        );
                     });
                 });
+                if !single_row {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.render_search(ui);
+                        });
+                    });
+                }
             });
+    }
+
+    fn render_toolbar_brand(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
+        ui.label(RichText::new("WayExpand").heading().strong());
+        ui.label(RichText::new(self.strings.title()).color(palette.muted));
+        ui.add_space(8.0);
+        theme::pill(
+            ui,
+            self.strings.snippets_count(self.config.expansion.len()),
+            palette.muted,
+            palette.surface_hover,
+        );
+        if !self.config.hotkey.is_empty() {
+            theme::pill(
+                ui,
+                self.strings.hotkeys_count(self.config.hotkey.len()),
+                palette.muted,
+                palette.surface_hover,
+            );
+        }
+    }
+
+    /// Daemon health and the actions menu, laid out right to left.
+    fn render_toolbar_controls(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let ctx = ui.ctx().clone();
+        let (daemon_label, daemon_color) = match self.daemon_reachable {
+            Some(true) => (self.strings.daemon_running_status(), palette.success),
+            Some(false) => (self.strings.daemon_unreachable_status(), palette.danger),
+            None => (self.strings.daemon_unknown_status(), palette.muted),
+        };
+        let (route_label, route_color) = match self.route_state {
+            Some(runtime::RouteState::Connected) if self.paused =>
+                (self.strings.route_paused_status(), palette.warning),
+            Some(runtime::RouteState::Connected) =>
+                (self.strings.route_connected_status(), palette.success),
+            Some(runtime::RouteState::Reconnecting) =>
+                (self.strings.route_reconnecting_status(), palette.warning),
+            Some(runtime::RouteState::Starting) =>
+                (self.strings.route_starting_status(), palette.warning),
+            Some(runtime::RouteState::Degraded) =>
+                (self.strings.route_degraded_status(), palette.warning),
+            Some(runtime::RouteState::Failed) =>
+                (self.strings.route_failed_status(), palette.danger),
+            Some(runtime::RouteState::Stopped) =>
+                (self.strings.route_stopped_status(), palette.muted),
+            None => (self.strings.route_unknown_status(), palette.muted),
+        };
+        let more_actions = self.strings.more_actions();
+        let actions_response = ui
+            .menu_button(more_actions, |ui| {
+                if ui.button(self.strings.reload()).clicked() {
+                    self.request_action(PendingAction::Reload);
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        self.pending_control == 0,
+                        egui::Button::new(if self.paused {
+                            self.strings.resume()
+                        } else {
+                            self.strings.pause()
+                        }),
+                    )
+                    .clicked()
+                {
+                    self.toggle_pause();
+                    ui.close();
+                }
+                if ui.button(self.strings.diagnostics()).clicked() {
+                    self.diagnostics_open = true;
+                    self.refresh_diagnostics(true);
+                    ui.close();
+                }
+                if ui.button(self.strings.import_espanso()).clicked() {
+                    self.import_open = true;
+                    self.import_preview = None;
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(self.strings.settings()).clicked() {
+                    self.open_settings();
+                    ui.close();
+                }
+                if ui
+                    .button(if self.dark_mode {
+                        self.strings.theme_light()
+                    } else {
+                        self.strings.theme_dark()
+                    })
+                    .clicked()
+                {
+                    self.set_dark_mode(&ctx, !self.dark_mode);
+                    ui.close();
+                }
+            })
+            .response;
+        actions_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
+        });
+        actions_response.on_hover_text(more_actions);
+        if ui
+            .add(
+                egui::Button::new(RichText::new(route_label).color(route_color))
+                    .fill(theme::tint(route_color, 38))
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(255))
+                    .min_size(egui::vec2(0.0, 30.0)),
+            )
+            .on_hover_text(self.daemon_status.clone())
+            .clicked()
+        {
+            self.diagnostics_open = true;
+            self.refresh_diagnostics(true);
+        }
+        // The first-run screen has its own step for this.
+        theme::pill(
+            ui,
+            daemon_label,
+            daemon_color,
+            theme::tint(daemon_color, 38),
+        );
+        if self.daemon_reachable == Some(false) && !self.config.expansion.is_empty() {
+            self.turn_on_button(ui, palette);
+        }
+    }
+
+    /// The search field and its field-scope menu, laid out right to left.
+    fn render_search(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button(self.strings.search_fields(), |ui| {
+            ui.checkbox(
+                &mut self.search_fields.triggers,
+                self.strings.search_triggers(),
+            );
+            ui.checkbox(
+                &mut self.search_fields.descriptions,
+                self.strings.search_descriptions(),
+            );
+            ui.checkbox(&mut self.search_fields.tags, self.strings.search_tags());
+            ui.checkbox(
+                &mut self.search_fields.replacements,
+                self.strings.search_replacements(),
+            );
+        });
+        if !self.filter.is_empty()
+            && ui
+                .small_button("×")
+                .on_hover_text(self.strings.clear_filters())
+                .clicked()
+        {
+            self.filter.clear();
+        }
+        ui.add(
+            TextEdit::singleline(&mut self.filter)
+                .id(egui::Id::new(SEARCH_FIELD_SALT))
+                .hint_text(self.strings.search_placeholder())
+                .margin(egui::Margin::symmetric(10, 7))
+                .desired_width(280.0),
+        )
+        .on_hover_text(self.strings.search_tooltip());
     }
 
     fn render_diagnostics(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -1756,7 +1810,7 @@ impl GuiApp {
                     theme::card(ui, palette, |ui| {
                         ui.label(RichText::new(&self.daemon_status).monospace());
                     });
-                    if self.daemon_connected == Some(true) {
+                    if self.daemon_reachable == Some(true) {
                         let capabilities = self.daemon_capabilities.unwrap_or_default();
                         ui.add_space(8.0);
                         theme::section_header(ui, "", self.strings.capture_guarantees());
@@ -4438,7 +4492,7 @@ mod tests {
         config.save_atomic(&path).unwrap();
         let mut app = GuiApp::load(path.clone()).unwrap();
         app.diagnostics_open = true;
-        app.daemon_connected = Some(true);
+        app.daemon_reachable = Some(true);
         app.daemon_capabilities = Some(runtime::DaemonCapabilities {
             capture_sensitive_focus: Some(false),
             capture_exclusive: Some(false),

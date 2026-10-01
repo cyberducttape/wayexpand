@@ -13,7 +13,7 @@ use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
     input_poll_interval, next_retry_delay, wait_for_retry,
 };
-use output_loop::connect_output_with_retry;
+use output_loop::{connect_output_backend, connect_output_with_retry};
 use reload::ReloadableConfig;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
@@ -176,7 +176,17 @@ impl EventError {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // `fmt::init()` falls back to ERROR-only when RUST_LOG is unset, which
+    // silently dropped every warning (policy violations, rejected reloads,
+    // reconnects) from the journal. Default to info; RUST_LOG still wins.
+    // Colour codes only belong on a terminal, not in journald.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+        .init();
     let (path, explicit_source, explicit_backend, allow_evdev_sensitive_fields, use_fleet) =
         parse_args()?;
 
@@ -527,6 +537,70 @@ fn main() -> Result<()> {
                 active_backend,
             )?;
         }
+        if let Some(id) = control.take_insert_request() {
+            // An explicit insert (quick-insert picker, `wayexpand insert`)
+            // types a snippet at the cursor through the same injector and
+            // evdev safety gate as a typed expansion. It is a user action,
+            // so a refusal or injection failure is logged, never fatal.
+            match config.engine.prepare_insert(&id) {
+                Ok(result) => {
+                    let gating = if evdev_mode {
+                        apply_evdev_gating(vec![result], &mut evdev)
+                    } else {
+                        EvdevGatingOutcome {
+                            results: vec![result],
+                            follow_up: Vec::new(),
+                            abandoned: Vec::new(),
+                        }
+                    };
+                    if !gating.abandoned.is_empty() {
+                        warn!("requested snippet insert abandoned because input arrived first");
+                    }
+                    let outcome = if gating.results.is_empty() {
+                        Ok(())
+                    } else if input_method_mode {
+                        match input_method.as_mut() {
+                            Some(source) => apply_results(
+                                &mut config.engine,
+                                gating.results,
+                                Some(source),
+                                &policy,
+                                active_backend,
+                            ),
+                            None => {
+                                warn!(
+                                    "requested snippet insert skipped: input method reconnecting"
+                                );
+                                Ok(())
+                            }
+                        }
+                    } else if let Some(mut backend) = injector.take() {
+                        let outcome = apply_results(
+                            &mut config.engine,
+                            gating.results,
+                            Some(backend.as_mut()),
+                            &policy,
+                            active_backend,
+                        );
+                        injector = Some(backend);
+                        outcome
+                    } else {
+                        warn!("requested snippet insert skipped: no injection backend");
+                        Ok(())
+                    };
+                    if let Err(error) = outcome {
+                        warn!(%error, "requested snippet insert failed");
+                    }
+                    replay_evdev_follow_up(
+                        &mut config.engine,
+                        gating.follow_up,
+                        &policy,
+                        active_backend,
+                    )?;
+                }
+                Err(error) => warn!(%error, "requested snippet insert refused"),
+            }
+        }
         set_daemon_status_with_runtime_capabilities(
             &mut status_publisher,
             &control,
@@ -556,6 +630,43 @@ fn main() -> Result<()> {
                 .as_ref()
                 .is_some_and(backend_lifecycle::WindowTrackerHandle::is_connected),
         );
+        // Output recovery is deliberately one attempt per reactor turn. A
+        // portal or compositor outage must not park control, reload, status,
+        // or shutdown handling inside an exponential-backoff sleep.
+        if injector.is_none()
+            && !input_method_mode
+            && backend_name != "none"
+            && output_retry_at.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            match connect_output_backend(
+                backend_name,
+                config.engine.libei_token_persistence(),
+                portal_token_path.as_deref(),
+            ) {
+                Ok(backend) => {
+                    injector = Some(backend);
+                    output_retry_at = None;
+                    output_retry_delay = Duration::from_millis(250);
+                    connection_state = "connected";
+                    set_daemon_status(
+                        &mut status_publisher,
+                        &control,
+                        active_source,
+                        backend_name,
+                        connection_state,
+                        &path,
+                        config.healthy(),
+                    );
+                    info!(backend = backend_name, "output backend reconnected");
+                }
+                Err(error) if error.retryable => {
+                    output_retry_at = Some(Instant::now() + output_retry_delay);
+                    output_retry_delay = next_retry_delay(output_retry_delay);
+                    warn!(%error, backend = backend_name, "output backend unavailable; retry scheduled");
+                }
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+        }
         if input_method_mode {
             if input_method.is_none() {
                 match connect_input_method_session(
@@ -816,20 +927,8 @@ fn main() -> Result<()> {
                                 &path,
                                 config.healthy(),
                             );
-                            let Some(reconnected) = connect_output_with_retry(
-                                &control,
-                                active_source,
-                                backend_name,
-                                &path,
-                                config.healthy(),
-                                config.engine.libei_token_persistence(),
-                                portal_token_path.as_deref(),
-                            )?
-                            else {
-                                break;
-                            };
-                            injector = Some(reconnected);
-                            connection_state = "connected";
+                            output_retry_at = Some(Instant::now());
+                            output_retry_delay = Duration::from_millis(250);
                         }
                         Err(error) => return Err(error.into()),
                     }
@@ -939,20 +1038,8 @@ fn main() -> Result<()> {
                                 &path,
                                 config.healthy(),
                             );
-                            let Some(reconnected) = connect_output_with_retry(
-                                &control,
-                                active_source,
-                                backend_name,
-                                &path,
-                                config.healthy(),
-                                config.engine.libei_token_persistence(),
-                                portal_token_path.as_deref(),
-                            )?
-                            else {
-                                break;
-                            };
-                            injector = Some(reconnected);
-                            connection_state = "connected";
+                            output_retry_at = Some(Instant::now());
+                            output_retry_delay = Duration::from_millis(250);
                         }
                     }
                     if let Some(backend) = injector.as_deref_mut() {

@@ -148,6 +148,36 @@ impl Strings {
         }
     }
 
+    pub fn daemon_running_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Daemon: Running",
+            Language::German => "Daemon: Aktiv",
+        }
+    }
+
+    pub fn daemon_unreachable_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Daemon: Unreachable",
+            Language::German => "Daemon: Nicht erreichbar",
+        }
+    }
+
+    pub fn daemon_unknown_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Daemon: Checking…",
+            Language::German => "Daemon: Wird geprüft…",
+        }
+    }
+
+    pub fn route_connected_status(&self) -> &'static str { "Expansion route: Connected" }
+    pub fn route_paused_status(&self) -> &'static str { "Expansion route: Paused" }
+    pub fn route_reconnecting_status(&self) -> &'static str { "Expansion route: Reconnecting…" }
+    pub fn route_starting_status(&self) -> &'static str { "Expansion route: Starting…" }
+    pub fn route_degraded_status(&self) -> &'static str { "Expansion route: Degraded" }
+    pub fn route_failed_status(&self) -> &'static str { "Expansion route: Failed" }
+    pub fn route_stopped_status(&self) -> &'static str { "Expansion route: Stopped" }
+    pub fn route_unknown_status(&self) -> &'static str { "Expansion route: Unknown" }
+
     pub fn technical_details(&self) -> &'static str {
         match self.lang {
             Language::English => "Technical details",

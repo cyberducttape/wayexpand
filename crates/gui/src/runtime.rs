@@ -61,9 +61,20 @@ pub(crate) struct DiagnosticsSnapshot {
     pub protocol_probes: Vec<(String, String)>,
     pub daemon_status: String,
     pub daemon_capabilities: Option<DaemonCapabilities>,
-    pub daemon_connected: Option<bool>,
+    pub daemon_reachable: Option<bool>,
+    pub route_state: Option<RouteState>,
     pub paused: Option<bool>,
     pub announce: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RouteState {
+    Connected,
+    Reconnecting,
+    Starting,
+    Degraded,
+    Failed,
+    Stopped,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -200,20 +211,15 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     };
     let protocol_probes = diagnostics::probe_protocols();
     let daemon_response = control_command("status");
-    let daemon_connected = Some(
-        daemon_response
-            .as_ref()
-            .ok()
-            .and_then(|response| parse_connected(response))
-            .unwrap_or(false),
-    );
-    let (daemon_status, daemon_capabilities, paused) = match daemon_response {
+    let daemon_reachable = Some(daemon_response.is_ok());
+    let (daemon_status, daemon_capabilities, route_state, paused) = match daemon_response {
         Ok(response) => (
             response.trim().replace('\n', " · "),
             DaemonCapabilities::parse(&response),
+            parse_route_state(&response),
             parse_paused(&response),
         ),
-        Err(error) => (format!("Unavailable: {error}"), None, None),
+        Err(error) => (format!("Unavailable: {error}"), None, None, None),
     };
     DiagnosticsSnapshot {
         backend_status,
@@ -221,16 +227,28 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         protocol_probes,
         daemon_status,
         daemon_capabilities,
-        daemon_connected,
+        daemon_reachable,
+        route_state,
         paused,
         announce,
     }
 }
 
-pub(crate) fn parse_connected(response: &str) -> Option<bool> {
+pub(crate) fn parse_route_state(response: &str) -> Option<RouteState> {
     response.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
-        (key == "state").then(|| value == "connected")
+        if key != "state" {
+            return None;
+        }
+        Some(match value {
+            "connected" | "running" => RouteState::Connected,
+            "reconnecting" => RouteState::Reconnecting,
+            "starting" => RouteState::Starting,
+            "degraded" => RouteState::Degraded,
+            "failed" => RouteState::Failed,
+            "stopped" => RouteState::Stopped,
+            _ => return None,
+        })
     })
 }
 
@@ -241,7 +259,7 @@ pub(crate) fn parse_paused(response: &str) -> Option<bool> {
     })
 }
 
-fn control_command(command: &str) -> anyhow::Result<String> {
+pub(crate) fn control_command(command: &str) -> anyhow::Result<String> {
     let path = env::var_os("WAYEXPAND_SOCKET")
         .map(PathBuf::from)
         .or_else(|| {
@@ -265,6 +283,7 @@ fn control_command(command: &str) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::RouteState;
     #[test]
     fn paused_state_parser_ignores_unrelated_status_lines() {
         assert_eq!(
@@ -277,9 +296,11 @@ mod tests {
 
     #[test]
     fn connection_parser_requires_the_daemon_state_field() {
-        assert_eq!(super::parse_connected("state=connected\n"), Some(true));
-        assert_eq!(super::parse_connected("state=stopped\n"), Some(false));
-        assert_eq!(super::parse_connected("running\npaused=false\n"), None);
+        assert_eq!(super::parse_route_state("state=connected\n"), Some(RouteState::Connected));
+        assert_eq!(super::parse_route_state("state=stopped\n"), Some(RouteState::Stopped));
+        assert_eq!(super::parse_route_state("running\npaused=false\n"), None);
+        assert_eq!(super::parse_route_state("state=running\n"), Some(RouteState::Connected));
+        assert_eq!(super::parse_route_state("state=reconnecting\n"), Some(RouteState::Reconnecting));
     }
 
     #[test]
