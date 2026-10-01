@@ -549,6 +549,11 @@ pub(crate) fn capitalize_first_letter(text: &str) -> String {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CommandConfig {
+    /// Named policy-controlled action executed by the optional Action Broker.
+    /// This is mutually exclusive with `program`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default)]
     pub program: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -1195,7 +1200,13 @@ impl Config {
                     reason: "description is too long or contains NUL",
                 });
             }
-            if binding.command.program.trim().is_empty()
+            if (binding.command.action.is_some() && !binding.command.program.trim().is_empty())
+                || (binding.command.action.is_none() && binding.command.program.trim().is_empty())
+                || binding.command.action.as_ref().is_some_and(|action| {
+                    action.trim().is_empty()
+                        || action.chars().count() > MAX_COMMAND_PROGRAM_CHARS
+                        || action.contains('\0')
+                })
                 || binding.command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
                 || binding.command.program.contains('\0')
                 || binding.command.args.len() > MAX_COMMAND_ARGS
@@ -1217,6 +1228,7 @@ impl Config {
             if self
                 .organization
                 .command_path_is_blocked(&binding.command.program)
+                && binding.command.action.is_none()
             {
                 return Err(ConfigError::InvalidHotkey {
                     index,
@@ -1343,10 +1355,12 @@ impl Config {
                 return Err(ConfigError::InvalidCategory { index });
             }
             if let Some(command) = &expansion.command {
-                if command.program.trim().is_empty() {
+                if (command.action.is_some() && !command.program.trim().is_empty())
+                    || (command.action.is_none() && command.program.trim().is_empty())
+                {
                     return Err(ConfigError::InvalidCommand {
                         index,
-                        reason: "program is empty",
+                        reason: "command must specify exactly one of action or program",
                     });
                 }
                 if command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
@@ -1357,7 +1371,9 @@ impl Config {
                         reason: "program is too long or contains NUL",
                     });
                 }
-                if self.organization.command_path_is_blocked(&command.program) {
+                if command.action.is_none()
+                    && self.organization.command_path_is_blocked(&command.program)
+                {
                     return Err(ConfigError::InvalidCommand {
                         index,
                         reason: "program must be an absolute path by organization policy",

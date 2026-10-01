@@ -81,6 +81,9 @@ pub(super) fn run_command_with_shutdown(
     command: &CommandConfig,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
+    if let Some(action_id) = &command.action {
+        return run_broker_action(action_id, command, shutdown);
+    }
     #[cfg(unix)]
     {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
@@ -104,6 +107,55 @@ pub(super) fn run_command_with_shutdown(
     {
         let _ = (command, shutdown);
         unreachable!("wayexpand-core requires a Unix target")
+    }
+}
+
+fn run_broker_action(
+    action_id: &str,
+    command: &CommandConfig,
+    shutdown: Option<&AtomicBool>,
+) -> Result<String, CommandError> {
+    if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(CommandError::StaleInput);
+    }
+    let socket = std::env::var_os("WAYEXPAND_ACTION_BROKER_SOCKET")
+        .or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR").map(|dir| {
+                std::path::PathBuf::from(dir)
+                    .join("wayexpand-broker.sock")
+                    .into_os_string()
+            })
+        })
+        .ok_or_else(|| CommandError::WaitFailed("action broker socket is not configured".into()))?;
+    let mut client = action_broker::BrokerClient::connect(socket).map_err(|error| {
+        CommandError::WaitFailed(format!("connecting to action broker: {error}"))
+    })?;
+    let env_vars = command
+        .pass_env
+        .iter()
+        .filter_map(|name| {
+            std::env::var(name)
+                .ok()
+                .map(|value| format!("{name}={value}"))
+        })
+        .collect();
+    client
+        .send_request(&action_broker::ActionRequest {
+            action_id: action_id.to_owned(),
+            timeout_ms: command.timeout_ms,
+            inherit_env: false,
+            env_vars,
+            stdout_capture: true,
+        })
+        .map_err(|error| CommandError::WaitFailed(format!("sending broker request: {error}")))?;
+    match client
+        .recv_response()
+        .map_err(|error| CommandError::WaitFailed(format!("receiving broker response: {error}")))?
+    {
+        action_broker::ActionResponse::Success(output) => Ok(output.stdout),
+        action_broker::ActionResponse::Error(error) => {
+            Err(CommandError::WaitFailed(error.to_string()))
+        }
     }
 }
 

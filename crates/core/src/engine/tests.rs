@@ -2242,6 +2242,7 @@ fn hotkey_descendants_are_cleaned_up_on_successful_exit() {
         chord: KeyChord::parse("Ctrl+Alt+H").unwrap(),
         description: "descendant cleanup test".into(),
         command: CommandConfig {
+            action: None,
             program: script_path.display().to_string(),
             args: Vec::new(),
             timeout_ms: 5000,
@@ -2291,6 +2292,7 @@ fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let command = CommandConfig {
+        action: None,
         program: script_path.clone(),
         args: Vec::new(),
         timeout_ms: 5000,
@@ -2589,6 +2591,7 @@ fn undo_is_disabled_when_intervening_input_occurs() {
 #[cfg(unix)]
 fn cancelling_a_running_command_returns_without_waiting_for_timeout() {
     let command = CommandConfig {
+        action: None,
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), "sleep 60".to_string()],
         timeout_ms: 60_000,
@@ -2620,6 +2623,7 @@ fn command_rejects_output_when_descendant_keeps_stdout_open() {
         std::process::id()
     );
     let command = CommandConfig {
+        action: None,
         program: "/bin/sh".to_string(),
         args: vec![
             "-c".to_string(),
@@ -2666,6 +2670,7 @@ fn child_process_is_cleaned_up_when_output_exceeds_limit() {
     );
 
     let command = CommandConfig {
+        action: None,
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), shell_command],
         timeout_ms: 5000,

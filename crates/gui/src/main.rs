@@ -4632,6 +4632,7 @@ mod tests {
             propagate_case: false,
         };
         source.command = Some(wayexpand_core::CommandConfig {
+            action: None,
             program: "/usr/bin/foo ".into(),
             args: vec![String::new(), " foo ".into(), "hello\nworld".into()],
             timeout_ms: 900,
@@ -5530,6 +5531,7 @@ mod tests {
                     app_filter: Vec::new(),
                     match_mode: MatchMode::WordBoundary,
                     command: Some(wayexpand_core::CommandConfig {
+                        action: None,
                         program: "uname".into(),
                         args: vec!["-s".into()],
                         timeout_ms: 500,

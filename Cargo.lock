@@ -4138,6 +4138,7 @@ dependencies = [
 name = "wayexpand-core"
 version = "1.2.0"
 dependencies = [
+ "action-broker",
  "criterion",
  "getrandom 0.4.3",
  "libc",

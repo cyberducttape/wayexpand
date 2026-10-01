@@ -1,23 +1,21 @@
 # Action Broker Architecture
 
 **Version:** 1.2.0
-**Status:** Experimental prototype; excluded from normal daemon routing and not a security boundary
-**Next:** Policy routing, service integration, and external sandbox integration before enablement
+**Status:** Integrated named-action execution; network/filesystem isolation remains a deployment responsibility
+**Next:** Managed service packaging and per-action OS sandbox profiles
 
 ## Overview
 
-The Action Broker is an experimental design for separating command execution
-from keyboard capture. It is not enabled by default and must not be treated as
-a sandbox: network and filesystem isolation are deployment responsibilities
-until a concrete service/container policy is integrated. The mature restricted
-command runner remains the safer default.
+The Action Broker separates named command execution from keyboard capture. A
+snippet may reference `action = "cluster-status"`; the daemon sends only that
+name over a protected Unix socket. The broker's executable, fixed arguments,
+working directory, timeout, output capture, and environment allowlist remain
+server-side policy. The broker is not itself an OS sandbox: network and
+filesystem isolation still require service-level hardening.
 
-The standalone binary is behind the Cargo feature
-`experimental-action-broker`; normal builds and distribution packages do not
-enable or install it. The daemon has no broker client integration. Enabling the
-feature only builds the prototype binary—it does not connect it to snippets,
-policy routing, a managed service, or an audit sink. Do not use it as a
-production security boundary.
+The standalone binary is now part of normal workspace builds. Set
+`WAYEXPAND_ACTION_BROKER_SOCKET` for the daemon (or use the default socket under
+`$XDG_RUNTIME_DIR`) and run the broker with a mode-0600 configuration.
 
 The design aims to provide:
 - **Daemon isolation** - Keyboard capture stays locked down (no network)
@@ -25,14 +23,33 @@ The design aims to provide:
 - **Audit trail** - Planned; no execution audit sink is currently implemented
 - **Privilege separation** - Commands run with appropriate permissions
 
-## Target architecture (not current routing)
+## Runtime architecture
 
-The following diagram is the intended Phase 2 topology. In the current v1.2
-implementation, the daemon does not route expansion commands through this
-socket: its mature command path still executes configured commands in the
-daemon process under the daemon's policy and service sandbox. The standalone
-broker binary can be run manually, but no daemon policy or service lifecycle
-starts it automatically.
+The daemon's bounded command worker routes named actions through this socket;
+ordinary `program =` commands retain the existing restricted direct runner.
+
+An expansion references only the broker action name:
+
+```toml
+[[expansion]]
+trigger = ":cluster"
+replacement = ""
+
+[expansion.command]
+action = "cluster-status"
+timeout_ms = 3000
+```
+
+The corresponding broker policy fixes what may run:
+
+```toml
+[actions."cluster-status"]
+program = "/usr/bin/kubectl"
+args = ["cluster-info"]
+timeout_ms = 3000
+pass_env = ["KUBECONFIG"]
+cwd = "/home/stephan"
+```
 
 ```
 ┌─────────────────────────────┐
@@ -97,7 +114,7 @@ What's implemented:
 To build the standalone prototype explicitly from a checkout:
 
 ```sh
-cargo build --locked -p action-broker --features experimental-action-broker \
+  cargo build --locked -p action-broker \
   --bin wayexpand-action-broker
 ```
 

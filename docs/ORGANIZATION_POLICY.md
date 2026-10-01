@@ -243,9 +243,12 @@ wayexpand-policy: command execution is disabled by organization policy
 wayexpand-policy: backend 'evdev' is not in allowed list: ["input-method-v2"]
 ```
 
-## Future: Action Broker
+## Named actions through the Action Broker
 
-For fine-grained command control (planned for v1.3+), an Action Broker will enable per-action permission control. This feature is tracked in the [PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md).
+For fine-grained command control, use a named Action Broker action such as
+`action = "cluster-status"`. The broker owns the executable, fixed arguments,
+environment allowlist, working directory, timeout, and output policy. Network
+and filesystem isolation still require hardening the broker's service unit.
 
 ## See Also
 

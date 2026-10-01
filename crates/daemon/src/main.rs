@@ -1438,10 +1438,12 @@ fn process_event(
                     continue;
                 }
             }
-            if let Some(violation) = policy.command_path_violation(&action.command.program) {
-                policy::log_violation(policy, &violation);
-                if policy.command_path_is_blocked(&action.command.program) {
-                    continue;
+            if action.command.action.is_none() {
+                if let Some(violation) = policy.command_path_violation(&action.command.program) {
+                    policy::log_violation(policy, &violation);
+                    if policy.command_path_is_blocked(&action.command.program) {
+                        continue;
+                    }
                 }
             }
             if let Err(error) = engine.queue_hotkey(&action) {
@@ -1522,11 +1524,13 @@ fn dispatch_pending_results(
         let has_command = pending_result.command.is_some();
 
         if let Some(command) = &pending_result.command {
-            if let Some(violation) = policy.command_path_violation(&command.program) {
-                policy::log_violation(policy, &violation);
-                if policy.command_path_is_blocked(&command.program) {
-                    engine.restore_deferred_match(&pending_result.matched_text);
-                    continue;
+            if command.action.is_none() {
+                if let Some(violation) = policy.command_path_violation(&command.program) {
+                    policy::log_violation(policy, &violation);
+                    if policy.command_path_is_blocked(&command.program) {
+                        engine.restore_deferred_match(&pending_result.matched_text);
+                        continue;
+                    }
                 }
             }
         }

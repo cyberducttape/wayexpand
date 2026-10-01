@@ -168,6 +168,7 @@ impl Draft {
             anyhow::bail!("cache duration must not exceed 60000 milliseconds");
         }
         Ok(Some(CommandConfig {
+            action: None,
             program: program.clone(),
             args,
             timeout_ms,
