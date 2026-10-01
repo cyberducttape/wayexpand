@@ -7,6 +7,8 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,8 +19,47 @@ def active_documents() -> list[Path]:
     return [path for path in files if path.is_file()]
 
 
+def check_executable_toml(errors: list[str]) -> None:
+    """Parse and validate TOML blocks explicitly marked as executable."""
+    marker = re.compile(
+        r"<!--\s*executable-toml:\s*config\s*-->\s*```toml\n(.*?)```",
+        re.DOTALL,
+    )
+    cli = ROOT / "target/debug/wayexpand"
+    for document in active_documents():
+        text = document.read_text(encoding="utf-8")
+        for block_number, source in enumerate(marker.findall(text), start=1):
+            relative = document.relative_to(ROOT)
+            try:
+                tomllib.loads(source)
+            except tomllib.TOMLDecodeError as error:
+                errors.append(f"{relative} executable TOML block {block_number} is invalid: {error}")
+                continue
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".toml", prefix="wayexpand-doc-", delete=False
+            ) as config:
+                config.write(source)
+                config_path = Path(config.name)
+            try:
+                result = subprocess.run(
+                    [str(cli), "validate", "--json", str(config_path)],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            finally:
+                config_path.unlink(missing_ok=True)
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip().splitlines()[-1]
+                errors.append(
+                    f"{relative} executable TOML block {block_number} failed Config validation: {detail}"
+                )
+
+
 def main() -> int:
     errors: list[str] = []
+    check_executable_toml(errors)
     cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
     gui_source = (ROOT / "crates/gui/src/colorpack.rs").read_text(encoding="utf-8")
     broker_source = ROOT / "crates/action-broker/src/bin/wayexpand-action-broker.rs"
