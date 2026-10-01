@@ -671,7 +671,7 @@ impl ConfigError {
                     source.utf8_error().valid_up_to()
                 )
             }
-            Self::Parse(_) => "invalid TOML".into(),
+            Self::Parse(error) => parse_error_summary(error),
             Self::EmptyTrigger { index } => format!("expansion {index} has an empty trigger"),
             Self::InvalidExpansionId { index } => format!("expansion {index} has an invalid id"),
             Self::DuplicateExpansionId { first, second } => {
@@ -963,6 +963,7 @@ impl Config {
         Ok(ConfigRevision(Arc::from(text)))
     }
 
+    #[cfg(not(target_os = "linux"))]
     fn save_atomic_serialized(
         path: impl AsRef<Path>,
         serialized: &[u8],
@@ -1021,8 +1022,8 @@ impl Config {
                 })?;
                 // Recheck immediately before replacement to avoid downgrading
                 // a target that became root-owned while the temporary file was
-                // being written. Descriptor-relative replacement would be
-                // needed to close the remaining path race completely.
+                // being written. Linux uses the descriptor-relative variant
+                // below; this path is the portable fallback.
                 Self::validate_save_target_owner(&resolved)?;
                 fs::rename(&temp, &resolved).map_err(|source| ConfigError::Read {
                     path: resolved.display().to_string(),
@@ -1048,6 +1049,21 @@ impl Config {
                 "could not allocate a unique configuration temporary file",
             ),
         }))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn save_atomic_serialized(
+        path: impl AsRef<Path>,
+        serialized: &[u8],
+    ) -> Result<(), ConfigError> {
+        let resolved = resolve_config_target(path.as_ref())?;
+        validate_parent_directories(&resolved)?;
+        Self::validate_save_target_owner(&resolved)?;
+        let file_name = resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("expansions.toml");
+        save_atomic_serialized_relative(&resolved, file_name, serialized)
     }
 
     fn validate_save_target_owner(path: &Path) -> Result<(), ConfigError> {
@@ -1432,6 +1448,110 @@ impl Config {
     }
 }
 
+/// Replace a configuration through an opened parent directory. Once the
+/// directory descriptor is acquired, an attacker cannot redirect the temp
+/// file or final rename by swapping a path component between validation and
+/// replacement.
+#[cfg(target_os = "linux")]
+fn save_atomic_serialized_relative(
+    resolved: &Path,
+    file_name: &str,
+    serialized: &[u8],
+) -> Result<(), ConfigError> {
+    let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
+    let parent_fd = open_secure_directory(parent).map_err(|source| ConfigError::Read {
+        path: parent.display().to_string(),
+        source,
+    })?;
+    let mut last_error = None;
+    for attempt in 0..16 {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let temp_name = format!(".{file_name}.tmp.{}.{}.{}", std::process::id(), nonce, attempt);
+        let temp_fd = match rustix::fs::openat(
+            &parent_fd,
+            &temp_name,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::from_raw_mode(0o600),
+        ) {
+            Ok(fd) => fd,
+            Err(error) if error == rustix::io::Errno::EXIST => {
+                last_error = Some(ConfigError::Read {
+                    path: temp_name,
+                    source: error.into(),
+                });
+                continue;
+            }
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: parent.display().to_string(),
+                    source: source.into(),
+                });
+            }
+        };
+        let temp_path = parent.join(&temp_name);
+        let result = (|| -> Result<(), ConfigError> {
+            let mut file = fs::File::from(temp_fd);
+            file.write_all(serialized).map_err(|source| ConfigError::Read {
+                path: temp_path.display().to_string(),
+                source,
+            })?;
+            file.sync_all().map_err(|source| ConfigError::Read {
+                path: temp_path.display().to_string(),
+                source,
+            })?;
+            Config::validate_save_target_owner(resolved)?;
+            rustix::fs::renameat(&parent_fd, &temp_name, &parent_fd, file_name).map_err(
+                |source| ConfigError::Read {
+                    path: resolved.display().to_string(),
+                    source: source.into(),
+                },
+            )?;
+            parent_fd
+                .try_clone()
+                .and_then(|directory| directory.sync_all())
+                .map_err(|source| ConfigError::Read {
+                    path: parent.display().to_string(),
+                    source,
+                })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = rustix::fs::unlinkat(&parent_fd, &temp_name, rustix::fs::AtFlags::empty());
+        }
+        return result;
+    }
+    Err(last_error.unwrap_or_else(|| ConfigError::Read {
+        path: parent.display().to_string(),
+        source: std::io::Error::new(std::io::ErrorKind::AlreadyExists, "temporary path collision"),
+    }))
+}
+
+#[cfg(target_os = "linux")]
+fn open_secure_directory(path: &Path) -> std::io::Result<fs::File> {
+    let root = rustix::fs::open(
+        "/",
+            rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?;
+    let relative = path.strip_prefix("/").unwrap_or(path);
+    let directory = rustix::fs::openat2(
+        &root,
+        relative,
+        rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
+    )?;
+    Ok(fs::File::from(directory))
+}
+
 fn is_uuid(value: &str) -> bool {
     value.len() == 36
         && value.bytes().enumerate().all(|(index, byte)| {
@@ -1596,8 +1716,9 @@ fn validate_parent_directories(path: &Path) -> Result<(), ConfigError> {
         // In containerized/namespaced environments, this prevents false
         // rejections while maintaining protection against directory swaps.
         //
-        // Future: Consider fd-based openat2(O_PATH, RESOLVE_IN_ROOT) for
-        // stronger protection against TOCTOU races.
+        // Linux save operations additionally open this parent with openat2
+        // and perform temp creation/replacement relative to that descriptor.
+        // The path walk remains here for portable validation and diagnostics.
         if current == Path::new("/") {
             // Reached filesystem root. Root-owned "/" is a trust anchor.
             // In systemd private namespaces, uid 65534 (overflow) may appear;
@@ -1653,6 +1774,43 @@ fn root_owned_target_requires_admin(target_uid: u32, current_uid: u32) -> bool {
 
 fn parent_mode_is_secure(mode: u32) -> bool {
     mode & 0o022 == 0 || mode & 0o1000 != 0
+}
+
+/// Describe a TOML/schema error by location only. The `Display` form of a
+/// `toml` error quotes the offending source line, which can be snippet
+/// content, so only its "line N, column M" header is kept. Missing-field
+/// errors are named because serde reports schema field names there, never
+/// user-provided text.
+fn parse_error_summary(error: &toml::de::Error) -> String {
+    let rendered = error.to_string();
+    let location = rendered
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("TOML parse error at "))
+        .filter(|location| {
+            location.starts_with("line ")
+                && location
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || " ,".contains(character))
+        });
+    let missing_field = error
+        .message()
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.strip_suffix('`'))
+        .filter(|field| {
+            field
+                .chars()
+                .all(|character| character.is_ascii_lowercase() || character == '_')
+        });
+    let mut summary = String::from("invalid TOML");
+    if let Some(location) = location {
+        summary.push_str(" at ");
+        summary.push_str(location);
+    }
+    if let Some(field) = missing_field {
+        summary.push_str(&format!(" (missing field `{field}`)"));
+    }
+    summary
 }
 
 #[cfg(test)]
