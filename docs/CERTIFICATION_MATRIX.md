@@ -123,6 +123,45 @@ WayExpand requires Wayland and will not be actively supported on X11. Reasons:
 
 ## Testing Procedures
 
+### Golden route: KDE Plasma + evdev + libei
+
+The first production certification target is deliberately one narrow route:
+KDE Plasma/KWin, `evdev+libei`, KWin application tracking, and the required
+US, DE, FR, AltGr, and multi-layout profiles. This is a test target, not a
+certification claim; the checked-in matrix remains **Not certified** until a
+real session produces a reviewed artifact.
+
+Run the real client driver from a KDE session with GTK, Qt, a Chromium or
+Electron client, a terminal, a password field, and an editor available:
+
+```bash
+scripts/run-certification-driver.sh \
+  --driver /absolute/path/to/kde-golden-driver \
+  --compositor kde --version "$(plasmashell --version | head -n1)" \
+  --backend evdev+libei \
+  --layout us,de,fr,altgr,multi-layout-switching \
+  --target-apps gtk,qt,chromium,electron,terminal,password,editor \
+  --output /tmp/wayexpand-kde-results.txt \
+  --log-dir /tmp/wayexpand-kde-logs
+
+scripts/certify-compositor.sh \
+  --compositor kde --version "$(plasmashell --version | head -n1)" \
+  --backend evdev+libei \
+  --layout us,de,fr,altgr,multi-layout-switching \
+  --target-apps gtk,qt,chromium,electron,terminal,password,editor \
+  --results /tmp/wayexpand-kde-results.txt \
+  --format json --output docs/certification/kde-<date>.json
+```
+
+The driver must exercise every scenario in
+`tests/certification/compositor-matrix.json`, including pass-through for
+Escape, arrows, function keys, modifiers, restart/reconnection, suspend and
+resume, portal revocation, hotplug, Unicode/Compose, focus changes, password
+fields, and GTK/Qt/Electron clients. A report is publishable only when every
+in-scope scenario × layout × client cell is an observed `pass`, the doctor and
+daemon probes identify the requested KDE session and backend, and a reviewer
+checks the per-cell logs. `UNVERIFIED` is never a pass.
+
 ### For KDE Plasma 6.6.x manual testing
 
 The following reproduces the manual compatibility observations. It is not a
@@ -275,25 +314,41 @@ To report testing results for other compositors:
 
 ## Enterprise Deployment
 
-### Recommended Configuration
+The organization policy file controls enforcement; it does not select the
+capture, injection, or window-tracking route. Those are runtime/backend
+selection concerns and must be verified separately with the certification
+artifact. The following is an executable policy example:
+
+<!-- executable-toml: config -->
 ```toml
 [organization]
-# No certified configuration is currently published; review the machine-readable artifact.
-capture_method = "evdev"
-injection_method = "libei"
-window_tracking = "kwin-d-bus"
-
-# Enforce certified mode
-require_certified_mode = true
+safe_mode = true
+require_atomic_replace = true
+allowed_backends = ["libei"]
+audit_prefix = "wayexpand-enterprise"
 ```
 
-### Safe Fallback
+`allowed_backends = ["libei"]` permits only the libei injector once the
+selected input source has passed its runtime checks. It does not certify KDE,
+KWin tracking, password-field handling, or any client/toolkit; those claims
+require a checked-in evidence artifact.
+
+### Text-only fallback policy
+
+If the deployment intentionally permits the input-method-v2 text-only route,
+use a separate policy such as:
+
+<!-- executable-toml: config -->
 ```toml
 [organization]
-# If KDE Plasma not available, fall back to input-method-v2
-primary_mode = "kde-evdev-libei"
-fallback_mode = "input-method-v2-safe"  # No keyboard capture, text only
+safe_mode = true
+allowed_backends = ["input-method-v2"]
+require_sensitive_focus = true
+audit_prefix = "wayexpand-text-only"
 ```
+
+This policy still does not make the route certified. Active IME/preedit
+composition remains outside the certification scope.
 
 ## Getting Help
 
