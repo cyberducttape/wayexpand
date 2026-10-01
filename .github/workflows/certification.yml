@@ -20,7 +20,10 @@ jobs:
       matrix:
         include:
           - compositor: kde
-            backend: ibus
+            # Keep the scheduled KDE job on the documented production
+            # golden route. IBus is a separate integration path and must not
+            # silently stand in for evdev + libei certification.
+            backend: evdev+libei
           - compositor: gnome
             backend: ibus
           - compositor: sway
