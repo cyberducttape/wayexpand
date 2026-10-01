@@ -743,6 +743,47 @@ impl ConfigError {
 }
 
 impl Config {
+    /// Create the empty per-user configuration when it does not exist, then
+    /// load it through the same secure path used for existing files.
+    ///
+    /// This is intentionally an explicit onboarding operation. Read-only
+    /// commands such as `validate` and `doctor` continue to report a missing
+    /// configuration instead of mutating the user's filesystem.
+    pub fn ensure_user_config(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
+        let path = path.as_ref();
+        match Self::load_versioned(path) {
+            Ok(loaded) => Ok(loaded),
+            Err(ConfigError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                if let Some(parent) = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                {
+                    fs::create_dir_all(parent).map_err(|source| ConfigError::Read {
+                        path: parent.display().to_string(),
+                        source,
+                    })?;
+                    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(
+                        |source| ConfigError::Read {
+                            path: parent.display().to_string(),
+                            source,
+                        },
+                    )?;
+                }
+                let config = Self {
+                    expansion: Vec::new(),
+                    hotkey: Vec::new(),
+                    settings: Settings::default(),
+                    organization: OrganizationPolicy::default(),
+                };
+                config.save_atomic(path)?;
+                Self::load_versioned(path)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         Self::load_versioned(path).map(|loaded| loaded.config)
     }

@@ -424,7 +424,9 @@ They won't interfere — each handles different triggers. Gradually migrate snip
 1. **Better Wayland support:** Native protocols instead of XWayland translation
 2. **Diagnostics:** `wayexpand doctor` tells you exactly what works
 3. **Reliability:** Config validation before swap means no broken states
-4. **Privacy:** Password fields are explicitly protected
+4. **Privacy:** Password-field suppression is available through input-method-v2
+   when the compositor supplies reliable content-purpose information; validate
+   the compositor/client combination before treating it as certified
 5. **Organization:** App-scoped snippets and fleet deployment for teams
 6. **GUI:** Visual editor with live preview (no YAML editing required)
 

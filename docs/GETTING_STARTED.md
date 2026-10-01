@@ -189,10 +189,14 @@ Limited support due to GNOME's design (no window tracking protocol).
 **What works:**
 - Text capture via input-method-v2 when explicitly enabled (but no window
   tracking); this path remains uncertified
+- Sensitive-field suppression is implemented when GNOME supplies reliable
+  input-method-v2 content-purpose information; GNOME's behavior is not yet
+  certified, so verify it in the certification matrix before relying on it
 
 **What doesn't work:**
 - ❌ Window-specific snippets (app_filter)
-- ❌ Password field protection
+- ❌ Certified password-field protection (compositor/content-purpose behavior
+  is not yet validated)
 
 **Recommendation:**
 - Use **global hotkeys** instead of trigger-based expansion, or explicitly opt into input-method-v2 after testing key pass-through
@@ -279,7 +283,9 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, and [FOR_
 **Password field protection not working?**
 - This requires input-method-v2 backend (shows in `wayexpand doctor`)
 - evdev capture (`--source=evdev`) has no password detection
-- GNOME Shell doesn't report password fields at all
+- input-method-v2 suppresses matching until it receives a content-purpose
+  update and treats unknown purposes as sensitive; compositor support remains
+  uncertified until validated in the certification matrix
 
 **Keys are lost (Escape, arrows, F-keys)?**
 - This is input-method-v2's limitation on some compositors

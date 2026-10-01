@@ -55,4 +55,38 @@ printf '%s' "$doctor_json" | grep -F "\"config\":{\"error\":null,\"path\":\"$con
 printf '%s' "$doctor_json" | grep -F '"policy":{"exists":' >/dev/null
 
 [ "$(stat -c '%a' "$config_path")" = 600 ]
+
+# A staged package must also work when it does not ship an example into the
+# user's home. `setup` is the explicit first-run initializer and must create a
+# private config before attempting to start the selected user service.
+fresh_root=$(mktemp -d "$test_root/fresh-first-run.XXXXXX")
+fresh_home="$fresh_root/home"
+fresh_config_home="$fresh_root/config"
+fresh_bin="$fresh_root/bin"
+fresh_systemctl_log="$fresh_root/systemctl.log"
+mkdir -p "$fresh_home" "$fresh_config_home" "$fresh_bin"
+chmod 0700 "$fresh_home" "$fresh_config_home"
+cat >"$fresh_bin/systemctl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"${WAYEXPAND_TEST_SYSTEMCTL_LOG:?}"
+exit 0
+EOF
+chmod 0755 "$fresh_bin/systemctl"
+install -m 0755 "$target_dir/release/wayexpand" "$fresh_bin/wayexpand"
+install -m 0755 "$target_dir/release/wayexpand-daemon" "$fresh_bin/wayexpand-daemon"
+: >"$fresh_systemctl_log"
+HOME="$fresh_home" \
+XDG_CONFIG_HOME="$fresh_config_home" \
+WAYEXPAND_TEST_SYSTEMCTL_LOG="$fresh_systemctl_log" \
+PATH="$fresh_bin:/usr/bin:/bin" \
+    wayexpand setup --backend=input-method --yes >/dev/null
+fresh_config="$fresh_config_home/wayexpand/expansions.toml"
+[ -f "$fresh_config" ]
+[ "$(stat -c '%a' "$fresh_config")" = 600 ]
+HOME="$fresh_home" \
+XDG_CONFIG_HOME="$fresh_config_home" \
+PATH="$fresh_bin:/usr/bin:/bin" \
+    wayexpand validate >/dev/null
+grep -F -- '--user enable --now wayexpand-input-method.service' "$fresh_systemctl_log" >/dev/null
+
 printf '%s\n' "release smoke test passed"

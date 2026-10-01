@@ -9,7 +9,8 @@ WayExpand must choose between two fundamentally different capture methods:
 ### Input-Method-V2 (Recommended for most users)
 - **What it captures:** Text composition events sent to applications
 - **What it misses:** Raw keyboard input (Escape, arrow keys, function keys)
-- **Security:** Strongly protected; password fields remain private
+- **Security:** Fails closed until content-purpose information is available;
+  password-field behavior remains compositor/client dependent and uncertified
 - **Compatibility:** Works universally across Wayland
 
 ### Evdev (Advanced use cases)
@@ -23,7 +24,7 @@ WayExpand must choose between two fundamentally different capture methods:
 | Aspect | Input-Method-V2 | Evdev |
 |--------|-----------------|-------|
 | **Unicode/CJK** | ✅ Full support via composition | ❌ Not supported |
-| **Passwords** | ✅ Protected automatically | ⚠️ Visible if input group granted |
+| **Passwords** | ⚠️ Protected when reliably reported; not universally certified | ⚠️ Visible if input group granted |
 | **Arrow Keys** | ❌ Not captured | ✅ Full capture |
 | **Function Keys** | ❌ Not captured | ✅ Full capture |
 | **Escape/Ctrl+C** | ❌ Not captured | ✅ Full capture |
@@ -133,7 +134,8 @@ No password protection (evdev sees all input)
 ## Security Implications
 
 ### Input-Method-V2 Security Model
-- ✅ Password fields: Protected automatically by IME/application
+- ⚠️ Password fields: Suppressed when reliable content-purpose information is
+  supplied; compositor/client behavior is not certified universally
 - ✅ Window focus: IME respects application security boundaries
 - ✅ Clipboard: No access to expansion output
 - ✅ Daemon compromise: Cannot steal passwords (doesn't see raw input)

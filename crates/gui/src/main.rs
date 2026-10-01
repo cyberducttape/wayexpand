@@ -361,48 +361,8 @@ impl Drop for GuiApp {
 
 impl GuiApp {
     fn load(path: PathBuf) -> Result<Self> {
-        let loaded = match Config::load_versioned(&path) {
-            Ok(loaded) => loaded,
-            Err(ConfigError::Read { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound =>
-            {
-                if let Some(parent) = path
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!(
-                            "could not create configuration directory {}",
-                            parent.display()
-                        )
-                    })?;
-                }
-                let config = Config {
-                    expansion: Vec::new(),
-                    hotkey: Vec::new(),
-                    settings: Settings::default(),
-                    organization: OrganizationPolicy::default(),
-                };
-                config.save_atomic(&path).map_err(|error| {
-                    anyhow::anyhow!(
-                        "could not initialize configuration: {}",
-                        error.safe_summary()
-                    )
-                })?;
-                Config::load_versioned(&path).map_err(|error| {
-                    anyhow::anyhow!(
-                        "could not load initialized configuration: {}",
-                        error.safe_summary()
-                    )
-                })?
-            }
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "configuration invalid: {}",
-                    error.safe_summary()
-                ))
-            }
-        };
+        let loaded = Config::ensure_user_config(&path)
+            .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
         let config_document = persistence::read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;

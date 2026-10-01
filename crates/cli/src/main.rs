@@ -644,6 +644,12 @@ fn run() -> Result<()> {
             );
             println!("Session: {}", session_description());
             println!();
+            Config::ensure_user_config(default_config_path()).map_err(|error| {
+                config_error(format!(
+                    "could not initialize configuration: {}",
+                    error.safe_summary()
+                ))
+            })?;
             let capabilities = probe_capabilities();
             let policy = load_policy()?;
             let automatic = recommended_setup_backend(&capabilities, &policy);

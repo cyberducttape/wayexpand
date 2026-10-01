@@ -12,14 +12,14 @@ Sensitive-field detection allows WayExpand to automatically suspend text matchin
 
 | Backend | Sensitive Detection | How It Works | When It Applies |
 |---------|-------------------|--------------|-----------------|
-| **input-method-v2** | ✅ Yes | Compositor sends content-type signal | Password, hidden-text, sensitive-data fields |
+| **input-method-v2** | ⚠️ Implemented, compositor-dependent | Compositor sends content-type signal; unknown state fails closed | Password, hidden-text, sensitive-data fields when reported |
 | **evdev** | ❌ No | Raw kernel input (no field signals) | Never — no way to detect |
 | **libei** | ❌ No | Output-only (doesn't see input type) | Never — not an input source |
 | **wlroots** | ❌ No | Output-only (doesn't see input type) | Never — not an input source |
 
 ## Input-Method-V2 (Compositor-dependent)
 
-**Detection Status:** ✅ Supported
+**Detection Status:** Implemented, not universally certified
 
 When using `--source=input-method`:
 
@@ -31,11 +31,19 @@ When using `--source=input-method`:
   - `unknown` — Treated as sensitive for safety
   - Other types — Allow expansion
 
-- **Result:** Text matching is automatically suspended in all sensitive fields
+- **Result:** Text matching is automatically suspended when the compositor
+  supplies a sensitive content purpose. Activation and unknown-purpose states
+  fail closed until that information arrives.
 - **User experience:** Typing in a password field works normally; expansion never occurs
 
+This behavior is a source capability, not a compositor certification claim.
+The desktop must be validated empirically for each compositor and client in
+the [certification matrix](CERTIFICATION_MATRIX.md) before password-field
+protection is advertised as production-ready.
+
 **Tradeoff:** 
-- ✅ Password protection is automatic
+- ⚠️ Password protection is automatic only when the compositor supplies the
+  content-purpose signal; this remains uncertified per compositor/client
 - ⚠️ Key pass-through is experimental. Unsupported keys and shortcuts require
   libei pass-through; failures should surface and reconnect, but this is not
   yet certified as lossless across desktops.
@@ -156,4 +164,7 @@ Look for the "Sensitive-field detection" line:
 
 ---
 
-**Summary:** Sensitive-field detection is automatic on input-method-v2, absent on evdev. Choose your backend knowing this tradeoff. Don't put credentials in snippets if using evdev.
+**Summary:** Sensitive-field detection is implemented on input-method-v2 when
+the compositor supplies reliable content-purpose information, and absent on
+evdev. The capability is not universally certified; choose your backend
+knowing this tradeoff. Don't put credentials in snippets if using evdev.

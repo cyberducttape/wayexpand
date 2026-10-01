@@ -53,7 +53,7 @@ enum Prompt {
 
 impl App {
     fn load(path: PathBuf) -> Result<Self> {
-        let loaded = Config::load_versioned(&path)
+        let loaded = Config::ensure_user_config(&path)
             .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
         Ok(Self {
             path,
