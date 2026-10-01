@@ -170,49 +170,49 @@ impl Strings {
     }
 
     pub fn route_connected_status(&self) -> &'static str {
-        "Expansion route: Connected"
+        "Typing integration: Ready"
     }
     pub fn route_paused_status(&self) -> &'static str {
-        "Expansion route: Paused"
+        "Typing integration: Paused"
     }
     pub fn route_reconnecting_status(&self) -> &'static str {
-        "Expansion route: Reconnecting…"
+        "Typing integration: Reconnecting…"
     }
     pub fn route_starting_status(&self) -> &'static str {
-        "Expansion route: Starting…"
+        "Typing integration: Starting…"
     }
 
     pub fn route_permission_required_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Expansion route: Permission required",
-            Language::German => "Erweiterungsroute: Berechtigung erforderlich",
+            Language::English => "Typing integration: Permission required",
+            Language::German => "Tastaturintegration: Berechtigung erforderlich",
         }
     }
 
     pub fn route_portal_revoked_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Expansion route: Portal revoked",
-            Language::German => "Erweiterungsroute: Portal widerrufen",
+            Language::English => "Typing integration: Permission revoked",
+            Language::German => "Tastaturintegration: Berechtigung widerrufen",
         }
     }
 
     pub fn route_unsupported_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Expansion route: Unsupported",
-            Language::German => "Erweiterungsroute: Nicht unterstützt",
+            Language::English => "Typing integration: Unsupported",
+            Language::German => "Tastaturintegration: Nicht unterstützt",
         }
     }
     pub fn route_degraded_status(&self) -> &'static str {
-        "Expansion route: Degraded"
+        "Typing integration: Degraded"
     }
     pub fn route_failed_status(&self) -> &'static str {
-        "Expansion route: Failed"
+        "Typing integration: Failed"
     }
     pub fn route_stopped_status(&self) -> &'static str {
-        "Expansion route: Stopped"
+        "Typing integration: Stopped"
     }
     pub fn route_unknown_status(&self) -> &'static str {
-        "Expansion route: Unknown"
+        "Typing integration: Unknown"
     }
 
     pub fn technical_details(&self) -> &'static str {
