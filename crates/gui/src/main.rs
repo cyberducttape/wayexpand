@@ -71,19 +71,7 @@ struct RouteRecommendation {
     certification: &'static str,
 }
 
-fn backend_state(statuses: &[BackendStatus], kind: wayexpand_core::BackendKind) -> BackendState {
-    statuses
-        .iter()
-        .find(|status| status.kind == kind)
-        .map(|status| status.state)
-        .unwrap_or(BackendState::NotImplemented)
-}
-
-fn route_recommendation(
-    route: RecommendedRoute,
-    capabilities: &Capabilities,
-    statuses: &[BackendStatus],
-) -> RouteRecommendation {
+fn route_recommendation(route: RecommendedRoute) -> RouteRecommendation {
     let contract = route.contract();
     let backend_kind = |name: &str| match name {
         "evdev" => wayexpand_core::BackendKind::Evdev,
@@ -99,19 +87,9 @@ fn route_recommendation(
         injection,
         capture_label: &contract.capture,
         injection_label: &contract.injection,
-        capture_state: match route {
-            RecommendedRoute::IBus => BackendState::Available,
-            RecommendedRoute::EvdevLibei if capabilities.has_dev_input => BackendState::Available,
-            RecommendedRoute::EvdevLibei => backend_state(statuses, capture),
-        },
-        injection_state: match route {
-            RecommendedRoute::IBus => BackendState::Available,
-            RecommendedRoute::EvdevLibei if capabilities.has_direct_libei_socket => {
-                BackendState::Available
-            }
-            RecommendedRoute::EvdevLibei => backend_state(statuses, injection),
-        },
-        focus_tracking: contract.focus_tracking && capabilities.has_window_tracker,
+        capture_state: BackendState::Available,
+        injection_state: BackendState::Available,
+        focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
         certification: match contract.status.as_str() {
@@ -2889,12 +2867,7 @@ impl GuiApp {
                         status.kind == wayexpand_core::BackendKind::WindowTracker
                             && status.state == BackendState::Available
                     });
-                    let recommendation = self
-                        .recommended_route
-                        .zip(self.selection_capabilities.as_ref())
-                        .map(|(route, capabilities)| {
-                            route_recommendation(route, capabilities, &self.backend_status)
-                        });
+                    let recommendation = self.recommended_route.map(route_recommendation);
                     let keyboard_probe = recommendation
                         .map(|route| route.capture_state)
                         .unwrap_or(BackendState::NotImplemented);
@@ -4460,49 +4433,24 @@ mod tests {
     }
 
     #[test]
-    fn route_recommendation_preserves_capture_and_injection_topology() {
-        let statuses = vec![
-            BackendStatus {
-                kind: wayexpand_core::BackendKind::InputMethodV2,
-                state: BackendState::Implemented,
-                detail: String::new(),
-            },
-            BackendStatus {
-                kind: wayexpand_core::BackendKind::Evdev,
-                state: BackendState::Available,
-                detail: String::new(),
-            },
-            BackendStatus {
-                kind: wayexpand_core::BackendKind::Libei,
-                state: BackendState::Unavailable,
-                detail: String::new(),
-            },
-            BackendStatus {
-                kind: wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
-                state: BackendState::Available,
-                detail: String::new(),
-            },
-        ];
+    fn route_recommendation_preserves_ibus_topology() {
+        let shared_route = RecommendedRoute::IBus;
+        let route = route_recommendation(shared_route);
+        assert_eq!(route.capture, wayexpand_core::BackendKind::InputMethodV2);
+        assert_eq!(route.injection, wayexpand_core::BackendKind::InputMethodV2);
+        assert_eq!(route.capture_label, "ibus");
+        assert_eq!(route.injection_label, "ibus");
+        assert!(route.sensitive_fields);
+        assert!(route.atomic_replace);
+
         let capabilities = Capabilities {
             has_dev_input: true,
             has_direct_libei_socket: true,
             ..Capabilities::default()
         };
-        let shared_route =
-            wayexpand_backend_selection::recommended_route(&capabilities, false, true, true)
-                .expect("complete route");
-        let route = route_recommendation(shared_route, &capabilities, &statuses);
-        assert_eq!(route.capture, wayexpand_core::BackendKind::Evdev);
-        assert_eq!(route.injection, wayexpand_core::BackendKind::Libei);
-        assert_eq!(route.capture_label, "evdev");
-        assert_eq!(route.injection_label, "libei");
-        assert!(!route.sensitive_fields);
-        assert!(!route.atomic_replace);
-
-        let ibus =
-            route_recommendation(RecommendedRoute::IBus, &Capabilities::default(), &statuses);
-        assert_eq!(ibus.capture_label, "ibus");
-        assert_eq!(ibus.injection_label, "ibus");
+        assert!(
+            wayexpand_backend_selection::recommended_route(&capabilities, false, true).is_none()
+        );
     }
 
     #[test]

@@ -265,7 +265,6 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
                 &selection_capabilities,
                 ibus_available,
                 policy.backend_allowed("input-method-v2"),
-                policy.backend_allowed("libei"),
             )
         });
     let fleet_status = match Config::load(config_path) {

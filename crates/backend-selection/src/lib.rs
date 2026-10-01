@@ -21,12 +21,13 @@ pub enum InjectorBackend {
 }
 
 /// A route that `setup --mode recommended` can configure without an expert
-/// backend override.  Keep this in the shared selection crate so GUI copy,
-/// CLI setup, doctor, and certification describe the same topology.
+/// backend override. Raw evdev is intentionally absent: it remains an
+/// explicit maximum-compatibility opt-in because it can observe password
+/// fields. Keep this in the shared selection crate so GUI copy, CLI setup,
+/// doctor, and certification describe the same topology.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecommendedRoute {
     IBus,
-    EvdevLibei,
 }
 
 /// Operator-facing route metadata shared by setup, diagnostics, GUI copy,
@@ -66,7 +67,6 @@ impl RecommendedRoute {
     pub fn contract(self) -> &'static RouteContract {
         let id = match self {
             Self::IBus => "ibus",
-            Self::EvdevLibei => "kde-evdev-libei",
         };
         route_catalog()
             .routes
@@ -97,14 +97,11 @@ pub fn recommended_route(
     capabilities: &Capabilities,
     ibus_available: bool,
     input_method_allowed: bool,
-    libei_allowed: bool,
 ) -> Option<RecommendedRoute> {
     if ibus_available && input_method_allowed {
         return Some(RecommendedRoute::IBus);
     }
-    if capabilities.has_dev_input && capabilities.has_direct_libei_socket && libei_allowed {
-        return Some(RecommendedRoute::EvdevLibei);
-    }
+    let _ = capabilities;
     None
 }
 
@@ -696,26 +693,28 @@ mod tests {
     fn recommended_route_is_shared_and_policy_aware() {
         let capabilities = capabilities(false, true, true);
         assert_eq!(
-            recommended_route(&capabilities, true, true, true),
+            recommended_route(&capabilities, true, true),
             Some(RecommendedRoute::IBus)
         );
-        assert_eq!(
-            recommended_route(&capabilities, true, false, true),
-            Some(RecommendedRoute::EvdevLibei)
-        );
-        assert_eq!(recommended_route(&capabilities, false, true, false), None);
+        assert_eq!(recommended_route(&capabilities, true, false), None);
+        assert_eq!(recommended_route(&capabilities, false, true), None);
+    }
+
+    #[test]
+    fn recommended_route_never_selects_raw_input() {
+        let capabilities = capabilities(true, true, true);
+        assert_eq!(recommended_route(&capabilities, false, false), None);
     }
 
     #[test]
     fn recommended_routes_have_complete_operator_contracts() {
-        for route in [RecommendedRoute::IBus, RecommendedRoute::EvdevLibei] {
-            let contract = route.contract();
-            assert!(!contract.id.is_empty());
-            assert!(!contract.capture.is_empty());
-            assert!(!contract.injection.is_empty());
-            assert!(!contract.setup_backend.is_empty());
-            assert!(!contract.setup_detail.is_empty());
-            assert_eq!(route.setup_backend(), contract.setup_backend);
-        }
+        let route = RecommendedRoute::IBus;
+        let contract = route.contract();
+        assert!(!contract.id.is_empty());
+        assert!(!contract.capture.is_empty());
+        assert!(!contract.injection.is_empty());
+        assert!(!contract.setup_backend.is_empty());
+        assert!(!contract.setup_detail.is_empty());
+        assert_eq!(route.setup_backend(), contract.setup_backend);
     }
 }

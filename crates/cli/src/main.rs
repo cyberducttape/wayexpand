@@ -1186,7 +1186,6 @@ fn recommended_setup_backend(
         capabilities,
         ibus_engine_available(),
         setup_backend_allowed(policy, "ibus"),
-        setup_backend_allowed(policy, "evdev"),
     ) {
         Some(route) => {
             let contract = route.contract();
@@ -1566,12 +1565,7 @@ fn print_certification(json: bool) -> Result<bool> {
             })
         });
     let ibus_installed = ibus_engine_available();
-    let recommendation = recommended_route(
-        &capabilities,
-        ibus_installed,
-        policy_allows_ibus,
-        policy_allows("libei"),
-    );
+    let recommendation = recommended_route(&capabilities, ibus_installed, policy_allows_ibus);
     let ibus = matches!(recommendation, Some(RecommendedRoute::IBus));
     let selected_label = match recommendation {
         Some(route) => route.setup_backend(),
@@ -2982,6 +2976,18 @@ mod tests {
             ..Default::default()
         };
         assert!(setup_backend_for_mode("maximum", &capabilities, &wlroots_only).is_err());
+    }
+
+    #[test]
+    fn recommended_mode_never_selects_evdev_even_when_available() {
+        let capabilities = wayexpand_backend_selection::Capabilities {
+            has_direct_libei_socket: true,
+            has_dev_input: true,
+            ..Default::default()
+        };
+        let recommendation =
+            recommended_setup_backend(&capabilities, &OrganizationPolicy::default());
+        assert_ne!(recommendation.backend, "evdev");
     }
 
     #[test]
