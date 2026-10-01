@@ -419,6 +419,55 @@ impl Strings {
         }
     }
 
+    pub fn onboarding_recommended_route(
+        &self,
+        keyboard: wayexpand_core::BackendState,
+        injection: wayexpand_core::BackendState,
+    ) -> (&'static str, &'static str) {
+        let ready = matches!(keyboard, wayexpand_core::BackendState::Available)
+            && matches!(injection, wayexpand_core::BackendState::Available);
+        let permission = matches!(
+            keyboard,
+            wayexpand_core::BackendState::RequiresPermission
+        ) || matches!(
+            injection,
+            wayexpand_core::BackendState::RequiresPermission
+        );
+        match (self.lang, ready, permission) {
+            (Language::English, true, _) => (
+                "Input Method v2 → libei via the desktop portal",
+                "Detected on this machine",
+            ),
+            (Language::German, true, _) => (
+                "Input Method v2 → libei über das Desktop-Portal",
+                "Auf diesem Rechner erkannt",
+            ),
+            (Language::English, false, true) => (
+                "Safest detected route requires permission",
+                "Permission required before setup",
+            ),
+            (Language::German, false, true) => (
+                "Sicherster erkannter Weg benötigt eine Berechtigung",
+                "Vor der Einrichtung ist eine Berechtigung nötig",
+            ),
+            (Language::English, false, false) => (
+                "No complete safe route detected yet",
+                "Refresh diagnostics after starting the desktop session",
+            ),
+            (Language::German, false, false) => (
+                "Noch kein vollständiger sicherer Weg erkannt",
+                "Diagnose nach dem Start der Desktop-Sitzung aktualisieren",
+            ),
+        }
+    }
+
+    pub fn onboarding_recommended_route_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Recommended input route",
+            Language::German => "Empfohlener Eingabeweg",
+        }
+    }
+
     pub fn onboarding_injection_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Text injection",

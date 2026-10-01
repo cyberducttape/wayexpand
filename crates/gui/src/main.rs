@@ -2516,94 +2516,198 @@ impl GuiApp {
                                 | wayexpand_core::BackendKind::Uinput
                         )
                     });
+                    let (recommended_route, recommended_route_detail) = self
+                        .strings
+                        .onboarding_recommended_route(keyboard_probe, injection_probe);
+                    let daemon_running = self.daemon_reachable == Some(true);
                     ui.vertical_centered(|ui| {
-                        ui.add_space(22.0);
-                        ui.label(RichText::new("⚡").size(32.0).color(palette.accent));
-                        ui.add_space(4.0);
-                        ui.heading(self.strings.welcome_title());
+                        ui.add_space(26.0);
+                        ui.label(RichText::new("⚡").size(40.0).color(palette.accent));
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(self.strings.welcome_title())
+                                .size(28.0)
+                                .strong()
+                                .color(ui.visuals().strong_text_color()),
+                        );
                         ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
-                        ui.add_space(20.0);
+                        ui.add_space(22.0);
+                        theme::card(ui, palette, |ui| {
+                            ui.set_width(ui.available_width().min(600.0));
+                            ui.label(
+                                RichText::new(self.strings.onboarding_recommended_route_title())
+                                    .strong(),
+                            );
+                            ui.label(RichText::new(recommended_route).color(palette.accent));
+                            ui.label(
+                                RichText::new(recommended_route_detail)
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(self.strings.onboarding_certification_note())
+                                    .small()
+                                    .color(palette.warning),
+                            );
+                        });
+                        ui.add_space(10.0);
                         ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width().min(620.0), ui.available_height()),
+                            egui::vec2(ui.available_width().min(600.0), ui.available_height()),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 theme::card(ui, palette, |ui| {
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_desktop_step())
-                                            .strong(),
-                                    );
-                                    ui.label(self.strings.onboarding_desktop(&desktop, is_wayland));
-                                    ui.add_space(10.0);
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_support_title())
-                                            .strong(),
-                                    );
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_probe_caveat())
-                                            .color(palette.muted),
-                                    );
-                                    ui.horizontal(|ui| {
-                                        ui.label(self.strings.onboarding_keyboard_label());
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.label(
-                                                    self.strings
-                                                        .onboarding_backend_state(keyboard_probe),
-                                                );
-                                            },
-                                        );
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label(self.strings.onboarding_injection_label());
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.label(
-                                                    self.strings
-                                                        .onboarding_backend_state(injection_probe),
-                                                );
-                                            },
-                                        );
-                                    });
-                                    ui.label(
-                                        RichText::new(
-                                            self.strings
-                                                .onboarding_detection(app_context_available),
-                                        )
-                                        .color(palette.muted),
-                                    );
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_app_caveat())
-                                            .small()
-                                            .color(palette.muted),
-                                    );
-                                    ui.add_space(10.0);
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_safety_title())
-                                            .strong(),
-                                    );
-                                    ui.label(self.strings.onboarding_try_text());
-                                    ui.add_space(8.0);
-                                    if theme::primary_button(
+                                    ui.set_width(ui.available_width());
+                                    // Step 1: the daemon. Done is shown as done.
+                                    onboarding_step(
                                         ui,
                                         palette,
-                                        self.strings.create_test_snippet(),
-                                    )
-                                    .clicked()
-                                    {
-                                        self.create_test_snippet();
-                                    }
-                                    if ui.link(self.strings.onboarding_evdev_setup()).clicked() {
-                                        self.evdev_setup_acknowledged = false;
-                                        self.evdev_setup_open = true;
-                                    }
-                                    ui.add_space(8.0);
-                                    ui.label(
-                                        RichText::new(self.strings.onboarding_certification_note())
+                                        1,
+                                        self.strings.onboarding_turn_on_title(),
+                                        daemon_running,
+                                    );
+                                    ui.indent("step_turn_on", |ui| {
+                                        if daemon_running {
+                                            ui.label(
+                                                RichText::new(self.strings.running_status())
+                                                    .color(palette.success),
+                                            );
+                                        } else {
+                                            ui.label(
+                                                RichText::new(
+                                                    self.strings.onboarding_turn_on_help(),
+                                                )
+                                                .color(palette.muted),
+                                            );
+                                            ui.add_space(4.0);
+                                            self.turn_on_button(ui, palette);
+                                            if ui
+                                                .link(self.strings.onboarding_evdev_setup())
+                                                .clicked()
+                                            {
+                                                self.evdev_setup_acknowledged = false;
+                                                self.evdev_setup_open = true;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(12.0);
+                                    // Step 2: a snippet to try.
+                                    onboarding_step(
+                                        ui,
+                                        palette,
+                                        2,
+                                        self.strings.onboarding_snippet_title(),
+                                        false,
+                                    );
+                                    ui.indent("step_snippet", |ui| {
+                                        ui.label(
+                                            RichText::new(self.strings.onboarding_snippet_help())
+                                                .color(palette.muted),
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            if theme::primary_button(
+                                                ui,
+                                                palette,
+                                                self.strings.create_test_snippet(),
+                                            )
+                                            .clicked()
+                                            {
+                                                self.create_test_snippet();
+                                            }
+                                            if theme::secondary_button(
+                                                ui,
+                                                palette,
+                                                self.strings.new_button(),
+                                            )
+                                            .clicked()
+                                            {
+                                                self.request_action(PendingAction::New);
+                                            }
+                                            if theme::secondary_button(
+                                                ui,
+                                                palette,
+                                                self.strings.import_espanso(),
+                                            )
+                                            .clicked()
+                                            {
+                                                self.import_open = true;
+                                                self.import_preview = None;
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(12.0);
+                                    // Step 3: where to try it.
+                                    onboarding_step(
+                                        ui,
+                                        palette,
+                                        3,
+                                        self.strings.onboarding_safety_title(),
+                                        false,
+                                    );
+                                    ui.indent("step_try", |ui| {
+                                        ui.label(
+                                            RichText::new(self.strings.onboarding_try_text())
+                                                .color(palette.muted),
+                                        );
+                                    });
+                                    ui.add_space(10.0);
+                                    ui.collapsing(self.strings.onboarding_details_title(), |ui| {
+                                        ui.label(
+                                            self.strings.onboarding_desktop(&desktop, is_wayland),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.strings.onboarding_probe_caveat())
+                                                .small()
+                                                .color(palette.muted),
+                                        );
+                                        ui.horizontal(|ui| {
+                                            ui.label(self.strings.onboarding_keyboard_label());
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        self.strings.onboarding_backend_state(
+                                                            keyboard_probe,
+                                                        ),
+                                                    );
+                                                },
+                                            );
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label(self.strings.onboarding_injection_label());
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    ui.label(
+                                                        self.strings.onboarding_backend_state(
+                                                            injection_probe,
+                                                        ),
+                                                    );
+                                                },
+                                            );
+                                        });
+                                        ui.label(
+                                            RichText::new(
+                                                self.strings
+                                                    .onboarding_detection(app_context_available),
+                                            )
+                                            .small()
+                                            .color(palette.muted),
+                                        );
+                                        ui.label(
+                                            RichText::new(self.strings.onboarding_app_caveat())
+                                                .small()
+                                                .color(palette.muted),
+                                        );
+                                        ui.label(
+                                            RichText::new(
+                                                self.strings.onboarding_certification_note(),
+                                            )
                                             .small()
                                             .color(palette.warning),
-                                    );
+                                        );
+                                    });
                                 });
                             },
                         );
