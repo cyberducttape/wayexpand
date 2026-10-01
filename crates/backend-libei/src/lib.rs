@@ -21,8 +21,11 @@
 //! is inserted between synthetic key events. This is necessary for compositor
 //! and toolkit compatibility: many desktop environments silently drop key
 //! events delivered in rapid bursts, similar to how other synthetic-input
-//! tools (`xdotool`, `wtype`, `ydotool`) behave. This results in O(N×12ms)
-//! daemon thread blocking per expansion, where N is the number of characters.
+//! tools (`xdotool`, `wtype`, `ydotool`) behave. Direct library callers spend
+//! O(N×12ms) in the injector per expansion, where N is the number of
+//! characters. The daemon's non-exclusive evdev path places this injector
+//! behind a bounded serialized output actor, so pacing does not block physical
+//! input capture or matching.
 //!
 //! This tradeoff prioritizes correctness over speed for bounded replacements.
 //! Very large keysym fallbacks are refused before erasing the trigger rather

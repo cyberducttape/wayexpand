@@ -14,7 +14,7 @@ use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
     input_poll_interval, next_retry_delay, wait_for_retry,
 };
-use output_loop::{connect_output_backend, connect_output_with_retry};
+use output_loop::{connect_output_backend, connect_output_with_retry, spawn_async_injector};
 use reload::ReloadableConfig;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
@@ -335,17 +335,18 @@ fn main() -> Result<()> {
         }
     }
     let input_method_mode = source_name == "input-method";
+    let evdev_mode = source_name == "evdev";
     if input_method_mode {
         info!(
             "input-method-v2 backend selected; libei key pass-through is mandatory for \
             unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) to be re-injected"
         );
     }
-    let evdev_mode = source_name == "evdev";
     let active_source = source_name;
     let mut reconnect_delay = Duration::from_millis(250);
     let mut output_retry_at: Option<Instant> = None;
     let mut output_retry_delay = Duration::from_millis(250);
+    let mut output_failures = None;
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
@@ -364,7 +365,13 @@ fn main() -> Result<()> {
                 else {
                     anyhow::bail!("output backend startup cancelled while stopping")
                 };
-                Some(injector)
+                if evdev_mode && backend == "libei" {
+                    let (injector, failures) = spawn_async_injector(injector);
+                    output_failures = Some(failures);
+                    Some(injector)
+                } else {
+                    Some(injector)
+                }
             }
             other => {
                 anyhow::bail!("unknown backend {other:?}; expected none, wlroots, or libei")
@@ -489,6 +496,34 @@ fn main() -> Result<()> {
             }
         }
         let metrics = config.engine.command_metrics();
+        let worker_failure = output_failures
+            .as_ref()
+            .and_then(|failures| failures.try_recv().ok());
+        if let Some(failure) = worker_failure {
+            warn!(
+                retryable = failure.retryable,
+                error = %failure.message,
+                "serialized output worker failed"
+            );
+            drop(injector.take());
+            process_event(
+                &mut config.engine,
+                InputEvent::EndOfInput,
+                None,
+                &policy,
+                active_backend,
+            )?;
+            output_failures = None;
+            if !failure.retryable {
+                return Err(anyhow::anyhow!(
+                    "output backend failed permanently: {}",
+                    failure.message
+                ));
+            }
+            connection_state = "reconnecting";
+            output_retry_at = Some(Instant::now());
+            output_retry_delay = Duration::from_millis(250);
+        }
         if metrics.command_queue_rejected_total < logged_queue_rejections {
             // A successful configuration reload creates a fresh engine and
             // therefore starts a fresh counter interval.
@@ -680,7 +715,13 @@ fn main() -> Result<()> {
                 portal_token_path.as_deref(),
             ) {
                 Ok(backend) => {
-                    injector = Some(backend);
+                    if evdev_mode && backend_name == "libei" {
+                        let (backend, failures) = spawn_async_injector(backend);
+                        injector = Some(backend);
+                        output_failures = Some(failures);
+                    } else {
+                        injector = Some(backend);
+                    }
                     output_retry_at = None;
                     output_retry_delay = Duration::from_millis(250);
                     connection_state = "connected";

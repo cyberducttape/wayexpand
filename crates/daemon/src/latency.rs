@@ -1,8 +1,9 @@
 //! Bounded rolling measurements of output-backend apply time.
 //!
-//! This measures the synchronous injector transaction, not keystroke-to-paint
-//! latency. Keeping that distinction explicit prevents backend timing from
-//! being presented as a full desktop end-to-end SLO.
+//! This measures injector admission for asynchronous output and the complete
+//! transaction for synchronous output, not keystroke-to-paint latency.
+//! Keeping that distinction explicit prevents backend timing from being
+//! presented as a full desktop end-to-end SLO.
 
 use std::{
     collections::VecDeque,

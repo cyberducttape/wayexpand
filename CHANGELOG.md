@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Fix: paced libei keysym fallback output no longer blocks the daemon's
+  non-exclusive evdev capture loop; replacements are serialized through a
+  bounded output worker and worker failures trigger the normal reconnect path.
+
 - **Breaking — app filters are exact by default:** a bare `app_filter` value
   now matches one normalized app ID exactly instead of any app ID containing
   it, so `["thunderbird"]` no longer matches `org.mozilla.thunderbird`. Use
