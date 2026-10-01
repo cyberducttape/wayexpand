@@ -10,8 +10,8 @@ use command_runtime::{
 pub use command_runtime::{run_command, run_command_cancellable};
 
 use crate::{
-    CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig, InjectorCapabilities,
-    KeyChord, Matcher,
+    AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig,
+    InjectorCapabilities, KeyChord, Matcher,
 };
 use std::{
     collections::VecDeque,
@@ -216,7 +216,7 @@ pub struct ExpansionEngine {
     config: Config,
     /// Case-folded app filters are immutable for the lifetime of an engine;
     /// avoid allocating them on every candidate match.
-    app_filters_lower: Vec<Vec<String>>,
+    app_filters: Vec<Vec<AppFilter>>,
     matcher: Matcher,
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
@@ -404,14 +404,14 @@ impl ExpansionEngine {
             .collect();
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
-        let app_filters_lower = config
+        let app_filters = config
             .expansion
             .iter()
             .map(|expansion| {
                 expansion
                     .app_filter
                     .iter()
-                    .map(|filter| filter.to_lowercase())
+                    .filter_map(|filter| AppFilter::parse(filter))
                     .collect()
             })
             .collect();
@@ -437,7 +437,7 @@ impl ExpansionEngine {
             .collect();
         Ok(Self {
             config,
-            app_filters_lower,
+            app_filters,
             matcher,
             matcher_indices,
             buffer: VecDeque::new(),

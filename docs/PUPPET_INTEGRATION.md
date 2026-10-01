@@ -218,7 +218,7 @@ trigger = ":env"
 replacement = "prod"
 description = "Environment (prod/staging/dev)"
 category = "environment"
-app_filter = ["gitlab", "jenkins", "terraform"]
+app_filter = ["app_id_glob:*gitlab*", "app_id_glob:*jenkins*", "app_id_glob:*terraform*"]
 ```
 
 ### files/reload-wrapper.sh

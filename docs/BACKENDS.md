@@ -152,9 +152,12 @@ content values remain disabled.
 
 ## Focused-window tracking (`app_filter`)
 
-Expansions can be scoped to specific applications with `app_filter` --
-a list of case-insensitive substrings matched against the focused window's
-app id or title. This needs to know which window is focused, and unlike
+Expansions can be scoped to specific applications with `app_filter`. Bare
+entries and `app_id_exact:<desktop-app-id>` entries are case-insensitive exact
+matches against the focused window's normalized desktop app ID. For weaker,
+explicitly opted-in behavior, use `app_id_glob:<pattern>` (`*` and `?`) or
+`title_contains:<text>`. A title match is convenience matching, not a security
+boundary. This needs to know which window is focused, and unlike
 text capture and injection there is no Wayland protocol for that which
 works across compositors: `wlr-foreign-toplevel-management-unstable-v1`
 is implemented by some wlroots compositors (Sway, Hyprland), but WayExpand
@@ -187,8 +190,8 @@ until the new script reports its initial active window.
 An `app_filter`-scoped expansion fails closed rather than matching
 everywhere when window tracking is unavailable (no tracker for this
 compositor, or the KWin bridge failed to start): `ExpansionEngine` only
-allows the match once a `WindowChanged` event has reported a window whose
-app id or title actually contains one of the filter strings. Unfiltered
+allows the match once a `WindowChanged` event has reported a window matching
+the selected operator. Unfiltered
 expansions are entirely unaffected.
 
 Wlroots compositor support via `wlr-foreign-toplevel-management-unstable-v1`

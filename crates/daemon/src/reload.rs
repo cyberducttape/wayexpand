@@ -442,7 +442,7 @@ mod tests {
         let path = temporary_config();
         write_config(
             &path,
-            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"kate\"]\n",
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
         );
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
@@ -455,7 +455,7 @@ mod tests {
         // must not forget the window the user is actually still in.
         write_config(
             &path,
-            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"kate\"]\n",
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
         );
         config.reload_now();
         assert!(config.healthy());

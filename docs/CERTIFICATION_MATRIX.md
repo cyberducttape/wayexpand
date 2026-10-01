@@ -196,7 +196,7 @@ machine-readable `wayexpand certify` artifact can establish certification.
    [[expansion]]
    trigger = ";konsole"
    replacement = "KonsoleTest"
-   app_filter = ["konsole"]
+   app_filter = ["app_id_exact:org.kde.konsole"]
    ```
    Validate it with:
    ```bash

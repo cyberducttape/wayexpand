@@ -39,11 +39,12 @@ The daemon will reload automatically. No service restart required.
 - `app_filter` improvements (see below)
 
 **App-filter changes:**
-- Filtering logic now prefers `app_id` over window title (safer, more predictable)
-- Existing filters continue to work, but may match differently
-- **Action:** Review app-filtered snippets after upgrade if you rely on app_filter
+- Bare filters now mean exact normalized desktop app-ID matches.
+- Use `app_id_exact:<id>` for the security-strength form, `app_id_glob:<pattern>` for explicit glob matching, or `title_contains:<text>` for weak title matching.
+- Safe mode permits exact app-ID filters only unless `allow_weak_app_filters = true` is explicitly configured.
+- **Action:** Review app-filtered snippets after upgrade; convert old substring/title intent to an explicit operator.
 
-**Example:** If you had a filter `["thunderbird"]` matching window titles, it now only matches the actual Thunderbird app, not other windows with "Thunderbird" in their title.
+**Example:** `app_filter = ["app_id_exact:org.mozilla.Thunderbird"]` matches only that desktop app. `app_filter = ["title_contains:thunderbird"]` is weaker and is not a security boundary.
 
 **Sensitive field detection:**
 - evdev backend still has no password-field detection (unchanged from v1.1.x)

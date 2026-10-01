@@ -144,7 +144,7 @@ fn app_filtered_expansion_fails_closed_without_window_tracking() {
         [[expansion]]
         trigger = ":sig"
         replacement = "Regards"
-        app_filter = ["thunderbird"]
+        app_filter = ["app_id_exact:org.mozilla.thunderbird"]
     "#,
     )
     .unwrap();
@@ -164,7 +164,7 @@ fn app_filtered_expansion_matches_by_app_id_case_insensitively() {
         [[expansion]]
         trigger = ":sig"
         replacement = "Regards"
-        app_filter = ["Thunderbird"]
+        app_filter = ["app_id_exact:Org.Mozilla.Thunderbird"]
     "#,
     )
     .unwrap();
@@ -189,7 +189,7 @@ fn current_window_can_be_carried_across_a_replacement_engine() {
         [[expansion]]
         trigger = ":sig"
         replacement = "Regards"
-        app_filter = ["thunderbird"]
+        app_filter = ["app_id_exact:org.mozilla.thunderbird"]
     "#,
     )
     .unwrap();
@@ -215,7 +215,7 @@ fn app_filtered_expansion_ignores_other_windows() {
         [[expansion]]
         trigger = ":sig"
         replacement = "Regards"
-        app_filter = ["thunderbird"]
+        app_filter = ["app_id_exact:org.mozilla.thunderbird"]
     "#,
     )
     .unwrap();
@@ -1679,7 +1679,7 @@ fn undo_restores_the_case_variant_actually_typed() {
 #[test]
 fn app_filter_matches_on_app_id_when_available() {
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"app_id_exact:org.mozilla.thunderbird\"]",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -1693,9 +1693,37 @@ fn app_filter_matches_on_app_id_when_available() {
 }
 
 #[test]
+fn app_id_exact_does_not_match_a_similar_app_id() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = ':email'\nreplacement = 'contact@example.com'\napp_filter = ['app_id_exact:org.mozilla.thunderbird']",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.mozilla.thunderbird-helper".into()),
+        title: Some("Thunderbird Mail".into()),
+    }));
+    assert!(engine.process(InputEvent::Text(":email".into())).is_empty());
+}
+
+#[test]
+fn app_id_glob_is_explicit_and_title_contains_is_explicit() {
+    let glob = Config::parse(
+        "[[expansion]]\ntrigger = ':glob'\nreplacement = 'glob'\napp_filter = ['app_id_glob:*thunderbird*']",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(glob).unwrap();
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.mozilla.thunderbird-helper".into()),
+        title: None,
+    }));
+    assert_eq!(engine.process(InputEvent::Text(":glob".into())).len(), 1);
+}
+
+#[test]
 fn app_filter_uses_title_only_when_app_id_unavailable() {
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"title_contains:thunderbird\"]",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -1717,7 +1745,7 @@ fn app_filter_rejects_title_match_when_app_id_is_available_but_different() {
     // Example: Konsole titled "Thunderbird troubleshooting" should NOT match
     // app_filter=["thunderbird"] meant for the actual Thunderbird application.
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"app_id_exact:org.mozilla.thunderbird\"]",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -1736,7 +1764,7 @@ fn app_filter_rejects_title_match_when_app_id_is_available_but_different() {
 #[test]
 fn app_filter_with_no_window_fails_closed() {
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"app_id_exact:org.mozilla.thunderbird\"]",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -1773,7 +1801,7 @@ fn disable_title_matching_policy_fails_closed_without_app_id() {
     // It should only disable the title-based fallback.
     // When app_id is unavailable and disable_title_matching=true, must fail closed.
     let mut config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"app_id_exact:org.mozilla.thunderbird\"]",
     )
     .unwrap();
     config.organization.disable_title_matching = true;
@@ -1795,7 +1823,7 @@ fn disable_title_matching_policy_fails_closed_without_app_id() {
 fn disable_title_matching_allows_app_id_match() {
     // When app_id IS available and matches, disable_title_matching should NOT block it.
     let mut config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"app_id_exact:org.thunderbird.thunderbird\"]",
     )
     .unwrap();
     config.organization.disable_title_matching = true;
@@ -1816,7 +1844,7 @@ fn disable_title_matching_allows_app_id_match() {
 #[test]
 fn runtime_title_matching_policy_is_applied() {
     let config = Config::parse(
-        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"thunderbird\"]",
+        "[[expansion]]\ntrigger = \":email\"\nreplacement = \"contact@example.com\"\napp_filter = [\"title_contains:thunderbird\"]",
     )
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
@@ -2429,7 +2457,7 @@ fn app_filter_prevents_cross_window_expansion() {
         [[expansion]]
         trigger = ":pass"
         replacement = "secret123"
-        app_filter = ["slack"]
+        app_filter = ["app_id_exact:slack"]
         "#,
     )
     .unwrap();
@@ -3496,7 +3524,7 @@ fn explicit_insert_by_trigger_follows_the_typed_expansion_safety_rules() {
         [[expansion]]
         trigger = ";term"
         replacement = "only in a terminal"
-        app_filter = ["konsole"]
+        app_filter = ["app_id_exact:org.kde.konsole"]
 
         [[expansion]]
         trigger = ";cmd"

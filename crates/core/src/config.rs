@@ -226,6 +226,11 @@ pub struct OrganizationPolicy {
     /// user-editable window title. App IDs remain eligible for matching.
     pub disable_title_matching: bool,
 
+    /// Permit weak app-filter operators (`app_id_glob` and `title_contains`)
+    /// while safe mode is enabled. Exact app-ID matching remains the default
+    /// and is the only form allowed without this explicit override.
+    pub allow_weak_app_filters: bool,
+
     /// Refuse startup unless the selected injector can replace text as one
     /// externally atomic transaction. Enforced only in safe mode, like the
     /// other administrator-owned requirements.
@@ -260,6 +265,7 @@ impl Default for OrganizationPolicy {
             disable_hotkeys: false,
             require_absolute_commands: false,
             disable_title_matching: false,
+            allow_weak_app_filters: false,
             require_atomic_replace: false,
             require_sensitive_focus: false,
             max_replacement_size: 0,
@@ -302,6 +308,7 @@ impl OrganizationPolicy {
             || self.disable_hotkeys
             || self.require_absolute_commands
             || self.disable_title_matching
+            || self.allow_weak_app_filters
             || self.require_atomic_replace
             || self.require_sensitive_focus
             || self.max_replacement_size > 0
@@ -412,6 +419,42 @@ impl OrganizationPolicy {
     }
 }
 
+/// The explicitly selected source and matching strength of an app filter.
+/// The serialized configuration remains a string for compatibility with the
+/// existing TOML shape, but is parsed before matching so backends cannot
+/// accidentally reinterpret a filter as a different kind of selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppFilter {
+    AppIdExact(String),
+    AppIdGlob(String),
+    TitleContains(String),
+}
+
+impl AppFilter {
+    pub fn parse(raw: &str) -> Option<Self> {
+        let raw = raw.trim();
+        if raw.is_empty() || raw.contains('\0') {
+            return None;
+        }
+        let (operator, value) = raw.split_once(':').unwrap_or(("app_id_exact", raw));
+        let value = value.trim();
+        if value.is_empty() || value.contains('\0') {
+            return None;
+        }
+        let value = value.to_lowercase();
+        match operator {
+            "app_id_exact" => Some(Self::AppIdExact(value)),
+            "app_id_glob" => Some(Self::AppIdGlob(value)),
+            "title_contains" => Some(Self::TitleContains(value)),
+            _ => None,
+        }
+    }
+
+    pub fn is_weak(&self) -> bool {
+        !matches!(self, Self::AppIdExact(_))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ExpansionConfig {
@@ -427,10 +470,11 @@ pub struct ExpansionConfig {
     pub tags: Vec<String>,
     #[serde(default)]
     pub category: String,
-    /// Case-insensitive substrings matched against the focused window's
-    /// app id or title. Empty means unrestricted. If window tracking is
-    /// unavailable on the running compositor, a non-empty filter fails
-    /// closed (the expansion never matches) rather than firing everywhere.
+    /// App filters. Bare values are exact normalized desktop app IDs.
+    /// Explicit operators are `app_id_exact:...`, `app_id_glob:...`, and
+    /// `title_contains:...`; only the first is a security-strength match.
+    /// Empty means unrestricted. If window tracking is unavailable, a
+    /// non-empty filter fails closed rather than firing everywhere.
     #[serde(default)]
     pub app_filter: Vec<String>,
     #[serde(default)]
@@ -1295,10 +1339,21 @@ impl Config {
             }
             if expansion.app_filter.len() > MAX_APP_FILTERS
                 || expansion.app_filter.iter().any(|filter| {
-                    filter.is_empty()
+                    filter.trim().is_empty()
                         || filter.chars().count() > MAX_APP_FILTER_CHARS
                         || filter.contains('\0')
+                        || AppFilter::parse(filter).is_none()
                 })
+            {
+                return Err(ConfigError::InvalidAppFilter { index });
+            }
+            if self.organization.safe_mode
+                && !self.organization.allow_weak_app_filters
+                && expansion
+                    .app_filter
+                    .iter()
+                    .filter_map(|filter| AppFilter::parse(filter))
+                    .any(|filter| filter.is_weak())
             {
                 return Err(ConfigError::InvalidAppFilter { index });
             }
@@ -2179,6 +2234,31 @@ mod tests {
             Config::parse(&too_many),
             Err(ConfigError::InvalidAppFilter { index: 0 })
         ));
+    }
+
+    #[test]
+    fn app_filter_operators_and_safe_mode_are_explicit() {
+        let exact = Config::parse(
+            "[[expansion]]\ntrigger = ':x'\nreplacement = 'y'\napp_filter = ['app_id_exact:org.example.Editor']\n",
+        )
+        .unwrap();
+        assert_eq!(
+            exact.expansion[0].app_filter[0],
+            "app_id_exact:org.example.Editor"
+        );
+
+        let weak = Config::parse(
+            "[organization]\nsafe_mode = true\n[[expansion]]\ntrigger = ':x'\nreplacement = 'y'\napp_filter = ['app_id_glob:*editor*']\n",
+        );
+        assert!(matches!(
+            weak,
+            Err(ConfigError::InvalidAppFilter { index: 0 })
+        ));
+
+        let override_config = Config::parse(
+            "[organization]\nsafe_mode = true\nallow_weak_app_filters = true\n[[expansion]]\ntrigger = ':x'\nreplacement = 'y'\napp_filter = ['title_contains:editor']\n",
+        );
+        assert!(override_config.is_ok());
     }
 
     #[test]

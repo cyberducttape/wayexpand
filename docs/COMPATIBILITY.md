@@ -449,6 +449,29 @@ daemon engine and reset after a successful configuration reload.
 
 ---
 
+### `wayexpand insert <trigger>` and the `insert` control command
+
+`wayexpand insert <trigger>` asks the running daemon to type the snippet with
+that configured trigger at the cursor, erasing nothing. The quick-insert picker
+(`wayexpand-gui --picker`) uses the same request. On the control socket the
+request is the line `insert <trigger>`; the trigger is taken verbatim (leading
+and trailing spaces are significant), must be 1–128 characters, and may not
+contain control characters. The daemon replies `insert scheduled` or
+`invalid trigger`.
+
+The insert itself follows the rules for typed expansion: it is refused while
+paused, in a sensitive field, or when the snippet's `app_filter` does not match
+the focused application (fail closed), and command-backed snippets are never
+run this way. Refusals are logged by the daemon rather than reported to the
+client, because the request is accepted before the focused application is
+known.
+
+**Exit codes:** `0` when the daemon accepted the request, `2` for a missing or
+malformed trigger, `4` when the daemon is unreachable or rejects the request.
+
+**Stability:** 🧪 **New in 1.2.x** — additive; existing control commands are
+unchanged.
+
 ## TOML Configuration Schema Stability
 
 The configuration file format (`~/.config/wayexpand/expansions.toml`) is stable within 1.x.
@@ -464,7 +487,9 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 
 **New fields** (0.2.0+):
 - `ExpansionConfig::category` — optional categorization
-- `ExpansionConfig::app_filter` — optional app-scoped restrictions (Vec<String>)
+- `ExpansionConfig::app_filter` — optional app-scoped restrictions (Vec<String>);
+  bare values are exact normalized app IDs, or use `app_id_exact:`,
+  `app_id_glob:`, and `title_contains:` explicitly
 - `ExpansionConfig::tags` — optional searchable tags
 - `ExpansionConfig::match_mode` — expansion matching mode ("immediate" or "word-boundary", default "immediate")
 

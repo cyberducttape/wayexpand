@@ -119,7 +119,7 @@ mod tests {
     fn app_filter_preview_fails_closed_without_context() {
         assert_eq!(
             render(
-                Some(&config(vec!["editor"]).expansion[0]),
+                Some(&config(vec!["app_id_exact:org.editor"]).expansion[0]),
                 &Settings::default(),
                 &OrganizationPolicy::default(),
                 None,
@@ -134,7 +134,7 @@ mod tests {
     fn app_filter_preview_uses_selected_application() {
         assert_eq!(
             render(
-                Some(&config(vec!["editor"]).expansion[0]),
+                Some(&config(vec!["app_id_exact:org.editor"]).expansion[0]),
                 &Settings::default(),
                 &OrganizationPolicy::default(),
                 None,

@@ -2033,8 +2033,8 @@ impl Strings {
 
     pub fn app_filter_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Leave empty to expand in every application. App filters currently work only with the KWin window tracker; elsewhere filtered snippets never expand.",
-            Language::German => "Leer lassen, um in jeder Anwendung zu erweitern. App-Filter funktionieren derzeit nur mit dem KWin-Fenster-Tracker; anderswo werden gefilterte Snippets nie erweitert.",
+            Language::English => "Leave empty for every app. Bare values or app_id_exact:<id> match one normalized desktop app ID. Use app_id_glob:<pattern> or title_contains:<text> only when weaker matching is intentional. Filters currently work only with the KWin window tracker.",
+            Language::German => "Leer lassen für alle Apps. Einzelwerte oder app_id_exact:<id> gleichen eine normalisierte Desktop-App-ID exakt ab. app_id_glob:<Muster> oder title_contains:<Text> nur verwenden, wenn schwächeres Matching beabsichtigt ist. Filter funktionieren derzeit nur mit dem KWin-Fenster-Tracker.",
         }
     }
 

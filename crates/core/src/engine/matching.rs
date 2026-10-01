@@ -7,7 +7,40 @@ use std::sync::Arc;
 
 use super::{ExpansionEngine, MatchPlan};
 use crate::config::capitalize_first_letter;
-use crate::{render_template_with_cursor, ExpansionConfig, MatchMode};
+use crate::{render_template_with_cursor, AppFilter, ExpansionConfig, MatchMode};
+
+fn glob_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let value = value.as_bytes();
+    let mut pattern_index = 0;
+    let mut value_index = 0;
+    let mut star = None;
+    let mut star_value_index = 0;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == b'?')
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star = Some(pattern_index);
+            pattern_index += 1;
+            star_value_index = value_index;
+        } else if let Some(star_index) = star {
+            pattern_index = star_index + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
 
 pub(super) fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
@@ -110,8 +143,8 @@ impl ExpansionEngine {
         }
     }
 
-    /// An empty app filter matches everywhere; a configured filter requires a
-    /// known app id, or an allowed title fallback when no app id is available.
+    /// An empty app filter matches everywhere. Each configured filter names
+    /// its source explicitly; app IDs never fall back to editable titles.
     pub(super) fn app_filter_allows(
         &self,
         config_index: usize,
@@ -123,17 +156,27 @@ impl ExpansionEngine {
         let Some(window) = &self.normalized_window else {
             return false;
         };
-        self.app_filters_lower[config_index].iter().any(|filter| {
-            if let Some(app_id) = window.app_id.as_deref() {
-                app_id.contains(filter.as_str())
-            } else if self.config.organization.disable_title_matching {
-                false
-            } else {
-                window
-                    .title
+        self.app_filters[config_index]
+            .iter()
+            .any(|filter| match filter {
+                AppFilter::AppIdExact(app_id_filter) => window
+                    .app_id
                     .as_deref()
-                    .is_some_and(|title| title.contains(filter.as_str()))
-            }
-        })
+                    .is_some_and(|app_id| app_id == app_id_filter),
+                AppFilter::AppIdGlob(app_id_filter) => window
+                    .app_id
+                    .as_deref()
+                    .is_some_and(|app_id| glob_matches(app_id_filter, app_id)),
+                AppFilter::TitleContains(title_filter) => {
+                    if self.config.organization.disable_title_matching {
+                        false
+                    } else {
+                        window
+                            .title
+                            .as_deref()
+                            .is_some_and(|title| title.contains(title_filter))
+                    }
+                }
+            })
     }
 }
