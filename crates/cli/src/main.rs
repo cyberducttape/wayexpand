@@ -1303,6 +1303,11 @@ fn configure_setup_backend(backend: &str) -> Result<()> {
             if !select.success() {
                 bail!("could not select the WayExpand IBus engine")
             }
+            // Keep the hardened daemon available as the session's control and
+            // Quick Insert broker. It runs in stdin mode, so it does not
+            // compete with IBus for keyboard capture; it only supplies the
+            // same authenticated control endpoint and approved injector.
+            enable_user_service("wayexpand.service")?;
             println!("WayExpand IBus integration is active. Run `wayexpand doctor` to inspect the session.");
         }
         "input-method" => enable_user_service("wayexpand-input-method.service")?,

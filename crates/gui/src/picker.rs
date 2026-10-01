@@ -8,7 +8,11 @@
 //! socket), under the same pause, password-field, and app-filter rules as a
 //! typed trigger. Without a daemon, Enter copies the snippet instead.
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    thread,
+    time::{Duration, Instant},
+};
 
 use eframe::egui::{self, Color32, RichText, TextEdit};
 use wayexpand_core::{render_template_with_cursor, Config, ExpansionConfig, TemplateContext};
@@ -19,9 +23,10 @@ use crate::{
     theme::{self, Palette},
 };
 
-/// How long to wait after the picker window closes before asking the daemon
-/// to type, so the compositor has returned keyboard focus to the target.
-const FOCUS_RETURN_DELAY: Duration = Duration::from_millis(180);
+/// Bound the authoritative focus-return wait. We never insert into an
+/// unverified window after this deadline.
+const FOCUS_RETURN_TIMEOUT: Duration = Duration::from_secs(2);
+const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MAX_RESULTS: usize = 60;
 
 /// Rank `entry` against `query` (both compared case-insensitively). A
@@ -59,6 +64,12 @@ pub(crate) fn score(query: &str, trigger: &str, description: &str) -> Option<i64
 #[derive(Default)]
 pub(crate) struct Outcome {
     pub trigger: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FocusTarget {
+    generation: u64,
+    token: String,
 }
 
 pub(crate) struct PickerApp {
@@ -318,7 +329,10 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let config = Config::load(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
     let prefs = crate::settings::load_gui_prefs();
-    let daemon_available = crate::runtime::control_command("status").is_ok();
+    let target_focus = crate::runtime::control_command("focus")
+        .ok()
+        .and_then(|response| focus_target_from_response(&response));
+    let daemon_available = target_focus.is_some();
     let outcome = std::sync::Arc::new(std::sync::Mutex::new(Outcome::default()));
     let app_outcome = std::sync::Arc::clone(&outcome);
     let options = eframe::NativeOptions {
@@ -364,18 +378,56 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
         .ok()
         .and_then(|mut outcome| outcome.trigger.take());
     if let Some(trigger) = trigger {
-        std::thread::sleep(FOCUS_RETURN_DELAY);
-        let response = crate::runtime::control_command(&format!("insert {trigger}"))?;
-        if response.trim_end() != "insert scheduled" {
-            anyhow::bail!("daemon refused the insert: {}", response.trim_end());
+        let Some(target_focus) = target_focus else {
+            anyhow::bail!("could not identify the original focused window; copied instead");
+        };
+        let deadline = Instant::now() + FOCUS_RETURN_TIMEOUT;
+        loop {
+            let current = crate::runtime::control_command("focus")
+                .ok()
+                .and_then(|response| focus_target_from_response(&response));
+            if let Some(current) = current {
+                if current.token == target_focus.token
+                    && current.generation > target_focus.generation
+                {
+                    let response = crate::runtime::control_command(&format!(
+                        "insert-target {} {} {trigger}",
+                        current.generation, current.token
+                    ))?;
+                    if response.trim_end() != "insert scheduled" {
+                        anyhow::bail!("daemon refused the insert: {}", response.trim_end());
+                    }
+                    break;
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("focus did not return to the original window; refusing to insert");
+            }
+            thread::sleep(FOCUS_POLL_INTERVAL);
         }
     }
     Ok(())
 }
 
+fn focus_target_from_response(response: &str) -> Option<FocusTarget> {
+    let generation = response
+        .lines()
+        .find_map(|line| line.strip_prefix("focus_generation="))?
+        .parse()
+        .ok()?;
+    let token = response
+        .lines()
+        .find_map(|line| line.strip_prefix("focus_token="))?;
+    if token.is_empty() {
+        return None;
+    }
+    let token = token.to_owned();
+    Some(FocusTarget { generation, token })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::score;
+    use super::{focus_target_from_response, score, FocusTarget};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -389,5 +441,21 @@ mod tests {
         assert_eq!(score("zz", ";sig", "Email signature"), None);
         assert_eq!(score("  ", ";sig", ""), Some(0));
         assert!(score("SIG", ";sig", "").is_some(), "matching ignores case");
+    }
+
+    #[test]
+    fn focus_target_parser_fails_closed_for_missing_or_empty_tokens() {
+        assert_eq!(
+            focus_target_from_response("focus_generation=4\nfocus_token=abcd\n"),
+            Some(FocusTarget {
+                generation: 4,
+                token: "abcd".into()
+            })
+        );
+        assert_eq!(
+            focus_target_from_response("focus_generation=4\nfocus_token=\n"),
+            None
+        );
+        assert_eq!(focus_target_from_response("running\n"), None);
     }
 }

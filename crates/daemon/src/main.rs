@@ -9,6 +9,7 @@ mod reload;
 mod status;
 
 use anyhow::Result;
+use control::{ControlServer, FocusSnapshot};
 use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
     input_poll_interval, next_retry_delay, wait_for_retry,
@@ -20,7 +21,9 @@ use signal_hook::{
     iterator::Signals,
 };
 use std::{
+    collections::hash_map::DefaultHasher,
     env,
+    hash::{Hash, Hasher},
     io::{self, BufRead},
     path::{Path, PathBuf},
     sync::mpsc,
@@ -34,6 +37,7 @@ use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
     InjectorCapabilities, InputEvent, InputSource, InputSourceCapabilities, TextInjector,
+    WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -434,11 +438,23 @@ fn main() -> Result<()> {
     };
 
     let window_tracker = backend_lifecycle::spawn_window_tracker();
+    let mut focus_state = FocusState {
+        previous: config.engine.current_window().cloned(),
+        generation: 0,
+    };
+    publish_focus_snapshot(&control, &focus_state);
 
     let mut stdin_closed = false;
     let mut logged_queue_rejections = 0;
     loop {
-        drain_pending_window_events(&window_tracker, &mut config.engine, &policy, active_backend)?;
+        drain_pending_window_events(
+            &window_tracker,
+            &mut config.engine,
+            &policy,
+            active_backend,
+            &control,
+            &mut focus_state,
+        )?;
         let transition = reactor::ReactorTransition::sample(
             &control.stop_requested,
             &control.pause_requested,
@@ -539,12 +555,27 @@ fn main() -> Result<()> {
                 active_backend,
             )?;
         }
-        if let Some(id) = control.take_insert_request() {
+        if let Some(request) = control.take_insert_request() {
             // An explicit insert (quick-insert picker, `wayexpand insert`)
             // types a snippet at the cursor through the same injector and
             // evdev safety gate as a typed expansion. It is a user action,
             // so a refusal or injection failure is logged, never fatal.
-            match config.engine.prepare_insert(&id) {
+            if let Some(expected_token) = request.focus_token.as_deref() {
+                let snapshot = control.focus_snapshot();
+                let current_token = config.engine.current_window().map(focus_token);
+                if current_token.as_deref() != Some(expected_token)
+                    || snapshot.token.as_deref() != Some(expected_token)
+                    || snapshot.generation != request.focus_generation.unwrap_or_default()
+                {
+                    warn!(
+                        expected = expected_token,
+                        actual = ?current_token,
+                        "requested snippet insert refused because focus changed"
+                    );
+                    continue;
+                }
+            }
+            match config.engine.prepare_insert(&request.trigger) {
                 Ok(result) => {
                     let gating = if evdev_mode {
                         apply_evdev_gating(vec![result], &mut evdev)
@@ -720,6 +751,8 @@ fn main() -> Result<()> {
                         &mut config.engine,
                         &policy,
                         active_backend,
+                        &control,
+                        &mut focus_state,
                     )?;
                     let result = match input_method.as_mut() {
                         Some(source) => process_event(
@@ -847,6 +880,8 @@ fn main() -> Result<()> {
                         &mut config.engine,
                         &policy,
                         active_backend,
+                        &control,
+                        &mut focus_state,
                     )?;
                     let result = if let Some(mut backend) = injector.take() {
                         // Match immediately. The release/quiet gates are only
@@ -977,6 +1012,8 @@ fn main() -> Result<()> {
                     &mut config.engine,
                     &policy,
                     active_backend,
+                    &control,
+                    &mut focus_state,
                 )?;
                 if injector.is_some() {
                     for character in line.chars() {
@@ -1129,11 +1166,32 @@ fn main() -> Result<()> {
 /// Drain any pending window-change events from the tracker's receiver
 /// and apply them to the engine. This prevents app-filter races where a
 /// focus change arrives between input-event wait and processing.
+struct FocusState {
+    previous: Option<WindowContext>,
+    generation: u64,
+}
+
+fn focus_token(window: &WindowContext) -> String {
+    let mut hasher = DefaultHasher::new();
+    window.app_id.hash(&mut hasher);
+    window.title.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
+    control.set_focus_snapshot(FocusSnapshot {
+        generation: state.generation,
+        token: state.previous.as_ref().map(focus_token),
+    });
+}
+
 fn drain_pending_window_events(
     window_tracker: &Option<backend_lifecycle::WindowTrackerHandle>,
     engine: &mut ExpansionEngine,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
+    control: &ControlServer,
+    focus_state: &mut FocusState,
 ) -> Result<()> {
     let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
     if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(receiver) {
@@ -1145,6 +1203,12 @@ fn drain_pending_window_events(
             active_backend,
         )?;
     }
+    let current = engine.current_window().cloned();
+    if focus_state.previous != current {
+        focus_state.previous = current;
+        focus_state.generation = focus_state.generation.wrapping_add(1);
+    }
+    publish_focus_snapshot(control, focus_state);
     Ok(())
 }
 
