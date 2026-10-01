@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::{
     fs,
     io::{Read, Write},
-    os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
+    os::unix::{fs::{FileTypeExt, MetadataExt, PermissionsExt}, io::AsRawFd},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     sync::{
@@ -39,8 +39,12 @@ impl ControlServer {
         };
         let path = secure_socket_path(&requested_path)?;
         validate_socket_parent(&path)?;
-        if let Ok(metadata) = fs::symlink_metadata(&path) {
-            match UnixStream::connect(&path) {
+        #[cfg(target_os = "linux")]
+        let (_socket_parent, operation_path) = open_socket_parent(&path)?;
+        #[cfg(not(target_os = "linux"))]
+        let operation_path = path.clone();
+        if let Ok(metadata) = fs::symlink_metadata(&operation_path) {
+            match UnixStream::connect(&operation_path) {
                 Ok(_) => bail!(
                     "another WayExpand daemon is already using {}",
                     path.display()
@@ -61,7 +65,7 @@ impl ControlServer {
                         );
                     }
                     let identity = (metadata.dev(), metadata.ino());
-                    let current = fs::symlink_metadata(&path)
+                    let current = fs::symlink_metadata(&operation_path)
                         .with_context(|| format!("rechecking stale socket {}", path.display()))?;
                     if !is_original_socket(&current, identity, owner) {
                         bail!(
@@ -69,7 +73,7 @@ impl ControlServer {
                             path.display()
                         );
                     }
-                    fs::remove_file(&path)
+                    fs::remove_file(&operation_path)
                         .with_context(|| format!("removing stale socket {}", path.display()))?
                 }
             }
@@ -78,12 +82,12 @@ impl ControlServer {
         // chmod. Restore the caller's mask immediately after bind so this
         // process does not change unrelated file-creation behavior.
         let previous_umask = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-        let listener_result = UnixListener::bind(&path);
+        let listener_result = UnixListener::bind(&operation_path);
         rustix::process::umask(previous_umask);
         let listener = listener_result
             .with_context(|| format!("binding control socket {}", path.display()))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-        let metadata = fs::symlink_metadata(&path)?;
+        fs::set_permissions(&operation_path, fs::Permissions::from_mode(0o600))?;
+        let metadata = fs::symlink_metadata(&operation_path)?;
         let socket_identity = Some((metadata.dev(), metadata.ino()));
         let reload_requested = Arc::new(AtomicBool::new(false));
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -132,6 +136,34 @@ impl ControlServer {
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn open_socket_parent(path: &Path) -> Result<(fs::File, PathBuf)> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("/"));
+    let root = rustix::fs::open(
+        "/",
+        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?;
+    let relative = parent.strip_prefix("/").unwrap_or(parent);
+    let directory = rustix::fs::openat2(
+        &root,
+        relative,
+        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
+    )?;
+    let guard = fs::File::from(directory);
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("control socket path has no file name"))?;
+    let operation_path = PathBuf::from(format!(
+        "/proc/self/fd/{}/{}",
+        guard.as_raw_fd(),
+        name.to_string_lossy()
+    ));
+    Ok((guard, operation_path))
 }
 
 fn is_owned_socket(metadata: &std::fs::Metadata, uid: rustix::process::RawUid) -> bool {
@@ -198,8 +230,9 @@ fn secure_socket_path(path: &Path) -> Result<PathBuf> {
         // In systemd private namespaces, uid 65534 (overflow) may appear;
         // this is acceptable as validation is constrained to namespace boundary.
         //
-        // Future: Consider fd-based openat2(O_PATH, RESOLVE_IN_ROOT) for
-        // stronger protection against TOCTOU races.
+        // On Linux, binding and stale-entry cleanup use an opened parent
+        // directory through /proc/self/fd, so later path operations cannot be
+        // redirected by swapping an ancestor after this validation.
         if current == Path::new("/") {
             break;
         }
