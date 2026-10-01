@@ -57,10 +57,8 @@ static ROUTE_CATALOG: OnceLock<RouteCatalog> = OnceLock::new();
 
 fn route_catalog() -> &'static RouteCatalog {
     ROUTE_CATALOG.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../../tests/certification/compositor-matrix.json"
-        ))
-        .expect("checked-in certification route contract must be valid")
+        serde_json::from_str(include_str!("../routes.json"))
+            .expect("checked-in certification route contract must be valid")
     })
 }
 

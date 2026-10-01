@@ -151,12 +151,12 @@ impl PickerApp {
     /// Cache enabled plain-text snippet indices, best match first. Command
     /// snippets are left out: they only run when their trigger is typed.
     fn refresh_results(&mut self) {
-        if self.cached_query.as_deref() == Some(self.query.as_str())
+        let query = self.query.trim().to_lowercase();
+        if self.cached_query.as_deref() == Some(query.as_str())
             && self.cached_revision.as_ref() == Some(&self.config_revision)
         {
             return;
         }
-        let query = self.query.trim().to_lowercase();
         let mut ranked: Vec<(i64, usize)> = self
             .config
             .expansion
@@ -178,7 +178,7 @@ impl PickerApp {
             .take(MAX_RESULTS)
             .map(|(_, index)| index)
             .collect();
-        self.cached_query = Some(self.query.clone());
+        self.cached_query = Some(query);
         self.cached_revision = Some(self.config_revision.clone());
     }
 

@@ -422,8 +422,8 @@ impl Strings {
                 ),
             };
         };
-        let capture = route.capture.to_string();
-        let injection = route.injection.to_string();
+        let capture = route.capture_label;
+        let injection = route.injection_label;
         let state = if matches!(
             (route.capture_state, route.injection_state),
             (BackendState::Available, BackendState::Available)

@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tests/certification/compositor-matrix.json"
+ROUTE_SOURCE = ROOT / "crates/backend-selection/routes.json"
 DOCUMENTS = (ROOT / "docs/SUPPORT_MATRIX.md", ROOT / "docs/CERTIFICATION_MATRIX.md")
 START = "<!-- generated:desktop-certification-matrix:start -->"
 END = "<!-- generated:desktop-certification-matrix:end -->"
@@ -18,9 +19,9 @@ ROUTE_END = "<!-- generated:route-contract:end -->"
 VALID_CERTIFICATION = {"not-certified", "certified"}
 
 
-def render(matrix: dict[str, object]) -> str:
+def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
     targets = matrix.get("targets")
-    routes = matrix.get("routes")
+    routes = route_catalog.get("routes")
     if not isinstance(targets, list) or not targets:
         raise ValueError("certification matrix must contain target entries")
     if not isinstance(routes, list) or not routes:
@@ -30,7 +31,12 @@ def render(matrix: dict[str, object]) -> str:
         if not isinstance(route, dict) or not isinstance(route.get("path"), str):
             raise ValueError("every route contract must define a path")
         path = route["path"]
-        for target_id in route.get("certification_targets", []):
+        targets_for_route = route.get("certification_targets")
+        if not isinstance(targets_for_route, list) or not all(
+            isinstance(target_id, str) for target_id in targets_for_route
+        ):
+            raise ValueError("every route contract must define string certification targets")
+        for target_id in targets_for_route:
             route_paths.setdefault(target_id, []).append(path)
     rows = [
         "| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |",
@@ -95,8 +101,8 @@ def render(matrix: dict[str, object]) -> str:
     return "\n".join([START, *rows, END])
 
 
-def render_routes(matrix: dict[str, object]) -> str:
-    routes = matrix.get("routes")
+def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
+    routes = route_catalog.get("routes")
     targets = matrix.get("targets")
     if not isinstance(routes, list) or not routes:
         raise ValueError("certification matrix must contain route entries")
@@ -121,9 +127,16 @@ def render_routes(matrix: dict[str, object]) -> str:
         route_id = route["id"]
         if not isinstance(route_id, str) or not route_id or route_id in seen:
             raise ValueError("route IDs must be unique non-empty strings")
+        for key in ("label", "path", "capture", "injection", "app_identity", "status", "setup_backend", "setup_detail"):
+            if not isinstance(route[key], str) or not route[key]:
+                raise ValueError(f"{route_id}: {key} must be a non-empty string")
+        for key in ("sensitive_fields", "atomic_replace", "focus_tracking"):
+            if not isinstance(route[key], bool):
+                raise ValueError(f"{route_id}: {key} must be boolean")
         seen.add(route_id)
         if not isinstance(route["certification_targets"], list) or not all(
-            target in target_ids for target in route["certification_targets"]
+            isinstance(target, str) and target in target_ids
+            for target in route["certification_targets"]
         ):
             raise ValueError(f"{route_id}: certification targets must name known targets")
         rows.append(
@@ -147,6 +160,7 @@ def update(document: Path, expected: str, write: bool, start: str, end: str) -> 
     if write:
         document.write_text(before + expected + after, encoding="utf-8")
         print(f"generated {document.relative_to(ROOT)}")
+        return True
     else:
         print(f"{document.relative_to(ROOT)} is stale; run scripts/generate-desktop-matrix.py --write", file=sys.stderr)
     return False
@@ -160,15 +174,18 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         matrix = json.loads(SOURCE.read_text(encoding="utf-8"))
+        route_catalog = json.loads(ROUTE_SOURCE.read_text(encoding="utf-8"))
         if not isinstance(matrix, dict):
             raise ValueError("certification matrix root must be an object")
-        expected = render(matrix)
-        expected_routes = render_routes(matrix)
-        results = [
-            update(document, expected, arguments.write, START, END)
-            and update(document, expected_routes, arguments.write, ROUTE_START, ROUTE_END)
-            for document in DOCUMENTS
-        ]
+        if not isinstance(route_catalog, dict):
+            raise ValueError("route catalog root must be an object")
+        expected = render(matrix, route_catalog)
+        expected_routes = render_routes(matrix, route_catalog)
+        results = []
+        for document in DOCUMENTS:
+            desktop_ok = update(document, expected, arguments.write, START, END)
+            routes_ok = update(document, expected_routes, arguments.write, ROUTE_START, ROUTE_END)
+            results.append(desktop_ok and routes_ok)
         current = all(results)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         print(f"desktop matrix generation failed: {error}", file=sys.stderr)

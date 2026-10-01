@@ -61,6 +61,8 @@ const REPLACEMENT_EDITOR_SALT: &str = "wayexpand-replacement-editor";
 struct RouteRecommendation {
     capture: wayexpand_core::BackendKind,
     injection: wayexpand_core::BackendKind,
+    capture_label: &'static str,
+    injection_label: &'static str,
     capture_state: BackendState,
     injection_state: BackendState,
     focus_tracking: bool,
@@ -95,6 +97,8 @@ fn route_recommendation(
     RouteRecommendation {
         capture,
         injection,
+        capture_label: &contract.capture,
+        injection_label: &contract.injection,
         capture_state: match route {
             RecommendedRoute::IBus => BackendState::Available,
             RecommendedRoute::EvdevLibei if capabilities.has_dev_input => BackendState::Available,
@@ -107,7 +111,7 @@ fn route_recommendation(
             }
             RecommendedRoute::EvdevLibei => backend_state(statuses, injection),
         },
-        focus_tracking: capabilities.has_window_tracker,
+        focus_tracking: contract.focus_tracking && capabilities.has_window_tracker,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
         certification: match contract.status.as_str() {
@@ -4471,8 +4475,15 @@ mod tests {
         let route = route_recommendation(shared_route, &capabilities, &statuses);
         assert_eq!(route.capture, wayexpand_core::BackendKind::Evdev);
         assert_eq!(route.injection, wayexpand_core::BackendKind::Libei);
+        assert_eq!(route.capture_label, "evdev");
+        assert_eq!(route.injection_label, "libei");
         assert!(!route.sensitive_fields);
         assert!(!route.atomic_replace);
+
+        let ibus =
+            route_recommendation(RecommendedRoute::IBus, &Capabilities::default(), &statuses);
+        assert_eq!(ibus.capture_label, "ibus");
+        assert_eq!(ibus.injection_label, "ibus");
     }
 
     #[test]
