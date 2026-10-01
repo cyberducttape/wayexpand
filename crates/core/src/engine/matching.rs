@@ -10,8 +10,11 @@ use crate::config::capitalize_first_letter;
 use crate::{render_template_with_cursor, AppFilter, ExpansionConfig, MatchMode};
 
 fn glob_matches(pattern: &str, value: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let value = value.as_bytes();
+    // Match Unicode scalar values rather than UTF-8 bytes. In particular, `?`
+    // must consume one user-visible character such as `é`, `你`, or `Ж`, not
+    // one byte of its encoding.
+    let pattern = pattern.chars().collect::<Vec<_>>();
+    let value = value.chars().collect::<Vec<_>>();
     let mut pattern_index = 0;
     let mut value_index = 0;
     let mut star = None;
@@ -19,11 +22,11 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 
     while value_index < value.len() {
         if pattern_index < pattern.len()
-            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == b'?')
+            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == '?')
         {
             pattern_index += 1;
             value_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == '*' {
             star = Some(pattern_index);
             pattern_index += 1;
             star_value_index = value_index;
@@ -36,7 +39,7 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
         }
     }
 
-    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+    while pattern_index < pattern.len() && pattern[pattern_index] == '*' {
         pattern_index += 1;
     }
     pattern_index == pattern.len()
@@ -178,5 +181,32 @@ impl ExpansionEngine {
                     }
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob_matches;
+
+    #[test]
+    fn question_mark_matches_one_unicode_scalar() {
+        for character in ["é", "ö", "你", "Ж"] {
+            assert!(glob_matches("?", character));
+            assert!(glob_matches("x?x", &format!("x{character}x")));
+        }
+    }
+
+    #[test]
+    fn question_mark_does_not_match_multiple_unicode_scalars() {
+        assert!(!glob_matches("?", "éé"));
+        assert!(!glob_matches("?", "你Ж"));
+        assert!(!glob_matches("x?x", "xééx"));
+    }
+
+    #[test]
+    fn star_keeps_matching_across_unicode_scalars() {
+        assert!(glob_matches("*你*", "prefix你suffix"));
+        assert!(glob_matches("你*Ж", "你éöЖ"));
+        assert!(!glob_matches("你*Ж", "你éöж"));
     }
 }

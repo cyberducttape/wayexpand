@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Fix: app-ID glob filters now match `?` against Unicode scalar values instead
+  of UTF-8 bytes, so international application IDs are matched correctly.
+
 - Fix: evdev now replays keys held on surviving keyboards when rebuilding its
   XKB state after another keyboard disconnects, keeping modifier handling and
   per-device pressed-key tracking consistent.
