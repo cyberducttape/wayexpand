@@ -5,7 +5,7 @@
 
 use std::{
     io::Read,
-    process::{Child, ChildStdout, Command, Stdio},
+    process::{Child, ChildStderr, ChildStdout, Command, Stdio},
     sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     thread,
     time::{Duration, Instant},
@@ -14,11 +14,15 @@ use std::{
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
 use super::{
     CommandConfig, CommandEnvironment, CommandError, MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
 };
+
+const MAX_COMMAND_STDERR_BYTES: usize = 16 * 1024;
 
 /// Atomic counters shared by the expansion and hotkey workers. Keeping this
 /// state with the runtime module makes queue accounting independent of the
@@ -88,11 +92,12 @@ pub(super) fn run_command_with_shutdown(
             .args(&command.args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         configure_process_group(&mut process);
         let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
         let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
-        run_command_unix(child, stdout, command.timeout_ms, shutdown)
+        let stderr = child.stderr.take().ok_or(CommandError::SpawnFailed)?;
+        run_command_unix(child, stdout, stderr, command.timeout_ms, shutdown)
     }
 
     #[cfg(not(unix))]
@@ -124,6 +129,7 @@ impl Drop for ChildGuard {
 fn run_command_unix(
     child: Child,
     mut stdout: ChildStdout,
+    mut stderr: ChildStderr,
     timeout_ms: u64,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
@@ -133,9 +139,13 @@ fn run_command_unix(
         pid: Some(pid),
     };
     set_nonblocking_stdout(&stdout)?;
+    set_nonblocking_stderr(&stderr)?;
+    let pidfd = open_pidfd(pid);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
     let mut stdout_eof = false;
+    let mut stderr_eof = false;
 
     let status = loop {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
@@ -144,27 +154,46 @@ fn run_command_unix(
         if !stdout_eof {
             stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
         }
+        if !stderr_eof {
+            stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
+        }
         match guard.child.as_mut().unwrap().try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+            Ok(None) if Instant::now() < deadline => {
+                wait_for_command_event(
+                    &stdout,
+                    &stderr,
+                    pidfd.as_ref(),
+                    deadline,
+                    shutdown.is_some(),
+                )?;
+            }
             Ok(None) => return Err(CommandError::Timeout),
             Err(error) => return Err(CommandError::WaitFailed(error.to_string())),
         }
     };
 
+    // Give a just-started descendant a chance to finish deliberately moving
+    // into its own session before the parent's process group is cleaned up.
+    // This is a one-time lifecycle grace period, not a polling interval.
+    thread::sleep(Duration::from_millis(10));
     if let Some(pid) = guard.pid {
         kill_process_group_by_pid(pid);
         guard.pid = None;
     }
     let drain_deadline = Instant::now() + Duration::from_millis(100);
-    while !stdout_eof && Instant::now() < drain_deadline {
+    while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
         stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
-        if !stdout_eof {
-            thread::sleep(Duration::from_millis(5));
+        stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
+        if !stdout_eof || !stderr_eof {
+            wait_for_command_event(&stdout, &stderr, None, drain_deadline, false)?;
         }
     }
     if !status.success() {
-        return Err(CommandError::NonZeroExit(status.code()));
+        return Err(CommandError::NonZeroExit {
+            code: status.code(),
+            stderr: diagnostic_stderr(&stderr_bytes),
+        });
     }
     if !stdout_eof {
         return Err(CommandError::IncompleteOutput);
@@ -198,6 +227,98 @@ fn set_nonblocking_stdout(stdout: &ChildStdout) -> Result<(), CommandError> {
 }
 
 #[cfg(unix)]
+fn set_nonblocking_stderr(stderr: &ChildStderr) -> Result<(), CommandError> {
+    let fd = stderr.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(CommandError::OutputChannelLost);
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(CommandError::OutputChannelLost);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn open_pidfd(pid: u32) -> Option<OwnedFd> {
+    #[cfg(target_os = "linux")]
+    {
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
+        if fd >= 0 {
+            // SAFETY: the successful syscall returned a newly-owned fd.
+            return Some(unsafe { OwnedFd::from_raw_fd(fd as RawFd) });
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn wait_for_command_event(
+    stdout: &ChildStdout,
+    stderr: &ChildStderr,
+    pidfd: Option<&OwnedFd>,
+    deadline: Instant,
+    cancellation_watch: bool,
+) -> Result<(), CommandError> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let mut timeout_ms = remaining
+        .as_millis()
+        .min(i32::MAX as u128)
+        .try_into()
+        .unwrap_or(i32::MAX);
+    // An AtomicBool cannot be included in poll's wait set. Keep cancellation
+    // responsive without returning to the old 5ms process-status spin; the
+    // normal path remains event-driven until the command deadline.
+    if cancellation_watch {
+        timeout_ms = timeout_ms.min(50);
+    }
+    let mut fds = [
+        libc::pollfd {
+            fd: stdout.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: stderr.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        },
+    ];
+    if let Some(pidfd) = pidfd {
+        // The extra entry is only used on Linux, where pidfd readiness means
+        // the child exited and avoids periodic waitpid polling entirely.
+        fds[0].revents = 0;
+        let mut all_fds = [
+            fds[0],
+            fds[1],
+            libc::pollfd {
+                fd: pidfd.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        poll_fds(&mut all_fds, timeout_ms)?;
+    } else {
+        poll_fds(&mut fds, timeout_ms)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn poll_fds(fds: &mut [libc::pollfd], timeout_ms: i32) -> Result<(), CommandError> {
+    loop {
+        let result = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
+        if result >= 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(CommandError::OutputChannelLost);
+        }
+    }
+}
+
+#[cfg(unix)]
 fn read_available_stdout(
     stdout: &mut ChildStdout,
     bytes: &mut Vec<u8>,
@@ -216,6 +337,34 @@ fn read_available_stdout(
             Err(_) => return Err(CommandError::OutputChannelLost),
         }
     }
+}
+
+#[cfg(unix)]
+fn read_available_stderr(
+    stderr: &mut ChildStderr,
+    bytes: &mut Vec<u8>,
+) -> Result<bool, CommandError> {
+    let mut buffer = [0_u8; 4096];
+    loop {
+        match stderr.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                let remaining = MAX_COMMAND_STDERR_BYTES.saturating_sub(bytes.len());
+                bytes.extend_from_slice(&buffer[..count.min(remaining)]);
+                if bytes.len() >= MAX_COMMAND_STDERR_BYTES {
+                    return Ok(false);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(_) => return Err(CommandError::OutputChannelLost),
+        }
+    }
+}
+
+fn diagnostic_stderr(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 pub(super) fn configure_command_environment(process: &mut Command, command: &CommandConfig) {

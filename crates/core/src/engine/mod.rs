@@ -1481,7 +1481,11 @@ pub enum CommandError {
     /// The process status could not be obtained after the program was started.
     WaitFailed(String),
     /// The program exited but reported failure.
-    NonZeroExit(Option<i32>),
+    NonZeroExit {
+        code: Option<i32>,
+        /// Bounded stderr captured for diagnostics only; never injected.
+        stderr: Option<String>,
+    },
     /// Output exceeded the bounded size this engine will buffer.
     OutputTooLarge,
     /// Output exceeded an organization-configured replacement limit.
@@ -1514,8 +1518,16 @@ impl std::fmt::Display for CommandError {
             CommandError::WaitFailed(error) => {
                 write!(f, "failed while obtaining process status: {error}")
             }
-            CommandError::NonZeroExit(Some(code)) => write!(f, "exited with status {code}"),
-            CommandError::NonZeroExit(None) => write!(f, "was terminated by a signal"),
+            CommandError::NonZeroExit { code, stderr } => {
+                match code {
+                    Some(code) => write!(f, "exited with status {code}")?,
+                    None => write!(f, "was terminated by a signal")?,
+                }
+                if let Some(stderr) = stderr {
+                    write!(f, ": {stderr}")?;
+                }
+                Ok(())
+            }
             CommandError::OutputTooLarge => write!(
                 f,
                 "produced more than {} bytes of output",
