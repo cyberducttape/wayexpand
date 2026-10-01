@@ -54,7 +54,7 @@ use thiserror::Error;
 use wayexpand_backend_input_method::{key_action, key_action_and_update, key_chord, KeyAction};
 use wayexpand_core::{InputEvent, InputSource, InputSourceCapabilities, InputSourceError};
 use wayland_client::protocol::wl_keyboard::KeyState;
-use xkbcommon_rs::{Context, Keymap, State};
+use xkbcommon_rs::{xkb_state::KeyDirection, Context, Keymap, State};
 
 const SOURCE_NAME: &str = "evdev";
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
@@ -249,6 +249,21 @@ impl EvdevSource {
         let keymap = Keymap::new_from_names(context, None, 0)
             .map_err(|error| EvdevError::Keymap(error.to_string()))?;
         self.state = State::new(keymap);
+        // Reconstruct the global XKB state from every key that is still held
+        // on a surviving device. Resetting without replaying these keys makes
+        // `pressed` report modifiers that XKB no longer knows about, so the
+        // next shortcut is interpreted with two different keyboard states.
+        let mut held_keys = self
+            .pressed
+            .values()
+            .flat_map(|keys| keys.iter().copied())
+            .collect::<Vec<_>>();
+        held_keys.sort_unstable();
+        for keycode in held_keys {
+            if let Some(xkb_keycode) = keycode.checked_add(8) {
+                self.state.update_key(xkb_keycode, KeyDirection::Down);
+            }
+        }
         self.queue_event(InputEvent::Reset);
         tracing::warn!(
             count = lost_paths.len(),
@@ -653,6 +668,79 @@ mod tests {
             .reset_keyboard_state_for_devices(&[keyboard_a.to_path_buf()])
             .unwrap();
         assert!(source.keys_held(), "disconnecting A must not clear B");
+    }
+
+    #[test]
+    fn surviving_keyboard_modifiers_are_replayed_after_disconnect() {
+        let keyboard_a = Path::new("/dev/input/event-a");
+        let keyboard_b = Path::new("/dev/input/event-b");
+        // Linux evdev keycodes: Left Ctrl, Left Shift, Left Alt, Right Alt.
+        let modifiers = [
+            (29, Some(&["Control", "Ctrl"][..])),
+            (42, Some(&["Shift"][..])),
+            (56, Some(&["Mod1", "Alt"][..])),
+            // Right Alt / AltGr is layout-dependent: it may be a real Alt
+            // modifier or the virtual LevelThree modifier.
+            (
+                100,
+                Some(&["Mod1", "Alt", "Mod5", "LevelThree", "AltGr"][..]),
+            ),
+        ];
+
+        for (keycode, names) in modifiers {
+            let mut source = EvdevSource {
+                devices: Vec::new(),
+                state: test_state(),
+                pending: VecDeque::new(),
+                pressed: HashMap::new(),
+                last_device_refresh: Instant::now(),
+            };
+            source.translate_for_device(
+                keyboard_b,
+                evdev::InputEvent::new(evdev::EventType::KEY.0, keycode, 1),
+            );
+            // A different keyboard has a key held when it disconnects. Its
+            // removal must not affect the modifier held on keyboard B.
+            source.translate_for_device(
+                keyboard_a,
+                evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1),
+            );
+            source.pending.clear();
+            source
+                .reset_keyboard_state_for_devices(&[keyboard_a.to_path_buf()])
+                .unwrap();
+
+            assert!(
+                names.unwrap().iter().any(|name| {
+                    source
+                        .state
+                        .mod_name_is_active(
+                            name,
+                            xkbcommon_rs::xkb_state::StateComponent::MODS_EFFECTIVE,
+                        )
+                        .unwrap_or(false)
+                }),
+                "modifier keycode {keycode} was not restored"
+            );
+
+            source.translate_for_device(
+                keyboard_b,
+                evdev::InputEvent::new(evdev::EventType::KEY.0, keycode, 0),
+            );
+            assert!(
+                names.unwrap().iter().all(|name| {
+                    !source
+                        .state
+                        .mod_name_is_active(
+                            name,
+                            xkbcommon_rs::xkb_state::StateComponent::MODS_EFFECTIVE,
+                        )
+                        .unwrap_or(false)
+                }),
+                "modifier keycode {keycode} remained active after release"
+            );
+            assert!(!source.pressed[keyboard_b].contains(&u32::from(keycode)));
+        }
     }
 
     #[test]

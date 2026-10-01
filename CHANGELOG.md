@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- Fix: evdev now replays keys held on surviving keyboards when rebuilding its
+  XKB state after another keyboard disconnects, keeping modifier handling and
+  per-device pressed-key tracking consistent.
+
 - Fix: paced libei keysym fallback output no longer blocks the daemon's
   non-exclusive evdev capture loop; replacements are serialized through a
   bounded output worker and worker failures trigger the normal reconnect path.
