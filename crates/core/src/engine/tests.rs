@@ -2453,7 +2453,7 @@ fn sensitive_focus_prevents_expansion_in_password_fields() {
 }
 
 #[test]
-fn buffer_truncation_doesnt_cause_false_misses() {
+fn buffer_truncation_fails_closed_for_unknown_preceding_context() {
     // CRITICAL: When the rolling buffer is full and wraps, old characters
     // are evicted. If a trigger depends on context that was evicted, it
     // must NOT match (fail closed). This prevents partial-context matches.
@@ -2474,19 +2474,17 @@ fn buffer_truncation_doesnt_cause_false_misses() {
     let filler = "x".repeat(max_buffer + 10);
     let _ = engine.process(InputEvent::Text(filler));
 
-    // At this point buffer_truncated = true and the buffer has wrapped.
-    // Now type a trigger that requires word boundary.
-    // The preceding context (if any) is gone, so word boundary check
-    // may not have the context it needs. This should fail closed.
+    assert!(engine.buffer_truncated);
+
+    // Now type a trigger that requires a word boundary. The retained
+    // preceding filler is not a boundary, and any evicted context must not
+    // be treated as proof that a boundary existed.
 
     let result = engine.process(InputEvent::Text("complete ".into()));
-    // With truncated buffer context, word-boundary matching must be conservative
-    // and not assume word boundary if context is missing.
-    // This test documents the behavior: we still match, but the security model
-    // should account for this edge case in the word-boundary implementation.
-    assert!(
-        result.len() <= 1,
-        "buffer truncation should not cause spurious matches"
+    assert_eq!(
+        result.len(),
+        0,
+        "truncated context must fail closed rather than expand"
     );
 }
 
