@@ -101,6 +101,7 @@ struct GuiApp {
     fleet_status: String,
     backend_status: Vec<BackendStatus>,
     protocol_probes: Vec<(String, String)>,
+    diagnostics_sender: Option<SyncSender<runtime::Request>>,
     runtime_sender: Option<SyncSender<runtime::Request>>,
     runtime_receiver: Option<mpsc::Receiver<runtime::Completion>>,
     diagnostics_running: bool,
@@ -408,6 +409,7 @@ impl GuiApp {
             fleet_status: strings.not_checked().into(),
             backend_status: Vec::new(),
             protocol_probes: Vec::new(),
+            diagnostics_sender: None,
             runtime_sender: None,
             runtime_receiver: None,
             diagnostics_running: false,
@@ -441,8 +443,10 @@ impl GuiApp {
     }
 
     fn start_runtime(&mut self) -> Result<()> {
-        let (sender, receiver) = runtime::start().context("starting GUI background runtime")?;
-        self.runtime_sender = Some(sender);
+        let (control_sender, diagnostics_sender, receiver) =
+            runtime::start().context("starting GUI background runtime")?;
+        self.runtime_sender = Some(control_sender);
+        self.diagnostics_sender = Some(diagnostics_sender);
         self.runtime_receiver = Some(receiver);
         self.refresh_diagnostics(false);
         Ok(())
@@ -456,7 +460,7 @@ impl GuiApp {
             config_path: self.path.clone(),
             announce,
         };
-        let Some(sender) = self.runtime_sender.as_ref() else {
+        let Some(sender) = self.diagnostics_sender.as_ref() else {
             return;
         };
         match sender.try_send(request) {
@@ -492,6 +496,7 @@ impl GuiApp {
         if disconnected {
             self.runtime_receiver = None;
             self.runtime_sender = None;
+            self.diagnostics_sender = None;
             self.diagnostics_running = false;
             self.pending_control = 0;
             self.pending_reload_revision = None;
@@ -3922,8 +3927,9 @@ mod tests {
         let original_draft = app.draft.as_ref().unwrap().clone();
         fs::write(&path, "[[expansion]\nthis is not valid TOML").unwrap();
 
-        let (sender, receiver) = runtime::start().unwrap();
+        let (sender, diagnostics_sender, receiver) = runtime::start().unwrap();
         app.runtime_sender = Some(sender);
+        app.diagnostics_sender = Some(diagnostics_sender);
         app.runtime_receiver = Some(receiver);
         app.perform_reload();
         assert!(app.pending_reload_revision.is_some());

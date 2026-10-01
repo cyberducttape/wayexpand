@@ -111,18 +111,21 @@ impl DaemonCapabilities {
     }
 }
 
-pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completion>)> {
-    let (request_sender, request_receiver) = mpsc::sync_channel(REQUEST_CAPACITY);
+pub(crate) fn start() -> std::io::Result<(
+    SyncSender<Request>,
+    SyncSender<Request>,
+    Receiver<Completion>,
+)> {
+    let (control_sender, control_receiver) = mpsc::sync_channel(REQUEST_CAPACITY);
+    let (diagnostics_sender, diagnostics_receiver) = mpsc::sync_channel(REQUEST_CAPACITY);
     let (completion_sender, completion_receiver) = mpsc::sync_channel(RESULT_CAPACITY);
+
+    let control_completion_sender = completion_sender.clone();
     thread::Builder::new()
-        .name("wayexpand-gui-runtime".into())
+        .name("wayexpand-gui-control".into())
         .spawn(move || {
-            while let Ok(request) = request_receiver.recv() {
+            while let Ok(request) = control_receiver.recv() {
                 let completion = match request {
-                    Request::Diagnostics {
-                        config_path,
-                        announce,
-                    } => Completion::Diagnostics(run_diagnostics(config_path, announce)),
                     Request::Control { command, operation } => Completion::Control {
                         operation,
                         result: control_command(&command),
@@ -130,13 +133,32 @@ pub(crate) fn start() -> std::io::Result<(SyncSender<Request>, Receiver<Completi
                     Request::ReloadConfig { path } => {
                         Completion::ConfigReloaded(Box::new(load_config_snapshot(path)))
                     }
+                    Request::Diagnostics { .. } => continue,
                 };
+                if control_completion_sender.send(completion).is_err() {
+                    break;
+                }
+            }
+        })?;
+
+    thread::Builder::new()
+        .name("wayexpand-gui-diagnostics".into())
+        .spawn(move || {
+            while let Ok(request) = diagnostics_receiver.recv() {
+                let Request::Diagnostics {
+                    config_path,
+                    announce,
+                } = request
+                else {
+                    continue;
+                };
+                let completion = Completion::Diagnostics(run_diagnostics(config_path, announce));
                 if completion_sender.send(completion).is_err() {
                     break;
                 }
             }
         })?;
-    Ok((request_sender, completion_receiver))
+    Ok((control_sender, diagnostics_sender, completion_receiver))
 }
 
 fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
