@@ -163,13 +163,13 @@ impl std::error::Error for EventError {
 }
 
 impl EventError {
+    /// Whether the output session failed in a way that a reconnect can fix.
+    /// This is independent of whether the transaction may have partially
+    /// applied: callers never replay the failed expansion either way, and a
+    /// lost libei/wlroots connection (non-atomic backends) must reconnect
+    /// rather than terminate the daemon.
     fn retryable(&self) -> bool {
-        match &self.source {
-            wayexpand_core::TransactionOutcome::NotApplied { source } => source.retryable,
-            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
-            | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
-            | wayexpand_core::TransactionOutcome::Applied => false,
-        }
+        self.source.source().is_some_and(|source| source.retryable)
     }
 
     fn expansion_rejected(&self) -> bool {
@@ -1166,9 +1166,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Drain any pending window-change events from the tracker's receiver
-/// and apply them to the engine. This prevents app-filter races where a
-/// focus change arrives between input-event wait and processing.
+/// The last published focused window and a counter bumped on every change,
+/// so the quick-insert picker can tell focus left and came back.
 struct FocusState {
     previous: Option<WindowContext>,
     generation: u64,
@@ -1188,6 +1187,9 @@ fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
     });
 }
 
+/// Drain any pending window-change events from the tracker's receiver
+/// and apply them to the engine. This prevents app-filter races where a
+/// focus change arrives between input-event wait and processing.
 fn drain_pending_window_events(
     window_tracker: &Option<backend_lifecycle::WindowTrackerHandle>,
     engine: &mut ExpansionEngine,
@@ -1206,12 +1208,13 @@ fn drain_pending_window_events(
             active_backend,
         )?;
     }
-    let current = engine.current_window().cloned();
-    if focus_state.previous != current {
-        focus_state.previous = current;
+    // Runs on every loop iteration: compare by reference and publish only on
+    // an actual focus change.
+    if focus_state.previous.as_ref() != engine.current_window() {
+        focus_state.previous = engine.current_window().cloned();
         focus_state.generation = focus_state.generation.wrapping_add(1);
+        publish_focus_snapshot(control, focus_state);
     }
-    publish_focus_snapshot(control, focus_state);
     Ok(())
 }
 
@@ -1416,16 +1419,15 @@ fn process_event(
                 if let Some(backend) = injector.as_deref_mut() {
                     let outcome = latency::apply(backend, &result);
                     if !outcome.is_applied() {
-                        if matches!(
+                        // Only a transaction known not to have started may
+                        // retain the undo record for a retry. After a
+                        // possibly partial one, replaying the undo would
+                        // erase text the user never typed, so drop it.
+                        if !matches!(
                             outcome,
                             wayexpand_core::TransactionOutcome::NotApplied { .. }
                         ) {
-                            // Only a transaction known not to have started may
-                            // safely retain the undo record for a retry.
-                            return Err(Box::new(EventError {
-                                result,
-                                source: outcome,
-                            }));
+                            engine.commit_undo(&result);
                         }
                         return Err(Box::new(EventError {
                             result,
@@ -1936,6 +1938,35 @@ mod tests {
         }
     }
 
+    /// Fails like [`FailingInjector`], but its replace is one atomic
+    /// protocol transaction, so a failure is known not to have applied.
+    struct AtomicFailingInjector;
+
+    impl TextInjector for AtomicFailingInjector {
+        fn name(&self) -> &'static str {
+            "atomic-failing-test"
+        }
+
+        fn capabilities(&self) -> InjectorCapabilities {
+            InjectorCapabilities {
+                atomic_replace: true,
+                ..InjectorCapabilities::default()
+            }
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Err(InjectorError {
+                backend: "atomic-failing-test",
+                message: "connection lost".into(),
+                retryable: true,
+            })
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            unreachable!("erase fails first")
+        }
+    }
+
     struct TextBufferInjector {
         text: String,
     }
@@ -2398,12 +2429,12 @@ mod tests {
         let error = process_event(
             &mut engine,
             InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
-            Some(&mut FailingInjector),
+            Some(&mut AtomicFailingInjector),
             &policy,
             "libei",
         )
         .unwrap_err();
-        assert!(!error.retryable());
+        assert!(error.retryable());
 
         let mut retry_injector = RecordingInjector { calls: Vec::new() };
         process_event(
@@ -2415,6 +2446,56 @@ mod tests {
         )
         .unwrap();
         assert_eq!(retry_injector.calls, ["erase:ok", "insert::x"]);
+    }
+
+    #[test]
+    fn possibly_partial_undo_failure_drops_the_undo_record() {
+        let config = Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+
+            [[expansion]]
+            trigger = ":x"
+            replacement = "ok"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let mut initial_injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Text(":x".into()),
+            Some(&mut initial_injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+
+        // A non-atomic backend may have erased part of the text before
+        // failing; the session still reconnects, but the undo must not be
+        // replayed against text in an unknown state.
+        let error = process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut FailingInjector),
+            &policy,
+            "libei",
+        )
+        .unwrap_err();
+        assert!(error.retryable());
+
+        let mut retry_injector = RecordingInjector { calls: Vec::new() };
+        process_event(
+            &mut engine,
+            InputEvent::Key(wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap()),
+            Some(&mut retry_injector),
+            &policy,
+            "libei",
+        )
+        .unwrap();
+        assert!(retry_injector.calls.is_empty());
     }
 
     #[test]
@@ -2664,7 +2745,7 @@ mod tests {
     }
 
     #[test]
-    fn retryable_injection_failure_preserves_ambiguous_result() {
+    fn lost_non_atomic_session_reconnects_and_preserves_ambiguous_result() {
         let config = Config::parse(
             r#"[[expansion]]
             trigger = ":x"
@@ -2681,7 +2762,7 @@ mod tests {
             "libei",
         )
         .unwrap_err();
-        assert!(!error.retryable());
+        assert!(error.retryable());
         assert_eq!(error.result.trigger, ":x");
         assert_eq!(error.result.insert, "ok");
     }

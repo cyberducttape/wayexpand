@@ -38,8 +38,9 @@ pub(crate) enum Request {
     SaveConfig {
         request_id: u64,
         path: PathBuf,
-        candidate: Config,
-        base_document: DocumentMut,
+        // Boxed: both are large and would otherwise size every request.
+        candidate: Box<Config>,
+        base_document: Box<DocumentMut>,
         expected_revision: wayexpand_core::ConfigRevision,
     },
 }
@@ -59,8 +60,20 @@ pub(crate) enum Completion {
     ConfigReloaded(Box<Result<ReloadSnapshot, String>>),
     ConfigSaved {
         request_id: u64,
-        result: Result<(wayexpand_core::ConfigRevision, DocumentMut), String>,
+        result: Result<(wayexpand_core::ConfigRevision, DocumentMut), SaveFailure>,
     },
+}
+
+/// Why a background save did not land, classified so the editor can react
+/// without parsing message text.
+#[derive(Debug)]
+pub(crate) enum SaveFailure {
+    /// The file changed on disk since it was loaded.
+    Conflict,
+    /// Another writer holds the configuration lock.
+    Busy,
+    /// Anything else, as a summary that never echoes snippet content.
+    Failed(String),
 }
 
 pub(crate) struct ReloadSnapshot {
@@ -172,7 +185,7 @@ pub(crate) fn start() -> std::io::Result<(
                         expected_revision,
                     } => Completion::ConfigSaved {
                         request_id,
-                        result: save_config(path, candidate, base_document, expected_revision),
+                        result: save_config(path, *candidate, *base_document, expected_revision),
                     },
                     Request::Diagnostics { .. } => continue,
                 };
@@ -207,19 +220,24 @@ pub(crate) fn save_config(
     candidate: Config,
     base_document: DocumentMut,
     expected_revision: wayexpand_core::ConfigRevision,
-) -> Result<(wayexpand_core::ConfigRevision, DocumentMut), String> {
+) -> Result<(wayexpand_core::ConfigRevision, DocumentMut), SaveFailure> {
     candidate
         .validate()
-        .map_err(|error| format!("Validation: {}", error.safe_summary()))?;
-    let replacement = toml_edit::ser::to_document(&candidate)
-        .map_err(|error| format!("Validation: could not serialize configuration: {error}"))?;
+        .map_err(|error| SaveFailure::Failed(error.safe_summary()))?;
+    let replacement = toml_edit::ser::to_document(&candidate).map_err(|error| {
+        SaveFailure::Failed(format!("could not serialize configuration: {error}"))
+    })?;
     let document = crate::persistence::merge_config_document(base_document, replacement);
     let revision = Config::save_atomic_text_if_revision_matches(
         path,
         &document.to_string(),
         &expected_revision,
     )
-    .map_err(|error| format!("{}: {}", error.category(), error.safe_summary()))?;
+    .map_err(|error| match error {
+        wayexpand_core::ConfigError::RevisionConflict => SaveFailure::Conflict,
+        wayexpand_core::ConfigError::Busy { .. } => SaveFailure::Busy,
+        error => SaveFailure::Failed(error.safe_summary()),
+    })?;
     Ok((revision, document))
 }
 

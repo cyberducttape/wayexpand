@@ -46,7 +46,7 @@ Script-level checks run in CI (`.github/workflows/ci.yml`): `scripts/test-releas
 
 ## Conventions that aren't obvious from the code
 
-- **Fail closed.** An `app_filter` snippet with no known window, or a word-boundary trigger whose preceding context was evicted, must not match. When an `app_id` is present it is the only thing an `app_filter` matches against; the window title is a fallback only when there is no `app_id`.
+- **Fail closed.** An `app_filter` snippet with no known window, or a word-boundary trigger whose preceding context was evicted, must not match. `app_filter` values are parsed into `AppFilter` operators: bare values and `app_id_exact:` match the normalized app ID exactly, `app_id_glob:` globs it, and neither ever falls back to the window title. Only an explicit `title_contains:` reads the (user-editable) title; it is weak, rejected in safe mode unless `allow_weak_app_filters` is set, and disabled by `disable_title_matching`.
 - **State compatibility precisely.** Docs and `doctor` must not claim a backend works without evidence (see `docs/SUPPORT_MATRIX.md`, promotion policy).
 - **CLI exit codes come from typed error categories.** `CliErrorKind` carried by `CliError` in `crates/cli/src/main.rs` assigns stable exit codes independently of human-facing error wording. Exit codes and JSON output are a documented contract in `docs/COMPATIBILITY.md`, with contract tests in the CLI's test module.
 - **Errors must not leak snippet content.** Use `ConfigError::safe_summary()` in user-facing output; `scripts/test-doctor.sh` checks for leaks.

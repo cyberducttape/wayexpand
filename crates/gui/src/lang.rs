@@ -128,27 +128,6 @@ impl Strings {
         }
     }
 
-    pub fn disconnected_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "● Disconnected",
-            Language::German => "● Getrennt",
-        }
-    }
-
-    pub fn status_unknown(&self) -> &'static str {
-        match self.lang {
-            Language::English => "◌ Checking",
-            Language::German => "◌ Wird geprüft",
-        }
-    }
-
-    pub fn paused_status(&self) -> &'static str {
-        match self.lang {
-            Language::English => "● Paused",
-            Language::German => "● Pausiert",
-        }
-    }
-
     pub fn daemon_running_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Daemon: Running",
@@ -2288,10 +2267,10 @@ impl Strings {
     pub fn picker_footer_clipboard(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "WayExpand isn't running · Enter copies the snippet to the clipboard"
+                "Can't type into the previous app (no daemon or window tracking) · Enter copies the snippet to the clipboard"
             }
             Language::German => {
-                "WayExpand läuft nicht · Enter kopiert das Snippet in die Zwischenablage"
+                "Tippen in die vorherige App nicht möglich (kein Dienst oder Fenster-Tracking) · Enter kopiert das Snippet in die Zwischenablage"
             }
         }
     }

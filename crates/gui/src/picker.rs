@@ -35,7 +35,8 @@ const MAX_RESULTS: usize = 60;
 /// trigger match beats a description match, an earlier match beats a later
 /// one, and letters that merely appear in order ("sg" for ";sig") still
 /// match, below any substring. `None` means the entry is hidden.
-pub(crate) fn score(query: &str, trigger: &str, description: &str) -> Option<i64> {
+#[cfg(test)]
+fn score(query: &str, trigger: &str, description: &str) -> Option<i64> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Some(0);
@@ -46,10 +47,10 @@ pub(crate) fn score(query: &str, trigger: &str, description: &str) -> Option<i64
 }
 
 fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64> {
-    if let Some(position) = trigger.find(&query) {
+    if let Some(position) = trigger.find(query) {
         return Some(3_000 - position as i64 + i64::from(trigger == query) * 1_000);
     }
-    if let Some(position) = description.find(&query) {
+    if let Some(position) = description.find(query) {
         return Some(2_000 - position as i64);
     }
     let mut gaps = 0_i64;

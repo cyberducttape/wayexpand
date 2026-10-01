@@ -217,51 +217,54 @@ enum ChildExitObservation {
     Exited(Option<std::process::ExitStatus>),
 }
 
-#[cfg(unix)]
+/// Observe whether the child has exited without reaping it, so the leader
+/// stays a zombie and its PID/PGID cannot be recycled before the group kill.
+#[cfg(target_os = "linux")]
 fn child_exit_observed(
     _child: &mut Child,
     pid: u32,
     pidfd: Option<&OwnedFd>,
 ) -> Result<ChildExitObservation, CommandError> {
-    #[cfg(target_os = "linux")]
-    {
-        let (id_type, id) = if let Some(pidfd) = pidfd {
-            (libc::P_PIDFD, pidfd.as_raw_fd() as libc::id_t)
-        } else {
-            (libc::P_PID, pid as libc::id_t)
-        };
-        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
-        let result = unsafe {
-            libc::waitid(
-                id_type,
-                id,
-                &mut info,
-                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-            )
-        };
-        if result != 0 {
-            return Err(CommandError::WaitFailed(
-                std::io::Error::last_os_error().to_string(),
-            ));
-        }
-        return Ok(if unsafe { info.si_pid() } != 0 {
-            ChildExitObservation::Exited(None)
-        } else {
-            ChildExitObservation::Running
-        });
+    let (id_type, id) = if let Some(pidfd) = pidfd {
+        (libc::P_PIDFD, pidfd.as_raw_fd() as libc::id_t)
+    } else {
+        (libc::P_PID, pid as libc::id_t)
+    };
+    // SAFETY: siginfo_t is plain data; waitid only writes into `info`.
+    let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+    let result = unsafe {
+        libc::waitid(
+            id_type,
+            id,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result != 0 {
+        return Err(CommandError::WaitFailed(
+            std::io::Error::last_os_error().to_string(),
+        ));
     }
+    Ok(if unsafe { info.si_pid() } != 0 {
+        ChildExitObservation::Exited(None)
+    } else {
+        ChildExitObservation::Running
+    })
+}
 
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = pidfd;
-        _child
-            .try_wait()
-            .map(|status| match status {
-                Some(status) => ChildExitObservation::Exited(Some(status)),
-                None => ChildExitObservation::Running,
-            })
-            .map_err(|error| CommandError::WaitFailed(error.to_string()))
-    }
+#[cfg(all(unix, not(target_os = "linux")))]
+fn child_exit_observed(
+    child: &mut Child,
+    _pid: u32,
+    _pidfd: Option<&OwnedFd>,
+) -> Result<ChildExitObservation, CommandError> {
+    child
+        .try_wait()
+        .map(|status| match status {
+            Some(status) => ChildExitObservation::Exited(Some(status)),
+            None => ChildExitObservation::Running,
+        })
+        .map_err(|error| CommandError::WaitFailed(error.to_string()))
 }
 
 /// Drops trailing CR/LF in place. Command output is bounded at one megabyte,

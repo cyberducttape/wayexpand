@@ -466,6 +466,14 @@ run this way. Refusals are logged by the daemon rather than reported to the
 client, because the request is accepted before the focused application is
 known.
 
+The picker uses two further control lines so it never types into a window
+other than the one it was opened from. `focus` replies
+`focus_generation=<n>` and `focus_token=<hex>` lines: an opaque token for the
+focused window (empty when the daemon has no window tracker) and a counter
+that increases on every focus change. `insert-target <generation> <token>
+<trigger>` is `insert` that the daemon refuses unless the focused window still
+has that token and generation when the request is processed.
+
 **Exit codes:** `0` when the daemon accepted the request, `2` for a missing or
 malformed trigger, `4` when the daemon is unreachable or rejects the request.
 

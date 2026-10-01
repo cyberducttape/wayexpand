@@ -689,26 +689,6 @@ pub enum ConfigError {
 }
 
 impl ConfigError {
-    /// Stable class for frontends that need to present save failures without
-    /// parsing localized or evolving error text.
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::RevisionConflict => "Conflict",
-            Self::Busy { .. } => "Busy",
-            Self::Parse(_) | Self::InvalidUtf8 { .. } => "Parse",
-            Self::Read { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied => {
-                "Permission"
-            }
-            Self::Read { .. } => "IO",
-            Self::InsecurePermissions { .. }
-            | Self::InsecureOwner { .. }
-            | Self::RootOwnedWriteRequiresAdmin { .. }
-            | Self::InsecureParent { .. }
-            | Self::InsecureParentOwner { .. } => "Permission",
-            _ => "Validation",
-        }
-    }
-
     /// Return operator-useful diagnostics without echoing configuration text.
     /// The `Display` implementation remains detailed for library callers, but
     /// user-facing health checks should use this boundary-safe form.

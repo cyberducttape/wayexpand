@@ -193,7 +193,11 @@ impl EngineObject {
     /// IBus calls Destroy when the input context releases this engine. Remove
     /// both the retained adapter and its D-Bus object so context churn cannot
     /// grow the service forever.
-    fn destroy(&self) -> zbus::fdo::Result<()> {
+    ///
+    /// Async so the object-server removal is awaited on the dispatcher
+    /// rather than blocking it: removal takes the object tree's write lock,
+    /// which a blocking call from inside a handler could wait on forever.
+    async fn destroy(&self) -> zbus::fdo::Result<()> {
         let removed = self
             .instances
             .lock()
@@ -210,8 +214,10 @@ impl EngineObject {
             .clone()
             .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
         connection
+            .inner()
             .object_server()
             .remove::<EngineObject, _>(self.path.as_str())
+            .await
             .map_err(zbus::fdo::Error::ZBus)?;
         Ok(())
     }
@@ -458,7 +464,7 @@ mod tests {
             instances: Arc::clone(&instances),
         };
 
-        assert!(engine.destroy().is_err());
+        assert!(zbus::block_on(engine.destroy()).is_err());
         assert!(instances.lock().unwrap().is_empty());
     }
 

@@ -796,8 +796,8 @@ impl GuiApp {
             .try_send(runtime::Request::SaveConfig {
                 request_id,
                 path: self.path.clone(),
-                candidate: pending.candidate.clone(),
-                base_document: self.config_document.clone(),
+                candidate: Box::new(pending.candidate.clone()),
+                base_document: Box::new(self.config_document.clone()),
                 expected_revision: self.config_revision.clone(),
             })
             .is_err()
@@ -813,7 +813,10 @@ impl GuiApp {
     fn finish_save(
         &mut self,
         request_id: u64,
-        result: Result<(wayexpand_core::ConfigRevision, toml_edit::DocumentMut), String>,
+        result: Result<
+            (wayexpand_core::ConfigRevision, toml_edit::DocumentMut),
+            runtime::SaveFailure,
+        >,
     ) {
         let Some(pending) = self.pending_save.take() else {
             return;
@@ -824,24 +827,32 @@ impl GuiApp {
         }
         let (revision, document) = match result {
             Ok(result) => result,
-            Err(error) => {
-                self.status = if error.starts_with("Conflict:") {
-                    Status::warning(self.strings.status_config_changed_externally())
-                } else if error.starts_with("Busy:") {
-                    Status::warning(self.strings.status_save_busy())
-                } else {
-                    Status::error(self.strings.status_save_failed(&error))
-                };
+            Err(runtime::SaveFailure::Conflict) => {
+                self.status = Status::warning(self.strings.status_config_changed_externally());
+                return;
+            }
+            Err(runtime::SaveFailure::Busy) => {
+                self.status = Status::warning(self.strings.status_save_busy());
+                return;
+            }
+            Err(runtime::SaveFailure::Failed(error)) => {
+                let strings = &self.strings;
+                self.status = Status::error(match &pending.intent {
+                    SaveIntent::Settings => strings.status_settings_save_failed(&error),
+                    SaveIntent::Import(_) => strings.status_import_save_failed(&error),
+                    SaveIntent::Snippet { .. } => strings.status_save_failed(&error),
+                    SaveIntent::Undo => strings.status_undo_save_failed(&error),
+                    SaveIntent::Created => strings.status_create_failed(&error),
+                    SaveIntent::Duplicated => strings.status_duplicate_failed(&error),
+                    SaveIntent::Deleted { .. } => strings.status_delete_failed(&error),
+                    SaveIntent::Toggled { .. } => strings.status_toggle_failed(&error),
+                });
                 return;
             }
         };
         self.config_document = document;
         self.config_revision = revision;
         let newer_draft_exists = self.preview_revision != pending.preview_revision;
-        if newer_draft_exists && matches!(&pending.intent, SaveIntent::Snippet { .. }) {
-            self.status = Status::warning(self.strings.status_save_completed_with_newer_edits());
-            return;
-        }
         let candidate = pending.candidate;
         match pending.intent {
             SaveIntent::Settings => {
@@ -873,6 +884,14 @@ impl GuiApp {
                     self.new_draft = false;
                     self.new_draft_origin = None;
                     self.set_selected_index(Some(index));
+                }
+                // The file now holds this candidate, so the in-memory config
+                // must too, or a later save would silently revert it. Only
+                // the editor keeps the edits typed while the save ran.
+                if newer_draft_exists {
+                    self.status =
+                        Status::warning(self.strings.status_save_completed_with_newer_edits());
+                    return;
                 }
                 self.draft = self
                     .selected
@@ -5091,7 +5110,7 @@ mod tests {
         };
         let _ = fs::remove_file(&path);
         config.save_atomic(&path).unwrap();
-        let mut app = GuiApp::load(path.clone()).unwrap();
+        let app = GuiApp::load(path.clone()).unwrap();
         let mut external = config.clone();
         external.expansion[0].replacement = "external edit".into();
         external.save_atomic(&path).unwrap();
@@ -5246,6 +5265,63 @@ mod tests {
         assert_eq!(
             Config::load(&path).unwrap().expansion[0].replacement,
             "before"
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-save-race-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config {
+            expansion: vec![ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: ":race".into(),
+                replacement: "before".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+            }],
+            hotkey: Vec::new(),
+            settings: Settings::default(),
+            organization: OrganizationPolicy::default(),
+        };
+        config.save_atomic(&path).unwrap();
+        let mut app = GuiApp::load(path.clone()).unwrap();
+
+        // Simulate the background save landing after the user kept typing.
+        let mut candidate = app.config.clone();
+        candidate.expansion[0].replacement = "saved".into();
+        app.pending_save = Some(PendingSave {
+            request_id: 41,
+            candidate: candidate.clone(),
+            preview_revision: app.preview_revision,
+            intent: SaveIntent::Snippet {
+                is_new: false,
+                index: 0,
+            },
+        });
+        app.invalidate_preview();
+        let result = runtime::save_config(
+            path.clone(),
+            candidate,
+            app.config_document.clone(),
+            app.config_revision.clone(),
+        );
+        app.finish_save(41, result);
+
+        assert_eq!(app.config.expansion[0].replacement, "saved");
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "saved"
         );
         fs::remove_file(path).unwrap();
     }
@@ -5730,7 +5806,7 @@ mod tests {
         );
         fs::write(&path, text).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-        let mut app = GuiApp::load(path.clone()).unwrap();
+        let app = GuiApp::load(path.clone()).unwrap();
         let mut candidate = app.config.clone();
         candidate.expansion[0].replacement = "Best regards".into();
 
