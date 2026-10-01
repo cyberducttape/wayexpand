@@ -401,8 +401,6 @@ impl Strings {
                 ),
             };
         };
-        let capture = route.capture_label;
-        let injection = route.injection_label;
         let state = if matches!(
             (route.capture_state, route.injection_state),
             (BackendState::Available, BackendState::Available)
@@ -417,33 +415,46 @@ impl Strings {
                 Language::German => "Vor der Einrichtung ist eine Berechtigung nötig",
             }
         };
-        let guarantees = match self.lang {
-            Language::English => format!(
-                "sensitive fields: {} · atomic replace: {} · focus tracking: {} · {}",
-                if route.sensitive_fields { "yes" } else { "no" },
-                if route.atomic_replace { "yes" } else { "no" },
-                if route.focus_tracking { "yes" } else { "no" },
-                route.certification,
-            ),
-            Language::German => format!(
-                "sensible Felder: {} · atomare Ersetzung: {} · Fokusverfolgung: {} · {}",
-                if route.sensitive_fields { "ja" } else { "nein" },
-                if route.atomic_replace { "ja" } else { "nein" },
-                if route.focus_tracking { "ja" } else { "nein" },
-                route.certification,
-            ),
-        };
         let label = match self.lang {
-            Language::English => format!("{capture} → {injection}"),
-            Language::German => format!("{capture} → {injection}"),
+            Language::English => "Safe integration".to_owned(),
+            Language::German => "Sichere Integration".to_owned(),
         };
-        (label, format!("{state} · {guarantees}"))
+        let detail = match self.lang {
+            Language::English => {
+                let mut properties = vec![state.to_owned()];
+                if route.sensitive_fields {
+                    properties.push("best protection for unsupported or sensitive contexts".into());
+                }
+                if route.atomic_replace {
+                    properties.push("atomic replacement".into());
+                }
+                if route.focus_tracking {
+                    properties.push("application focus tracking".into());
+                }
+                properties.join(" · ")
+            }
+            Language::German => {
+                let mut properties = vec![state.to_owned()];
+                if route.sensitive_fields {
+                    properties
+                        .push("bester Schutz für nicht unterstützte oder sensible Kontexte".into());
+                }
+                if route.atomic_replace {
+                    properties.push("atomare Ersetzung".into());
+                }
+                if route.focus_tracking {
+                    properties.push("Verfolgung des App-Fokus".into());
+                }
+                properties.join(" · ")
+            }
+        };
+        (label, detail)
     }
 
     pub fn onboarding_recommended_route_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Recommended safe integration",
-            Language::German => "Empfohlene sichere Integration",
+            Language::English => "Recommended integration",
+            Language::German => "Empfohlene Integration",
         }
     }
 
@@ -451,6 +462,20 @@ impl Strings {
         match self.lang {
             Language::English => "Text injection",
             Language::German => "Texteingabe",
+        }
+    }
+
+    pub fn onboarding_capture_detail(&self, backend: &str) -> String {
+        match self.lang {
+            Language::English => format!("Capture: {backend}"),
+            Language::German => format!("Eingabe: {backend}"),
+        }
+    }
+
+    pub fn onboarding_injection_detail(&self, backend: &str) -> String {
+        match self.lang {
+            Language::English => format!("Output: {backend}"),
+            Language::German => format!("Ausgabe: {backend}"),
         }
     }
 

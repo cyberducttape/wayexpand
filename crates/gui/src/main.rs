@@ -68,7 +68,6 @@ struct RouteRecommendation {
     focus_tracking: bool,
     sensitive_fields: bool,
     atomic_replace: bool,
-    certification: &'static str,
 }
 
 fn route_recommendation(route: RecommendedRoute) -> RouteRecommendation {
@@ -92,12 +91,6 @@ fn route_recommendation(route: RecommendedRoute) -> RouteRecommendation {
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
-        certification: match contract.status.as_str() {
-            "experimental" => "Experimental",
-            "certified" => "Certified",
-            "unsupported" => "Unsupported",
-            _ => "Unverified",
-        },
     }
 }
 /// Built-in template variables offered as insert buttons. Their hover
@@ -3018,6 +3011,28 @@ impl GuiApp {
                                                 .small()
                                                 .color(palette.muted),
                                         );
+                                        if let Some(route) = recommendation {
+                                            ui.label(
+                                                RichText::new(
+                                                    self.strings.onboarding_capture_detail(
+                                                        route.capture_label,
+                                                    ),
+                                                )
+                                                .small()
+                                                .monospace()
+                                                .color(palette.muted),
+                                            );
+                                            ui.label(
+                                                RichText::new(
+                                                    self.strings.onboarding_injection_detail(
+                                                        route.injection_label,
+                                                    ),
+                                                )
+                                                .small()
+                                                .monospace()
+                                                .color(palette.muted),
+                                            );
+                                        }
                                         ui.horizontal(|ui| {
                                             ui.label(self.strings.onboarding_keyboard_label());
                                             ui.with_layout(

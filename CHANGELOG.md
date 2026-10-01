@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- UX: onboarding now leads with user-facing integration properties and keeps
+  capture/output backend names in the expanded technical details.
+
 - Fix: app-ID glob filters now match `?` against Unicode scalar values instead
   of UTF-8 bytes, so international application IDs are matched correctly.
 
