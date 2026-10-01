@@ -5,7 +5,7 @@
 //! compositor has activated the input method and grants its keyboard grab.
 //! Printable text, Backspace, Return, and Tab are forwarded through the
 //! input-method commit contract. Unsupported non-text keys and shortcut-like
-//! modified keys use a separate key-event injector for pass-through via libei;
+//! modified keys use a separate, mandatory key-event injector for pass-through via libei;
 //! the source preserves virtual press/repeat/release state and releases any
 //! held keys during focus loss or transport teardown. If that injector is
 //! missing or fails, this source reports an error rather than silently
@@ -936,7 +936,9 @@ impl InputMethodSource {
     /// The compositor may give this object an exclusive keyboard grab after
     /// activation. Printable text and common editing keys are forwarded via
     /// the input-method commit contract, and unsupported keys can be passed
-    /// through via an optional separate lifecycle-aware injector (e.g. libei).
+    /// through via a separate lifecycle-aware injector (e.g. libei). The
+    /// daemon attaches this injector before exposing the source to the
+    /// compositor, so an active source always has a safe pass-through path.
     pub fn connect() -> Result<Self, InputMethodError> {
         let connection = Connection::connect_to_env()?;
         let mut event_queue = connection.new_event_queue();

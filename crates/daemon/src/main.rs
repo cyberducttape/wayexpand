@@ -330,7 +330,7 @@ fn main() -> Result<()> {
     let input_method_mode = source_name == "input-method";
     if input_method_mode {
         info!(
-            "input-method-v2 backend selected; optional libei key pass-through allows \
+            "input-method-v2 backend selected; libei key pass-through is mandatory for \
             unsupported keys (Escape, arrows, F-keys, shortcuts, etc.) to be re-injected"
         );
     }

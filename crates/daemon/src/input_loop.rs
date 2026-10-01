@@ -35,7 +35,12 @@ pub fn input_poll_interval(metrics: CommandMetrics) -> Duration {
     }
 }
 
-/// Connect to input-method-v2 with optional libei key pass-through.
+/// Connect to input-method-v2 with mandatory libei key pass-through.
+///
+/// The input-method-v2 source may receive an exclusive keyboard grab. It must
+/// therefore never be created successfully without a working pass-through
+/// injector: a retryable libei outage means no input-method source exists and
+/// normal keyboard events remain with the compositor/application.
 pub fn connect_input_method_session(
     control: &control::ControlServer,
     config_path: &Path,
@@ -44,8 +49,6 @@ pub fn connect_input_method_session(
     portal_token_path: Option<&Path>,
     policy: &OrganizationPolicy,
 ) -> Result<InputMethodSource, InputMethodError> {
-    let mut source = InputMethodSource::connect()?;
-
     if !policy.backend_allowed("libei") {
         let violation = format!(
             "backend 'libei' is not in allowed list: {:?}",
@@ -53,44 +56,37 @@ pub fn connect_input_method_session(
         );
         crate::policy::log_violation(policy, &violation);
         if libei_policy_blocks(policy) {
-            warn!(
-                "organization policy prohibits libei backend; \
-                unsupported keys will not pass through"
-            );
-            return Ok(source);
+            return Err(InputMethodError::Protocol(
+                "organization policy prohibits input-method-v2 because libei key ".to_owned()
+                    + "pass-through is mandatory for safe keyboard capture",
+            ));
         }
         info!("audit mode permits libei key pass-through with a disallowed backend");
     }
 
-    match connect_output_backend("libei", persist_portal_token, portal_token_path) {
-        Ok(key_injector) => {
-            let backend_mode = key_injector.status_detail();
-            source = source.with_key_pass_through(key_injector);
-            status::set_daemon_status_with_mode(
-                control,
-                "input-method",
-                "input-method-v2",
-                "connected",
-                config_path,
-                config_healthy,
-                backend_mode,
-                CommandMetrics::default(),
-            );
-        }
+    // Establish pass-through before creating the input-method source. This
+    // ordering is the keyboard-safety boundary: once the source exists, the
+    // compositor is allowed to grant it an exclusive keyboard grab.
+    let key_injector = match connect_output_backend(
+        "libei",
+        persist_portal_token,
+        portal_token_path,
+    ) {
+        Ok(key_injector) => key_injector,
         Err(error) if error.retryable => {
-            warn!(
-                %error,
-                "libei unavailable at startup; unsupported keys will not pass through \
-                (connection will be retried asynchronously)"
-            );
+            warn!(%error, "libei unavailable; input-method capture will remain disabled until it recovers");
             status::set_daemon_status_direct(
                 control,
                 "input-method",
                 "libei",
-                "degraded",
+                "reconnecting",
                 config_path,
                 config_healthy,
             );
+            return Err(InputMethodError::PassThrough {
+                message: error.message,
+                retryable: true,
+            });
         }
         Err(error) => {
             return Err(InputMethodError::Protocol(format!(
@@ -98,8 +94,20 @@ pub fn connect_input_method_session(
                 error.message
             )));
         }
-    }
+    };
 
+    let backend_mode = key_injector.status_detail();
+    let source = InputMethodSource::connect()?.with_key_pass_through(key_injector);
+    status::set_daemon_status_with_mode(
+        control,
+        "input-method",
+        "input-method-v2",
+        "connected",
+        config_path,
+        config_healthy,
+        backend_mode,
+        CommandMetrics::default(),
+    );
     Ok(source)
 }
 
