@@ -760,16 +760,19 @@ impl Config {
                     .parent()
                     .filter(|parent| !parent.as_os_str().is_empty())
                 {
+                    let parent_exists = parent.exists();
                     fs::create_dir_all(parent).map_err(|source| ConfigError::Read {
                         path: parent.display().to_string(),
                         source,
                     })?;
-                    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(
-                        |source| ConfigError::Read {
-                            path: parent.display().to_string(),
-                            source,
-                        },
-                    )?;
+                    if !parent_exists {
+                        fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(
+                            |source| ConfigError::Read {
+                                path: parent.display().to_string(),
+                                source,
+                            },
+                        )?;
+                    }
                 }
                 let config = Self {
                     expansion: Vec::new(),

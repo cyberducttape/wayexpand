@@ -5458,8 +5458,10 @@ mod tests {
         assert_eq!(app.config.expansion[0].trigger, ":wayexpand-test");
         assert_eq!(app.config.expansion[0].replacement, "WayExpand is working!");
         app.filter = "working".into();
+        app.refresh_visible_indices_cache();
         assert!(app.visible_indices().is_empty());
         app.search_fields.replacements = true;
+        app.refresh_visible_indices_cache();
         assert_eq!(app.visible_indices(), vec![0]);
         assert_eq!(Config::load(&path).unwrap().expansion.len(), 1);
         fs::remove_file(path).unwrap();
