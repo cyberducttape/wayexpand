@@ -3484,3 +3484,61 @@ fn command_backed_flag_must_reflect_actual_execution() {
         );
     }
 }
+
+#[test]
+fn explicit_insert_by_trigger_follows_the_typed_expansion_safety_rules() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ";sig"
+        replacement = "Best {{cursor}}regards"
+
+        [[expansion]]
+        trigger = ";term"
+        replacement = "only in a terminal"
+        app_filter = ["konsole"]
+
+        [[expansion]]
+        trigger = ";cmd"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/echo"
+
+        [[expansion]]
+        trigger = ";off"
+        replacement = "disabled"
+        enabled = false
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let sig = ";sig";
+
+    let result = engine.prepare_insert(sig).unwrap();
+    assert_eq!(result.matched_text, "", "an explicit insert erases nothing");
+    assert_eq!(result.insert, "Best regards");
+    assert_eq!(result.cursor_offset, Some("regards".len()));
+    assert!(!result.undoable && !result.command_backed);
+
+    assert_eq!(engine.prepare_insert(";off"), Err(InsertError::NotFound));
+    assert_eq!(engine.prepare_insert("missing"), Err(InsertError::NotFound));
+    assert_eq!(
+        engine.prepare_insert(";cmd"),
+        Err(InsertError::CommandBacked)
+    );
+
+    // App filters fail closed without a known window, as typed triggers do.
+    let term = ";term";
+    assert_eq!(engine.prepare_insert(term), Err(InsertError::NotForThisApp));
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.kde.konsole".into()),
+        title: None,
+    }));
+    assert!(engine.prepare_insert(term).is_ok());
+
+    engine.process(InputEvent::FocusChanged { sensitive: true });
+    assert_eq!(engine.prepare_insert(sig), Err(InsertError::SensitiveField));
+    engine.process(InputEvent::FocusChanged { sensitive: false });
+    engine.process(InputEvent::PauseChanged(true));
+    assert_eq!(engine.prepare_insert(sig), Err(InsertError::Paused));
+}

@@ -15,10 +15,27 @@ fn git_output(root: &Path, arguments: &[&str]) -> Option<String> {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=WAYEXPAND_BUILD_SHA");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/index");
 
     let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    // `.git/HEAD` only names the current branch, so it does not change on a
+    // commit; the branch ref (or `packed-refs`) does. Watching only HEAD left
+    // `wayexpand --version` reporting the previous commit after every commit.
+    // Paths are resolved through git so linked worktrees work too.
+    let mut watched = vec![
+        "HEAD".to_owned(),
+        "index".to_owned(),
+        "packed-refs".to_owned(),
+    ];
+    watched.extend(git_output(&root, &["symbolic-ref", "-q", "HEAD"]));
+    for name in watched {
+        // A missing path would make cargo rerun this script on every build.
+        if let Some(path) = git_output(&root, &["rev-parse", "--git-path", &name])
+            .map(|path| root.join(path))
+            .filter(|path| path.exists())
+        {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
     let package_version = env::var("CARGO_PKG_VERSION").unwrap();
     let sha = env::var("WAYEXPAND_BUILD_SHA")
         .ok()

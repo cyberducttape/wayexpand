@@ -98,13 +98,18 @@ impl Status {
 
     /// A faint wash of the tone colour behind the line, so an error is
     /// noticeable without the status bar shouting during normal use.
+    ///
+    /// Always opaque: nothing is painted beneath the status panel, so a
+    /// transparent fill showed the window's clear colour -- a near-black bar
+    /// in the light theme with the muted status text unreadable on it.
     pub(crate) fn background(&self, palette: &Palette) -> Color32 {
-        match self.tone {
-            StatusTone::Info => Color32::TRANSPARENT,
+        let wash = match self.tone {
+            StatusTone::Info => return palette.surface,
             StatusTone::Success => theme::tint(palette.success, 20),
             StatusTone::Warning => theme::tint(palette.warning, 24),
             StatusTone::Error => theme::tint(palette.danger, 26),
-        }
+        };
+        theme::blend_over(wash, palette.surface)
     }
 }
 
@@ -112,6 +117,29 @@ impl Status {
 mod tests {
     use super::*;
     use crate::colorpack::ColorPack;
+
+    #[test]
+    fn every_status_tone_paints_an_opaque_readable_background() {
+        for dark in [false, true] {
+            let palette = Palette::for_pack(ColorPack::Default, dark);
+            for status in [
+                Status::info("Ready"),
+                Status::success("Saved"),
+                Status::warning("Careful"),
+                Status::error("Failed"),
+            ] {
+                let background = status.background(&palette);
+                assert_eq!(background.a(), 255, "{:?} dark={dark}", status.tone);
+                let (text, _) = status.colors(&palette);
+                assert!(
+                    crate::colorpack::contrast_ratio(text, background)
+                        >= crate::colorpack::WCAG_AA_NORMAL_TEXT,
+                    "{:?} dark={dark}",
+                    status.tone
+                );
+            }
+        }
+    }
 
     #[test]
     fn a_caveat_downgrades_a_success_to_a_warning() {
@@ -142,6 +170,7 @@ mod tests {
         let palette = Palette::for_pack(ColorPack::Default, true);
         let status = Status::info("Ready");
         assert_eq!(status.colors(&palette), (palette.muted, None));
-        assert_eq!(status.background(&palette), Color32::TRANSPARENT);
+        // No tone wash: the idle line is the plain surface colour.
+        assert_eq!(status.background(&palette), palette.surface);
     }
 }

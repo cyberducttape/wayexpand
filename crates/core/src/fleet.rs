@@ -60,6 +60,29 @@ pub enum FleetError {
     InvalidOrganizationDirectory { path: String },
 }
 
+impl FleetError {
+    /// A description safe for logs and terminals: like
+    /// `ConfigError::safe_summary`, it never echoes a trigger, which can be
+    /// snippet content. File paths and hotkey chords are kept, since they
+    /// identify the conflicting layer without revealing what it expands to.
+    pub fn safe_summary(&self) -> String {
+        match self {
+            Self::Config(error) => error.safe_summary(),
+            Self::DuplicateTrigger { existing_file, .. } => {
+                format!("duplicate trigger (first defined in {existing_file})")
+            }
+            Self::DuplicateHotkey {
+                chord,
+                existing_file,
+                ..
+            } => format!("duplicate hotkey {chord} (first defined in {existing_file})"),
+            Self::OrganizationPolicyInLayer { .. }
+            | Self::OrganizationPathNotRootOwned { .. }
+            | Self::InvalidOrganizationDirectory { .. } => self.to_string(),
+        }
+    }
+}
+
 fn reject_embedded_policy(config: &Config, path: &Path) -> Result<(), FleetError> {
     if config.organization.is_active() {
         return Err(FleetError::OrganizationPolicyInLayer {
@@ -650,6 +673,27 @@ fn settings_source_allowed(provenance: &Provenance, policy: &OrganizationPolicy)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fleet_error_summary_never_echoes_a_trigger() {
+        let error = FleetError::DuplicateTrigger {
+            trigger: "secret-trigger".into(),
+            message: "expansion trigger 'secret-trigger' in a.toml conflicts".into(),
+            existing_file: "/etc/wayexpand/fleet.d/a.toml".into(),
+        };
+        let summary = error.safe_summary();
+        assert!(
+            summary.contains("/etc/wayexpand/fleet.d/a.toml"),
+            "{summary}"
+        );
+        assert!(!summary.contains("secret"), "{summary}");
+        let error = FleetError::Config(ConfigError::DuplicateTrigger {
+            trigger: "secret-trigger".into(),
+            first: 1,
+            second: 2,
+        });
+        assert!(!error.safe_summary().contains("secret"));
+    }
 
     #[test]
     fn layer_defaults() {

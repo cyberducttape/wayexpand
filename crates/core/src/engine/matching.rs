@@ -112,7 +112,11 @@ impl ExpansionEngine {
 
     /// An empty app filter matches everywhere; a configured filter requires a
     /// known app id, or an allowed title fallback when no app id is available.
-    fn app_filter_allows(&self, config_index: usize, expansion: &ExpansionConfig) -> bool {
+    pub(super) fn app_filter_allows(
+        &self,
+        config_index: usize,
+        expansion: &ExpansionConfig,
+    ) -> bool {
         if expansion.app_filter.is_empty() {
             return true;
         }

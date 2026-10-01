@@ -311,8 +311,8 @@ impl Strings {
 
     pub fn welcome_intro(&self) -> &'static str {
         match self.lang {
-            Language::English => "Set up a test expansion, then verify it in an app you use every day.",
-            Language::German => "Richten Sie eine Test-Ersetzung ein und prüfen Sie sie in einer täglich genutzten App.",
+            Language::English => "Text expansion for Wayland, in three steps.",
+            Language::German => "Textexpansion für Wayland, in drei Schritten.",
         }
     }
 
@@ -359,8 +359,8 @@ impl Strings {
 
     pub fn onboarding_try_text(&self) -> &'static str {
         match self.lang {
-            Language::English => "Then type :wayexpand-test in another app. It expands to “WayExpand is working!” Use a normal text field, never a password field.",
-            Language::German => "Geben Sie danach :wayexpand-test in einer anderen App ein. Es wird zu „WayExpand is working!“. Verwenden Sie ein normales Textfeld, kein Passwortfeld.",
+            Language::English => "Type :wayexpand-test in the “Try it live” box that appears, then in any app you use. Never test in a password field.",
+            Language::German => "Tippen Sie :wayexpand-test in das erscheinende Feld „Live ausprobieren“, dann in einer beliebigen App. Nie in einem Passwortfeld testen.",
         }
     }
 
@@ -389,20 +389,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_support_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "2 · Input and application support",
-            Language::German => "2 · Eingabe und App-Unterstützung",
-        }
-    }
-
-    pub fn onboarding_desktop_step(&self) -> &'static str {
-        match self.lang {
-            Language::English => "1 · Desktop",
-            Language::German => "1 · Desktop",
-        }
-    }
-
     pub fn onboarding_detection(&self, available: bool) -> &'static str {
         match (self.lang, available) {
             (Language::English, true) => "Application detection probe available",
@@ -426,13 +412,8 @@ impl Strings {
     ) -> (&'static str, &'static str) {
         let ready = matches!(keyboard, wayexpand_core::BackendState::Available)
             && matches!(injection, wayexpand_core::BackendState::Available);
-        let permission = matches!(
-            keyboard,
-            wayexpand_core::BackendState::RequiresPermission
-        ) || matches!(
-            injection,
-            wayexpand_core::BackendState::RequiresPermission
-        );
+        let permission = matches!(keyboard, wayexpand_core::BackendState::RequiresPermission)
+            || matches!(injection, wayexpand_core::BackendState::RequiresPermission);
         match (self.lang, ready, permission) {
             (Language::English, true, _) => (
                 "Input Method v2 → libei via the desktop portal",
@@ -463,8 +444,8 @@ impl Strings {
 
     pub fn onboarding_recommended_route_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Recommended input route",
-            Language::German => "Empfohlener Eingabeweg",
+            Language::English => "Recommended safe integration",
+            Language::German => "Empfohlene sichere Integration",
         }
     }
 
@@ -506,15 +487,15 @@ impl Strings {
 
     pub fn onboarding_safety_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "3 · Safe expansion check",
-            Language::German => "3 · Sicherer Ersetzungstest",
+            Language::English => "Try it",
+            Language::German => "Ausprobieren",
         }
     }
 
     pub fn onboarding_evdev_setup(&self) -> &'static str {
         match self.lang {
-            Language::English => "Set up broad application coverage…",
-            Language::German => "Breite App-Unterstützung einrichten…",
+            Language::English => "Compatibility fallback: raw keyboard input…",
+            Language::German => "Kompatibilitätsfallback: rohe Tastatureingabe…",
         }
     }
 
@@ -867,8 +848,12 @@ impl Strings {
 
     pub fn undo_button(&self, count: usize) -> String {
         match self.lang {
-            Language::English => format!("Undo ({})", count),
-            Language::German => format!("Rückgängig ({})", count),
+            // The history depth is useful once there is something to undo;
+            // "Undo (0)" only advertised an action that does nothing.
+            Language::English if count == 0 => "Undo".to_owned(),
+            Language::German if count == 0 => "Rückgängig".to_owned(),
+            Language::English => format!("Undo ({count})"),
+            Language::German => format!("Rückgängig ({count})"),
         }
     }
 
@@ -980,8 +965,8 @@ impl Strings {
 
     pub fn existing(&self) -> &'static str {
         match self.lang {
-            Language::English => "Existing",
-            Language::German => "Vorhandene",
+            Language::English => "Choose…",
+            Language::German => "Auswählen…",
         }
     }
 
@@ -1196,18 +1181,18 @@ impl Strings {
 
     pub fn arguments(&self) -> &'static str {
         match self.lang {
-            Language::English => "Arguments (one per line)",
-            Language::German => "Argumente (eine pro Zeile)",
+            Language::English => "Arguments",
+            Language::German => "Argumente",
         }
     }
 
     pub fn command_backed_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "This snippet is command-backed; replacement is stored fallback text."
+                "The typed text comes from the command below. This replacement is kept but not used while the command is enabled, including when the command fails."
             }
             Language::German => {
-                "Dieses Snippet wird durch Befehl unterstützt; Der Ersatz ist Fallback-Text."
+                "Der eingefügte Text stammt vom Befehl unten. Dieser Ersatztext bleibt erhalten, wird aber nicht verwendet, solange der Befehl aktiv ist – auch nicht, wenn der Befehl fehlschlägt."
             }
         }
     }
@@ -1693,10 +1678,12 @@ impl Strings {
         }
     }
 
-    pub fn status_appearance_save_failed(&self) -> &'static str {
+    pub fn status_appearance_save_failed(&self, detail: &str) -> String {
         match self.lang {
-            Language::English => "Appearance preference could not be saved",
-            Language::German => "Darstellungseinstellung konnte nicht gespeichert werden",
+            Language::English => format!("Appearance preference could not be saved: {detail}"),
+            Language::German => {
+                format!("Darstellungseinstellung konnte nicht gespeichert werden: {detail}")
+            }
         }
     }
 
@@ -2006,8 +1993,8 @@ impl Strings {
 
     pub fn app_filter_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Comma separated. Currently works only with the KWin window tracker; elsewhere filtered snippets fail closed. Leave empty to expand in every application.",
-            Language::German => "Kommagetrennt. Derzeit nur mit dem KWin-Fenster-Tracker verfügbar; sonst werden gefilterte Snippets nicht erweitert. Leer lassen, um in jeder Anwendung zu erweitern.",
+            Language::English => "Leave empty to expand in every application. App filters currently work only with the KWin window tracker; elsewhere filtered snippets never expand.",
+            Language::German => "Leer lassen, um in jeder Anwendung zu erweitern. App-Filter funktionieren derzeit nur mit dem KWin-Fenster-Tracker; anderswo werden gefilterte Snippets nie erweitert.",
         }
     }
 
@@ -2015,6 +2002,349 @@ impl Strings {
         match self.lang {
             Language::English => "Matching",
             Language::German => "Erkennung",
+        }
+    }
+
+    pub fn add_tag(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Add tag…",
+            Language::German => "Tag hinzufügen…",
+        }
+    }
+
+    pub fn remove_tag(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove tag",
+            Language::German => "Tag entfernen",
+        }
+    }
+
+    pub fn add_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Add app id…",
+            Language::German => "App-ID hinzufügen…",
+        }
+    }
+
+    pub fn remove_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove app",
+            Language::German => "App entfernen",
+        }
+    }
+
+    pub fn add_argument(&self) -> &'static str {
+        match self.lang {
+            Language::English => "+ Add argument",
+            Language::German => "+ Argument hinzufügen",
+        }
+    }
+
+    pub fn move_up(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Move up",
+            Language::German => "Nach oben",
+        }
+    }
+
+    pub fn move_down(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Move down",
+            Language::German => "Nach unten",
+        }
+    }
+
+    pub fn remove_argument(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove argument",
+            Language::German => "Argument entfernen",
+        }
+    }
+
+    pub fn environment(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Environment",
+            Language::German => "Umgebung",
+        }
+    }
+
+    pub fn environment_minimal(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Minimal",
+            Language::German => "Minimal",
+        }
+    }
+
+    pub fn environment_inherit(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Inherit",
+            Language::German => "Übernehmen",
+        }
+    }
+
+    pub fn environment_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Minimal passes only a safe PATH and the variables listed below; Inherit passes the editor's whole environment.",
+            Language::German => "Minimal übergibt nur einen sicheren PATH und die unten aufgeführten Variablen; Übernehmen übergibt die gesamte Umgebung des Editors.",
+        }
+    }
+
+    pub fn pass_environment(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Pass environment variables",
+            Language::German => "Umgebungsvariablen übergeben",
+        }
+    }
+
+    pub fn add_environment_variable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "+ Add environment variable",
+            Language::German => "+ Umgebungsvariable hinzufügen",
+        }
+    }
+
+    pub fn remove_environment_variable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove environment variable",
+            Language::German => "Umgebungsvariable entfernen",
+        }
+    }
+
+    pub fn no_changes_to_save(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No unsaved changes",
+            Language::German => "Keine ungespeicherten Änderungen",
+        }
+    }
+
+    pub fn duplicate_needs_selection(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Select a snippet to duplicate it",
+            Language::German => "Wählen Sie ein Snippet zum Duplizieren",
+        }
+    }
+
+    pub fn template_variable_description(&self, variable: &str) -> &'static str {
+        match (self.lang, variable) {
+            (Language::English, "{{date}}") => "UTC date",
+            (Language::German, "{{date}}") => "Datum (UTC)",
+            (Language::English, "{{time}}") => "UTC time",
+            (Language::German, "{{time}}") => "Uhrzeit (UTC)",
+            (Language::English, "{{datetime}}") => "UTC date and time",
+            (Language::German, "{{datetime}}") => "Datum und Uhrzeit (UTC)",
+            (Language::English, "{{date+1d}}") => {
+                "Tomorrow's date (also -1d, +1w; date, time or datetime; d/w/h/m units)"
+            }
+            (Language::German, "{{date+1d}}") => {
+                "Morgiges Datum (auch -1d, +1w; date, time oder datetime; Einheiten d/w/h/m)"
+            }
+            (Language::English, "{{cursor}}") => {
+                "Place the cursor here after expanding (libei and wlroots backends)"
+            }
+            (Language::German, "{{cursor}}") => {
+                "Setzt den Cursor nach dem Erweitern hierher (Backends libei und wlroots)"
+            }
+            (Language::English, "{{username}}") => "Current user",
+            (Language::German, "{{username}}") => "Aktueller Benutzer",
+            (Language::English, "{{hostname}}") => "Local hostname",
+            (Language::German, "{{hostname}}") => "Lokaler Rechnername",
+            (Language::English, "{{unix_timestamp}}") => "Unix timestamp",
+            (Language::German, "{{unix_timestamp}}") => "Unix-Zeitstempel",
+            (Language::English, "{{newline}}") => "Line break",
+            (Language::German, "{{newline}}") => "Zeilenumbruch",
+            (Language::English, "{{tab}}") => "Tab character",
+            (Language::German, "{{tab}}") => "Tabulatorzeichen",
+            _ => "",
+        }
+    }
+
+    pub fn description_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "What is this snippet for? (shown in the list)",
+            Language::German => "Wofür ist dieses Snippet? (in der Liste angezeigt)",
+        }
+    }
+
+    pub fn command_not_run_by_gui(&self) -> &'static str {
+        match self.lang {
+            Language::English => "This command is not run by the GUI.",
+            Language::German => "Dieser Befehl wird nicht von der GUI ausgeführt.",
+        }
+    }
+
+    pub fn unknown_desktop(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Linux desktop",
+            Language::German => "Linux-Desktop",
+        }
+    }
+
+    pub fn try_live_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Try it live",
+            Language::German => "Live ausprobieren",
+        }
+    }
+
+    pub fn try_live_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Your saved snippets expand here exactly as in other apps. No setup needed; command snippets are not run.",
+            Language::German => "Gespeicherte Snippets werden hier wie in anderen Apps erweitert. Keine Einrichtung nötig; Befehls-Snippets laufen nicht.",
+        }
+    }
+
+    pub fn try_live_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Type a trigger and watch it expand…",
+            Language::German => "Tippen Sie einen Auslöser und sehen Sie zu…",
+        }
+    }
+
+    pub fn try_live_stats(&self, expansions: usize, saved: usize) -> String {
+        match self.lang {
+            Language::English => format!(
+                "{expansions} expansion{} · {saved} keystrokes saved",
+                if expansions == 1 { "" } else { "s" }
+            ),
+            Language::German => format!(
+                "{expansions} Erweiterung{} · {saved} Tastenanschläge gespart",
+                if expansions == 1 { "" } else { "en" }
+            ),
+        }
+    }
+
+    pub fn clear(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Clear",
+            Language::German => "Leeren",
+        }
+    }
+
+    pub fn picker_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Search snippets…",
+            Language::German => "Snippets suchen…",
+        }
+    }
+
+    pub fn picker_no_results(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No matching snippets",
+            Language::German => "Keine passenden Snippets",
+        }
+    }
+
+    pub fn picker_footer_daemon(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "↑↓ select · Enter types it into the app you were using · Esc cancels"
+            }
+            Language::German => {
+                "↑↓ auswählen · Enter tippt es in die vorherige App · Esc bricht ab"
+            }
+        }
+    }
+
+    pub fn picker_footer_clipboard(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "WayExpand isn't running · Enter copies the snippet to the clipboard"
+            }
+            Language::German => {
+                "WayExpand läuft nicht · Enter kopiert das Snippet in die Zwischenablage"
+            }
+        }
+    }
+
+    pub fn picker_copied(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("Copied {trigger} · paste it with Ctrl+V, then press Esc"),
+            Language::German => {
+                format!("{trigger} kopiert · mit Strg+V einfügen, dann Esc drücken")
+            }
+        }
+    }
+
+    pub fn turn_on(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Turn on WayExpand",
+            Language::German => "WayExpand einschalten",
+        }
+    }
+
+    pub fn turning_on(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Turning on…",
+            Language::German => "Wird eingeschaltet…",
+        }
+    }
+
+    pub fn turn_on_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Runs `wayexpand setup --yes`: enables the safest detected input path for this desktop. It never grants raw keyboard access; your desktop may ask for permission.",
+            Language::German => "Führt `wayexpand setup --yes` aus: aktiviert den sichersten erkannten Eingabeweg. Es wird nie roher Tastaturzugriff gewährt; der Desktop fragt eventuell nach Erlaubnis.",
+        }
+    }
+
+    pub fn status_setup_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Turning on WayExpand…",
+            Language::German => "WayExpand wird eingeschaltet…",
+        }
+    }
+
+    pub fn status_setup_done(&self) -> &'static str {
+        match self.lang {
+            Language::English => "WayExpand is on · type a trigger in any app to try it",
+            Language::German => {
+                "WayExpand ist aktiv · tippen Sie einen Auslöser in einer beliebigen App"
+            }
+        }
+    }
+
+    pub fn status_setup_failed(&self, detail: &str) -> String {
+        match (self.lang, detail.is_empty()) {
+            (Language::English, true) => "Setup failed; run `wayexpand doctor` for details".into(),
+            (Language::German, true) => {
+                "Einrichtung fehlgeschlagen; Details mit `wayexpand doctor`".into()
+            }
+            (Language::English, false) => format!("Setup failed: {detail}"),
+            (Language::German, false) => format!("Einrichtung fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn onboarding_turn_on_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Turn on WayExpand",
+            Language::German => "WayExpand einschalten",
+        }
+    }
+
+    pub fn onboarding_turn_on_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Enables the safest input path WayExpand detects on this desktop. Your desktop may ask for permission.",
+            Language::German => "Aktiviert den sichersten Eingabeweg, den WayExpand auf diesem Desktop erkennt. Der Desktop fragt eventuell nach Erlaubnis.",
+        }
+    }
+
+    pub fn onboarding_snippet_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Add your first snippet",
+            Language::German => "Erstes Snippet anlegen",
+        }
+    }
+
+    pub fn onboarding_snippet_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Start with a test snippet, write your own, or bring your Espanso library.",
+            Language::German => "Beginnen Sie mit einem Test-Snippet, schreiben Sie ein eigenes oder übernehmen Sie Ihre Espanso-Bibliothek.",
+        }
+    }
+
+    pub fn onboarding_details_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Desktop details",
+            Language::German => "Desktop-Details",
         }
     }
 }

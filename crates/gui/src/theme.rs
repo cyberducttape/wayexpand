@@ -8,6 +8,11 @@ use eframe::egui::{
 };
 use wayexpand_core::FontScale;
 
+/// Inner margin for text fields. egui's default (4×2 px) makes a single-line
+/// field visibly thinner than the 34 px buttons beside it; egui has no global
+/// setting for this, so every field applies it explicitly.
+pub const FIELD_MARGIN: Margin = Margin::symmetric(8, 6);
+
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub accent: Color32,
@@ -134,19 +139,20 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     visuals.widgets.open.bg_fill = palette.surface_hover;
     visuals.widgets.open.weak_bg_fill = palette.surface_hover;
 
-    // Keyboard focus indicator: dashed border for accessibility
+    // State is carried by the widget outline only. `fg_stroke` is the
+    // *text* color of a widget in that state (typed text in every field,
+    // button and checkbox labels), so it keeps egui's readable baseline:
+    // painting it with the border or accent color made every idle field
+    // look disabled and every hovered one change its text color.
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
-    visuals.widgets.inactive.fg_stroke = Stroke::new(2.0, palette.border);
 
     // Hover should provide a clear change in state without making every
-    // toolbar control look selected. The selected/active state carries the
-    // heavier accent treatment below.
+    // toolbar control look selected. The active state carries the heavier
+    // accent treatment below.
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette.accent);
-    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, palette.accent);
 
     // Active/focused state: brightest indicator for keyboard users
     visuals.widgets.active.bg_stroke = Stroke::new(1.5, palette.accent);
-    visuals.widgets.active.fg_stroke = Stroke::new(2.0, palette.accent);
 
     style.visuals = visuals;
     style.spacing.item_spacing = Vec2::new(8.0, 8.0);
@@ -218,7 +224,8 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32
         });
 }
 
-fn blend_over(foreground: Color32, background: Color32) -> Color32 {
+/// Composite a translucent `foreground` over an opaque `background`.
+pub fn blend_over(foreground: Color32, background: Color32) -> Color32 {
     let alpha = f32::from(foreground.a()) / 255.0;
     let channel = |foreground: u8, background: u8| {
         (f32::from(foreground) * alpha + f32::from(background) * (1.0 - alpha)).round() as u8
@@ -592,6 +599,78 @@ pub fn snippet_row_scaled(
         row: response.on_hover_cursor(egui::CursorIcon::PointingHand),
         toggle: toggle_response,
     }
+}
+
+/// Labels for one `token_editor` instance, already in the interface language.
+pub struct TokenEditorText<'a> {
+    pub add_hint: &'a str,
+    pub remove_hint: &'a str,
+}
+
+/// An editable list of short values (tags, app filters) shown as removable
+/// chips followed by one input: type a value and press Enter to add it. The
+/// half-typed input lives in `pending` so the caller can treat it as part of
+/// the draft. Returns whether `tokens` changed.
+pub fn token_editor(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    tokens: &mut Vec<String>,
+    pending: &mut String,
+    text: TokenEditorText<'_>,
+    input_width: f32,
+) -> bool {
+    let mut remove = None;
+    let mut changed = false;
+    for (index, token) in tokens.iter().enumerate() {
+        egui::Frame::new()
+            .fill(palette.surface_hover)
+            .stroke(Stroke::new(1.0, palette.border))
+            .corner_radius(CornerRadius::same(255))
+            .inner_margin(Margin {
+                left: 10,
+                right: 4,
+                top: 3,
+                bottom: 3,
+            })
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label(token);
+                let response = ui
+                    .add(egui::Button::new("×").frame(false).small())
+                    .on_hover_text(text.remove_hint);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("{}: {token}", text.remove_hint),
+                    )
+                });
+                if response.clicked() {
+                    remove = Some(index);
+                }
+            });
+    }
+    if let Some(index) = remove {
+        tokens.remove(index);
+        changed = true;
+    }
+    let response = ui.add(
+        egui::TextEdit::singleline(pending)
+            .hint_text(text.add_hint)
+            .margin(FIELD_MARGIN)
+            .desired_width(input_width),
+    );
+    if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+        let committed = crate::editor::with_pending_token(tokens, pending);
+        if committed.len() != tokens.len() {
+            *tokens = committed;
+            changed = true;
+        }
+        pending.clear();
+        // Keep the input focused so several values can be entered in a row.
+        response.request_focus();
+    }
+    changed
 }
 
 /// A translucent tint of `color`, for a badge background that should read

@@ -51,12 +51,26 @@ pub enum TemplateError {
     RenderedTooLarge { maximum: usize },
     #[error("date arithmetic overflow for template variable {name:?}")]
     DateArithmeticOverflow { name: String },
+    #[error("template has a second {{{{cursor}}}} marker at byte {offset}; only one is supported")]
+    MultipleCursors { offset: usize },
 }
 
 /// Render built-in variables without invoking a shell or external process.
 /// Unknown variables are errors so a typo can never silently reach an editor.
 pub fn render_template(template: &str, context: &TemplateContext) -> Result<String, TemplateError> {
+    render(template, context, false).map(|(rendered, _)| rendered)
+}
+
+/// Shared renderer. With `allow_cursor`, a `{{cursor}}` variable renders to
+/// nothing and its byte position in the output is returned; otherwise it is
+/// an unknown variable like any other.
+fn render(
+    template: &str,
+    context: &TemplateContext,
+    allow_cursor: bool,
+) -> Result<(String, Option<usize>), TemplateError> {
     let mut rendered = String::with_capacity(template.len());
+    let mut cursor_position = None;
     let mut cursor = 0;
     while cursor < template.len() {
         let Some(relative_start) = template[cursor..].find("{{") else {
@@ -73,6 +87,14 @@ pub fn render_template(template: &str, context: &TemplateContext) -> Result<Stri
         let name = template[variable_start..end].trim();
         if name.is_empty() {
             return Err(TemplateError::EmptyVariable { offset: start });
+        }
+        if allow_cursor && name == "cursor" {
+            if cursor_position.is_some() {
+                return Err(TemplateError::MultipleCursors { offset: start });
+            }
+            cursor_position = Some(rendered.len());
+            cursor = end + 2;
+            continue;
         }
         let value = match name {
             "date" => format_date(context.unix_timestamp),
@@ -118,7 +140,7 @@ pub fn render_template(template: &str, context: &TemplateContext) -> Result<Stri
         push_bounded(&mut rendered, &value)?;
         cursor = end + 2;
     }
-    Ok(rendered)
+    Ok((rendered, cursor_position))
 }
 
 /// Parses a variable name of the form `<base><sign><magnitude><unit>` (e.g.
@@ -153,31 +175,27 @@ fn parse_offset_variable(name: &str) -> Option<(&str, i64)> {
     Some((base, if negative { -offset } else { offset }))
 }
 
-/// Splits `template` on the first literal `{{cursor}}` marker (if any),
-/// renders each half independently through [`render_template`], and
-/// reports how many grapheme clusters follow the marker in the rendered text --
-/// the offset callers use to move the cursor back after typing the result.
-/// `{{cursor}}` is deliberately not a variable inside `render_template`
-/// itself (it substitutes to nothing; it only marks a position), so
-/// splitting around it here keeps that function's "every `{{...}}` is a
-/// known variable" guarantee unchanged for everything else.
+/// Renders `template` like [`render_template`], additionally accepting one
+/// `{{cursor}}` marker (whitespace inside the braces is allowed, as for every
+/// other variable). The marker renders to nothing; the returned offset is how
+/// many grapheme clusters follow it in the rendered text -- the offset callers
+/// use to move the cursor back after typing the result. A second marker is an
+/// error rather than silently ignored, since there is only one cursor.
+///
+/// `{{cursor}}` is deliberately not a variable accepted by `render_template`
+/// itself: it only marks a position, which callers without cursor support
+/// could not honor.
 ///
 /// Used both by config validation (to accept `{{cursor}}` before
 /// activation) and by the engine (to actually render it), so the two
-/// agree on what is valid without duplicating the splitting logic.
+/// agree on what is valid.
 pub fn render_template_with_cursor(
     template: &str,
     context: &TemplateContext,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    const MARKER: &str = "{{cursor}}";
-    let Some(marker_start) = template.find(MARKER) else {
-        return render_template(template, context).map(|rendered| (rendered, None));
-    };
-    let mut rendered = render_template(&template[..marker_start], context)?;
-    let after = render_template(&template[marker_start + MARKER.len()..], context)?;
-    let cursor_offset = after.graphemes(true).count();
-    rendered.push_str(&after);
-    Ok((rendered, Some(cursor_offset)))
+    let (rendered, position) = render(template, context, true)?;
+    let cursor_offset = position.map(|position| rendered[position..].graphemes(true).count());
+    Ok((rendered, cursor_offset))
 }
 
 fn push_bounded(output: &mut String, value: &str) -> Result<(), TemplateError> {
@@ -253,6 +271,28 @@ mod tests {
         assert!(matches!(
             render_template("{{date", &context),
             Err(TemplateError::Unclosed { .. })
+        ));
+    }
+
+    #[test]
+    fn cursor_marker_accepts_whitespace_and_rejects_a_second_marker() {
+        let context = TemplateContext::default();
+        assert_eq!(
+            render_template_with_cursor("a {{ cursor }}bc", &context).unwrap(),
+            ("a bc".to_owned(), Some(2))
+        );
+        assert_eq!(
+            render_template_with_cursor("{{cursor}}{{newline}}x", &context).unwrap(),
+            ("\nx".to_owned(), Some(2))
+        );
+        assert!(matches!(
+            render_template_with_cursor("v{{cursor}} and v{{cursor}}", &context),
+            Err(TemplateError::MultipleCursors { offset: 17 })
+        ));
+        // Plain rendering has no cursor to place, so the marker stays unknown.
+        assert!(matches!(
+            render_template("{{cursor}}", &context),
+            Err(TemplateError::UnknownVariable { .. })
         ));
     }
 

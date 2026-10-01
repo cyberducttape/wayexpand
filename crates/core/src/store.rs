@@ -247,7 +247,10 @@ mod tests {
         assert!(store.reload_if_changed().is_err());
         let status = store.status();
         assert_eq!(status.state, "reload-error");
-        assert_eq!(status.error.as_deref(), Some("invalid TOML"));
+        assert_eq!(
+            status.error.as_deref(),
+            Some("invalid TOML at line 1, column 16")
+        );
         assert_eq!(status.generation, 0);
 
         write_private(

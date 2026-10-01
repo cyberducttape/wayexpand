@@ -4,12 +4,20 @@ use wayexpand_core::Config;
 #[cfg(test)]
 use wayexpand_core::ExpansionConfig;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SearchFields {
     pub triggers: bool,
     pub descriptions: bool,
     pub tags: bool,
     pub replacements: bool,
+}
+
+pub(crate) struct VisibleIndicesCache {
+    pub library_revision: u64,
+    pub filter: String,
+    pub category_filter: Option<String>,
+    pub search_fields: SearchFields,
+    pub indices: Vec<usize>,
 }
 
 impl Default for SearchFields {

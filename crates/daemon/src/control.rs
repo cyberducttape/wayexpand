@@ -2,8 +2,11 @@ use anyhow::{bail, Context, Result};
 use std::{
     fs,
     io::{Read, Write},
-    os::unix::{fs::{FileTypeExt, MetadataExt, PermissionsExt}, io::AsRawFd},
     os::unix::net::{UnixListener, UnixStream},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
+        io::AsRawFd,
+    },
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -13,13 +16,18 @@ use std::{
     time::Duration,
 };
 
-const MAX_COMMAND_BYTES: usize = 128;
+/// Large enough for `insert ` plus a maximum-length (128 character) trigger.
+const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
     pub stop_requested: Arc<AtomicBool>,
     pub pause_requested: Arc<AtomicBool>,
+    /// A snippet trigger to insert at the cursor (quick-insert picker,
+    /// `wayexpand insert`). Only the latest request is kept: an insert is a one-shot
+    /// user action and a stale queued one must never fire later.
+    insert_requested: Arc<Mutex<Option<String>>>,
     status: Arc<Mutex<String>>,
     path: Option<PathBuf>,
     socket_identity: Option<(u64, u64)>,
@@ -32,6 +40,7 @@ impl ControlServer {
                 reload_requested: Arc::new(AtomicBool::new(false)),
                 stop_requested: Arc::new(AtomicBool::new(false)),
                 pause_requested: Arc::new(AtomicBool::new(false)),
+                insert_requested: Arc::new(Mutex::new(None)),
                 status: Arc::new(Mutex::new("starting".into())),
                 path: None,
                 socket_identity: None,
@@ -92,17 +101,24 @@ impl ControlServer {
         let reload_requested = Arc::new(AtomicBool::new(false));
         let stop_requested = Arc::new(AtomicBool::new(false));
         let pause_requested = Arc::new(AtomicBool::new(false));
+        let insert_requested = Arc::new(Mutex::new(None));
         let status = Arc::new(Mutex::new("starting".into()));
         let reload_flag = Arc::clone(&reload_requested);
         let stop_flag = Arc::clone(&stop_requested);
         let pause_flag = Arc::clone(&pause_requested);
+        let insert_slot = Arc::clone(&insert_requested);
         let status_flag = Arc::clone(&status);
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { break };
-                if handle_request(stream, &reload_flag, &stop_flag, &pause_flag, &status_flag)
-                    .is_err()
-                {
+                let flags = Flags {
+                    reload: &reload_flag,
+                    stop: &stop_flag,
+                    pause: &pause_flag,
+                    insert: &insert_slot,
+                    status: &status_flag,
+                };
+                if handle_request(stream, flags).is_err() {
                     // The control socket is best-effort and must never take
                     // down the keyboard/expansion loop.
                     continue;
@@ -116,10 +132,18 @@ impl ControlServer {
             reload_requested,
             stop_requested,
             pause_requested,
+            insert_requested,
             status,
             path: Some(path),
             socket_identity,
         })
+    }
+
+    /// Take the pending insert request, if any.
+    pub fn take_insert_request(&self) -> Option<String> {
+        self.insert_requested
+            .lock()
+            .map_or(None, |mut slot| slot.take())
     }
 
     pub fn path(&self) -> Option<&PathBuf> {
@@ -270,13 +294,40 @@ impl Drop for ControlServer {
     }
 }
 
-fn handle_request(
-    mut stream: UnixStream,
-    reload: &AtomicBool,
-    stop: &AtomicBool,
-    pause: &AtomicBool,
-    status: &Mutex<String>,
-) -> Result<()> {
+/// The shared state one control request may touch.
+#[derive(Clone, Copy)]
+struct Flags<'a> {
+    reload: &'a AtomicBool,
+    stop: &'a AtomicBool,
+    pause: &'a AtomicBool,
+    insert: &'a Mutex<Option<String>>,
+    status: &'a Mutex<String>,
+}
+
+/// The trigger of an `insert <trigger>` request, taken verbatim: a
+/// configured trigger may legitimately begin or end with a space. Control
+/// characters are refused so the line protocol cannot be confused.
+/// Returns `None` for any other command, `Some(None)` for an invalid trigger.
+fn insert_trigger(line: &str) -> Option<Option<&str>> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    if line == "insert" {
+        return Some(None);
+    }
+    let trigger = line.strip_prefix("insert ")?;
+    let valid =
+        (1..=128).contains(&trigger.chars().count()) && !trigger.chars().any(char::is_control);
+    Some(valid.then_some(trigger))
+}
+
+fn handle_request(mut stream: UnixStream, flags: Flags<'_>) -> Result<()> {
+    let Flags {
+        reload,
+        stop,
+        pause,
+        insert,
+        status,
+    } = flags;
     stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT))?;
     stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
     let mut command_bytes = Vec::with_capacity(MAX_COMMAND_BYTES);
@@ -300,6 +351,20 @@ fn handle_request(
     } else {
         String::from_utf8_lossy(&command_bytes).into_owned()
     };
+    if let Some(trigger) = insert_trigger(&command) {
+        let response = match trigger {
+            Some(trigger) => {
+                *insert
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("insert lock poisoned"))? =
+                    Some(trigger.to_owned());
+                "insert scheduled\n"
+            }
+            None => "invalid trigger\n",
+        };
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
     let response = match command.trim() {
         "status" => format!(
             "running\n{}\n",
@@ -323,7 +388,8 @@ fn handle_request(
             pause.store(false, Ordering::Release);
             "resumed\n".to_string()
         }
-        _ => "unknown command; expected status, reload, pause, resume, or stop\n".to_string(),
+        _ => "unknown command; expected status, reload, pause, resume, stop, or insert <trigger>\n"
+            .to_string(),
     };
     stream.write_all(response.as_bytes())?;
     Ok(())
@@ -355,12 +421,16 @@ mod tests {
         let pause_worker = Arc::clone(pause);
         let status_worker = Arc::clone(status);
         let join = thread::spawn(move || {
+            let insert = Mutex::new(None);
             handle_request(
                 server,
-                &reload_worker,
-                &stop_worker,
-                &pause_worker,
-                &status_worker,
+                Flags {
+                    reload: &reload_worker,
+                    stop: &stop_worker,
+                    pause: &pause_worker,
+                    insert: &insert,
+                    status: &status_worker,
+                },
             )
             .unwrap();
         });
@@ -404,6 +474,46 @@ mod tests {
     }
 
     #[test]
+    fn insert_takes_the_trigger_verbatim_and_refuses_control_characters() {
+        let reload = AtomicBool::new(false);
+        let stop = AtomicBool::new(false);
+        let pause = AtomicBool::new(false);
+        let insert = Mutex::new(None);
+        let status = Mutex::new(String::new());
+        let flags = Flags {
+            reload: &reload,
+            stop: &stop,
+            pause: &pause,
+            insert: &insert,
+            status: &status,
+        };
+        let send = |command: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        };
+        for (line, trigger) in [
+            ("insert ;sig\n", ";sig"),
+            ("insert :sig \r\n", ":sig "),
+            ("insert  lead\n", " lead"),
+            ("insert 🙂x\n", "🙂x"),
+        ] {
+            assert_eq!(send(line), "insert scheduled\n", "{line:?}");
+            assert_eq!(insert.lock().unwrap().as_deref(), Some(trigger));
+        }
+        let too_long = format!("insert {}\n", "x".repeat(129));
+        for bad in ["insert\n", "insert \n", "insert a\tb\n", too_long.as_str()] {
+            *insert.lock().unwrap() = None;
+            assert_eq!(send(bad), "invalid trigger\n", "{bad:?}");
+            assert!(insert.lock().unwrap().is_none());
+        }
+    }
+
+    #[test]
     fn unknown_command_is_nonfatal() {
         let reload = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -411,7 +521,7 @@ mod tests {
         let status = Arc::new(Mutex::new("starting".into()));
         assert_eq!(
             request("bogus\n", &reload, &stop, &pause, &status),
-            "unknown command; expected status, reload, pause, resume, or stop\n"
+            "unknown command; expected status, reload, pause, resume, stop, or insert <trigger>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
@@ -426,7 +536,7 @@ mod tests {
         let command = format!("{}\n", "x".repeat(MAX_COMMAND_BYTES + 1024));
         assert_eq!(
             request(&command, &reload, &stop, &pause, &status),
-            "unknown command; expected status, reload, pause, resume, or stop\n"
+            "unknown command; expected status, reload, pause, resume, stop, or insert <trigger>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));

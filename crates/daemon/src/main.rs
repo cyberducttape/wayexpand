@@ -1099,7 +1099,11 @@ fn main() -> Result<()> {
             });
         match spawn {
             Ok(_) => match finished_receiver.recv_timeout(Duration::from_secs(5)) {
-                Ok(()) => info!(backend, event = "injector_shutdown_finished", "backend shutdown completed"),
+                Ok(()) => info!(
+                    backend,
+                    event = "injector_shutdown_finished",
+                    "backend shutdown completed"
+                ),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
                     backend,
                     event = "injector_shutdown_deadline_exceeded",

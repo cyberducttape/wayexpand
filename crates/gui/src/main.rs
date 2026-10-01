@@ -7,6 +7,8 @@ mod import;
 mod lang;
 mod library;
 mod persistence;
+mod picker;
+mod playground;
 mod preview;
 mod runtime;
 mod settings;
@@ -22,8 +24,8 @@ use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
 use std::{
-    env, fs,
-    path::PathBuf,
+    env,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, SyncSender},
@@ -35,8 +37,8 @@ use std::{
 
 use theme::Palette;
 use wayexpand_core::{
-    default_config_path, BackendState, BackendStatus, Config, ConfigError, ExpansionConfig,
-    FontScale, MatchMode, OrganizationPolicy, Settings,
+    default_config_path, BackendState, BackendStatus, Config, ExpansionConfig, FontScale,
+    MatchMode, OrganizationPolicy, Settings,
 };
 
 /// Stable source for the toolbar search field's id, so Ctrl+F can focus it.
@@ -51,23 +53,21 @@ const FONT_SCALES: &[FontScale] = &[
 ];
 const MAX_UNDO_HISTORY: usize = 64;
 const MAX_UNDO_BYTES: usize = 16 * 1024 * 1024;
-const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
-    ("{{date}}", "UTC date"),
-    ("{{time}}", "UTC time"),
-    ("{{datetime}}", "UTC date and time"),
-    (
-        "{{date+1d}}",
-        "tomorrow's date (also: -1d, +1w, date/time/datetime, d/w/h/m units)",
-    ),
-    (
-        "{{cursor}}",
-        "place the cursor here after expanding (supported on the libei and wlroots backends)",
-    ),
-    ("{{username}}", "current user"),
-    ("{{hostname}}", "local hostname"),
-    ("{{unix_timestamp}}", "Unix timestamp"),
-    ("{{newline}}", "line break"),
-    ("{{tab}}", "tab character"),
+const MIN_FIELD_WIDTH: f32 = 120.0;
+const REPLACEMENT_EDITOR_SALT: &str = "wayexpand-replacement-editor";
+/// Built-in template variables offered as insert buttons. Their hover
+/// descriptions are translated in `Strings::template_variable_description`.
+const TEMPLATE_VARIABLES: &[&str] = &[
+    "{{date}}",
+    "{{time}}",
+    "{{datetime}}",
+    "{{date+1d}}",
+    "{{cursor}}",
+    "{{username}}",
+    "{{hostname}}",
+    "{{unix_timestamp}}",
+    "{{newline}}",
+    "{{tab}}",
 ];
 
 struct GuiApp {
@@ -81,6 +81,8 @@ struct GuiApp {
     filter: String,
     search_fields: library::SearchFields,
     search_index: library::SearchIndex,
+    library_revision: u64,
+    visible_indices_cache: Option<library::VisibleIndicesCache>,
     category_filter: Option<String>,
     preview_input: String,
     preview_app: String,
@@ -162,6 +164,11 @@ struct GuiApp {
     /// `ViewportCommand::Title` is only sent when that text actually
     /// changes rather than on every frame.
     window_title: String,
+    /// "Try it live": the saved library expanding as the user types.
+    playground: playground::Playground,
+    try_live_open: bool,
+    /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
+    setup_task: Option<mpsc::Receiver<Result<String, String>>>,
 }
 
 /// The two halves of the settings window: display preferences that take
@@ -377,8 +384,8 @@ impl GuiApp {
             .unwrap_or_default();
         let settings_buffer = config.settings.max_buffer_chars.to_string();
         let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
-        let settings_font_scale = config.settings.font_scale;
         let prefs = load_gui_prefs();
+        let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
         Ok(Self {
             path,
@@ -391,6 +398,8 @@ impl GuiApp {
             filter: String::new(),
             search_fields: library::SearchFields::default(),
             search_index,
+            library_revision: 0,
+            visible_indices_cache: None,
             category_filter: None,
             preview_input,
             preview_app: String::new(),
@@ -401,7 +410,8 @@ impl GuiApp {
             undo_bytes: 0,
             status: Status::info(strings.ready()),
             paused: false,
-            daemon_connected: None,
+            daemon_reachable: None,
+            route_state: None,
             diagnostics_open: false,
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
@@ -440,6 +450,9 @@ impl GuiApp {
             app_detection: None,
             close_after_confirm: false,
             window_title: String::new(),
+            playground: playground::Playground::default(),
+            try_live_open: true,
+            setup_task: None,
         })
     }
 
@@ -601,7 +614,7 @@ impl GuiApp {
         let now = Instant::now();
         if now >= self.next_status_poll {
             self.next_status_poll = now + Duration::from_secs(2);
-            if self.pending_control == 0 && !self.diagnostics_running {
+            if self.pending_control == 0 {
                 if let Some(sender) = self.runtime_sender.as_ref() {
                     if sender
                         .try_send(runtime::Request::Control {
@@ -705,7 +718,6 @@ impl GuiApp {
     fn open_settings(&mut self) {
         self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
         self.settings_undo_chord = self.config.settings.undo_chord.clone().unwrap_or_default();
-        self.settings_font_scale = self.config.settings.font_scale;
         self.settings_error = None;
         self.settings_open = true;
     }
@@ -717,24 +729,39 @@ impl GuiApp {
         } else {
             egui::ThemePreference::Light
         });
-        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
-            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        if let Err(error) = save_gui_prefs(
+            self.language,
+            self.colorpack,
+            self.settings_font_scale,
+            self.dark_mode,
+        ) {
+            self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
     }
 
     fn set_language(&mut self, language: Language) {
         self.language = language;
         self.strings.set_language(language);
-        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
-            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        if let Err(error) = save_gui_prefs(
+            self.language,
+            self.colorpack,
+            self.settings_font_scale,
+            self.dark_mode,
+        ) {
+            self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
     }
 
     fn set_colorpack(&mut self, ctx: &egui::Context, pack: ColorPack) {
         self.colorpack = pack;
-        theme::install_pack(ctx, pack, self.config.settings.font_scale);
-        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
-            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        theme::install_pack(ctx, pack, self.settings_font_scale);
+        if let Err(error) = save_gui_prefs(
+            self.language,
+            self.colorpack,
+            self.settings_font_scale,
+            self.dark_mode,
+        ) {
+            self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
     }
 
@@ -745,24 +772,16 @@ impl GuiApp {
     /// content, and filling it with display-preference steps would bury the
     /// change the user actually wants back.
     fn apply_font_scale(&mut self, ctx: &egui::Context, scale: FontScale) {
-        if !self.can_save_config() {
-            return;
-        }
         self.settings_font_scale = scale;
-        let mut candidate = self.config.clone();
-        candidate.settings.font_scale = scale;
         // Apply the style first: the preference is visible even in the
         // unlikely case that persisting it fails, and the failure is
         // reported rather than silently producing a scale that resets on
         // the next launch.
         theme::install_pack(ctx, self.colorpack, scale);
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                self.config = candidate;
-                self.status = Status::success(self.strings.status_font_size_saved());
-            }
+        match save_gui_prefs(self.language, self.colorpack, scale, self.dark_mode) {
+            Ok(()) => self.status = Status::success(self.strings.status_font_size_saved()),
             Err(error) => {
-                self.status = Status::error(self.strings.status_settings_save_failed(&error))
+                self.status = Status::warning(self.strings.status_appearance_save_failed(&error))
             }
         }
     }
@@ -781,7 +800,6 @@ impl GuiApp {
         };
         let mut candidate = self.config.clone();
         candidate.settings.max_buffer_chars = max_buffer_chars;
-        candidate.settings.font_scale = self.settings_font_scale;
         let undo_chord_input = self.settings_undo_chord.trim();
         candidate.settings.undo_chord =
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
@@ -797,14 +815,14 @@ impl GuiApp {
         match self.save_config_candidate(&candidate) {
             Ok(()) => {
                 let previous = std::mem::replace(&mut self.config, candidate);
+                self.playground.invalidate();
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
                 self.settings_undo_chord =
                     self.config.settings.undo_chord.clone().unwrap_or_default();
-                self.settings_font_scale = self.config.settings.font_scale;
                 self.settings_open = false;
                 self.settings_error = None;
-                theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
+                theme::install_pack(ctx, self.colorpack, self.settings_font_scale);
                 self.set_saved_status(Status::success(self.strings.status_settings_saved()));
             }
             Err(error) => {
@@ -886,23 +904,51 @@ impl GuiApp {
         }
     }
 
-    fn visible_indices(&self) -> Vec<usize> {
-        self.search_index.visible_indices(
-            &self.config,
-            &self.filter,
-            self.category_filter.as_deref(),
-            self.search_fields,
-        )
+    fn refresh_visible_indices_cache(&mut self) {
+        let cache_valid = self.visible_indices_cache.as_ref().is_some_and(|cache| {
+            cache.library_revision == self.library_revision
+                && cache.filter == self.filter
+                && cache.category_filter == self.category_filter
+                && cache.search_fields == self.search_fields
+        });
+        if !cache_valid {
+            let indices = self.search_index.visible_indices(
+                &self.config,
+                &self.filter,
+                self.category_filter.as_deref(),
+                self.search_fields,
+            );
+            self.visible_indices_cache = Some(library::VisibleIndicesCache {
+                library_revision: self.library_revision,
+                filter: self.filter.clone(),
+                category_filter: self.category_filter.clone(),
+                search_fields: self.search_fields,
+                indices,
+            });
+        }
     }
 
+    fn visible_indices(&self) -> &[usize] {
+        &self
+            .visible_indices_cache
+            .as_ref()
+            .expect("visible indices cache initialized")
+            .indices
+    }
+
+    /// Refresh everything derived from the committed library. Every path
+    /// that replaces `self.config` must call this (or refresh both caches).
     fn rebuild_search_index(&mut self) {
         self.search_index = library::SearchIndex::new(&self.config);
+        self.library_revision = self.library_revision.wrapping_add(1);
+        self.visible_indices_cache = None;
+        self.playground.invalidate();
     }
 
     /// Distinct, sorted, non-empty categories currently in use — drives the
     /// sidebar filter chips and the editor's "pick existing" combo box.
-    fn categories(&self) -> Vec<String> {
-        self.search_index.categories().to_vec()
+    fn categories(&self) -> &[String] {
+        self.search_index.categories()
     }
 
     fn select(&mut self, index: usize) {
@@ -983,8 +1029,8 @@ impl GuiApp {
             || draft.description != expansion.description
             || draft.category != expansion.category
             || draft.replacement != expansion.replacement
-            || draft.tags != expansion.tags
-            || draft.app_filter != expansion.app_filter
+            || draft.committed_tags() != expansion.tags
+            || draft.committed_app_filter() != expansion.app_filter
             || draft.enabled != expansion.enabled
             || draft.match_mode != expansion.match_mode
             || draft.propagate_case != expansion.propagate_case
@@ -1102,6 +1148,7 @@ impl GuiApp {
         self.new_draft = false;
         self.new_draft_origin = None;
         self.search_index = snapshot.search_index;
+        self.playground.invalidate();
         self.config_document = snapshot.document;
         self.config_revision = snapshot.revision;
         self.set_selected_index(new_selected);
@@ -1150,9 +1197,9 @@ impl GuiApp {
                 trigger: draft.trigger.clone(),
                 replacement: draft.replacement.clone(),
                 description: draft.description.clone(),
-                tags: draft.tags.clone(),
+                tags: draft.committed_tags(),
                 category: draft.category.clone(),
-                app_filter: draft.app_filter.clone(),
+                app_filter: draft.committed_app_filter(),
                 match_mode: draft.match_mode,
                 command,
                 enabled: draft.enabled,
@@ -1161,9 +1208,9 @@ impl GuiApp {
         } else {
             candidate.expansion[index].trigger = draft.trigger.clone();
             candidate.expansion[index].description = draft.description.clone();
-            candidate.expansion[index].tags = draft.tags.clone();
+            candidate.expansion[index].tags = draft.committed_tags();
             candidate.expansion[index].category = draft.category.clone();
-            candidate.expansion[index].app_filter = draft.app_filter.clone();
+            candidate.expansion[index].app_filter = draft.committed_app_filter();
             candidate.expansion[index].replacement = draft.replacement.clone();
             candidate.expansion[index].enabled = draft.enabled;
             candidate.expansion[index].match_mode = draft.match_mode;
@@ -1198,6 +1245,116 @@ impl GuiApp {
                 self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
             }
             Err(error) => self.status = Status::error(self.strings.status_save_failed(&error)),
+        }
+    }
+
+    /// One-click setup: run `wayexpand setup --yes`, which configures only
+    /// the safe Recommended mode (never raw keyboard access), off the UI
+    /// thread, then refresh the daemon status.
+    fn start_setup(&mut self) {
+        if self.setup_task.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        // Prefer the CLI installed beside this binary (release archives and
+        // development builds), else whatever `wayexpand` is on PATH.
+        let cli = env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("wayexpand")))
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from("wayexpand"));
+        let spawned = thread::Builder::new()
+            .name("wayexpand-setup".into())
+            .spawn(move || {
+                let result = std::process::Command::new(&cli)
+                    .args(["setup", "--yes"])
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                    .map_err(|error| error.to_string())
+                    .and_then(|output| {
+                        let text = |bytes: &[u8]| {
+                            String::from_utf8_lossy(bytes)
+                                .lines()
+                                .rev()
+                                .find(|line| !line.trim().is_empty())
+                                .unwrap_or_default()
+                                .trim()
+                                .trim_start_matches("Error: ")
+                                .to_owned()
+                        };
+                        if output.status.success() {
+                            Ok(text(&output.stdout))
+                        } else {
+                            Err(text(&output.stderr))
+                        }
+                    });
+                let _ = sender.send(result);
+            });
+        match spawned {
+            Ok(_) => {
+                self.setup_task = Some(receiver);
+                self.status = Status::info(self.strings.status_setup_running());
+            }
+            Err(error) => {
+                self.status = Status::error(self.strings.status_setup_failed(&error.to_string()))
+            }
+        }
+    }
+
+    fn poll_setup(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = self.setup_task.as_ref() else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(result) => {
+                self.setup_task = None;
+                self.status = match result {
+                    Ok(_) => Status::success(self.strings.status_setup_done()),
+                    Err(detail) => Status::error(self.strings.status_setup_failed(&detail)),
+                };
+                self.refresh_diagnostics(false);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.setup_task = None;
+                self.status = Status::error(self.strings.status_setup_failed(""));
+            }
+        }
+    }
+
+    /// The "Turn on WayExpand" call to action, shown while no daemon runs.
+    fn turn_on_button(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let running = self.setup_task.is_some();
+        let response = ui
+            .add_enabled_ui(!running, |ui| {
+                theme::primary_button(
+                    ui,
+                    palette,
+                    if running {
+                        self.strings.turning_on()
+                    } else {
+                        self.strings.turn_on()
+                    },
+                )
+            })
+            .inner
+            .on_hover_text(self.strings.turn_on_tooltip());
+        if response.clicked() {
+            self.start_setup();
+        }
+    }
+
+    /// Ctrl+S: the same rule as the Save button. `draft_is_dirty` is also
+    /// true for a new, not yet saved snippet, which an earlier `selected`
+    /// check skipped, so Ctrl+S did nothing while writing a new snippet; a
+    /// clean draft is reported instead of being rewritten to disk.
+    fn save_shortcut(&mut self) {
+        if self.draft_is_dirty() {
+            self.save_selected();
+        } else if self.draft.is_some() {
+            self.status = Status::info(self.strings.no_changes_to_save());
         }
     }
 
@@ -1270,7 +1427,7 @@ impl GuiApp {
             id: ExpansionConfig::new_id(),
             trigger,
             replacement: String::new(),
-            description: "New snippet".into(),
+            description: String::new(),
             tags: Vec::new(),
             category: String::new(),
             app_filter: Vec::new(),
@@ -1575,7 +1732,11 @@ impl GuiApp {
     /// library is not discarded by a keystroke meant to dismiss something
     /// else.
     fn close_topmost_dialog(&mut self) {
-        if self.evdev_setup_open {
+        // The save/discard/delete prompt is modal and sits above everything
+        // else, so Escape answers it (as Cancel) before closing any window.
+        if self.pending_action.is_some() {
+            self.pending_action = None;
+        } else if self.evdev_setup_open {
             self.evdev_setup_open = false;
         } else if self.settings_open {
             self.settings_open = false;
@@ -1672,9 +1833,10 @@ impl GuiApp {
             Some(runtime::RouteState::Starting) => {
                 (self.strings.route_starting_status(), palette.warning)
             }
-            Some(runtime::RouteState::PermissionRequired) => {
-                (self.strings.route_permission_required_status(), palette.warning)
-            }
+            Some(runtime::RouteState::PermissionRequired) => (
+                self.strings.route_permission_required_status(),
+                palette.warning,
+            ),
             Some(runtime::RouteState::PortalRevoked) => {
                 (self.strings.route_portal_revoked_status(), palette.warning)
             }
@@ -2058,6 +2220,7 @@ impl GuiApp {
                     ui.label(self.strings.source_yaml());
                     ui.add(
                         TextEdit::singleline(&mut self.import_path)
+                            .margin(theme::FIELD_MARGIN)
                             .hint_text("~/.config/espanso/match/base.yml")
                             .desired_width(520.0),
                     );
@@ -2148,7 +2311,7 @@ impl GuiApp {
                             palette,
                             label,
                             self.settings_tab == tab,
-                            self.config.settings.font_scale.multiplier(),
+                            self.settings_font_scale.multiplier(),
                         )
                         .clicked()
                         {
@@ -2190,7 +2353,7 @@ impl GuiApp {
                     palette,
                     label,
                     self.dark_mode == dark,
-                    self.config.settings.font_scale.multiplier(),
+                    self.settings_font_scale.multiplier(),
                 )
                 .clicked()
                 {
@@ -2211,7 +2374,7 @@ impl GuiApp {
                     palette,
                     label,
                     self.language == language,
-                    self.config.settings.font_scale.multiplier(),
+                    self.settings_font_scale.multiplier(),
                 )
                 .clicked()
                 {
@@ -2229,7 +2392,7 @@ impl GuiApp {
                     palette,
                     self.strings.font_scale_label(*scale),
                     *scale == self.settings_font_scale,
-                    self.config.settings.font_scale.multiplier(),
+                    self.settings_font_scale.multiplier(),
                 )
                 .clicked()
                 {
@@ -2260,7 +2423,7 @@ impl GuiApp {
                 pack.description(),
                 scheme.accent,
                 self.colorpack == *pack,
-                self.config.settings.font_scale.multiplier(),
+                self.settings_font_scale.multiplier(),
             )
             .clicked()
             {
@@ -2283,7 +2446,11 @@ impl GuiApp {
         ui.add_space(10.0);
 
         ui.label(self.strings.buffer_limit());
-        ui.add(TextEdit::singleline(&mut self.settings_buffer).desired_width(120.0));
+        ui.add(
+            TextEdit::singleline(&mut self.settings_buffer)
+                .margin(theme::FIELD_MARGIN)
+                .desired_width(120.0),
+        );
         ui.label(
             RichText::new(self.strings.buffer_limit_help())
                 .small()
@@ -2294,6 +2461,7 @@ impl GuiApp {
         ui.label(self.strings.undo_chord());
         ui.add(
             TextEdit::singleline(&mut self.settings_undo_chord)
+                .margin(theme::FIELD_MARGIN)
                 .hint_text("Ctrl+Z")
                 .desired_width(120.0),
         );
@@ -2334,9 +2502,12 @@ impl GuiApp {
         if self.config.expansion.is_empty() && !self.new_draft {
             return;
         }
+        // Proportional first-open width so a small window still leaves the
+        // editor usable; the user can drag it wider afterwards.
+        let default_width = (root.available_width() * 0.34).clamp(250.0, 340.0);
         egui::Panel::left("snippets")
             .resizable(true)
-            .default_size(340.0)
+            .default_size(default_width)
             .frame(
                 egui::Frame::new()
                     .fill(palette.surface)
@@ -2360,15 +2531,28 @@ impl GuiApp {
                     {
                         self.request_action(PendingAction::New);
                     }
-                    if theme::secondary_button(ui, palette, self.strings.duplicate()).clicked() {
+                    let can_duplicate = self.selected_index().is_some();
+                    if ui
+                        .add_enabled_ui(can_duplicate, |ui| {
+                            theme::secondary_button(ui, palette, self.strings.duplicate())
+                        })
+                        .inner
+                        .on_disabled_hover_text(self.strings.duplicate_needs_selection())
+                        .clicked()
+                    {
                         self.request_action(PendingAction::Duplicate);
                     }
-                    if theme::secondary_button(
-                        ui,
-                        palette,
-                        &self.strings.undo_button(self.undo.len()),
-                    )
-                    .clicked()
+                    if ui
+                        .add_enabled_ui(!self.undo.is_empty(), |ui| {
+                            theme::secondary_button(
+                                ui,
+                                palette,
+                                &self.strings.undo_button(self.undo.len()),
+                            )
+                        })
+                        .inner
+                        .on_disabled_hover_text(self.strings.status_nothing_to_undo())
+                        .clicked()
                     {
                         self.request_action(PendingAction::Undo);
                     }
@@ -2376,8 +2560,9 @@ impl GuiApp {
                 ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(4.0);
-                let font_scale = self.config.settings.font_scale.multiplier();
+                let font_scale = self.settings_font_scale.multiplier();
                 let categories = self.categories();
+                let mut category_action = None;
                 if !categories.is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         if theme::chip_scaled(
@@ -2389,63 +2574,38 @@ impl GuiApp {
                         )
                         .clicked()
                         {
-                            self.category_filter = None;
+                            category_action = Some(None);
                         }
-                        for category in &categories {
+                        for category in categories {
                             let selected =
                                 self.category_filter.as_deref() == Some(category.as_str());
                             if theme::chip_scaled(ui, palette, category, selected, font_scale)
                                 .clicked()
                             {
-                                self.category_filter = if selected {
+                                category_action = Some(if selected {
                                     None
                                 } else {
                                     Some(category.clone())
-                                };
+                                });
                             }
                         }
                     });
                     ui.add_space(6.0);
                 }
+                if let Some(category) = category_action {
+                    self.category_filter = category;
+                }
                 // Filtering walks the whole library, so it happens once per
                 // frame and the same result answers both the list and the
                 // empty-state check below.
+                self.refresh_visible_indices_cache();
                 let visible_indices = self.visible_indices();
                 let nothing_visible = visible_indices.is_empty();
-                ScrollArea::vertical().show(ui, |ui| {
-                    for index in visible_indices {
-                        let expansion = &self.config.expansion[index];
-                        let detail = if expansion.command.is_some() {
-                            self.strings.command_backed_summary().to_owned()
-                        } else {
-                            expansion.description.clone()
-                        };
-                        let response = theme::snippet_row_scaled(
-                            ui,
-                            palette,
-                            theme::SnippetRow {
-                                selected: self.selected_index() == Some(index),
-                                enabled: expansion.enabled,
-                                command_backed: expansion.command.is_some(),
-                                trigger: &expansion.trigger,
-                                detail: &detail,
-                                category: &expansion.category,
-                                detail_placeholder: self.strings.no_description(),
-                                toggle_hint: if expansion.enabled {
-                                    self.strings.click_to_disable()
-                                } else {
-                                    self.strings.click_to_enable()
-                                },
-                            },
-                            font_scale,
-                        );
-                        if response.toggle.clicked() {
-                            self.toggle_enabled(index);
-                        } else if response.row.clicked() {
-                            self.request_action(PendingAction::Select(index));
-                        }
-                        ui.add_space(3.0);
-                    }
+                // Only the rows in view are laid out and painted
+                // (`show_rows`), so a library of thousands of snippets costs
+                // the same per frame as a short one. Rows have a fixed height,
+                // and the 11 px gap reproduces the earlier spacing exactly.
+                if nothing_visible {
                     if self.config.expansion.is_empty() {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
@@ -2479,7 +2639,63 @@ impl GuiApp {
                             }
                         });
                     }
-                });
+                } else {
+                    let row_height = 48.0 * font_scale;
+                    let mut toggle_index = None;
+                    let mut selected_index = None;
+                    ui.scope(|ui| {
+                        ui.spacing_mut().item_spacing.y = 11.0;
+                        ScrollArea::vertical().show_rows(
+                            ui,
+                            row_height,
+                            visible_indices.len(),
+                            |ui, rows| {
+                                for &index in &visible_indices[rows] {
+                                    let expansion = &self.config.expansion[index];
+                                    // The row's `cmd` badge already marks command-backed
+                                    // snippets, so the user's own description wins; the
+                                    // generic summary only fills an otherwise empty line.
+                                    let detail = if expansion.description.is_empty()
+                                        && expansion.command.is_some()
+                                    {
+                                        self.strings.command_backed_summary()
+                                    } else {
+                                        expansion.description.as_str()
+                                    };
+                                    let response = theme::snippet_row_scaled(
+                                        ui,
+                                        palette,
+                                        theme::SnippetRow {
+                                            selected: self.selected_index() == Some(index),
+                                            enabled: expansion.enabled,
+                                            command_backed: expansion.command.is_some(),
+                                            trigger: &expansion.trigger,
+                                            detail,
+                                            category: &expansion.category,
+                                            detail_placeholder: self.strings.no_description(),
+                                            toggle_hint: if expansion.enabled {
+                                                self.strings.click_to_disable()
+                                            } else {
+                                                self.strings.click_to_enable()
+                                            },
+                                        },
+                                        font_scale,
+                                    );
+                                    if response.toggle.clicked() {
+                                        toggle_index = Some(index);
+                                    } else if response.row.clicked() {
+                                        selected_index = Some(index);
+                                    }
+                                }
+                            },
+                        );
+                    });
+                    if let Some(index) = toggle_index {
+                        self.toggle_enabled(index);
+                    } else if let Some(index) = selected_index {
+                        self.request_action(PendingAction::Select(index));
+                    }
+                }
             });
     }
 
@@ -2526,7 +2742,7 @@ impl GuiApp {
                 else {
                     let desktop = env::var("XDG_CURRENT_DESKTOP")
                         .or_else(|_| env::var("XDG_SESSION_DESKTOP"))
-                        .unwrap_or_else(|_| "Linux desktop".into());
+                        .unwrap_or_else(|_| self.strings.unknown_desktop().into());
                     let is_wayland = env::var_os("WAYLAND_DISPLAY").is_some();
                     let app_context_available = self.backend_status.iter().any(|status| {
                         status.kind == wayexpand_core::BackendKind::WindowTracker
@@ -2785,7 +3001,7 @@ impl GuiApp {
                             .show(ui, |ui| {
                                 theme::section_header(ui, "", self.strings.snippet_details());
                                 ui.add_space(6.0);
-                                let categories = self.categories();
+                                let categories = self.categories().to_vec();
                                 let duplicate_trigger = self.draft.as_ref().is_some_and(|draft| {
                                     !draft.trigger.is_empty()
                                         && self.config.expansion.iter().enumerate().any(
@@ -2806,171 +3022,178 @@ impl GuiApp {
                                     ui.label(strings.draft_unavailable());
                                     return;
                                 };
-                                // A two-column grid rather than a stack of
-                                // `horizontal` rows: with free-form rows every
-                                // field started at a different x depending on
-                                // how long its label happened to be in the
-                                // selected language, which read as a form
-                                // nobody had laid out.
-                                egui::Grid::new("snippet_details_grid")
-                                    .num_columns(2)
-                                    .spacing([12.0, 8.0])
-                                    .show(ui, |ui| {
-                                        ui.label(strings.trigger());
-                                        ui.add(
-                                            TextEdit::singleline(&mut draft.trigger)
-                                                .hint_text(strings.trigger_hint())
-                                                .font(egui::TextStyle::Monospace)
-                                                .desired_width(f32::INFINITY),
+                                // Two aligned columns so every field starts at
+                                // the same x whatever the language's label
+                                // lengths. Rows are laid out in one pass by
+                                // `form_row` rather than by `egui::Grid`, which
+                                // sizes rows from the previous frame: wrapped
+                                // chips and hints overlapped the next row, and
+                                // one long hint pushed the card past the window.
+                                let body_font = egui::TextStyle::Body.resolve(ui.style());
+                                let label_width = [
+                                    strings.trigger(),
+                                    strings.description(),
+                                    strings.tags(),
+                                    strings.category(),
+                                    strings.app_filter(),
+                                    strings.matching(),
+                                ]
+                                .iter()
+                                .map(|label| {
+                                    ui.painter()
+                                        .layout_no_wrap(
+                                            (*label).to_owned(),
+                                            body_font.clone(),
+                                            Color32::TRANSPARENT,
+                                        )
+                                        .size()
+                                        .x
+                                })
+                                .fold(0.0, f32::max);
+                                let columns = FormColumns::new(ui, label_width);
+                                let field_width = columns.field_width;
+                                let hint = |ui: &mut egui::Ui, text: RichText| {
+                                    ui.add(egui::Label::new(text).wrap());
+                                };
+
+                                form_row(ui, strings.trigger(), columns, |ui| {
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.trigger)
+                                            .margin(theme::FIELD_MARGIN)
+                                            .hint_text(strings.trigger_hint())
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_width(field_width),
+                                    );
+                                    if duplicate_trigger {
+                                        hint(
+                                            ui,
+                                            RichText::new(strings.duplicate_trigger())
+                                                .color(palette.danger),
                                         );
-                                        ui.end_row();
-
-                                        ui.label("");
-                                        if duplicate_trigger {
-                                            ui.colored_label(
-                                                palette.danger,
-                                                strings.duplicate_trigger(),
-                                            );
-                                        } else {
-                                            ui.label(
-                                                RichText::new(strings.trigger_tip())
-                                                    .small()
-                                                    .color(palette.muted),
-                                            );
-                                        }
-                                        ui.end_row();
-
-                                        ui.label(strings.description());
-                                        ui.add(
-                                            TextEdit::singleline(&mut draft.description)
-                                                .desired_width(f32::INFINITY),
+                                    } else {
+                                        hint(
+                                            ui,
+                                            RichText::new(strings.trigger_tip())
+                                                .small()
+                                                .color(palette.muted),
                                         );
-                                        ui.end_row();
+                                    }
+                                });
 
-                                        ui.label(strings.tags());
-                                        let mut remove_tag = None;
-                                        ui.horizontal_wrapped(|ui| {
-                                            for (index, tag) in draft.tags.iter_mut().enumerate() {
-                                                ui.horizontal(|ui| {
-                                                    ui.add(
-                                                        TextEdit::multiline(tag)
-                                                            .desired_rows(1)
-                                                            .desired_width(120.0),
-                                                    );
-                                                    if ui.small_button("×").clicked() {
-                                                        remove_tag = Some(index);
-                                                    }
-                                                });
-                                            }
-                                            if ui.small_button("+ Add tag").clicked() {
-                                                draft.tags.push(String::new());
-                                            }
-                                        });
-                                        if let Some(index) = remove_tag {
-                                            draft.tags.remove(index);
-                                        }
-                                        ui.end_row();
+                                form_row(ui, strings.description(), columns, |ui| {
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.description)
+                                            .margin(theme::FIELD_MARGIN)
+                                            .hint_text(strings.description_hint())
+                                            .desired_width(field_width),
+                                    );
+                                });
 
-                                        ui.label(strings.category());
-                                        ui.horizontal(|ui| {
-                                            let picker_width =
-                                                if categories.is_empty() { 0.0 } else { 150.0 };
-                                            ui.add(
-                                                TextEdit::singleline(&mut draft.category)
-                                                    .hint_text(strings.category_hint())
-                                                    .desired_width(
-                                                        (ui.available_width() - picker_width)
-                                                            .max(120.0),
-                                                    ),
-                                            );
-                                            if !categories.is_empty() {
-                                                egui::ComboBox::from_id_salt("category_picker")
-                                                    .selected_text(strings.existing())
-                                                    .width(110.0)
-                                                    .show_ui(ui, |ui| {
-                                                        for category in &categories {
-                                                            if ui
-                                                                .selectable_label(
-                                                                    draft.category == *category,
-                                                                    category,
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                draft.category = category.clone();
-                                                            }
+                                form_row(ui, strings.tags(), columns, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        theme::token_editor(
+                                            ui,
+                                            palette,
+                                            &mut draft.tags,
+                                            &mut draft.pending_tag,
+                                            theme::TokenEditorText {
+                                                add_hint: strings.add_tag(),
+                                                remove_hint: strings.remove_tag(),
+                                            },
+                                            160.0,
+                                        );
+                                    });
+                                });
+
+                                form_row(ui, strings.category(), columns, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let picker_width =
+                                            if categories.is_empty() { 0.0 } else { 130.0 };
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.category)
+                                                .margin(theme::FIELD_MARGIN)
+                                                .hint_text(strings.category_hint())
+                                                .desired_width(
+                                                    (field_width
+                                                        - picker_width
+                                                        - ui.spacing().item_spacing.x)
+                                                        .max(120.0),
+                                                ),
+                                        );
+                                        if !categories.is_empty() {
+                                            egui::ComboBox::from_id_salt("category_picker")
+                                                .selected_text(strings.existing())
+                                                .width(picker_width - 20.0)
+                                                .show_ui(ui, |ui| {
+                                                    for category in categories {
+                                                        if ui
+                                                            .selectable_label(
+                                                                draft.category == category,
+                                                                &category,
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            draft.category = category.clone();
                                                         }
-                                                    });
-                                            }
-                                        });
-                                        ui.end_row();
-
-                                        ui.label(strings.app_filter());
-                                        let mut remove_filter = None;
-                                        ui.vertical(|ui| {
-                                            for (index, filter) in
-                                                draft.app_filter.iter_mut().enumerate()
-                                            {
-                                                ui.horizontal(|ui| {
-                                                    ui.add(
-                                                        TextEdit::multiline(filter)
-                                                            .desired_rows(1)
-                                                            .desired_width(220.0),
-                                                    );
-                                                    if ui.small_button("×").clicked() {
-                                                        remove_filter = Some(index);
                                                     }
                                                 });
-                                            }
-                                            ui.horizontal(|ui| {
-                                                if ui.small_button("+ Add app").clicked() {
-                                                    draft.app_filter.push(String::new());
-                                                }
-                                                if app_detecting {
-                                                    ui.spinner();
-                                                    ui.label(strings.detecting_app())
-                                                        .on_hover_text(
-                                                            strings.detect_app_tooltip(),
-                                                        );
-                                                    if ui.small_button(strings.cancel()).clicked() {
-                                                        // The spawned thread is not joined/cancelled --
-                                                        // it may itself be stuck in a hung D-Bus call --
-                                                        // just stop waiting on it and discard whatever
-                                                        // it eventually sends.
-                                                        cancel_detection = true;
-                                                    }
-                                                } else if app_detection_busy {
-                                                    ui.spinner();
-                                                    ui.label(strings.stopping_app_detection())
-                                                        .on_hover_text(
-                                                            strings.detect_app_tooltip(),
-                                                        );
-                                                } else if ui
-                                                    .button(strings.detect_app())
-                                                    .on_hover_text(strings.detect_app_tooltip())
-                                                    .clicked()
-                                                {
-                                                    detect_app_clicked = true;
-                                                }
-                                            });
-                                        });
-                                        if let Some(index) = remove_filter {
-                                            draft.app_filter.remove(index);
                                         }
-                                        ui.end_row();
+                                    });
+                                });
 
-                                        ui.label("");
-                                        ui.label(
-                                            RichText::new(if draft.app_filter.is_empty() {
-                                                strings.app_filter_help()
-                                            } else {
-                                                strings.window_tracking_warning()
-                                            })
-                                            .small()
-                                            .color(palette.muted),
+                                form_row(ui, strings.app_filter(), columns, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        theme::token_editor(
+                                            ui,
+                                            palette,
+                                            &mut draft.app_filter,
+                                            &mut draft.pending_app,
+                                            theme::TokenEditorText {
+                                                add_hint: strings.add_app(),
+                                                remove_hint: strings.remove_app(),
+                                            },
+                                            180.0,
                                         );
-                                        ui.end_row();
+                                        if app_detecting {
+                                            ui.spinner();
+                                            ui.label(strings.detecting_app())
+                                                .on_hover_text(strings.detect_app_tooltip());
+                                            if ui.small_button(strings.cancel()).clicked() {
+                                                // The spawned thread is not joined/cancelled --
+                                                // it may itself be stuck in a hung D-Bus call --
+                                                // just stop waiting on it and discard whatever
+                                                // it eventually sends.
+                                                cancel_detection = true;
+                                            }
+                                        } else if app_detection_busy {
+                                            ui.spinner();
+                                            ui.label(strings.stopping_app_detection())
+                                                .on_hover_text(strings.detect_app_tooltip());
+                                        } else if ui
+                                            .button(strings.detect_app())
+                                            .on_hover_text(strings.detect_app_tooltip())
+                                            .clicked()
+                                        {
+                                            detect_app_clicked = true;
+                                        }
+                                    });
+                                    hint(
+                                        ui,
+                                        RichText::new(if draft.app_filter.is_empty() {
+                                            strings.app_filter_help()
+                                        } else {
+                                            strings.window_tracking_warning()
+                                        })
+                                        .small()
+                                        .color(palette.muted),
+                                    );
+                                });
 
-                                        ui.label(strings.matching());
+                                form_row(
+                                    ui,
+                                    strings.matching(),
+                                    columns.with_label_offset(0.0),
+                                    |ui| {
                                         ui.horizontal_wrapped(|ui| {
                                             ui.checkbox(&mut draft.enabled, strings.enabled());
                                             ui.separator();
@@ -2991,8 +3214,8 @@ impl GuiApp {
                                             )
                                             .on_hover_text(strings.propagate_case_tooltip());
                                         });
-                                        ui.end_row();
-                                    });
+                                    },
+                                );
                                 if cancel_detection {
                                     if let Some(task) = self.app_detection.as_mut() {
                                         task.cancelled.store(true, Ordering::Release);
@@ -3003,8 +3226,20 @@ impl GuiApp {
                                 };
                                 ui.add_space(8.0);
                                 ui.label(self.strings.replacement());
+                                if command_backed {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(self.strings.command_backed_help())
+                                                .small()
+                                                .color(palette.warning),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
                                 ui.add(
                                     TextEdit::multiline(&mut draft.replacement)
+                                        .margin(theme::FIELD_MARGIN)
+                                        .id(egui::Id::new(REPLACEMENT_EDITOR_SALT))
                                         .font(egui::TextStyle::Monospace)
                                         .desired_rows(9)
                                         .desired_width(f32::INFINITY),
@@ -3116,14 +3351,6 @@ impl GuiApp {
                                 }
                             }
                         }
-                        if command_backed {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new(self.strings.command_backed_help())
-                                    .italics()
-                                    .color(palette.muted),
-                            );
-                        }
                         ui.add_space(10.0);
                         ui.collapsing(self.strings.template_variables(), |ui| {
                             ui.label(
@@ -3132,14 +3359,21 @@ impl GuiApp {
                                     .color(palette.muted),
                             );
                             ui.horizontal_wrapped(|ui| {
-                                for (variable, description) in TEMPLATE_VARIABLES {
+                                for variable in TEMPLATE_VARIABLES {
                                     if theme::secondary_button(ui, palette, variable)
-                                        .on_hover_text(*description)
+                                        .on_hover_text(
+                                            self.strings.template_variable_description(variable),
+                                        )
                                         .clicked()
                                     {
                                         if let Some(draft) = self.draft.as_mut() {
-                                            draft.replacement.push_str(variable);
+                                            insert_into_replacement_editor(
+                                                ui.ctx(),
+                                                &mut draft.replacement,
+                                                variable,
+                                            );
                                         }
+                                        self.invalidate_preview();
                                     }
                                 }
                             });
@@ -3148,6 +3382,7 @@ impl GuiApp {
                             ui.label(self.strings.preview_app());
                             ui.add(
                                 TextEdit::singleline(&mut self.preview_app)
+                                    .margin(theme::FIELD_MARGIN)
                                     .hint_text(self.strings.preview_app_hint())
                                     .desired_width(300.0),
                             );
@@ -3184,6 +3419,7 @@ impl GuiApp {
                                     ui.label(self.strings.program());
                                     ui.add(
                                         TextEdit::singleline(&mut draft.command_program)
+                                            .margin(theme::FIELD_MARGIN)
                                             .hint_text(self.strings.program_hint())
                                             .desired_width(300.0),
                                     );
@@ -3192,11 +3428,13 @@ impl GuiApp {
                                     ui.label(self.strings.timeout_ms());
                                     ui.add(
                                         TextEdit::singleline(&mut draft.command_timeout_ms)
+                                            .margin(theme::FIELD_MARGIN)
                                             .desired_width(90.0),
                                     );
                                     ui.label(self.strings.cache_ms());
                                     ui.add(
                                         TextEdit::singleline(&mut draft.command_cache_ms)
+                                            .margin(theme::FIELD_MARGIN)
                                             .desired_width(90.0),
                                     );
                                 });
@@ -3207,22 +3445,32 @@ impl GuiApp {
                                     ui.horizontal(|ui| {
                                         ui.add(
                                             TextEdit::multiline(&mut draft.command_args[index])
+                                                .margin(theme::FIELD_MARGIN)
                                                 .desired_rows(1)
-                                                .desired_width(ui.available_width() - 108.0),
+                                                .desired_width(
+                                                    (ui.available_width() - 108.0)
+                                                        .max(MIN_FIELD_WIDTH),
+                                                ),
                                         );
-                                        if ui.small_button("↑").on_hover_text("Move up").clicked()
+                                        if ui
+                                            .small_button("↑")
+                                            .on_hover_text(self.strings.move_up())
+                                            .clicked()
                                             && index > 0
                                         {
                                             move_arg = Some((index, index - 1));
                                         }
-                                        if ui.small_button("↓").on_hover_text("Move down").clicked()
+                                        if ui
+                                            .small_button("↓")
+                                            .on_hover_text(self.strings.move_down())
+                                            .clicked()
                                             && index + 1 < draft.command_args.len()
                                         {
                                             move_arg = Some((index, index + 1));
                                         }
                                         if ui
                                             .small_button("×")
-                                            .on_hover_text("Remove argument")
+                                            .on_hover_text(self.strings.remove_argument())
                                             .clicked()
                                         {
                                             remove_arg = Some(index);
@@ -3235,45 +3483,50 @@ impl GuiApp {
                                 if let Some((from, to)) = move_arg {
                                     draft.command_args.swap(from, to);
                                 }
-                                if ui.small_button("+ Add argument").clicked() {
+                                if ui.small_button(self.strings.add_argument()).clicked() {
                                     draft.command_args.push(String::new());
                                 }
                                 ui.horizontal(|ui| {
-                                    ui.label("Environment");
+                                    ui.label(self.strings.environment())
+                                        .on_hover_text(self.strings.environment_tooltip());
+                                    let minimal = self.strings.environment_minimal();
+                                    let inherit = self.strings.environment_inherit();
                                     egui::ComboBox::from_id_salt("command_environment")
                                         .selected_text(match draft.command_environment {
-                                            wayexpand_core::CommandEnvironment::Minimal => {
-                                                "Minimal"
-                                            }
-                                            wayexpand_core::CommandEnvironment::Inherit => {
-                                                "Inherit"
-                                            }
+                                            wayexpand_core::CommandEnvironment::Minimal => minimal,
+                                            wayexpand_core::CommandEnvironment::Inherit => inherit,
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(
                                                 &mut draft.command_environment,
                                                 wayexpand_core::CommandEnvironment::Minimal,
-                                                "Minimal",
+                                                minimal,
                                             );
                                             ui.selectable_value(
                                                 &mut draft.command_environment,
                                                 wayexpand_core::CommandEnvironment::Inherit,
-                                                "Inherit",
+                                                inherit,
                                             );
                                         });
                                 });
-                                ui.label("Pass environment variables");
+                                ui.label(self.strings.pass_environment());
                                 let mut remove_env = None;
                                 for index in 0..draft.command_pass_env.len() {
                                     ui.horizontal(|ui| {
                                         ui.add(
-                                            TextEdit::multiline(&mut draft.command_pass_env[index])
-                                                .desired_rows(1)
-                                                .desired_width(ui.available_width() - 38.0),
+                                            TextEdit::singleline(
+                                                &mut draft.command_pass_env[index],
+                                            )
+                                            .margin(theme::FIELD_MARGIN)
+                                            .desired_width(
+                                                (ui.available_width() - 38.0).max(MIN_FIELD_WIDTH),
+                                            ),
                                         );
                                         if ui
                                             .small_button("×")
-                                            .on_hover_text("Remove environment variable")
+                                            .on_hover_text(
+                                                self.strings.remove_environment_variable(),
+                                            )
                                             .clicked()
                                         {
                                             remove_env = Some(index);
@@ -3283,7 +3536,10 @@ impl GuiApp {
                                 if let Some(index) = remove_env {
                                     draft.command_pass_env.remove(index);
                                 }
-                                if ui.small_button("+ Add environment variable").clicked() {
+                                if ui
+                                    .small_button(self.strings.add_environment_variable())
+                                    .clicked()
+                                {
                                     draft.command_pass_env.push(String::new());
                                 }
                             });
@@ -3300,6 +3556,7 @@ impl GuiApp {
                             ui.label(self.strings.input());
                             ui.add(
                                 TextEdit::singleline(&mut self.preview_input)
+                                    .margin(theme::FIELD_MARGIN)
                                     .hint_text(self.strings.input_hint())
                                     .desired_width(420.0),
                             );
@@ -3408,6 +3665,118 @@ impl GuiApp {
             });
     }
 
+    /// Pinned under the editor (above Save) so the one thing that proves the
+    /// library works is always in view, not below the snippet form.
+    fn render_try_live_panel(&mut self, root: &mut egui::Ui, palette: &Palette) {
+        if self.config.expansion.is_empty() {
+            return;
+        }
+        egui::Panel::bottom("try_live")
+            .show_separator_line(true)
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.background)
+                    .inner_margin(egui::Margin::symmetric(22, 10))
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show(root, |ui| self.render_try_live(ui, palette));
+    }
+
+    /// "Try it live": type into a field and watch the saved library expand
+    /// exactly as the daemon would expand it in another application.
+    fn render_try_live(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        egui::Frame::new()
+            .fill(theme::tint(palette.accent, 18))
+            .stroke(egui::Stroke::new(1.0, theme::tint(palette.accent, 110)))
+            .corner_radius(egui::CornerRadius::same(10))
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let arrow = if self.try_live_open { "⏷" } else { "⏵" };
+                    let toggle = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!(
+                                    "{arrow}  ⚡ {}",
+                                    self.strings.try_live_title()
+                                ))
+                                .strong()
+                                .color(palette.accent),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text(self.strings.try_live_help());
+                    if toggle.clicked() {
+                        self.try_live_open = !self.try_live_open;
+                    }
+                    if self.playground.expansions > 0 {
+                        theme::pill(
+                            ui,
+                            self.strings.try_live_stats(
+                                self.playground.expansions,
+                                self.playground.keystrokes_saved,
+                            ),
+                            palette.success,
+                            theme::tint(palette.success, 34),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.try_live_open
+                            && !self.playground.text.is_empty()
+                            && ui.small_button(self.strings.clear()).clicked()
+                        {
+                            self.playground.clear();
+                        }
+                        // Once something has expanded, the stats say it all.
+                        if self.try_live_open && self.playground.expansions == 0 {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(self.strings.try_live_help())
+                                        .small()
+                                        .color(palette.muted),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
+                });
+                if !self.try_live_open {
+                    return;
+                }
+                ui.add_space(4.0);
+                let id = egui::Id::new("try_live_field");
+                let output = TextEdit::multiline(&mut self.playground.text)
+                    .id(id)
+                    .margin(theme::FIELD_MARGIN)
+                    .hint_text(self.strings.try_live_hint())
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY)
+                    .show(ui);
+                if output.response.response.changed() {
+                    let text = self.playground.text.clone();
+                    let caret_at_end = output
+                        .cursor_range
+                        .is_none_or(|range| range.primary.index.0 == text.chars().count());
+                    if let Some(rewrite) =
+                        self.playground
+                            .edit(&self.config, &self.preview_app, &text, caret_at_end)
+                    {
+                        let caret = rewrite
+                            .caret
+                            .unwrap_or_else(|| rewrite.text.chars().count());
+                        self.playground.text = rewrite.text;
+                        let mut state = output.state;
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(
+                                egui::text::CCursor::new(caret),
+                            )));
+                        state.store(ui.ctx(), id);
+                    }
+                }
+            });
+    }
+
     /// The editor's pinned action bar. It is a panel rather than the last
     /// row of the editor's scroll area so the primary action stays on screen
     /// however far the snippet's replacement text scrolls.
@@ -3427,8 +3796,14 @@ impl GuiApp {
             )
             .show(root, |ui| {
                 ui.horizontal(|ui| {
-                    if theme::primary_button(ui, palette, self.strings.save_changes())
+                    let dirty = self.draft_is_dirty();
+                    if ui
+                        .add_enabled_ui(dirty, |ui| {
+                            theme::primary_button(ui, palette, self.strings.save_changes())
+                        })
+                        .inner
                         .on_hover_text(self.strings.save_tooltip())
+                        .on_disabled_hover_text(self.strings.no_changes_to_save())
                         .clicked()
                     {
                         self.save_selected();
@@ -3441,7 +3816,7 @@ impl GuiApp {
                     } else if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
                         self.request_action(PendingAction::Delete);
                     }
-                    if self.draft_is_dirty() {
+                    if dirty {
                         theme::pill(
                             ui,
                             self.strings.unsaved_changes(),
@@ -3482,13 +3857,23 @@ impl GuiApp {
                         ui.spinner();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(self.path.display().to_string())
+                        let full_path = self.path.display().to_string();
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(home_relative_path(
+                                    &self.path,
+                                    env::var_os("HOME").as_deref(),
+                                ))
                                 .monospace()
                                 .small()
                                 .color(palette.muted),
+                            )
+                            .truncate(),
                         )
-                        .on_hover_text(self.strings.configuration_file());
+                        .on_hover_text(format!(
+                            "{}\n{full_path}",
+                            self.strings.configuration_file()
+                        ));
                     });
                 });
             });
@@ -3516,11 +3901,24 @@ impl GuiApp {
 
     fn render_pending_action(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.pending_action.is_some() {
-            egui::Window::new(self.strings.unsaved_title())
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            // A real modal: the rest of the window is dimmed and ignores
+            // clicks. As a floating window, clicking another snippet while
+            // this prompt was open silently replaced the pending action.
+            let dirty = self.draft_is_dirty();
+            let response = egui::Modal::new(egui::Id::new("pending_action_modal"))
+                .frame(
+                    egui::Frame::popup(&ctx.global_style())
+                        .fill(palette.surface)
+                        .inner_margin(egui::Margin::same(20)),
+                )
                 .show(ctx, |ui| {
+                    ui.set_max_width(460.0);
+                    ui.heading(if dirty {
+                        self.strings.unsaved_title()
+                    } else {
+                        self.strings.delete_button()
+                    });
+                    ui.add_space(4.0);
                     let action = match self.pending_action {
                         Some(PendingAction::Select(_)) => self.strings.unsaved_switching(),
                         Some(PendingAction::New) => self.strings.unsaved_creating(),
@@ -3531,7 +3929,7 @@ impl GuiApp {
                         Some(PendingAction::Close) => self.strings.unsaved_closing(),
                         None => "continuing",
                     };
-                    if self.draft_is_dirty() {
+                    if dirty {
                         ui.label(self.strings.save_before(action));
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
@@ -3567,6 +3965,10 @@ impl GuiApp {
                         });
                     }
                 });
+            // Backdrop click or Escape means Cancel.
+            if response.should_close() {
+                self.pending_action = None;
+            }
         }
     }
 
@@ -3596,7 +3998,7 @@ impl GuiApp {
                         }
                     });
                     ui.label(
-                        RichText::new("This command is not run by the GUI.")
+                        RichText::new(self.strings.command_not_run_by_gui())
                             .small()
                             .color(palette.muted),
                     );
@@ -3615,9 +4017,10 @@ impl eframe::App for GuiApp {
         let ctx = &ctx;
         self.poll_runtime(ctx);
         self.poll_command_preview(ctx);
+        self.poll_setup(ctx);
         self.reap_app_detection_without_editor(ctx);
         if self.theme_refresh_pending {
-            theme::install_pack(ctx, self.colorpack, self.config.settings.font_scale);
+            theme::install_pack(ctx, self.colorpack, self.settings_font_scale);
             self.theme_refresh_pending = false;
         }
         let palette = Palette::for_pack(self.colorpack, self.dark_mode);
@@ -3649,8 +4052,8 @@ impl eframe::App for GuiApp {
             self.close_after_confirm = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if want_save && self.selected.is_some() {
-            self.save_selected();
+        if want_save {
+            self.save_shortcut();
         }
         if want_new {
             self.request_action(PendingAction::New);
@@ -3673,10 +4076,150 @@ impl eframe::App for GuiApp {
         self.render_status_bar(root, &palette);
         self.render_snippet_list(root, &palette);
         self.render_editor_actions(root, &palette);
+        self.render_try_live_panel(root, &palette);
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
     }
+}
+
+/// A numbered onboarding step heading, with a check mark once it is done.
+fn onboarding_step(ui: &mut egui::Ui, palette: &Palette, number: u8, title: &str, done: bool) {
+    ui.horizontal(|ui| {
+        let (badge, color) = if done {
+            ("✓".to_owned(), palette.success)
+        } else {
+            (number.to_string(), palette.accent)
+        };
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        ui.painter()
+            .circle_filled(rect.center(), 12.0, theme::tint(color, 50));
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            badge,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+        ui.label(RichText::new(title).strong().size(16.0));
+    });
+}
+
+/// Column geometry shared by the rows of the snippet form./// Column geometry shared by the rows of the snippet form.
+#[derive(Clone, Copy)]
+struct FormColumns {
+    label_width: f32,
+    field_width: f32,
+    /// Space above a label so its text lines up with the text inside the
+    /// (padded) field beside it.
+    label_offset: f32,
+}
+
+impl FormColumns {
+    const GAP: f32 = 4.0;
+
+    fn new(ui: &egui::Ui, label_width: f32) -> Self {
+        let spacing = ui.spacing().item_spacing.x;
+        Self {
+            label_width,
+            field_width: (ui.available_width() - label_width - spacing - Self::GAP).max(160.0),
+            label_offset: f32::from(theme::FIELD_MARGIN.top),
+        }
+    }
+
+    fn with_label_offset(self, label_offset: f32) -> Self {
+        Self {
+            label_offset,
+            ..self
+        }
+    }
+}
+
+/// One label/field row of the snippet form. The field column is a bounded
+/// vertical layout, so its content wraps inside the card and the row grows to
+/// fit it in the same frame.
+fn form_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    columns: FormColumns,
+    add_field: impl FnOnce(&mut egui::Ui),
+) {
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(columns.label_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_width(columns.label_width);
+                ui.add_space(columns.label_offset);
+                ui.label(label);
+            },
+        );
+        ui.add_space(FormColumns::GAP);
+        ui.vertical(|ui| {
+            ui.set_max_width(columns.field_width);
+            add_field(ui);
+        });
+    });
+}
+
+/// Insert `text` at the replacement editor's caret/// Insert `text` at the replacement editor's caret (replacing any selection)
+/// and leave the caret after it, so inserting `{{cursor}}` lands where the
+/// user was typing rather than at the end of the snippet. Falls back to
+/// appending when the editor has no remembered caret yet.
+fn insert_into_replacement_editor(ctx: &egui::Context, replacement: &mut String, text: &str) {
+    let id = egui::Id::new(REPLACEMENT_EDITOR_SALT);
+    let mut state = egui::text_edit::TextEditState::load(ctx, id);
+    let selection = state
+        .as_ref()
+        .and_then(|state| state.cursor.char_range())
+        .map(|range| {
+            let range = range.as_sorted_char_range();
+            range.start.0..range.end.0
+        });
+    let caret = insert_at_char_range(replacement, selection, text);
+    if let Some(state) = state.as_mut() {
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(caret),
+            )));
+    }
+    if let Some(state) = state {
+        state.store(ctx, id);
+    }
+    ctx.memory_mut(|memory| memory.request_focus(id));
+}
+
+/// Replace the characters in `selection` (a char-index range, clamped to the
+/// text) with `insert`, or append when there is no selection. Returns the
+/// char index just after the inserted text.
+fn insert_at_char_range(
+    text: &mut String,
+    selection: Option<std::ops::Range<usize>>,
+    insert: &str,
+) -> usize {
+    let length = text.chars().count();
+    let range = selection.unwrap_or(length..length);
+    let start = range.start.min(length);
+    let end = range.end.clamp(start, length);
+    let byte_at = |text: &str, index: usize| {
+        text.char_indices()
+            .nth(index)
+            .map_or(text.len(), |(byte, _)| byte)
+    };
+    let (start_byte, end_byte) = (byte_at(text, start), byte_at(text, end));
+    text.replace_range(start_byte..end_byte, insert);
+    start + insert.chars().count()
+}
+
+/// Show a path under the home directory as `~/...`, the way a shell would,
+/// so the status line spends its width on the part that identifies the file.
+fn home_relative_path(path: &Path, home: Option<&std::ffi::OsStr>) -> String {
+    home.map(Path::new)
+        .filter(|home| !home.as_os_str().is_empty())
+        .and_then(|home| path.strip_prefix(home).ok())
+        .map(|relative| format!("~/{}", relative.display()))
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn expand_user_path(value: &str) -> PathBuf {
@@ -3698,8 +4241,17 @@ fn expand_user_path_with_home(value: &str, home: Option<&std::ffi::OsStr>) -> Pa
 
 fn main() -> Result<()> {
     if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
-        println!("Usage: wayexpand-gui [CONFIG]\n\nNative Wayland settings editor for WayExpand.");
+        println!(
+            "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [CONFIG]\n\nNative Wayland settings editor for WayExpand.\n\n--picker  Quick-insert window: search your snippets and press Enter to type\n          one into the app you were using. Bind it to a desktop shortcut."
+        );
         return Ok(());
+    }
+    if env::args().nth(1).as_deref() == Some("--picker") {
+        let path = env::args()
+            .nth(2)
+            .map(PathBuf::from)
+            .unwrap_or_else(default_config_path);
+        return picker::run(path);
     }
     let path = env::args()
         .nth(1)
@@ -3731,7 +4283,7 @@ fn main() -> Result<()> {
             theme::install_pack(
                 &creation_context.egui_ctx,
                 colorpack,
-                app.config.settings.font_scale,
+                app.settings_font_scale,
             );
             // Only override with the OS-detected theme when the user has
             // never explicitly chosen one; otherwise a saved preference
@@ -3753,6 +4305,7 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
     use crate::status::StatusTone;
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     fn run_gui_test_frame(
@@ -3843,7 +4396,61 @@ mod tests {
             command_cache_ms: "1000".into(),
             command_environment: wayexpand_core::CommandEnvironment::default(),
             command_pass_env: Vec::new(),
+            pending_tag: String::new(),
+            pending_app: String::new(),
         }
+    }
+
+    #[test]
+    fn a_half_typed_tag_is_saved_and_makes_the_draft_dirty() {
+        let mut form = draft();
+        form.tags = vec!["ops".into()];
+        form.pending_tag = "  release ".into();
+        assert_eq!(form.committed_tags(), ["ops", "release"]);
+        // An entry that is blank or already present adds nothing.
+        form.pending_tag = "ops".into();
+        assert_eq!(form.committed_tags(), ["ops"]);
+        form.pending_tag = "   ".into();
+        assert_eq!(form.committed_tags(), ["ops"]);
+        form.pending_app = "firefox".into();
+        assert_eq!(form.committed_app_filter(), ["firefox"]);
+    }
+
+    #[test]
+    fn template_variables_insert_at_the_caret_and_replace_a_selection() {
+        let mut text = "Hello world".to_owned();
+        assert_eq!(insert_at_char_range(&mut text, Some(5..5), ","), 6);
+        assert_eq!(text, "Hello, world");
+        assert_eq!(
+            insert_at_char_range(&mut text, Some(7..12), "{{cursor}}"),
+            17
+        );
+        assert_eq!(text, "Hello, {{cursor}}");
+        // No remembered caret appends; an out-of-range caret is clamped.
+        assert_eq!(insert_at_char_range(&mut text, None, "!"), 18);
+        assert_eq!(insert_at_char_range(&mut text, Some(99..120), "?"), 19);
+        assert_eq!(text, "Hello, {{cursor}}!?");
+        // Char indices, not bytes: multi-byte text before the caret.
+        let mut text = "ä€x".to_owned();
+        assert_eq!(insert_at_char_range(&mut text, Some(2..2), "-"), 3);
+        assert_eq!(text, "ä€-x");
+    }
+
+    #[test]
+    fn status_bar_paths_are_shown_relative_to_home() {
+        let home = std::ffi::OsStr::new("/home/ada");
+        assert_eq!(
+            home_relative_path(Path::new("/home/ada/.config/wayexpand/x.toml"), Some(home)),
+            "~/.config/wayexpand/x.toml"
+        );
+        assert_eq!(
+            home_relative_path(Path::new("/etc/wayexpand/x.toml"), Some(home)),
+            "/etc/wayexpand/x.toml"
+        );
+        assert_eq!(
+            home_relative_path(Path::new("/home/adam/x.toml"), Some(home)),
+            "/home/adam/x.toml"
+        );
     }
 
     #[test]
@@ -3928,6 +4535,30 @@ mod tests {
         assert!(saved.expansion[0].enabled);
         assert!(!app.new_draft);
         assert!(!app.draft_is_dirty());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn the_save_shortcut_saves_a_new_snippet_and_skips_a_clean_draft() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-save-shortcut-{}.toml",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let mut app = GuiApp::load(path.clone()).unwrap();
+
+        app.create_new_snippet();
+        app.draft.as_mut().unwrap().replacement = "Typed with Ctrl+S".into();
+        app.save_shortcut();
+        let saved = Config::load(&path).unwrap();
+        assert_eq!(saved.expansion.len(), 1);
+        assert_eq!(saved.expansion[0].replacement, "Typed with Ctrl+S");
+
+        let undo_depth = app.undo.len();
+        let file = fs::read(&path).unwrap();
+        app.save_shortcut();
+        assert_eq!(fs::read(&path).unwrap(), file);
+        assert_eq!(app.undo.len(), undo_depth);
         fs::remove_file(path).unwrap();
     }
 
@@ -4564,7 +5195,14 @@ mod tests {
             wayexpand_core::EspansoImportReport::default(),
         ));
         app.settings_open = true;
+        app.pending_action = Some(PendingAction::Close);
         assert!(app.any_dialog_open());
+
+        // The modal save/discard prompt is answered first, as Cancel, and
+        // leaves the windows beneath it open.
+        app.close_topmost_dialog();
+        assert!(app.pending_action.is_none());
+        assert!(app.settings_open);
 
         app.close_topmost_dialog();
         assert!(!app.settings_open);
@@ -4636,13 +5274,9 @@ mod tests {
 
         app.apply_font_scale(&ctx, FontScale::Large);
 
-        assert_eq!(app.config.settings.font_scale, FontScale::Large);
+        assert_eq!(app.config.settings.font_scale, FontScale::Normal);
         assert_eq!(app.settings_font_scale, FontScale::Large);
         assert!(app.undo.is_empty());
-        assert_eq!(
-            Config::load(&path).unwrap().settings.font_scale,
-            FontScale::Large
-        );
         fs::remove_file(path).unwrap();
     }
 

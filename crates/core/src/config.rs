@@ -1469,7 +1469,12 @@ fn save_atomic_serialized_relative(
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
-        let temp_name = format!(".{file_name}.tmp.{}.{}.{}", std::process::id(), nonce, attempt);
+        let temp_name = format!(
+            ".{file_name}.tmp.{}.{}.{}",
+            std::process::id(),
+            nonce,
+            attempt
+        );
         let temp_fd = match rustix::fs::openat(
             &parent_fd,
             &temp_name,
@@ -1497,10 +1502,11 @@ fn save_atomic_serialized_relative(
         let temp_path = parent.join(&temp_name);
         let result = (|| -> Result<(), ConfigError> {
             let mut file = fs::File::from(temp_fd);
-            file.write_all(serialized).map_err(|source| ConfigError::Read {
-                path: temp_path.display().to_string(),
-                source,
-            })?;
+            file.write_all(serialized)
+                .map_err(|source| ConfigError::Read {
+                    path: temp_path.display().to_string(),
+                    source,
+                })?;
             file.sync_all().map_err(|source| ConfigError::Read {
                 path: temp_path.display().to_string(),
                 source,
@@ -1528,7 +1534,10 @@ fn save_atomic_serialized_relative(
     }
     Err(last_error.unwrap_or_else(|| ConfigError::Read {
         path: parent.display().to_string(),
-        source: std::io::Error::new(std::io::ErrorKind::AlreadyExists, "temporary path collision"),
+        source: std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "temporary path collision",
+        ),
     }))
 }
 
@@ -1536,16 +1545,14 @@ fn save_atomic_serialized_relative(
 fn open_secure_directory(path: &Path) -> std::io::Result<fs::File> {
     let root = rustix::fs::open(
         "/",
-            rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
     )?;
     let relative = path.strip_prefix("/").unwrap_or(path);
     let directory = rustix::fs::openat2(
         &root,
         relative,
-        rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
         rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
     )?;

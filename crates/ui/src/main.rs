@@ -250,7 +250,7 @@ impl App {
             index,
             trigger: self.config.expansion[index].trigger.clone(),
         });
-        self.message = "Edit tags as a JSON string array and press Enter (example: [\"ops\", \"customer, west\"])".into();
+        self.message = "Enter comma-separated tags and press Enter (use a JSON array such as [\"customer, west\"] for tags containing commas)".into();
     }
 
     fn request_delete(&mut self) {
@@ -371,7 +371,7 @@ impl App {
                 let tags = match decode_tags(&input) {
                     Ok(tags) => tags,
                     Err(error) => {
-                        self.message = format!("Tags must be a JSON string array: {error}");
+                        self.message = format!("Tags JSON array is invalid: {error}");
                         self.input = input;
                         self.prompt = Some(Prompt::EditTags { index, trigger });
                         return;
@@ -737,7 +737,8 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
         app.message = "No snippet selected".into();
         return Ok(());
     };
-    let temp = std::env::temp_dir().join(format!("wayexpand-edit-{}.tmp", std::process::id()));
+    let temp = external_edit_directory(std::env::var_os("XDG_RUNTIME_DIR"))
+        .join(format!("wayexpand-edit-{}.tmp", std::process::id()));
     execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
     terminal::disable_raw_mode()?;
     let edit_result = (|| -> Result<()> {
@@ -810,6 +811,18 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
         app.message = format!("External edit failed: {error}");
     }
     Ok(())
+}
+
+/// Where the replacement is handed to `$VISUAL`/`$EDITOR`. The per-user
+/// runtime directory (mode 0700, usually tmpfs) keeps the snippet body -- and
+/// the swap/backup files editors create beside it -- out of the shared,
+/// world-listable `/tmp`, where another user could also pre-create the
+/// predictable name to block editing. `/tmp` remains the fallback.
+fn external_edit_directory(runtime_dir: Option<std::ffi::OsString>) -> PathBuf {
+    runtime_dir
+        .map(PathBuf::from)
+        .filter(|directory| directory.is_absolute() && directory.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
@@ -937,12 +950,39 @@ fn control_command(command: &str) -> Result<String> {
     Ok(response)
 }
 
+/// Present tags for editing as plain `a, b` text whenever that form parses
+/// back to exactly the same list, and as a JSON array only for tags it cannot
+/// represent (commas, surrounding whitespace, empty tags, newlines, or a
+/// leading `[`).
 fn encode_tags(tags: &[String]) -> String {
-    serde_json::to_string(tags).expect("serializing strings to JSON cannot fail")
+    let plain = tags.join(", ");
+    if decode_plain_tags(&plain) == tags {
+        plain
+    } else {
+        serde_json::to_string(tags).expect("serializing strings to JSON cannot fail")
+    }
 }
 
+/// Parse the tag prompt: a JSON string array when the input starts with `[`,
+/// otherwise comma-separated tags with surrounding whitespace and empty
+/// entries dropped. JSON-only input was hostile to type in a terminal and
+/// broke the documented `ops, email` form; JSON stays available for the
+/// rare tag that itself contains a comma.
 fn decode_tags(input: &str) -> serde_json::Result<Vec<String>> {
-    serde_json::from_str(input)
+    if input.trim_start().starts_with('[') {
+        serde_json::from_str(input)
+    } else {
+        Ok(decode_plain_tags(input))
+    }
+}
+
+fn decode_plain_tags(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1011,7 +1051,10 @@ mod tests {
         update(&mut app, key(KeyCode::Char('e'))).unwrap();
         update(&mut app, key(KeyCode::Enter)).unwrap();
         assert_eq!(app.config.expansion[1].replacement, "update");
-        assert_eq!(Config::load(path).unwrap().expansion[1].replacement, "update");
+        assert_eq!(
+            Config::load(path).unwrap().expansion[1].replacement,
+            "update"
+        );
     }
 
     #[test]
@@ -1043,6 +1086,20 @@ mod tests {
             "line one\nline two".into(),
         ];
         assert_eq!(decode_tags(&encode_tags(&tags)).unwrap(), tags);
+    }
+
+    #[test]
+    fn tui_tag_editor_accepts_plain_comma_separated_tags() {
+        assert_eq!(decode_tags(" edited,  ui ,, ").unwrap(), ["edited", "ui"]);
+        assert_eq!(decode_tags("").unwrap(), Vec::<String>::new());
+        // Simple tags are offered back in the same plain form...
+        let simple = vec!["ops".to_owned(), "email".to_owned()];
+        assert_eq!(encode_tags(&simple), "ops, email");
+        assert_eq!(decode_tags(&encode_tags(&simple)).unwrap(), simple);
+        // ...and a tag the plain form cannot carry switches to JSON.
+        let comma = vec!["customer, west".to_owned()];
+        assert_eq!(encode_tags(&comma), r#"["customer, west"]"#);
+        assert!(decode_tags("[not json").is_err());
     }
 
     #[test]

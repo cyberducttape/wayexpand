@@ -29,6 +29,11 @@ pub(crate) struct Draft {
     pub(crate) command_cache_ms: String,
     pub(crate) command_environment: CommandEnvironment,
     pub(crate) command_pass_env: Vec<String>,
+    /// Text typed into the "add tag" input but not yet confirmed with Enter.
+    /// It counts as part of the draft so Save never drops a half-typed tag.
+    pub(crate) pending_tag: String,
+    /// Same as `pending_tag`, for the "add app" input.
+    pub(crate) pending_app: String,
 }
 
 impl Draft {
@@ -78,7 +83,19 @@ impl Draft {
             command_cache_ms,
             command_environment,
             command_pass_env,
+            pending_tag: String::new(),
+            pending_app: String::new(),
         }
+    }
+
+    /// Tags as they will be saved: the confirmed chips plus any pending input.
+    pub(crate) fn committed_tags(&self) -> Vec<String> {
+        with_pending_token(&self.tags, &self.pending_tag)
+    }
+
+    /// App filters as they will be saved, including any pending input.
+    pub(crate) fn committed_app_filter(&self) -> Vec<String> {
+        with_pending_token(&self.app_filter, &self.pending_app)
     }
 
     /// Compare the raw form fields with the loaded model, without attempting
@@ -159,4 +176,15 @@ impl Draft {
             pass_env: self.command_pass_env.clone(),
         }))
     }
+}
+
+/// `tokens` plus the trimmed `pending` entry, unless it is empty or already
+/// present. Shared by the tag and app-filter chip editors.
+pub(crate) fn with_pending_token(tokens: &[String], pending: &str) -> Vec<String> {
+    let mut committed = tokens.to_vec();
+    let pending = pending.trim();
+    if !pending.is_empty() && !committed.iter().any(|token| token == pending) {
+        committed.push(pending.to_owned());
+    }
+    committed
 }

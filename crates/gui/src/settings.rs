@@ -12,12 +12,14 @@ use serde::{Deserialize, Serialize};
 use wayexpand_core::default_config_path;
 
 use crate::{colorpack::ColorPack, lang::Language};
+use wayexpand_core::FontScale;
 
 /// GUI-only display preferences. This file is deliberately separate from the
 /// expansion configuration so a preferences parse failure never blocks editing.
 pub(crate) struct GuiPrefs {
     pub(crate) language: Language,
     pub(crate) colorpack: ColorPack,
+    pub(crate) font_scale: FontScale,
     /// `None` means no preference has been saved; the caller should use the
     /// desktop theme on first launch.
     pub(crate) dark_mode: Option<bool>,
@@ -28,6 +30,8 @@ pub(crate) struct GuiPrefs {
 struct StoredGuiPrefs {
     language: String,
     colorpack: String,
+    #[serde(default)]
+    font_scale: FontScale,
     #[serde(default)]
     dark_mode: Option<bool>,
 }
@@ -40,6 +44,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
     let defaults = GuiPrefs {
         language: Language::from_env(),
         colorpack: ColorPack::Default,
+        font_scale: FontScale::Normal,
         dark_mode: None,
     };
     let Ok(contents) = fs::read_to_string(gui_prefs_path()) else {
@@ -57,6 +62,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
     GuiPrefs {
         language,
         colorpack,
+        font_scale: stored.font_scale,
         dark_mode: stored.dark_mode,
     }
 }
@@ -67,6 +73,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
 pub(crate) fn save_gui_prefs(
     language: Language,
     colorpack: ColorPack,
+    font_scale: FontScale,
     dark_mode: bool,
 ) -> Result<(), String> {
     let path = gui_prefs_path();
@@ -78,6 +85,7 @@ pub(crate) fn save_gui_prefs(
     let stored = StoredGuiPrefs {
         language: language.code().to_owned(),
         colorpack: colorpack.code().to_owned(),
+        font_scale,
         dark_mode: Some(dark_mode),
     };
     let contents = toml_edit::ser::to_string_pretty(&stored)

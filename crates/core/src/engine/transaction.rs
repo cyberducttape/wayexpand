@@ -6,6 +6,12 @@
 use super::{ExpansionEngine, ExpansionError, ExpansionResult};
 use crate::TextInjector;
 
+/// Return the exact `(restore, erase)` strings for an expansion's undo
+/// transaction.
+///
+/// A non-exclusive word-boundary match has already delivered its terminating
+/// character to the application. Since `apply` replaces that character along
+/// with the trigger, undo must include it as well.
 pub(super) fn transaction_texts(
     restore: &str,
     replacement: &str,

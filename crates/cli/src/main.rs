@@ -61,6 +61,22 @@ fn classified_error(kind: CliErrorKind, message: impl Into<String>) -> Error {
     })
 }
 
+/// Map a configuration load failure to a CLI error. A missing file is the
+/// usual first-run state, so it gets an actionable message naming the path
+/// the user (or the default) chose; everything else goes through
+/// `safe_summary` so snippet content never reaches the terminal.
+fn config_load_error(path: &Path, error: wayexpand_core::ConfigError) -> Error {
+    if let wayexpand_core::ConfigError::Read { source, .. } = &error {
+        if source.kind() == io::ErrorKind::NotFound {
+            return config_error(format!(
+                "no configuration file at {}; create one with `wayexpand-gui` or `wayexpand-ui`",
+                path.display()
+            ));
+        }
+    }
+    config_error(format!("configuration invalid: {}", error.safe_summary()))
+}
+
 fn usage_error(message: impl Into<String>) -> Error {
     classified_error(CliErrorKind::Usage, message)
 }
@@ -99,11 +115,20 @@ fn normalize_error(error: Error) -> Error {
     if error.downcast_ref::<CliError>().is_some() {
         error
     } else {
-        classified_error(CliErrorKind::Operational, error.to_string())
+        // `{:#}` keeps the cause chain ("creating backup X: File exists").
+        // `to_string()` kept only the outermost context, so every
+        // `.context(...)` failure lost the part that explained it.
+        classified_error(CliErrorKind::Operational, format!("{error:#}"))
     }
 }
 
 fn run() -> Result<()> {
+    // `wayexpand <command> --help` would otherwise reach the command's own
+    // parser and be read as a trigger or config path.
+    if env::args().skip(2).any(|argument| argument == "--help") {
+        print_help();
+        return Ok(());
+    }
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("--version") | Some("-V") | Some("version") => {
@@ -127,9 +152,7 @@ fn run() -> Result<()> {
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            let config = Config::load(path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let mut engine = ExpansionEngine::new(config).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
@@ -172,9 +195,7 @@ fn run() -> Result<()> {
                 .unwrap_or_else(default_config_path);
             let chord = wayexpand_core::KeyChord::parse(&chord_text)
                 .map_err(|error| config_error(format!("invalid hotkey chord: {error}")))?;
-            let config = Config::load(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let engine = ExpansionEngine::new(config).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
@@ -215,9 +236,7 @@ fn run() -> Result<()> {
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            let config = Config::load(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let mut engine = ExpansionEngine::new(config).map_err(|error| {
                 config_error(format!("configuration invalid: {}", error.safe_summary()))
             })?;
@@ -262,9 +281,7 @@ fn run() -> Result<()> {
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            let config = Config::load(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             if requested_json {
                 println!(
                     "{}",
@@ -311,9 +328,7 @@ fn run() -> Result<()> {
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
             let query_lower = query.to_lowercase();
-            let config = Config::load(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let matches: Vec<_> = config
                 .expansion
                 .into_iter()
@@ -373,13 +388,14 @@ fn run() -> Result<()> {
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
             let policy = load_policy()?;
-            let config = Config::load(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let (config, policy_violations) = if merged {
                 let fleet = FleetConfig::load_standard_with_base_and_policy(config, &policy)
                     .map_err(|error| {
-                        config_error(format!("fleet configuration invalid: {error}"))
+                        config_error(format!(
+                            "fleet configuration invalid: {}",
+                            error.safe_summary()
+                        ))
                     })?;
                 (fleet.config, fleet.policy_violations)
             } else {
@@ -388,7 +404,8 @@ fn run() -> Result<()> {
                     .apply_administrator_policy(&policy)
                     .map_err(|error| {
                         config_error(format!(
-                            "organization policy rejects configuration: {error}"
+                            "organization policy rejects configuration: {}",
+                            error.safe_summary()
                         ))
                     })?;
                 (config, Vec::new())
@@ -517,7 +534,7 @@ fn run() -> Result<()> {
             let enabled = match value.as_str() {
                 "on" | "true" | "1" => true,
                 "off" | "false" | "0" => false,
-                _ => bail!("enabled state must be on or off"),
+                _ => usage_bail!("enabled state must be on or off, not {value:?}"),
             };
             let path = args
                 .next()
@@ -526,9 +543,8 @@ fn run() -> Result<()> {
             if args.next().is_some() {
                 usage_bail!("usage: wayexpand set-enabled <trigger> <on|off> [config]");
             }
-            let loaded = Config::load_versioned(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let loaded =
+                Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
             let expected_revision = loaded.revision;
             let mut config = loaded.config;
             let Some(expansion) = config
@@ -573,7 +589,7 @@ fn run() -> Result<()> {
             let mode = match value.as_str() {
                 "immediate" => MatchMode::Immediate,
                 "word-boundary" => MatchMode::WordBoundary,
-                _ => bail!("match mode must be immediate or word-boundary"),
+                _ => usage_bail!("match mode must be immediate or word-boundary, not {value:?}"),
             };
             let path = args
                 .next()
@@ -584,9 +600,8 @@ fn run() -> Result<()> {
                     "usage: wayexpand set-mode <trigger> <immediate|word-boundary> [config]"
                 );
             }
-            let loaded = Config::load_versioned(&path).map_err(|error| {
-                config_error(format!("configuration invalid: {}", error.safe_summary()))
-            })?;
+            let loaded =
+                Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
             let expected_revision = loaded.revision;
             let mut config = loaded.config;
             let Some(expansion) = config
@@ -618,11 +633,10 @@ fn run() -> Result<()> {
                 .next()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_config_path);
-            let destination = args.next().map(PathBuf::from).unwrap_or_else(|| {
-                let mut path = source.clone();
-                path.set_extension("toml.bak");
-                path
-            });
+            let destination = args
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| default_backup_destination(&source));
             if args.next().is_some() {
                 usage_bail!("usage: wayexpand backup [config] [destination]");
             }
@@ -805,13 +819,15 @@ fn run() -> Result<()> {
                 if !rest.is_empty() {
                     usage_bail!("usage: wayexpand fleet status [--json]");
                 }
-                let base = Config::load(default_config_path()).map_err(|error| {
-                    config_error(format!("configuration invalid: {}", error.safe_summary()))
-                })?;
+                let path = default_config_path();
+                let base = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
                 let policy = load_policy()?;
                 let fleet = FleetConfig::load_standard_with_base_and_policy(base, &policy)
                     .map_err(|error| {
-                        config_error(format!("fleet configuration invalid: {error}"))
+                        config_error(format!(
+                            "fleet configuration invalid: {}",
+                            error.safe_summary()
+                        ))
                     })?;
                 for violation in &fleet.policy_violations {
                     eprintln!("policy warning: {violation}");
@@ -894,41 +910,31 @@ fn run() -> Result<()> {
             if args.next().is_some() {
                 usage_bail!("usage: wayexpand {requested} [--json]");
             }
-            let path = std::env::var_os("WAYEXPAND_SOCKET")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("XDG_RUNTIME_DIR")
-                        .map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-                })
-                .ok_or_else(|| daemon_error("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required"))?;
-            let mut stream = UnixStream::connect(&path).map_err(|error| {
-                daemon_error(format!("connecting to {}: {error}", path.display()))
-            })?;
-            stream
-                .set_read_timeout(Some(CONTROL_IO_TIMEOUT))
-                .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
-            stream
-                .set_write_timeout(Some(CONTROL_IO_TIMEOUT))
-                .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
-            writeln!(stream, "{requested}")
-                .map_err(|error| daemon_error(format!("sending daemon command: {error}")))?;
-            let mut response = Vec::with_capacity(MAX_CONTROL_RESPONSE_BYTES);
-            stream
-                .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-                .read_to_end(&mut response)
-                .map_err(|error| daemon_error(format!("reading daemon response: {error}")))?;
-            if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-                return Err(daemon_error(format!(
-                    "daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes"
-                )));
-            }
-            let response = String::from_utf8(response)
-                .map_err(|_| daemon_error("daemon returned a non-UTF-8 control response"))?;
+            let response = control_request(requested)?;
             if requested_json {
                 println!("{}", status_as_json(&response)?);
             } else {
                 print!("{response}");
             }
+        }
+        Some("insert") => {
+            let trigger = args
+                .next()
+                .ok_or_else(|| usage_error("usage: wayexpand insert <trigger>"))?;
+            if args.next().is_some() {
+                usage_bail!("usage: wayexpand insert <trigger>");
+            }
+            if trigger.is_empty() || trigger.chars().any(char::is_control) {
+                usage_bail!("a trigger cannot be empty or contain control characters");
+            }
+            let response = control_request(&format!("insert {trigger}"))?;
+            if response.trim_end() != "insert scheduled" {
+                return Err(daemon_error(format!(
+                    "daemon refused the insert: {}",
+                    response.trim_end()
+                )));
+            }
+            println!("insert scheduled");
         }
         Some("help") | Some("--help") | Some("-h") | None => print_help(),
         Some(command) => usage_bail!("unknown command {command:?}; try `wayexpand help`"),
@@ -945,6 +951,26 @@ fn session_description() -> &'static str {
         _ if env::var_os("DISPLAY").is_some() => "X11 or XWayland",
         _ => "not detected",
     }
+}
+
+/// `<config>.bak`, or the first free `<config>.bak.N`, so running `backup`
+/// again keeps every earlier backup instead of failing on the first one.
+/// `create_backup` still refuses to overwrite if a name appears meanwhile.
+fn default_backup_destination(source: &Path) -> PathBuf {
+    let mut base = source.as_os_str().to_owned();
+    base.push(".bak");
+    let first = PathBuf::from(&base);
+    if fs::symlink_metadata(&first).is_err() {
+        return first;
+    }
+    (2..10_000)
+        .map(|index| {
+            let mut candidate = base.clone();
+            candidate.push(format!(".{index}"));
+            PathBuf::from(candidate)
+        })
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .unwrap_or(first)
 }
 
 fn create_backup(source: &Path, destination: &Path) -> Result<()> {
@@ -970,22 +996,166 @@ fn create_backup(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn print_help() {
-    let help = format!(
-        "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n\ncommands:\n  setup [--mode recommended|maximum|experimental] [--yes] Configure a safe compatibility mode\n  status|reload|pause|resume|stop [--json]                 Control a running daemon\n  edit [config]                                            Open the graphical snippet editor\n  doctor [--json] [config]                                 Diagnose configuration and backends\n  certify [--json]                                         Run local compatibility certification\n  test <text> [--json] [config]                            Simulate input and print a match\n  test-hotkey <chord> [--json] [config]                   Resolve a hotkey without executing it\n  preview <trigger> [--json] [config]                      Preview a replacement\n  list [--json] [config]                                   List configured expansions and hotkeys\n  search <query> [--json] [config]                         Search triggers, descriptions, and tags\n  validate [config]                                        Validate configuration\n  import espanso <file>                                    Import an Espanso YAML file\n  set-enabled <trigger> <on|off> [config]                 Enable or disable an expansion\n  set-mode <trigger> <mode> [config]                       Set immediate or word-boundary matching\n  backup [config] [destination]                            Create a non-overwriting config backup\n  backend                                                  Show backend availability\n  explain-backend                                          Explain expert backend selection\n  help                                                     Show this help\n  version                                                  Print the installed version\n\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR\nDefault config: {}",
-        env!("CARGO_PKG_VERSION"),
+/// `(usage, summary)` rows for `wayexpand help`, grouped by section.
+const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Getting started",
+        &[
+            (
+                "setup [--mode recommended|maximum|experimental] [--yes]",
+                "Configure a safe compatibility mode",
+            ),
+            (
+                "doctor [--json] [config]",
+                "Diagnose configuration and backends",
+            ),
+            ("edit [config]", "Open the graphical snippet editor"),
+        ],
+    ),
+    (
+        "Daemon control",
+        &[(
+            "status|reload|pause|resume|stop [--json]",
+            "Control a running daemon",
+        )],
+    ),
+    (
+        "Snippets",
+        &[
+            (
+                "list [--json] [config]",
+                "List configured expansions and hotkeys",
+            ),
+            (
+                "search <query> [--json] [config]",
+                "Search triggers, descriptions, and tags",
+            ),
+            (
+                "test <text> [--json] [config]",
+                "Simulate input and print a match",
+            ),
+            (
+                "preview <trigger> [--preview-app APP] [--json] [config]",
+                "Preview a replacement",
+            ),
+            (
+                "test-hotkey <chord> [--json] [config]",
+                "Resolve a hotkey without executing it",
+            ),
+            (
+                "insert <trigger>",
+                "Type a snippet at the cursor via the running daemon",
+            ),
+            (
+                "set-enabled <trigger> <on|off> [config]",
+                "Enable or disable an expansion",
+            ),
+            (
+                "set-mode <trigger> <immediate|word-boundary> [config]",
+                "Set the matching mode",
+            ),
+            (
+                "validate [--fleet] [--json] [config]",
+                "Validate configuration",
+            ),
+            (
+                "backup [config] [destination]",
+                "Create a non-overwriting config backup",
+            ),
+            (
+                "import espanso <file>",
+                "Convert an Espanso YAML file to TOML on stdout",
+            ),
+            (
+                "pack inspect|import <directory>",
+                "Inspect or safely import a local snippet pack",
+            ),
+        ],
+    ),
+    (
+        "Backends and operations",
+        &[
+            ("backend", "Show backend availability"),
+            ("explain-backend", "Explain automatic backend selection"),
+            ("certify [--json]", "Run local compatibility certification"),
+            (
+                "fleet status [--json]",
+                "Show merged fleet configuration status",
+            ),
+            (
+                "portal status|reset",
+                "Inspect or remove the libei portal token",
+            ),
+        ],
+    ),
+    (
+        "Other",
+        &[
+            ("help", "Show this help"),
+            ("version", "Print the installed version"),
+        ],
+    ),
+];
+
+fn help_text() -> String {
+    let width = HELP_SECTIONS
+        .iter()
+        .flat_map(|(_, rows)| rows.iter())
+        .map(|(usage, _)| usage.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut help = format!(
+        "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    for (section, rows) in HELP_SECTIONS {
+        help.push_str(&format!("\n{section}:\n"));
+        for (usage, summary) in *rows {
+            help.push_str(&format!("  {usage:<width$}  {summary}\n"));
+        }
+    }
+    help.push_str(&format!(
+        "\n[config] defaults to {}\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR",
         default_config_path().display()
-    );
-    let help = help
-        .replace(
-            "preview <trigger> [--json] [config]",
-            "preview <trigger> [--preview-app APP] [--json] [config]",
-        )
-        .replace("validate [config]", "validate [--fleet] [--json] [config]");
-    println!("{help}");
-    println!(
-        "\nOperational commands:\n  fleet status [--json]                                    Show merged fleet configuration status\n  portal status|reset                                      Inspect or remove the libei portal token"
-    );
+    ));
+    help
+}
+
+/// Send one line to the daemon's control socket and return its reply.
+fn control_request(command: &str) -> Result<String> {
+    let path = std::env::var_os("WAYEXPAND_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
+        })
+        .ok_or_else(|| daemon_error("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required"))?;
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|error| daemon_error(format!("connecting to {}: {error}", path.display())))?;
+    stream
+        .set_read_timeout(Some(CONTROL_IO_TIMEOUT))
+        .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
+    stream
+        .set_write_timeout(Some(CONTROL_IO_TIMEOUT))
+        .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
+    writeln!(stream, "{command}")
+        .map_err(|error| daemon_error(format!("sending daemon command: {error}")))?;
+    let mut response = Vec::with_capacity(MAX_CONTROL_RESPONSE_BYTES);
+    stream
+        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
+        .read_to_end(&mut response)
+        .map_err(|error| daemon_error(format!("reading daemon response: {error}")))?;
+    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
+        return Err(daemon_error(format!(
+            "daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes"
+        )));
+    }
+    let response = String::from_utf8(response)
+        .map_err(|_| daemon_error("daemon returned a non-UTF-8 control response"))?;
+    Ok(response)
+}
+
+fn print_help() {
+    println!("{}", help_text());
 }
 
 fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
@@ -2994,5 +3164,66 @@ mod tests {
             exit_code_for(&anyhow::anyhow!("usage: this is unclassified")),
             1
         );
+    }
+
+    #[test]
+    fn help_rows_share_one_summary_column() {
+        let help = help_text();
+        let columns: Vec<usize> = help
+            .lines()
+            .filter(|line| line.starts_with("  "))
+            .map(|line| {
+                let usage_end = line[2..].find("  ").expect("summary separator") + 2;
+                usage_end + line[usage_end..].len() - line[usage_end..].trim_start().len()
+            })
+            .collect();
+        assert!(columns.len() > 20, "{help}");
+        assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{help}");
+    }
+
+    #[test]
+    fn missing_configuration_names_the_path_and_keeps_the_config_exit_code() {
+        let path = Path::new("/nonexistent/wayexpand/expansions.toml");
+        let error = config_load_error(path, Config::load(path).unwrap_err());
+        assert_eq!(exit_code_for(&error), EXIT_CONFIG);
+        assert!(error
+            .to_string()
+            .starts_with(&format!("no configuration file at {}", path.display())));
+    }
+
+    #[test]
+    fn repeated_default_backups_get_distinct_names() {
+        let directory =
+            std::env::temp_dir().join(format!("wayexpand-backup-names-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("expansions.toml");
+        fs::write(&source, "").unwrap();
+
+        let first = default_backup_destination(&source);
+        assert_eq!(first, directory.join("expansions.toml.bak"));
+        create_backup(&source, &first).unwrap();
+        let second = default_backup_destination(&source);
+        assert_eq!(second, directory.join("expansions.toml.bak.2"));
+        create_backup(&source, &second).unwrap();
+        assert_eq!(
+            default_backup_destination(&source),
+            directory.join("expansions.toml.bak.3")
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unclassified_errors_keep_their_cause() {
+        let error = normalize_error(
+            Err::<(), _>(io::Error::new(io::ErrorKind::AlreadyExists, "File exists"))
+                .context("creating configuration backup /x")
+                .unwrap_err(),
+        );
+        assert_eq!(
+            error.to_string(),
+            "creating configuration backup /x: File exists"
+        );
+        assert_eq!(exit_code_for(&error), 1);
     }
 }

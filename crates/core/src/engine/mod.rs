@@ -375,11 +375,6 @@ struct AsyncHotkeyCompletion {
     output: Result<(), HotkeyError>,
 }
 
-/// Return the exact erase/insert strings for an expansion transaction.
-///
-/// A non-exclusive word-boundary match has already delivered its terminating
-/// character to the application. Since `apply` replaces that character along
-/// with the trigger, undo must include it as well.
 impl ExpansionEngine {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         config.validate()?;
@@ -1120,9 +1115,6 @@ impl ExpansionEngine {
         !self.user_paused && !self.sensitive_focus
     }
 
-    /// Resolve a normalized key chord into configured actions. This method is
-    /// side-effect free; the daemon or script runtime owns execution policy,
-    /// cancellation, and capability checks.
     /// Invalidate pending asynchronous expansions by incrementing the generation
     /// counter. Called when any key event arrives, before processing the hotkey
     /// action. This ensures running commands are discarded when the user presses
@@ -1142,9 +1134,12 @@ impl ExpansionEngine {
     pub fn is_undo_chord(&self, chord: &KeyChord) -> bool {
         self.undo_chord
             .as_ref()
-            .is_some_and(|undo| chord.modifiers == undo.modifiers && chord.key == undo.key)
+            .is_some_and(|undo| undo.matches(chord))
     }
 
+    /// Resolve a normalized key chord into configured actions. This method is
+    /// side-effect free; the daemon or script runtime owns execution policy,
+    /// cancellation, and capability checks.
     pub fn process_key(&self, chord: &KeyChord) -> Vec<HotkeyResult> {
         if !self.is_capture_enabled() {
             return Vec::new();
@@ -1473,6 +1468,89 @@ impl ExpansionEngine {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.buffer_truncated = false;
+    }
+}
+
+/// Why a snippet chosen by trigger (for example from the quick-insert picker)
+/// was not inserted. Each case is a deliberate refusal that mirrors the
+/// rules for typed expansion, not a transient failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InsertError {
+    /// No enabled snippet has this trigger in the running configuration.
+    NotFound,
+    /// Expansion is paused by the user.
+    Paused,
+    /// The focused field is sensitive (for example a password field).
+    SensitiveField,
+    /// The snippet's app filter does not match the focused application, or
+    /// no window is known (fail closed, as for typed triggers).
+    NotForThisApp,
+    /// Command-backed snippets run only when their trigger is typed.
+    CommandBacked,
+    /// The rendered template failed or exceeds the organization limit.
+    Unrenderable,
+}
+
+impl std::fmt::Display for InsertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NotFound => "no enabled snippet has that trigger",
+            Self::Paused => "expansion is paused",
+            Self::SensitiveField => "the focused field is sensitive",
+            Self::NotForThisApp => "the snippet is not enabled for the focused application",
+            Self::CommandBacked => "command-backed snippets run only when their trigger is typed",
+            Self::Unrenderable => "the snippet could not be rendered within policy limits",
+        })
+    }
+}
+
+impl std::error::Error for InsertError {}
+
+impl ExpansionEngine {
+    /// Prepare an explicit insertion of the snippet whose configured trigger
+    /// is `trigger`, at the cursor, with nothing erased. Triggers (unlike
+    /// ids, which older files do not store yet) identify a snippet the same
+    /// way in every process that loads the file. The same safety rules as
+    /// typed expansion apply: pause and sensitive fields refuse, app filters
+    /// fail closed, and command-backed snippets are never run this way.
+    pub fn prepare_insert(&self, trigger: &str) -> Result<ExpansionResult, InsertError> {
+        let (config_index, expansion) = self
+            .config
+            .expansion
+            .iter()
+            .enumerate()
+            .find(|(_, expansion)| expansion.enabled && expansion.trigger == trigger)
+            .ok_or(InsertError::NotFound)?;
+        if self.user_paused {
+            return Err(InsertError::Paused);
+        }
+        if self.sensitive_focus {
+            return Err(InsertError::SensitiveField);
+        }
+        if expansion.command.is_some() {
+            return Err(InsertError::CommandBacked);
+        }
+        if !self.app_filter_allows(config_index, expansion) {
+            return Err(InsertError::NotForThisApp);
+        }
+        let (insert, cursor_offset) = crate::render_template_with_cursor(
+            &expansion.replacement,
+            &crate::TemplateContext::system(),
+        )
+        .map_err(|_| InsertError::Unrenderable)?;
+        let limit = self.config.organization.max_replacement_size;
+        if limit > 0 && insert.len() > limit {
+            return Err(InsertError::Unrenderable);
+        }
+        Ok(ExpansionResult {
+            trigger: expansion.trigger.clone(),
+            matched_text: String::new(),
+            insert,
+            cursor_offset,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+        })
     }
 }
 

@@ -14,7 +14,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
-use wayexpand_core::{Config, ConfigError, ExpansionEngine, FleetConfig, OrganizationPolicy};
+use wayexpand_core::{
+    Config, ConfigError, ExpansionEngine, FleetConfig, FleetError, OrganizationPolicy,
+};
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
@@ -308,6 +310,11 @@ fn safe_reload_error(error: &anyhow::Error) -> String {
     if let Some(error) = error.downcast_ref::<ConfigError>() {
         return error.safe_summary();
     }
+    // Previously wrapped in an untyped message, so a fleet conflict was
+    // logged as "configuration could not be read consistently".
+    if let Some(error) = error.downcast_ref::<FleetError>() {
+        return format!("fleet configuration invalid: {}", error.safe_summary());
+    }
     "configuration could not be read consistently".into()
 }
 
@@ -332,17 +339,17 @@ fn load_for_mode(
 ) -> Result<(Config, Option<FileStamp>)> {
     let (mut base, stamp) = load_consistent(path)?;
     if fleet {
+        // Kept typed so `safe_reload_error` can report what went wrong.
         let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
-            .map_err(|error| anyhow::anyhow!("fleet configuration invalid: {error}"))?;
+            .map_err(anyhow::Error::new)?;
         for violation in &merged.policy_violations {
             super::policy::log_violation(policy, violation);
         }
         base = merged.config;
     }
 
-    base.apply_administrator_policy(policy).map_err(|error| {
-        anyhow::anyhow!("organization policy invalidates configuration: {error}")
-    })?;
+    base.apply_administrator_policy(policy)
+        .map_err(anyhow::Error::new)?;
 
     Ok((base, stamp))
 }
