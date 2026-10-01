@@ -34,18 +34,18 @@ pub enum IbusServiceError {
 }
 
 /// IBus factory state. Each CreateEngine call gets its own adapter and object
-/// path; IBus may create multiple engines for separate input contexts.
+/// path; IBus may create multiple engines for separate input contexts. Engine
+/// objects are removed from this map by their Destroy method.
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     config: Arc<Mutex<wayexpand_core::Config>>,
     policy: Arc<OrganizationPolicy>,
-    instances: Arc<Mutex<Vec<EngineInstance>>>,
+    instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     next_id: AtomicU64,
 }
 
 struct EngineInstance {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
-    path: OwnedObjectPath,
 }
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
@@ -78,6 +78,7 @@ impl Factory {
             adapter: Arc::clone(&adapter),
             connection: Arc::clone(&self.connection),
             path: path.clone(),
+            instances: Arc::clone(&self.instances),
         };
         let connection = self
             .connection
@@ -92,56 +93,9 @@ impl Factory {
         self.instances
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
-            .push(EngineInstance {
-                adapter,
-                path: path.clone(),
-            });
+            .insert(path.clone(), EngineInstance { adapter });
         Ok(path)
     }
-}
-
-fn spawn_completion_dispatcher(
-    instances: Arc<Mutex<Vec<EngineInstance>>>,
-    connection: Arc<Mutex<Option<Connection>>>,
-) -> std::io::Result<()> {
-    std::thread::Builder::new()
-        .name("wayexpand-ibus-completion".into())
-        .spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(10));
-            let instances = match instances.lock() {
-                Ok(instances) => instances
-                    .iter()
-                    .map(|instance| (Arc::clone(&instance.adapter), instance.path.clone()))
-                    .collect::<Vec<_>>(),
-                Err(_) => break,
-            };
-            for (adapter, path) in instances {
-                let actions = match adapter.lock() {
-                    Ok(mut adapter) => adapter.drain_completed_commands(),
-                    Err(_) => continue,
-                };
-                if actions.is_empty() {
-                    continue;
-                }
-                let engine = EngineObject {
-                    adapter: Arc::clone(&adapter),
-                    connection: Arc::clone(&connection),
-                    path,
-                };
-                if let Err(error) = engine.emit_actions(&actions) {
-                    warn!(%error, "could not deliver completed IBus expansion");
-                    // The adapter commits a completed expansion when it builds
-                    // the protocol action batch. If D-Bus rejects that batch, the
-                    // application did not receive a reliable replacement; clear
-                    // matcher and undo state so a later undo cannot target
-                    // unrelated text at the cursor.
-                    if let Ok(mut adapter) = adapter.lock() {
-                        adapter.reset();
-                    }
-                }
-            }
-        })
-        .map(|_| ())
 }
 
 fn engine_path(id: u64) -> OwnedObjectPath {
@@ -153,6 +107,7 @@ struct EngineObject {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
     connection: Arc<Mutex<Option<Connection>>>,
     path: OwnedObjectPath,
+    instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
 }
 
 impl EngineObject {
@@ -235,6 +190,31 @@ impl EngineObject {
             adapter.focus_out();
         }
     }
+    /// IBus calls Destroy when the input context releases this engine. Remove
+    /// both the retained adapter and its D-Bus object so context churn cannot
+    /// grow the service forever.
+    fn destroy(&self) -> zbus::fdo::Result<()> {
+        let removed = self
+            .instances
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
+            .remove(&self.path)
+            .is_some();
+        if !removed {
+            return Ok(());
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus connection lock poisoned".into()))?
+            .clone()
+            .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
+        connection
+            .object_server()
+            .remove::<EngineObject, _>(self.path.as_str())
+            .map_err(zbus::fdo::Error::ZBus)?;
+        Ok(())
+    }
     fn set_cursor_location(&self, _x: i32, _y: i32, _w: i32, _h: i32) {}
     fn set_capabilities(&self, _caps: u32) {}
     /// IBus purpose values 8 and 9 are PASSWORD and PIN respectively. Both
@@ -253,6 +233,8 @@ impl EngineObject {
 /// Build and run the IBus engine process. The process owns a private bus name,
 /// registers a factory, and creates one isolated engine object per request
 /// while zbus dispatches method calls on its internal async-io executor.
+/// Command-backed expansions and their worker/completion machinery are
+/// intentionally disabled in this non-hardened session service.
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
     let path = config_path.unwrap_or_else(default_config_path);
     let store = ConfigStore::load(&path)?;
@@ -266,7 +248,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
-    let instances: Arc<Mutex<Vec<EngineInstance>>> = Arc::new(Mutex::new(Vec::new()));
+    let instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         config: Arc::clone(&factory_config),
@@ -342,7 +325,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                         *current = config.clone();
                     }
                     if let Ok(instances) = reload_instances.lock() {
-                        for instance in instances.iter() {
+                        for instance in instances.values() {
                             if let Ok(mut adapter) = instance.adapter.lock() {
                                 if let Err(error) = adapter.replace_config(config.clone()) {
                                     let summary = error.safe_summary();
@@ -378,8 +361,6 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .serve_at(FACTORY_PATH, factory)?
         .build()?;
     *connection_slot.lock().expect("connection slot") = Some(connection.clone());
-    spawn_completion_dispatcher(Arc::clone(&instances), Arc::clone(&connection_slot))
-        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     loop {
         std::thread::park();
     }
@@ -441,13 +422,44 @@ mod tests {
             connection: Arc::new(Mutex::new(None)),
             config: Arc::new(Mutex::new(config)),
             policy: Arc::new(OrganizationPolicy::default()),
-            instances: Arc::new(Mutex::new(Vec::new())),
+            instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
         };
         assert!(matches!(
             factory.create_engine("not-wayexpand"),
             Err(zbus::fdo::Error::InvalidArgs(_))
         ));
+    }
+
+    #[test]
+    fn destroy_removes_instance_before_connection_teardown() {
+        let path = engine_path(7);
+        let instances = Arc::new(Mutex::new(HashMap::new()));
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"x\"\n").unwrap();
+        instances.lock().unwrap().insert(
+            path.clone(),
+            EngineInstance {
+                adapter: Arc::new(Mutex::new(IbusEngineAdapter::new(
+                    ExpansionEngine::new(config).unwrap(),
+                ))),
+            },
+        );
+        let engine = EngineObject {
+            adapter: Arc::new(Mutex::new(IbusEngineAdapter::new(
+                ExpansionEngine::new(
+                    toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"x\"\n")
+                        .unwrap(),
+                )
+                .unwrap(),
+            ))),
+            connection: Arc::new(Mutex::new(None)),
+            path,
+            instances: Arc::clone(&instances),
+        };
+
+        assert!(engine.destroy().is_err());
+        assert!(instances.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -461,6 +473,7 @@ mod tests {
             ))),
             connection: Arc::new(Mutex::new(None)),
             path: engine_path(1),
+            instances: Arc::new(Mutex::new(HashMap::new())),
         };
         engine.set_content_type(8, 0);
         assert!(!engine.process_key_event('a' as u32, 0, 0).unwrap());

@@ -30,5 +30,12 @@ service is not the hardened `wayexpand.service` command-execution boundary.
 They remain unavailable in audit mode as well. The backend is identified as
 `input-method-v2` for `allowed_backends` policy checks.
 
+Each IBus `CreateEngine` request owns one engine object and adapter. IBus
+releases that object through `Destroy`; the service removes the adapter from
+its registry and unregisters the D-Bus object at that point. The service does
+not maintain a periodic completion scanner or per-engine command worker pool:
+IBus command execution is disabled until a shared hardened execution boundary
+exists.
+
 After installing, make sure `~/.local/bin` is on `PATH`, then restart IBus and
 select `WayExpand` (`wayexpand` engine) in the desktop input-method settings.
