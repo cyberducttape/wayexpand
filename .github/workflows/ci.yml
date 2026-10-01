@@ -151,6 +151,40 @@ jobs:
       - name: GUI help output
         run: cargo run --locked -q -p wayexpand-gui -- --help
 
+  rust-concurrency:
+    name: Concurrent Rust stress (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - wayexpand-core
+          - wayexpand-ui
+    env:
+      # The default lane deliberately serializes tests that share desktop
+      # state. This lane is the complementary race detector: packages here
+      # must tolerate concurrent test execution and repeated worker churn.
+      RUST_TEST_THREADS: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Run concurrent tests repeatedly
+        shell: bash
+        run: |
+          set -euo pipefail
+          for iteration in 1 2 3; do
+            echo "Concurrent stress iteration ${iteration}"
+            cargo test --locked -p "${{ matrix.package }}" -- --test-threads=8
+          done
+
   msrv:
     name: MSRV (Rust 1.95)
     runs-on: ubuntu-latest
