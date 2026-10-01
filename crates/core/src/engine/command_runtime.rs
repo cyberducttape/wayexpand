@@ -157,30 +157,38 @@ fn run_command_unix(
         if !stderr_eof {
             stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
         }
-        match guard.child.as_mut().unwrap().try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => {
-                wait_for_command_event(
-                    &stdout,
-                    &stderr,
-                    pidfd.as_ref(),
-                    deadline,
-                    shutdown.is_some(),
-                )?;
+        match child_exit_observed(guard.child.as_mut().unwrap(), pid, pidfd.as_ref())? {
+            ChildExitObservation::Running => {}
+            ChildExitObservation::Exited(status) => {
+                // On Linux this observation uses waitid(WNOWAIT), so the
+                // leader remains a zombie and its PID/PGID cannot be
+                // recycled while the process group is cleaned up. Only reap
+                // after the group kill.
+                thread::sleep(Duration::from_millis(10));
+                #[cfg(target_os = "linux")]
+                kill_process_group_by_pid(pid);
+                guard.pid = None;
+                if let Some(status) = status {
+                    break status;
+                }
+                let mut child = guard.child.take().expect("child guard owns the child");
+                break child
+                    .wait()
+                    .map_err(|error| CommandError::WaitFailed(error.to_string()))?;
             }
-            Ok(None) => return Err(CommandError::Timeout),
-            Err(error) => return Err(CommandError::WaitFailed(error.to_string())),
+        }
+        if Instant::now() < deadline {
+            wait_for_command_event(
+                &stdout,
+                &stderr,
+                pidfd.as_ref(),
+                deadline,
+                shutdown.is_some(),
+            )?;
+        } else {
+            return Err(CommandError::Timeout);
         }
     };
-
-    // Give a just-started descendant a chance to finish deliberately moving
-    // into its own session before the parent's process group is cleaned up.
-    // This is a one-time lifecycle grace period, not a polling interval.
-    thread::sleep(Duration::from_millis(10));
-    if let Some(pid) = guard.pid {
-        kill_process_group_by_pid(pid);
-        guard.pid = None;
-    }
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
         stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
@@ -201,6 +209,59 @@ fn run_command_unix(
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
     guard.child = None;
     Ok(trim_trailing_newlines(output))
+}
+
+#[cfg(unix)]
+enum ChildExitObservation {
+    Running,
+    Exited(Option<std::process::ExitStatus>),
+}
+
+#[cfg(unix)]
+fn child_exit_observed(
+    _child: &mut Child,
+    pid: u32,
+    pidfd: Option<&OwnedFd>,
+) -> Result<ChildExitObservation, CommandError> {
+    #[cfg(target_os = "linux")]
+    {
+        let (id_type, id) = if let Some(pidfd) = pidfd {
+            (libc::P_PIDFD, pidfd.as_raw_fd() as libc::id_t)
+        } else {
+            (libc::P_PID, pid as libc::id_t)
+        };
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        let result = unsafe {
+            libc::waitid(
+                id_type,
+                id,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result != 0 {
+            return Err(CommandError::WaitFailed(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+        return Ok(if unsafe { info.si_pid() } != 0 {
+            ChildExitObservation::Exited(None)
+        } else {
+            ChildExitObservation::Running
+        });
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pidfd;
+        _child
+            .try_wait()
+            .map(|status| match status {
+                Some(status) => ChildExitObservation::Exited(Some(status)),
+                None => ChildExitObservation::Running,
+            })
+            .map_err(|error| CommandError::WaitFailed(error.to_string()))
+    }
 }
 
 /// Drops trailing CR/LF in place. Command output is bounded at one megabyte,
@@ -260,18 +321,6 @@ fn wait_for_command_event(
     deadline: Instant,
     cancellation_watch: bool,
 ) -> Result<(), CommandError> {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let mut timeout_ms = remaining
-        .as_millis()
-        .min(i32::MAX as u128)
-        .try_into()
-        .unwrap_or(i32::MAX);
-    // An AtomicBool cannot be included in poll's wait set. Keep cancellation
-    // responsive without returning to the old 5ms process-status spin; the
-    // normal path remains event-driven until the command deadline.
-    if cancellation_watch {
-        timeout_ms = timeout_ms.min(50);
-    }
     let mut fds = [
         libc::pollfd {
             fd: stdout.as_raw_fd(),
@@ -297,16 +346,34 @@ fn wait_for_command_event(
                 revents: 0,
             },
         ];
-        poll_fds(&mut all_fds, timeout_ms)?;
+        poll_fds(&mut all_fds, deadline, cancellation_watch)?;
     } else {
-        poll_fds(&mut fds, timeout_ms)?;
+        poll_fds(&mut fds, deadline, cancellation_watch)?;
     }
     Ok(())
 }
 
 #[cfg(unix)]
-fn poll_fds(fds: &mut [libc::pollfd], timeout_ms: i32) -> Result<(), CommandError> {
+fn poll_fds(
+    fds: &mut [libc::pollfd],
+    deadline: Instant,
+    cancellation_watch: bool,
+) -> Result<(), CommandError> {
+    // An AtomicBool cannot be included in poll's wait set. Keep cancellation
+    // responsive without allowing repeated EINTR retries to extend the
+    // command deadline. The cap is itself an absolute deadline.
+    let poll_deadline = if cancellation_watch {
+        deadline.min(Instant::now() + Duration::from_millis(50))
+    } else {
+        deadline
+    };
     loop {
+        let timeout_ms = poll_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(i32::MAX as u128)
+            .try_into()
+            .unwrap_or(i32::MAX);
         let result = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
         if result >= 0 {
             return Ok(());
