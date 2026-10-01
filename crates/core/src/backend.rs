@@ -138,12 +138,17 @@ pub struct InjectorCapabilities {
 
 /// The platform-independent operation required by the expansion engine.
 ///
-/// Requires `Send` so that a `Box<dyn TextInjector>` can be handed off to a
-/// detached thread on shutdown (see the daemon's main loop): the libei
-/// backend's teardown can hang against some portal implementations, and
-/// moving that drop off the main thread is what lets shutdown proceed
-/// without waiting on it.
+/// Requires `Send` so a backend can be shut down by the daemon's lifecycle
+/// supervisor without tying the input reactor to backend teardown.
 pub trait TextInjector: Send {
+    /// Explicitly end the backend lifecycle and release its resources.
+    ///
+    /// Implementations should cancel protocol/portal work before dropping
+    /// their runtime. The default preserves compatibility for simple
+    /// backends; the daemon still applies a deadline around this operation.
+    fn shutdown(self: Box<Self>) {
+        drop(self);
+    }
     fn name(&self) -> &'static str;
     /// Report the negotiated guarantees of this connected injector.
     /// Implementations default to the conservative profile so a new backend

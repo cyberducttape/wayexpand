@@ -25,7 +25,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
@@ -337,6 +337,8 @@ fn main() -> Result<()> {
     let evdev_mode = source_name == "evdev";
     let active_source = source_name;
     let mut reconnect_delay = Duration::from_millis(250);
+    let mut output_retry_at: Option<Instant> = None;
+    let mut output_retry_delay = Duration::from_millis(250);
     let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
@@ -1077,42 +1079,44 @@ fn main() -> Result<()> {
         }
     }
     warn!("input stream ended; daemon stopping");
-    // The libei backend's Drop can hang indefinitely when connected through
-    // a desktop portal (e.g. KWin's RemoteDesktop portal): its
-    // `tokio::runtime::Runtime` blocks the dropping thread until its
-    // background tasks reach a safe stopping point, which observably does
-    // not always happen promptly against every portal implementation. Left
-    // inline, that stalls this function's return past systemd's
-    // `TimeoutStopSec`, forcing a SIGKILL instead of the clean exit this
-    // service is asking for. Move the injector's drop to a detached thread
-    // so a hang there can never delay `control`'s own drop just below
-    // (which removes the control socket file -- needed for a clean
-    // restart) or the daemon's own exit; the whole process going away
-    // reclaims that thread regardless of whether its drop ever finishes.
+    // Backends get an explicit teardown opportunity. The bounded wait keeps
+    // systemd stop independent from a broken portal implementation, while
+    // still allowing libei to close its portal session and Tokio runtime
+    // cleanly in the normal case.
     if let Some(injector) = injector.take() {
         let backend = injector.name();
+        let (finished_sender, finished_receiver) = std::sync::mpsc::sync_channel(1);
         info!(
             backend,
-            event = "detached_injector_drop_started",
-            "detaching backend shutdown so daemon exit cannot be blocked"
+            event = "injector_shutdown_started",
+            "starting bounded backend shutdown"
         );
         let spawn = thread::Builder::new()
-            .name("wayexpand-injector-drop".into())
+            .name("wayexpand-injector-shutdown".into())
             .spawn(move || {
-                drop(injector);
-                info!(
-                    backend,
-                    event = "detached_injector_drop_finished",
-                    "detached backend shutdown completed"
-                );
+                injector.shutdown();
+                let _ = finished_sender.send(());
             });
-        if let Err(error) = spawn {
-            warn!(
+        match spawn {
+            Ok(_) => match finished_receiver.recv_timeout(Duration::from_secs(5)) {
+                Ok(()) => info!(backend, event = "injector_shutdown_finished", "backend shutdown completed"),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
+                    backend,
+                    event = "injector_shutdown_deadline_exceeded",
+                    "backend shutdown exceeded its deadline; leaving the worker detached"
+                ),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => warn!(
+                    backend,
+                    event = "injector_shutdown_worker_failed",
+                    "backend shutdown worker exited without completion"
+                ),
+            },
+            Err(error) => warn!(
                 backend,
                 %error,
-                event = "detached_injector_drop_spawn_failed",
-                "could not start detached backend shutdown thread"
-            );
+                event = "injector_shutdown_spawn_failed",
+                "could not start backend shutdown worker; backend will be reclaimed at process exit"
+            ),
         }
     }
     Ok(())

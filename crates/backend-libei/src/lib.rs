@@ -134,6 +134,27 @@ struct PortalKeepalive {
     _runtime: tokio::runtime::Runtime,
 }
 
+impl PortalKeepalive {
+    /// Close the portal session before shutting down its Tokio runtime.
+    ///
+    /// `Runtime::shutdown_timeout` bounds runtime teardown even when a portal
+    /// implementation leaves a task pending. This keeps the lifecycle
+    /// explicit while retaining a hard upper bound for the daemon.
+    fn close(self) {
+        let PortalKeepalive {
+            _proxy: proxy,
+            _session: session,
+            _runtime: runtime,
+        } = self;
+        let _ = runtime.block_on(tokio::time::timeout(
+            Duration::from_secs(2),
+            session.close(),
+        ));
+        drop(proxy);
+        runtime.shutdown_timeout(Duration::from_secs(2));
+    }
+}
+
 pub struct LibeiInjector {
     connection: reis::event::Connection,
     device: reis::event::Device,
@@ -1216,6 +1237,16 @@ fn connect_portal(
 }
 
 impl TextInjector for LibeiInjector {
+    fn shutdown(mut self: Box<Self>) {
+        // Remove the portal keepalive before dropping the injector so its
+        // session can be closed while the Tokio runtime is still available.
+        let portal = self._portal.take();
+        drop(self);
+        if let Some(portal) = portal {
+            portal.close();
+        }
+    }
+
     fn name(&self) -> &'static str {
         BACKEND_NAME
     }
