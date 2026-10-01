@@ -15,7 +15,9 @@ use std::{
 };
 
 use eframe::egui::{self, Color32, RichText, TextEdit};
-use wayexpand_core::{render_template_with_cursor, Config, ExpansionConfig, TemplateContext};
+use wayexpand_core::{
+    render_template_with_cursor, Config, ConfigRevision, ExpansionConfig, TemplateContext,
+};
 
 use crate::{
     colorpack::ColorPack,
@@ -40,24 +42,46 @@ pub(crate) fn score(query: &str, trigger: &str, description: &str) -> Option<i64
     }
     let trigger = trigger.to_lowercase();
     let description = description.to_lowercase();
+    score_normalized(&query, &trigger, &description)
+}
+
+fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64> {
     if let Some(position) = trigger.find(&query) {
         return Some(3_000 - position as i64 + i64::from(trigger == query) * 1_000);
     }
     if let Some(position) = description.find(&query) {
         return Some(2_000 - position as i64);
     }
-    let haystack = format!("{trigger} {description}");
     let mut gaps = 0_i64;
     let mut last = None;
-    let mut characters = haystack.char_indices();
+    let mut characters = trigger
+        .chars()
+        .chain(std::iter::once(' '))
+        .chain(description.chars());
+    let mut character_index = 0usize;
     for wanted in query.chars().filter(|character| !character.is_whitespace()) {
-        let (index, _) = characters.find(|(_, character)| *character == wanted)?;
+        let mut found = None;
+        for character in characters.by_ref() {
+            let index = character_index;
+            character_index += 1;
+            if character == wanted {
+                found = Some(index);
+                break;
+            }
+        }
+        let index = found?;
         if let Some(previous) = last {
             gaps += (index - previous - 1) as i64;
         }
         last = Some(index);
     }
     Some(1_000 - gaps.min(999))
+}
+
+#[derive(Debug, Clone)]
+struct SearchEntry {
+    trigger: String,
+    description: String,
 }
 
 /// What the user chose, handed back to `main` after the window closes.
@@ -74,6 +98,11 @@ struct FocusTarget {
 
 pub(crate) struct PickerApp {
     config: Config,
+    config_revision: ConfigRevision,
+    search_index: Vec<SearchEntry>,
+    cached_query: Option<String>,
+    cached_revision: Option<ConfigRevision>,
+    result_indices: Vec<usize>,
     strings: Strings,
     palette: Palette,
     query: String,
@@ -87,6 +116,7 @@ pub(crate) struct PickerApp {
 impl PickerApp {
     pub(crate) fn new(
         config: Config,
+        config_revision: ConfigRevision,
         language: Language,
         colorpack: ColorPack,
         dark: bool,
@@ -94,7 +124,19 @@ impl PickerApp {
         outcome: std::sync::Arc<std::sync::Mutex<Outcome>>,
     ) -> Self {
         Self {
+            search_index: config
+                .expansion
+                .iter()
+                .map(|expansion| SearchEntry {
+                    trigger: expansion.trigger.to_lowercase(),
+                    description: expansion.description.to_lowercase(),
+                })
+                .collect(),
             config,
+            config_revision,
+            cached_query: None,
+            cached_revision: None,
+            result_indices: Vec::new(),
             strings: Strings::new(language),
             palette: Palette::for_pack(colorpack, dark),
             query: String::new(),
@@ -106,26 +148,38 @@ impl PickerApp {
         }
     }
 
-    /// Enabled plain-text snippets, best match first. Command snippets are
-    /// left out: they only run when their trigger is typed.
-    fn results(&self) -> Vec<ExpansionConfig> {
-        let mut ranked: Vec<(i64, usize, &ExpansionConfig)> = self
+    /// Cache enabled plain-text snippet indices, best match first. Command
+    /// snippets are left out: they only run when their trigger is typed.
+    fn refresh_results(&mut self) {
+        if self.cached_query.as_deref() == Some(self.query.as_str())
+            && self.cached_revision.as_ref() == Some(&self.config_revision)
+        {
+            return;
+        }
+        let query = self.query.trim().to_lowercase();
+        let mut ranked: Vec<(i64, usize)> = self
             .config
             .expansion
             .iter()
             .enumerate()
             .filter(|(_, expansion)| expansion.enabled && expansion.command.is_none())
-            .filter_map(|(index, expansion)| {
-                score(&self.query, &expansion.trigger, &expansion.description)
-                    .map(|score| (score, index, expansion))
+            .filter_map(|(index, _)| {
+                score_normalized(
+                    &query,
+                    &self.search_index[index].trigger,
+                    &self.search_index[index].description,
+                )
+                .map(|score| (score, index))
             })
             .collect();
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        ranked
+        self.result_indices = ranked
             .into_iter()
             .take(MAX_RESULTS)
-            .map(|(_, _, expansion)| expansion.clone())
-            .collect()
+            .map(|(_, index)| index)
+            .collect();
+        self.cached_query = Some(self.query.clone());
+        self.cached_revision = Some(self.config_revision.clone());
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
@@ -153,8 +207,9 @@ impl eframe::App for PickerApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let palette = self.palette;
-        let results = self.results();
-        let count = results.len();
+        self.refresh_results();
+        let result_indices = self.result_indices.clone();
+        let count = result_indices.len();
         let (up, down, enter, escape) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowUp),
@@ -173,7 +228,7 @@ impl eframe::App for PickerApp {
             self.selected = self.selected.saturating_sub(1);
         }
         self.selected = self.selected.min(count.saturating_sub(1));
-        let mut chosen = (enter && count > 0).then(|| results[self.selected].clone());
+        let mut chosen = (enter && count > 0).then(|| result_indices[self.selected]);
 
         egui::CentralPanel::default()
             .frame(
@@ -206,7 +261,7 @@ impl eframe::App for PickerApp {
                     .max_height(ui.available_height() - footer_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if results.is_empty() {
+                        if result_indices.is_empty() {
                             ui.add_space(24.0);
                             ui.vertical_centered(|ui| {
                                 ui.label(
@@ -215,7 +270,8 @@ impl eframe::App for PickerApp {
                                 );
                             });
                         }
-                        for (index, expansion) in results.iter().enumerate() {
+                        for (index, expansion_index) in result_indices.iter().copied().enumerate() {
+                            let expansion = &self.config.expansion[expansion_index];
                             let selected = index == self.selected;
                             let response = picker_row(ui, &palette, expansion, selected);
                             if selected && (up || down) {
@@ -225,7 +281,7 @@ impl eframe::App for PickerApp {
                                 self.selected = index;
                             }
                             if response.clicked() {
-                                chosen = Some(expansion.clone());
+                                chosen = Some(expansion_index);
                             }
                         }
                     });
@@ -248,7 +304,8 @@ impl eframe::App for PickerApp {
                     ui.label(RichText::new(text).small().color(color));
                 });
             });
-        if let Some(expansion) = chosen {
+        if let Some(expansion_index) = chosen {
+            let expansion = self.config.expansion[expansion_index].clone();
             self.choose(&ctx, &expansion);
         }
     }
@@ -326,8 +383,10 @@ fn picker_row(
 
 /// Run the picker, then hand the chosen trigger to the daemon.
 pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
-    let config = Config::load(&path)
+    let loaded = Config::load_versioned(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
+    let config = loaded.config;
+    let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
     let target_focus = crate::runtime::control_command("focus")
         .ok()
@@ -363,6 +422,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
             });
             Ok(Box::new(PickerApp::new(
                 config,
+                config_revision,
                 prefs.language,
                 prefs.colorpack,
                 dark,

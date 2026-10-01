@@ -228,7 +228,7 @@ struct GuiApp {
     /// `ViewportCommand::Title` is only sent when that text actually
     /// changes rather than on every frame.
     window_title: String,
-    /// "Try it live": the saved library expanding as the user types.
+    /// Matcher preview state: the saved library expanding as the user types.
     playground: playground::Playground,
     try_live_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
@@ -3781,8 +3781,8 @@ impl GuiApp {
             .show(root, |ui| self.render_try_live(ui, palette));
     }
 
-    /// "Try it live": type into a field and watch the saved library expand
-    /// exactly as the daemon would expand it in another application.
+    /// "Matcher preview": exercise core matching and template rendering in
+    /// an in-process field. This is not a desktop integration test.
     fn render_try_live(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         egui::Frame::new()
             .fill(theme::tint(palette.accent, 18))

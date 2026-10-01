@@ -360,8 +360,8 @@ impl Strings {
 
     pub fn onboarding_try_text(&self) -> &'static str {
         match self.lang {
-            Language::English => "Type :wayexpand-test in the “Try it live” box that appears, then in any app you use. Never test in a password field.",
-            Language::German => "Tippen Sie :wayexpand-test in das erscheinende Feld „Live ausprobieren“, dann in einer beliebigen App. Nie in einem Passwortfeld testen.",
+            Language::English => "Type :wayexpand-test in the Matcher preview box, then use the separate desktop setup checks before trying it in another app. Never test in a password field.",
+            Language::German => "Tippen Sie :wayexpand-test in der Matcher-Vorschau ein und verwenden Sie danach die getrennten Desktop-Tests, bevor Sie es in einer anderen App probieren. Nie in einem Passwortfeld testen.",
         }
     }
 
@@ -2221,15 +2221,15 @@ impl Strings {
 
     pub fn try_live_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Try it live",
-            Language::German => "Live ausprobieren",
+            Language::English => "Matcher preview",
+            Language::German => "Matcher-Vorschau",
         }
     }
 
     pub fn try_live_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Your saved snippets expand here exactly as in other apps. No setup needed; command snippets are not run.",
-            Language::German => "Gespeicherte Snippets werden hier wie in anderen Apps erweitert. Keine Einrichtung nötig; Befehls-Snippets laufen nicht.",
+            Language::English => "Tests snippet matching and template rendering only. It does not test desktop capture or insertion; command snippets are not run.",
+            Language::German => "Testet nur Snippet-Matching und Template-Rendering. Desktop-Erfassung und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
         }
     }
 

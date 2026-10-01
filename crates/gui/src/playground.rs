@@ -1,11 +1,9 @@
-//! "Try it live": a text field where the saved library expands as you type.
+//! "Matcher preview": an in-process preview of saved snippet matching.
 //!
-//! Each typed character is fed through the same `ExpansionEngine` the daemon
-//! runs, and every result is applied to the field the way a backend applies
-//! it to the focused application -- erase the matched text (plus any
-//! delimiter that completed a word-boundary trigger) and type the
-//! replacement. It needs no daemon, compositor protocol, or permission, so
-//! it answers "does my snippet work?" before any desktop setup is done.
+//! Each typed character is fed through the same core matcher the daemon uses,
+//! with commands disabled. It does not exercise desktop capture, focus,
+//! portals, keyboard layouts, pass-through, sensitive fields, or real client
+//! insertion.
 
 use wayexpand_core::{Config, ExpansionEngine, ExpansionResult, InputEvent, WindowContext};
 
