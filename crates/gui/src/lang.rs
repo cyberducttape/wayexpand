@@ -1558,6 +1558,13 @@ impl Strings {
         }
     }
 
+    pub fn status_appearance_save_failed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Appearance preference could not be saved",
+            Language::German => "Darstellungseinstellung konnte nicht gespeichert werden",
+        }
+    }
+
     pub fn status_settings_save_failed(&self, detail: &str) -> String {
         match self.lang {
             Language::English => format!("Settings save failed: {detail}"),

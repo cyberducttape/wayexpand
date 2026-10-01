@@ -717,19 +717,25 @@ impl GuiApp {
         } else {
             egui::ThemePreference::Light
         });
-        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
+            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        }
     }
 
     fn set_language(&mut self, language: Language) {
         self.language = language;
         self.strings.set_language(language);
-        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
+            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        }
     }
 
     fn set_colorpack(&mut self, ctx: &egui::Context, pack: ColorPack) {
         self.colorpack = pack;
         theme::install_pack(ctx, pack, self.config.settings.font_scale);
-        save_gui_prefs(self.language, self.colorpack, self.dark_mode);
+        if save_gui_prefs(self.language, self.colorpack, self.dark_mode).is_err() {
+            self.status = Status::warning(self.strings.status_appearance_save_failed());
+        }
     }
 
     /// Applies a font scale immediately and persists it, so it behaves like
