@@ -186,6 +186,7 @@ A typical SRE might want:
 ```toml
 [[expansion]]
 trigger = ":shortlist"
+replacement = ""  # typed text comes from the command
 [expansion.command]
 program = "kubectl"
 args = ["get", "svc", "-o", "wide"]

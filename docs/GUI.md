@@ -35,7 +35,9 @@ Controls:
 - `n` creates a snippet, prompting for trigger and replacement
 - `e` edits the selected replacement
 - `D` edits the selected description
-- `t` edits tags as a JSON string array (for example, `["ops", "customer, west"]`)
+- `t` edits tags as comma-separated text (for example, `ops, email`); use a
+  JSON string array such as `["ops", "customer, west"]` for a tag that itself
+  contains a comma
 - `Ctrl-U` clears the active prompt before entering replacement text
 - `m` toggles immediate and Unicode-aware word-boundary matching
 - `E` opens the selected replacement in `$VISUAL` or `$EDITOR` for multiline editing
@@ -88,10 +90,57 @@ exposes the command environment policy and explicitly passed environment
 variables. Shell syntax is never interpreted. Invalid command settings or
 unsafe limits are rejected before the file is changed.
 The `Template variables` palette inserts supported built-ins such as date,
-time, hostname, username, newline, and tab directly into the replacement;
-unknown template syntax is still rejected by core validation.
+time, hostname, username, newline, and tab at the replacement editor's caret
+(replacing any selection); unknown template syntax is still rejected by core
+validation.
+Tags and "Only in these apps" filters are edited as chips: type a value and
+press Enter to add it, or click a chip's `×` to remove it. A value that has
+been typed but not yet confirmed is still saved with the snippet.
+`Save changes`, `Duplicate`, and `Undo` are disabled, with an explanation on
+hover, while there is nothing for them to act on.
 The preview input is editable, allowing a trigger to be tested inside larger
 text and making word-boundary behavior visible before saving.
+
+### Matcher preview
+
+A panel pinned under the editor provides an in-process preview of the saved
+library. It tests snippet matching and template rendering, with command-backed
+snippets disabled. It does not test desktop capture, focus changes, portals,
+keyboard layouts, pass-through, sensitive-field detection, or insertion into a
+real client. Use a separate harmless desktop integration check in a disposable
+text field before relying on an input backend. The panel counts expansions and
+keystrokes saved, and can be collapsed.
+
+### Quick-insert picker
+
+`wayexpand-gui --picker` opens a small search window. Type to filter your
+enabled snippets (triggers rank above descriptions, and scattered letters
+still match), move with the arrow keys, and press Enter. The window closes and
+the running daemon types the snippet once focus returns to the window that was
+active when the picker opened, under the same pause, password-field, and
+app-filter rules as a typed trigger. If focus does not return within two
+seconds, or returns to a different window, nothing is typed. Command-backed
+snippets are not listed.
+
+Typing requires the daemon to identify the focused window, which currently
+means the KWin window tracker on KDE Plasma. If no daemon is running or the
+window cannot be identified, Enter copies the rendered snippet to the
+clipboard instead and the window stays open so the clipboard remains
+available; press Esc when done.
+
+Bind the picker to a desktop shortcut: the `.desktop` entry provides a *Quick
+Insert Snippet* action that KDE Plasma's and GNOME's shortcut settings can use
+directly, or run `wayexpand-gui --picker` from a custom shortcut.
+
+### First run and one-click setup
+
+With an empty library the editor shows three steps: turn on WayExpand, add a
+first snippet (test snippet, new snippet, or Espanso import), and try it. *Turn
+on WayExpand* runs `wayexpand setup --yes` in the background, which configures
+only the Recommended mode and never grants raw keyboard access; the result is
+shown in the status line and the daemon status refreshes. The same button
+appears in the toolbar whenever the library has snippets but no daemon is
+running.
 
 The `Settings` window is the single place for preferences and has two tabs:
 
@@ -333,6 +382,10 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
   '/org/a11y/atspi/cache'`; do not treat Linux screen-reader support as
   release-certified until a working Orca session verifies keyboard navigation,
   control names/states, and the first-run flow.
+- Release accessibility gate: complete the Orca check on one certified
+  distro/desktop combination, including keyboard-only navigation, dialogs,
+  error announcements, focus restoration, the picker, first-run setup, and
+  200% scaling. Passing headless AccessKit tests alone is insufficient.
 - An empty configuration opens a guided first-run panel. It reports desktop and
   backend probe results without treating probes as certification. The user can
   explicitly add `:wayexpand-test`, then verify it in a normal text field;
@@ -347,6 +400,14 @@ names and states. Navigate without a pointer, create the first-run test snippet,
 and confirm the sample expansion in a normal text field. Never use a password
 field for this test. Also verify both English and German and the largest font
 scale.
+
+## Release visual verification
+
+The archived screenshot below is historical and is not evidence of the current
+layout. Each release should attach a current screenshot captured from the
+release build and run the headless GUI rendering tests in English and German
+at standard, narrow, and 200% scale. Add the resulting image to the release
+artifacts so visual review is tied to the shipped version.
 
 ## Future Enhancements
 

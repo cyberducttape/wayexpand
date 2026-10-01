@@ -6,5 +6,11 @@ Exec=wayexpand-gui %f
 Icon=wayexpand
 Terminal=false
 Categories=Utility;Accessibility;
-Keywords=text;expansion;snippets;Wayland;
+Keywords=text;expansion;snippets;Wayland;picker;insert;
 StartupNotify=true
+Actions=picker;
+
+[Desktop Action picker]
+Name=Quick Insert Snippet
+Name[de]=Snippet schnell einfügen
+Exec=wayexpand-gui --picker

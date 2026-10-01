@@ -6,6 +6,97 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Breaking — app filters are exact by default:** a bare `app_filter` value
+  now matches one normalized app ID exactly instead of any app ID containing
+  it, so `["thunderbird"]` no longer matches `org.mozilla.thunderbird`. Use
+  `app_id_exact:`, `app_id_glob:`, or `title_contains:` explicitly; safe mode
+  rejects the weak forms unless `allow_weak_app_filters = true`. Snippets with
+  old substring filters stop expanding (fail closed) until updated; see
+  `docs/UPGRADING.md`.
+- **Matcher preview:** a panel in the GUI expands your saved snippets as you
+  type with the daemon's matching engine, with no setup or permissions, and
+  counts the keystrokes saved. It does not exercise desktop capture or
+  insertion.
+- **Quick-insert picker:** `wayexpand-gui --picker` (also a *Quick Insert
+  Snippet* desktop action) searches your snippets from a shortcut and has the
+  running daemon type the chosen one into the previously focused app once
+  focus verifiably returns to it, which needs focused-window tracking
+  (currently KWin); otherwise it copies to the clipboard. `wayexpand insert <trigger>` and the
+  `insert` control command do the same for scripts, under the typed-expansion
+  safety rules.
+- **One-click setup and a three-step first run:** *Turn on WayExpand* runs the
+  safe Recommended setup from the GUI.
+- Fix: the daemon, IBus engine, and action broker logged only errors unless
+  `RUST_LOG` was set, so warnings such as policy violations never reached the
+  journal; they now default to `info`, and no longer write colour codes to
+  non-terminal output.
+- Fix: the GUI showed a running daemon without a compositor session (stdin
+  source) as disconnected.
+- README and AppStream metadata now include real screenshots.
+- input-method-v2 capture now refuses to start without libei key
+  pass-through, so an exclusive keyboard grab can never swallow keys it cannot
+  forward; IBus never runs command-backed snippets, in safe or audit mode.
+- Injection failures distinguish "not applied" from "possibly partially
+  applied": only the former keeps an undo record for retry. A lost libei or
+  wlroots session still reconnects. A failed `{{cursor}}` move after a
+  successful replacement is logged instead of failing the expansion.
+- Snippet packs are read as hostile input: size, file-count, and aggregate
+  limits, and symlinks or special files are rejected.
+- Configuration writers give up with a "busy" error after two seconds instead
+  of waiting forever on another writer's lock.
+- libei's per-key fallback refuses replacements over 250 characters (about
+  three seconds of synthetic typing) before erasing the trigger.
+- GUI saves run in the background; a save that completes while the snippet is
+  still being edited keeps the newer edits in the editor.
+
+- TUI: accept plain comma-separated tags again (`ops, email`); a JSON array is
+  still accepted for a tag containing a comma. The JSON-only prompt introduced
+  in the previous change also broke `scripts/test-ui.sh`.
+- TUI: hand replacements to `$VISUAL`/`$EDITOR` in the private
+  `$XDG_RUNTIME_DIR` instead of the shared `/tmp`, and stop repainting the
+  whole screen four times a second while idle.
+- CLI: errors keep their cause (`creating configuration backup …: File
+  exists` instead of only the first half), and repeated `wayexpand backup`
+  runs create `.bak.2`, `.bak.3`, … instead of failing.
+- Fleet and administrator-policy errors in the CLI and daemon reload log no
+  longer echo trigger text, and the daemon reports fleet conflicts as such
+  instead of "configuration could not be read consistently".
+- GUI: the snippet list lays out only the visible rows, so very large
+  libraries stay responsive.
+
+- GUI: fix washed-out, disabled-looking text in every field and button (the
+  theme painted idle widget text with the border colour); fix the light-theme
+  status bar rendering near-black with unreadable text; stop the snippet
+  editor overflowing the window and overlapping rows in narrow windows.
+- GUI: the unsaved-changes and delete confirmations are now true modals, so
+  clicking elsewhere can no longer replace the pending action, and Escape
+  cancels them; Ctrl+S now saves a new snippet and no longer rewrites the file
+  for an unchanged one.
+- GUI: tags and app filters are edited as chips; template variables insert at
+  the caret; Save, Duplicate, and Undo are disabled when they would do nothing;
+  the toolbar is a single row; command-backed snippets show their own
+  description in the list; new snippets no longer get a "New snippet"
+  description; the status bar shows paths relative to `~`.
+- GUI: translate the remaining English-only editor strings (tag, app, argument
+  and environment controls, template variable descriptions) into German, and
+  correct the command-backed note, which wrongly called the replacement a
+  fallback.
+- Accept `{{ cursor }}` with inner whitespace like every other template
+  variable, and report a second `{{cursor}}` marker as its own error instead
+  of "unknown template variable". Fix a documented release-tag example that
+  used three markers and failed validation.
+- Report configuration parse errors with their line and column (and the name
+  of a missing required field) while still never echoing snippet content.
+- CLI: a missing configuration file now names the path and how to create one;
+  `wayexpand <command> --help` prints help instead of treating `--help` as an
+  argument; invalid `set-enabled`/`set-mode` values exit with the documented
+  usage code 2; the help screen is grouped and aligned and lists every command.
+- Fix `wayexpand --version` reporting the previous commit in development
+  builds: the build script now tracks the checked-out branch ref, not only
+  `.git/HEAD`.
+- Add the required `replacement = ""` to command-backed snippet examples in the
+  Espanso migration, Ansible, and security documentation.
+
 - Add typed injector capability contracts and organization requirements for
   atomic replacement and sensitive-field awareness. Safe-mode deployments now
   fail before capture starts when their selected source/backend cannot meet the

@@ -1,5 +1,9 @@
 # Code Organization Refactoring Plan
 
+> **Historical record (archived 2026-09-30).** The daemon and engine module
+> splits described here are complete; line counts and phase status reflect the
+> time of writing, not the current tree.
+
 ## Overview
 Address the large monolithic source files that obscure integration boundaries and make bugs harder to catch.
 

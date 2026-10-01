@@ -15,6 +15,24 @@ automatisierte End-to-End-Zertifizierung freigegeben. Prüfen Sie vor dem
 produktiven Einsatz `wayexpand doctor` und die
 [Support-Matrix](docs/SUPPORT_MATRIX.md).
 
+![WayExpand-Editor mit Live-Vorschau: aus „Hi Jordan, ;ty … ;sig“ wird eine vollständige Antwort mit Signatur](docs/images/wayexpand-editor-try-it-live.png)
+
+### Das Besondere
+
+- **Ausprobieren, bevor irgendetwas eingerichtet ist.** Die
+  *Matcher-Vorschau* erweitert Ihre gespeicherten Snippets beim Tippen mit
+  derselben Matching-Engine wie der Dienst – ohne Dienst oder Berechtigungen –
+  und zählt die gesparten Tastenanschläge. Desktop-Erfassung und Einfügen
+  prüft sie nicht; dafür gibt es `wayexpand doctor`.
+- **Schnelleinfügen.** Legen Sie `wayexpand-gui --picker` auf ein
+  Tastenkürzel: ein paar Buchstaben tippen, Enter drücken, und der laufende
+  WayExpand-Dienst tippt das Snippet in die zuvor aktive App. Das erfordert
+  Fenster-Tracking (derzeit KDE Plasma); andernfalls oder ohne Dienst kopiert
+  Enter es in die Zwischenablage. Skripte nutzen
+  `wayexpand insert ';sig'`.
+- **Mit einem Klick einschalten.** Der Startbildschirm aktiviert den sichersten
+  erkannten Eingabeweg und gewährt nie selbstständig rohen Tastaturzugriff.
+
 ## Schnellstart
 
 ### Ubuntu

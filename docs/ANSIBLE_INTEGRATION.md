@@ -186,6 +186,7 @@ category = "logging"
 
 [[expansion]]
 trigger = ":restart-daemon"
+replacement = ""  # typed text comes from the command
 description = "Restart WayExpand daemon"
 category = "operations"
 

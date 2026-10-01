@@ -19,6 +19,12 @@ path after displaying session capabilities and safety tradeoffs. Use
 .B edit [CONFIG]
 Open the graphical snippet editor.
 .TP
+.B insert TRIGGER
+Ask the running daemon to type the snippet with this trigger at the cursor.
+Bind \fBwayexpand-gui --picker\fR to a desktop shortcut to choose a snippet
+interactively instead. Inserts follow the same pause, sensitive-field, and
+application-filter rules as typed triggers; command snippets are not run.
+.TP
 .B status [--json]
 Show the active daemon status. The JSON form is stable for automation.
 .TP

@@ -366,8 +366,8 @@ category = "Maintenance"
 ```toml
 [[expansion]]
 trigger = ".release"
-replacement = "git tag -a v{{cursor}} -m 'Release version {{cursor}}' && git push origin v{{cursor}}"
-description = "Create and push git release tag (edit version numbers)"
+replacement = "git tag -a v{{cursor}}"
+description = "Create an annotated release tag (type the version)"
 tags = ["git", "release"]
 category = "Development"
 ```

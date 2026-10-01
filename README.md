@@ -5,47 +5,39 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
 
-## Local text expansion for Linux desktops
+## Type less. Keep your words local.
 
-Type a short trigger and get the text you use every day — locally, without
-sending anything to the cloud.
+**WayExpand is a text expander built for Wayland.** Type `;sig` and get your
+signature. Type `;ty` and get your support reply — with the cursor waiting
+where you need to keep typing. Dates, addresses, templates, team snippets:
+local, offline, no account, no telemetry.
 
-```text
-;;sig   →  Stephan Loesevitz
-           Cyberdeck Labs
+![WayExpand's editor with its live preview field: typing "Hi Jordan, ;ty … ;sig" expanded into a full reply and signature, "2 expansions · 107 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
 
-;;date  →  YYYY-MM-DD
+### What makes it different
 
-;;ip    →  Server: prod-api-03
-           Status: investigating
-```
+- **See it work before you set anything up.** The *Matcher preview* panel
+  expands your saved snippets as you type with the daemon's own matching
+  engine — no daemon, permission, or desktop integration needed — and counts
+  the keystrokes you saved. It does not exercise desktop capture or insertion;
+  `wayexpand doctor` covers that.
+- **Quick-insert picker.** Bind `wayexpand-gui --picker` to a keyboard
+  shortcut. Type a few letters, press Enter, and the running WayExpand service
+  types the snippet into the app you were using. Typing needs focused-window
+  tracking (currently KDE Plasma); elsewhere, or without the service, Enter
+  copies it to the clipboard. No trigger to remember.
 
-WayExpand is a text expander for Linux desktops: signatures, support replies,
-dates, command output, boilerplate, and team snippets wherever your desktop
-backend supports safe expansion.
+  ![The quick-insert picker: a search box with "re" typed and matching snippets ranked below](docs/images/wayexpand-quick-insert-picker.png)
 
-No cloud. No account. No telemetry.
-
-Built to be boring to operate: local by default, explicit about permissions,
-and conservative when configuration or command execution looks unsafe.
-
-It includes a GUI, a scriptable CLI, Espanso import, templates, and fleet
-policy support. The goal is simple: type less and keep your snippets local.
-
-> **Status:** WayExpand is usable today, but desktop integration is still
-> compositor-dependent. Run `wayexpand doctor` on your own session before
-> enabling a backend. No compositor is currently certified by automated
-> end-to-end tests; see the [support matrix](docs/SUPPORT_MATRIX.md).
-
-> **Important limitations:** WayExpand sees committed text, not active IME
-> preedit/composition. Complete CJK/IBus/Fcitx, dead-key, and Compose sequences
-> before expecting a trigger to match. Its intended scope is direct keyboard
-> input and committed-text workflows; no desktop is yet E2E certified.
-> App-filtered snippets require focused-window tracking; that integration is
-> currently available only through the KWin bridge, and fails closed
-> elsewhere. If either capability is essential
-> to your workflow, verify it with `wayexpand doctor` on the exact desktop
-> session before deployment.
+- **One click to turn on.** The first-run screen detects your desktop and
+  enables the safest input path it finds. It never grants raw keyboard access
+  on its own.
+- **Safe by design.** Matching pauses in password fields when the desktop
+  reports them, app-specific snippets fail closed, command snippets run
+  without a shell under timeouts and output limits, and errors never echo your
+  snippet text.
+- **Brings your library along.** Import Espanso YAML, edit in the GUI, the
+  terminal UI, or plain TOML, and roll out team snippets with fleet policy.
 
 ## Install
 
@@ -55,68 +47,62 @@ On Ubuntu:
 sudo add-apt-repository ppa:cyberducttape/ppa
 sudo apt update
 sudo apt install wayexpand
-wayexpand doctor
 wayexpand-gui
 ```
 
-On Debian, use the source/release installation path for now; the Launchpad PPA
-targets Ubuntu series, not Debian releases.
-
-New GitHub releases are built to include installable Debian and RPM packages
-for x86_64, plus a native aarch64 release archive. Existing releases may not
-contain these assets. Fedora/Copr and AUR repositories are not yet published;
-see [Packaging](docs/PACKAGING.md) for the verified options.
-
-For those release assets, install the downloaded local package with
-`sudo apt install ./wayexpand_*_amd64.deb` or
-`sudo dnf install ./wayexpand-*.x86_64.rpm`. These are per-release packages,
-not auto-updating Debian/Fedora repositories.
-
-From source:
+From source (any distribution):
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
-wayexpand doctor
 wayexpand-gui
 ```
 
-The normal installers do not run as root, enable services automatically, grant
-raw-input permissions, or accept portal consent for you.
+New GitHub releases include installable `.deb` and `.rpm` packages for x86_64
+and an aarch64 archive: `sudo apt install ./wayexpand_*_amd64.deb` or
+`sudo dnf install ./wayexpand-*.x86_64.rpm`. Fedora/Copr, AUR, and Flathub are
+not published yet; see [Packaging](docs/PACKAGING.md).
 
-## Enable WayExpand and create your first snippet
+The installers never run as root, enable services, grant raw-input access, or
+accept portal consent for you.
+
+## Your first minute
+
+![WayExpand's first-run screen with three steps: Turn on WayExpand, Add your first snippet, Try it](docs/images/wayexpand-first-run.png)
+
+1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
+   terminal.
+2. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
+3. **Try it** — type the trigger in *Matcher preview*, then in any app.
+
+Set up the picker by adding a desktop shortcut (for example <kbd>Super</kbd> +
+<kbd>.</kbd>) that runs `wayexpand-gui --picker`. Scripts can do the same with
+`wayexpand insert ';sig'`.
+
+Useful commands:
 
 ```sh
-wayexpand doctor       # inspect this desktop's available paths
-wayexpand setup        # choose/configure a path; review any security prompt
-wayexpand status       # confirm the selected service is running
-wayexpand-gui          # create and save a snippet
+wayexpand doctor          # what this desktop supports, and what is missing
+wayexpand status          # is the daemon running, and on which path
+wayexpand test ';sig'     # check matching without the desktop
 ```
-
-In the GUI, create a snippet with trigger `;;hello` and replacement
-`Hello, world!`, save it, then type `;;hello` in a plain-text field. You can
-also use `wayexpand-ui` for the terminal editor. `wayexpand test ';;hello'`
-checks matching in the config; it does not test desktop capture or injection.
-
-Automatic setup never grants raw-input access by itself. In particular,
-evdev can observe typing in password fields and is not password-safe. Read the
-backend warning shown by setup and run `wayexpand doctor` before relying on
-expansion. If no suitable route is available, setup reports that instead of
-silently enabling one.
 
 ## Desktop compatibility
 
-Desktop integration remains compositor- and session-dependent. No compositor
-is currently certified by automated end-to-end tests. Active IME/preedit
-composition is unsupported, and app-filtered snippets currently have a window
-tracker only on KDE/KWin. Check your exact session before relying on either
-feature:
+Be precise about what works where:
 
-```sh
-wayexpand doctor
-wayexpand explain-backend
-```
+- **Committed text only.** WayExpand does not see IME preedit/composition;
+  finish CJK, dead-key, and Compose sequences before expecting a trigger to
+  match.
+- **App-specific snippets** need focused-window tracking, currently available
+  only on KDE Plasma (KWin). Elsewhere they fail closed and never expand.
+- **No compositor is certified yet** by automated end-to-end tests. Run
+  `wayexpand doctor` on your own session before relying on a backend.
+- **evdev** (maximum compatibility) can observe typing in password fields.
+  Setup never grants keyboard-device access; the Recommended mode chooses
+  evdev only when this user can already read `/dev/input` and no IBus path is
+  available. Check `wayexpand doctor` to see which route it will pick.
 
 See the [support matrix](docs/SUPPORT_MATRIX.md) and
 [certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known

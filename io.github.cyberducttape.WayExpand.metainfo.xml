@@ -17,6 +17,9 @@
     </ul>
     <p>Features:</p>
     <ul>
+      <li>Matcher preview: watch your snippets expand as you type, before any setup</li>
+      <li>Quick-insert picker: search your snippets from a keyboard shortcut and insert one into the app you were using (KDE Plasma), or copy it to the clipboard</li>
+      <li>One-click setup that enables the safest input path your desktop offers</li>
       <li>Graphical snippet editor with live preview</li>
       <li>Template variables (date, time, username, custom programs)</li>
       <li>Application-scoped snippets (KDE Plasma)</li>
@@ -29,6 +32,21 @@
     </ul>
     <p>Privacy-first and security-focused: WayExpand never logs your triggers or replacements, validates configurations before applying them, and uses password-field signals where the selected backend and toolkit expose them.</p>
   </description>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Snippets expanding live in the editor's preview field</caption>
+      <image>https://raw.githubusercontent.com/cyberducttape/wayexpand/main/docs/images/wayexpand-editor-try-it-live.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The quick-insert picker</caption>
+      <image>https://raw.githubusercontent.com/cyberducttape/wayexpand/main/docs/images/wayexpand-quick-insert-picker.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Three-step first run</caption>
+      <image>https://raw.githubusercontent.com/cyberducttape/wayexpand/main/docs/images/wayexpand-first-run.png</image>
+    </screenshot>
+  </screenshots>
 
   <project_license>MIT</project_license>
   <metadata_license>CC0-1.0</metadata_license>

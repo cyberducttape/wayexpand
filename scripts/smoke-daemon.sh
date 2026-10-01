@@ -81,6 +81,26 @@ wait_for_status_field paused true
 [ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" resume)" = "resumed" ]
 wait_for_status_field paused false
 
+wait_for_log() {
+    pattern=$1
+    for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        if grep -F "$pattern" "$runtime_dir/daemon.log" >/dev/null; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    printf '%s\n' "daemon log did not contain: $pattern" >&2
+    cat "$runtime_dir/daemon.log" >&2 || true
+    return 1
+}
+
+# Explicit inserts reach the event loop; with no injection backend the
+# daemon reports that instead of typing, and unknown triggers are refused.
+[ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" insert ';;hello')" = "insert scheduled" ]
+wait_for_log "requested snippet insert skipped: no injection backend"
+[ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" insert ';;missing')" = "insert scheduled" ]
+wait_for_log "requested snippet insert refused"
+
 printf '%s\n' '[[expansion]]' 'trigger = ' >"$config_path"
 reload=$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" reload)
 [ "$reload" = "reload scheduled" ]
