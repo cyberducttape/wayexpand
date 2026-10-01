@@ -36,6 +36,7 @@ use std::{
 };
 
 use theme::Palette;
+use wayexpand_backend_selection::{Capabilities, RecommendedRoute};
 use wayexpand_core::{
     default_config_path, BackendState, BackendStatus, Config, ExpansionConfig, FontScale,
     MatchMode, OrganizationPolicy, Settings,
@@ -76,50 +77,45 @@ fn backend_state(statuses: &[BackendStatus], kind: wayexpand_core::BackendKind) 
         .unwrap_or(BackendState::NotImplemented)
 }
 
-fn route_recommendation(statuses: &[BackendStatus]) -> Option<RouteRecommendation> {
-    let candidates = [
-        (
+fn route_recommendation(
+    route: RecommendedRoute,
+    capabilities: &Capabilities,
+    statuses: &[BackendStatus],
+) -> RouteRecommendation {
+    let (capture, injection, sensitive_fields, atomic_replace) = match route {
+        RecommendedRoute::IBus => (
             wayexpand_core::BackendKind::InputMethodV2,
-            wayexpand_core::BackendKind::Libei,
+            wayexpand_core::BackendKind::InputMethodV2,
             true,
             true,
         ),
-        (
+        RecommendedRoute::EvdevLibei => (
             wayexpand_core::BackendKind::Evdev,
             wayexpand_core::BackendKind::Libei,
             false,
             true,
         ),
-        (
-            wayexpand_core::BackendKind::Evdev,
-            wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
-            false,
-            false,
-        ),
-    ];
-    candidates
-        .into_iter()
-        .find_map(|(capture, injection, sensitive_fields, atomic_replace)| {
-            let capture_state = backend_state(statuses, capture);
-            let injection_state = backend_state(statuses, injection);
-            let usable = matches!(capture_state, BackendState::Available)
-                && matches!(injection_state, BackendState::Available);
-            let permission = matches!(capture_state, BackendState::RequiresPermission)
-                || matches!(injection_state, BackendState::RequiresPermission);
-            (usable || permission).then_some(RouteRecommendation {
-                capture,
-                injection,
-                capture_state,
-                injection_state,
-                focus_tracking: matches!(
-                    backend_state(statuses, wayexpand_core::BackendKind::WindowTracker),
-                    BackendState::Available
-                ),
-                sensitive_fields,
-                atomic_replace,
-                certification: "Experimental",
-            })
-        })
+    };
+    RouteRecommendation {
+        capture,
+        injection,
+        capture_state: match route {
+            RecommendedRoute::IBus => BackendState::Available,
+            RecommendedRoute::EvdevLibei if capabilities.has_dev_input => BackendState::Available,
+            RecommendedRoute::EvdevLibei => backend_state(statuses, capture),
+        },
+        injection_state: match route {
+            RecommendedRoute::IBus => BackendState::Available,
+            RecommendedRoute::EvdevLibei if capabilities.has_direct_libei_socket => {
+                BackendState::Available
+            }
+            RecommendedRoute::EvdevLibei => backend_state(statuses, injection),
+        },
+        focus_tracking: capabilities.has_window_tracker,
+        sensitive_fields,
+        atomic_replace,
+        certification: "Experimental",
+    }
 }
 /// Built-in template variables offered as insert buttons. Their hover
 /// descriptions are translated in `Strings::template_variable_description`.
@@ -169,6 +165,8 @@ struct GuiApp {
     daemon_capabilities: Option<runtime::DaemonCapabilities>,
     fleet_status: String,
     backend_status: Vec<BackendStatus>,
+    recommended_route: Option<RecommendedRoute>,
+    selection_capabilities: Option<Capabilities>,
     protocol_probes: Vec<(String, String)>,
     diagnostics_sender: Option<SyncSender<runtime::Request>>,
     runtime_sender: Option<SyncSender<runtime::Request>>,
@@ -515,6 +513,8 @@ impl GuiApp {
             daemon_capabilities: None,
             fleet_status: strings.not_checked().into(),
             backend_status: Vec::new(),
+            recommended_route: None,
+            selection_capabilities: None,
             protocol_probes: Vec::new(),
             diagnostics_sender: None,
             runtime_sender: None,
@@ -621,6 +621,8 @@ impl GuiApp {
             match completion {
                 runtime::Completion::Diagnostics(snapshot) => {
                     self.backend_status = snapshot.backend_status;
+                    self.recommended_route = snapshot.recommended_route;
+                    self.selection_capabilities = Some(snapshot.selection_capabilities);
                     self.fleet_status = snapshot.fleet_status;
                     self.protocol_probes = snapshot.protocol_probes;
                     self.daemon_status = snapshot.daemon_status;
@@ -2863,7 +2865,12 @@ impl GuiApp {
                         status.kind == wayexpand_core::BackendKind::WindowTracker
                             && status.state == BackendState::Available
                     });
-                    let recommendation = route_recommendation(&self.backend_status);
+                    let recommendation = self
+                        .recommended_route
+                        .zip(self.selection_capabilities.as_ref())
+                        .map(|(route, capabilities)| {
+                            route_recommendation(route, capabilities, &self.backend_status)
+                        });
                     let keyboard_probe = recommendation
                         .map(|route| route.capture_state)
                         .unwrap_or(BackendState::NotImplemented);
@@ -4452,14 +4459,19 @@ mod tests {
                 detail: String::new(),
             },
         ];
-        let route = route_recommendation(&statuses).expect("complete route");
+        let capabilities = Capabilities {
+            has_dev_input: true,
+            has_direct_libei_socket: true,
+            ..Capabilities::default()
+        };
+        let shared_route =
+            wayexpand_backend_selection::recommended_route(&capabilities, false, true, true)
+                .expect("complete route");
+        let route = route_recommendation(shared_route, &capabilities, &statuses);
         assert_eq!(route.capture, wayexpand_core::BackendKind::Evdev);
-        assert_eq!(
-            route.injection,
-            wayexpand_core::BackendKind::WlrootsVirtualKeyboard
-        );
+        assert_eq!(route.injection, wayexpand_core::BackendKind::Libei);
         assert!(!route.sensitive_fields);
-        assert!(!route.atomic_replace);
+        assert!(route.atomic_replace);
     }
 
     #[test]

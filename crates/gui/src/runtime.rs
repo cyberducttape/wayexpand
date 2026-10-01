@@ -12,6 +12,10 @@ use std::{
     time::Duration,
 };
 use toml_edit::DocumentMut;
+use wayexpand_backend_ibus::engine_available as ibus_engine_available;
+use wayexpand_backend_selection::{
+    probe_capabilities, recommended_route, Capabilities, RecommendedRoute,
+};
 use wayexpand_core::{discover_backends, Config, FleetConfig};
 
 const REQUEST_CAPACITY: usize = 8;
@@ -68,6 +72,8 @@ pub(crate) struct ReloadSnapshot {
 
 pub(crate) struct DiagnosticsSnapshot {
     pub backend_status: Vec<wayexpand_core::BackendStatus>,
+    pub recommended_route: Option<RecommendedRoute>,
+    pub selection_capabilities: Capabilities,
     pub fleet_status: String,
     pub protocol_probes: Vec<(String, String)>,
     pub daemon_status: String,
@@ -232,6 +238,18 @@ fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
 
 fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot {
     let backend_status = discover_backends();
+    let selection_capabilities = probe_capabilities();
+    let ibus_available = ibus_engine_available();
+    let recommended_route = wayexpand_core::load_organization_policy()
+        .ok()
+        .and_then(|policy| {
+            recommended_route(
+                &selection_capabilities,
+                ibus_available,
+                policy.backend_allowed("input-method-v2"),
+                policy.backend_allowed("libei"),
+            )
+        });
     let fleet_status = match Config::load(config_path) {
         Ok(config) => match wayexpand_core::load_organization_policy().and_then(|policy| {
             FleetConfig::load_standard_with_base_and_policy(config, &policy)
@@ -268,6 +286,8 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     };
     DiagnosticsSnapshot {
         backend_status,
+        recommended_route,
+        selection_capabilities,
         fleet_status,
         protocol_probes,
         daemon_status,

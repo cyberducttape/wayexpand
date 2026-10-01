@@ -19,6 +19,56 @@ pub enum InjectorBackend {
     Wlroots,
 }
 
+/// A route that `setup --mode recommended` can configure without an expert
+/// backend override.  Keep this in the shared selection crate so GUI copy,
+/// CLI setup, doctor, and certification describe the same topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecommendedRoute {
+    IBus,
+    EvdevLibei,
+}
+
+impl RecommendedRoute {
+    pub fn capture_label(self) -> &'static str {
+        match self {
+            Self::IBus => "input-method-v2",
+            Self::EvdevLibei => "evdev",
+        }
+    }
+
+    pub fn injection_label(self) -> &'static str {
+        match self {
+            Self::IBus => "input-method-v2",
+            Self::EvdevLibei => "libei",
+        }
+    }
+
+    pub fn setup_backend(self) -> &'static str {
+        match self {
+            Self::IBus => "ibus",
+            Self::EvdevLibei => "evdev",
+        }
+    }
+}
+
+/// Resolve the one-click/recommended route from one capability snapshot.
+/// Policy decisions are explicit inputs so callers cannot silently fall back
+/// to a different route after the UI has displayed its recommendation.
+pub fn recommended_route(
+    capabilities: &Capabilities,
+    ibus_available: bool,
+    input_method_allowed: bool,
+    libei_allowed: bool,
+) -> Option<RecommendedRoute> {
+    if ibus_available && input_method_allowed {
+        return Some(RecommendedRoute::IBus);
+    }
+    if capabilities.has_dev_input && capabilities.has_direct_libei_socket && libei_allowed {
+        return Some(RecommendedRoute::EvdevLibei);
+    }
+    None
+}
+
 impl InjectorBackend {
     pub fn name(self) -> &'static str {
         match self {
@@ -601,5 +651,19 @@ mod tests {
             ResolvedBackendPair::Stdin(InjectorBackend::Libei)
         );
         assert!(selection.explanation().contains("conservative default"));
+    }
+
+    #[test]
+    fn recommended_route_is_shared_and_policy_aware() {
+        let capabilities = capabilities(false, true, true);
+        assert_eq!(
+            recommended_route(&capabilities, true, true, true),
+            Some(RecommendedRoute::IBus)
+        );
+        assert_eq!(
+            recommended_route(&capabilities, true, false, true),
+            Some(RecommendedRoute::EvdevLibei)
+        );
+        assert_eq!(recommended_route(&capabilities, false, true, false), None);
     }
 }

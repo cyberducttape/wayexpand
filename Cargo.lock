@@ -4179,6 +4179,7 @@ dependencies = [
  "wayexpand-backend-ibus",
  "wayexpand-backend-input-method",
  "wayexpand-backend-kwin-window",
+ "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
  "wayexpand-core",
 ]

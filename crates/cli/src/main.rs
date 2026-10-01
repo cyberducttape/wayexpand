@@ -18,7 +18,9 @@ const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
-use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
+use wayexpand_backend_selection::{
+    explain_auto_selection, probe_capabilities, recommended_route, RecommendedRoute,
+};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
     all_capabilities, default_config_path, discover_backends, import_espanso, import_pack,
@@ -1180,31 +1182,28 @@ fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    if ibus_engine_available() && setup_backend_allowed(policy, "ibus") {
-        return SetupRecommendation {
-            backend: "ibus",
+    match recommended_route(
+        capabilities,
+        ibus_engine_available(),
+        setup_backend_allowed(policy, "ibus"),
+        setup_backend_allowed(policy, "evdev"),
+    ) {
+        Some(RecommendedRoute::IBus) => SetupRecommendation {
+            backend: RecommendedRoute::IBus.setup_backend(),
             label: "IBus",
             detail: "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access",
-        };
-    }
-    // The packaged maximum-compatibility service is evdev + libei. A
-    // wlroots virtual-keyboard probe alone is not enough to claim that the
-    // service it will enable can start.
-    if capabilities.has_dev_input
-        && capabilities.has_direct_libei_socket
-        && setup_backend_allowed(policy, "evdev")
-    {
-        return SetupRecommendation {
-            backend: "evdev",
+        },
+        Some(RecommendedRoute::EvdevLibei) => SetupRecommendation {
+            backend: RecommendedRoute::EvdevLibei.setup_backend(),
             label: "Maximum compatibility",
             detail:
                 "evdev capture with a detected output path; password-field awareness is unavailable",
-        };
-    }
-    SetupRecommendation {
-        backend: "unavailable",
-        label: "No safe automatic path",
-        detail: "setup will not enable an experimental or globally observing path automatically",
+        },
+        None => SetupRecommendation {
+            backend: "unavailable",
+            label: "No safe automatic path",
+            detail: "setup will not enable an experimental or globally observing path automatically",
+        },
     }
 }
 
@@ -1562,14 +1561,19 @@ fn print_certification(json: bool) -> Result<bool> {
             })
         });
     let ibus_installed = ibus_engine_available();
-    let ibus = ibus_installed && policy_allows_ibus;
-    let selected_label = if ibus {
-        "IBus"
-    } else {
-        selection
+    let recommendation = recommended_route(
+        &capabilities,
+        ibus_installed,
+        policy_allows_ibus,
+        policy_allows("libei"),
+    );
+    let ibus = matches!(recommendation, Some(RecommendedRoute::IBus));
+    let selected_label = match recommendation {
+        Some(route) => route.setup_backend(),
+        None => selection
             .as_ref()
             .map(|selection| selection.pair.source())
-            .unwrap_or("none")
+            .unwrap_or("none"),
     };
     let mut checks = Vec::new();
     let mut add_check = |category: &str, name: &str, status: &str, detail: &str| {
@@ -2033,18 +2037,6 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "ready": false,
             })
         });
-    let setup_ibus_ready = recommendation.backend == "ibus" && ibus_installed;
-    let setup_recommendation = if setup_ibus_ready {
-        serde_json::json!({
-            "mode": "recommended",
-            "backend": "ibus",
-            "label": "IBus",
-            "detail": "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access",
-            "ready": true,
-        })
-    } else {
-        setup_recommendation
-    };
     let selection_ok = automatic_selection["reason"].is_string()
         && automatic_selection["source"].is_string()
         && automatic_selection["ready"].as_bool().unwrap_or(false);
@@ -2056,7 +2048,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let healthy = config_ok
         && policy_ok
         && display_session_available()
-        && (selection_ok || setup_ibus_ready)
+        && (selection_ok || setup_recommendation["ready"].as_bool().unwrap_or(false))
         && socket_valid;
     println!(
         "{}",
