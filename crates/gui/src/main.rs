@@ -3347,6 +3347,28 @@ impl GuiApp {
                                         .wrap(),
                                     );
                                 }
+                                if let Some(capabilities) = self.daemon_capabilities {
+                                    if let Some(limit) = capabilities.injection_max_text_chars {
+                                        let count = draft.replacement.chars().count();
+                                        if limit > 0 && count > limit {
+                                            let mode = capabilities
+                                                .injection_mode
+                                                .unwrap_or("active injection");
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(
+                                                        self.strings.insertion_limit_warning(
+                                                            count, limit, mode,
+                                                        ),
+                                                    )
+                                                    .small()
+                                                    .color(palette.warning),
+                                                )
+                                                .wrap(),
+                                            );
+                                        }
+                                    }
+                                }
                                 ui.add(
                                     TextEdit::multiline(&mut draft.replacement)
                                         .margin(theme::FIELD_MARGIN)
@@ -5529,6 +5551,9 @@ mod tests {
         app.diagnostics_open = true;
         app.daemon_reachable = Some(true);
         app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+            injection_mode: Some("ei_text"),
+            injection_max_text_chars: None,
+            injection_throughput_chars_per_sec: None,
             capture_sensitive_focus: Some(false),
             capture_exclusive: Some(false),
             capture_reliable_key_state: Some(true),

@@ -2244,6 +2244,8 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "command_timeout_total"
                         | "command_failure_total"
                         | "status_schema"
+                        | "inject_max_text_chars"
+                        | "inject_expected_throughput_chars_per_sec"
                         | "injection_latency_sample_count"
                         | "injection_latency_window_count"
                         | "injection_latency_p50_us"
@@ -2282,6 +2284,9 @@ fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json:
             "tracker_connected": value("window_tracker_connected"),
         },
         "injection": {
+            "insertion_mode": value("inject_insertion_mode"),
+            "max_text_chars": value("inject_max_text_chars"),
+            "expected_throughput_chars_per_sec": value("inject_expected_throughput_chars_per_sec"),
             "atomic_replace": value("inject_atomic_replace"),
             "full_unicode": value("inject_full_unicode"),
             "cursor_reposition": value("inject_cursor_reposition"),
@@ -2699,12 +2704,12 @@ mod tests {
     #[test]
     fn status_json_preserves_types_and_ignores_banner() {
         let value = status_as_json(
-            "running\nsource=stdin\nstatus_schema=1\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\ninject_full_unicode=true\n",
+            "running\nsource=stdin\nstatus_schema=2\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\ninject_full_unicode=true\n",
         )
         .unwrap();
         assert_eq!(value["response"], "running");
         assert_eq!(value["source"], "stdin");
-        assert_eq!(value["status_schema"], 1);
+        assert_eq!(value["status_schema"], 2);
         assert_eq!(value["paused"], true);
         assert_eq!(value["command_queue_depth"], 3);
         assert_eq!(value["config_state"], "ok");
@@ -2716,11 +2721,11 @@ mod tests {
     #[test]
     fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
         assert!(status_schema_compatible(
-            &serde_json::json!({ "status_schema": 1 })
+            &serde_json::json!({ "status_schema": 2 })
         ));
         assert!(!status_schema_compatible(&serde_json::json!({})));
         assert!(!status_schema_compatible(
-            &serde_json::json!({ "status_schema": 2 })
+            &serde_json::json!({ "status_schema": 3 })
         ));
         assert!(!status_schema_compatible(
             &serde_json::json!({ "status_schema": "1" })
@@ -2757,7 +2762,7 @@ mod tests {
              source=input-method\n\
              backend=input-method-v2\n\
              backend_mode=unknown\n\
-             status_schema=1\n\
+             status_schema=2\n\
              state=connected\n\
              paused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\n\
@@ -2772,6 +2777,9 @@ mod tests {
              inject_full_unicode=true\n\
              inject_cursor_reposition=false\n\
              inject_key_passthrough=false\n\
+             inject_insertion_mode=ei_text\n\
+             inject_max_text_chars=0\n\
+             inject_expected_throughput_chars_per_sec=0\n\
              command_queue_depth=0\n\
              command_in_flight=0\n\
              expansion_command_queue_depth=0\n\
@@ -2884,6 +2892,9 @@ mod tests {
                 "inject_full_unicode",
                 "inject_cursor_reposition",
                 "inject_key_passthrough",
+                "inject_insertion_mode",
+                "inject_max_text_chars",
+                "inject_expected_throughput_chars_per_sec",
                 "command_queue_depth",
                 "command_in_flight",
                 "expansion_command_queue_depth",

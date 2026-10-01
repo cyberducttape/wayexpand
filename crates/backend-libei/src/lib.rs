@@ -1275,7 +1275,19 @@ impl TextInjector for LibeiInjector {
     }
 
     fn capabilities(&self) -> InjectorCapabilities {
+        let keysym_fallback = matches!(self.mode, TextMode::Keysym(_));
         InjectorCapabilities {
+            insertion_mode: if keysym_fallback {
+                "libei keysym fallback"
+            } else {
+                "ei_text"
+            },
+            max_text_chars: if keysym_fallback {
+                MAX_KEYSYM_FALLBACK_CHARS
+            } else {
+                0
+            },
+            expected_throughput_chars_per_sec: keysym_fallback.then_some(83),
             // Even a single ei_text flush can fail after the target has
             // processed part of the transaction; libei has no rollback
             // primitive for arbitrary application text.

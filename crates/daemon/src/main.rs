@@ -1897,8 +1897,11 @@ mod tests {
                 "hotkey_queue_depth",
                 "inject_atomic_replace",
                 "inject_cursor_reposition",
+                "inject_expected_throughput_chars_per_sec",
                 "inject_full_unicode",
+                "inject_insertion_mode",
                 "inject_key_passthrough",
+                "inject_max_text_chars",
                 "injection_latency_p50_us",
                 "injection_latency_p95_us",
                 "injection_latency_p99_us",
@@ -1914,7 +1917,7 @@ mod tests {
         );
         assert_eq!(
             body,
-            "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=1\nstate=connected\npaused=false\n\
+            "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=2\nstate=connected\npaused=false\n\
              config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
              capture_sensitive_focus=true\n\
              capture_exclusive=true\n\
@@ -1926,6 +1929,9 @@ mod tests {
              inject_full_unicode=true\n\
              inject_cursor_reposition=false\n\
              inject_key_passthrough=false\n\
+             inject_insertion_mode=\n\
+             inject_max_text_chars=0\n\
+             inject_expected_throughput_chars_per_sec=0\n\
              command_queue_depth=0\ncommand_in_flight=0\n\
              expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\
              hotkey_queue_depth=0\nhotkey_in_flight=0\n\

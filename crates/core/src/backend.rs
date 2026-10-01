@@ -124,6 +124,13 @@ impl std::error::Error for InputSourceError {}
 /// must be evaluated against the connected injector's actual contract.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InjectorCapabilities {
+    /// Stable name for the negotiated insertion protocol or mode.
+    pub insertion_mode: &'static str,
+    /// Maximum number of Unicode scalar values accepted by this mode. Zero
+    /// means that the backend does not advertise a mode-specific limit.
+    pub max_text_chars: usize,
+    /// Approximate sustained output rate when the mode is paced.
+    pub expected_throughput_chars_per_sec: Option<u32>,
     /// The backend can replace the trigger and replacement as one protocol
     /// transaction, without an externally visible erase-then-insert gap.
     pub atomic_replace: bool,

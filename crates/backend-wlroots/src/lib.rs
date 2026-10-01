@@ -403,6 +403,9 @@ impl TextInjector for WlrootsInjector {
 
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
+            insertion_mode: "wlroots virtual-keyboard key synthesis",
+            max_text_chars: 0,
+            expected_throughput_chars_per_sec: None,
             atomic_replace: false,
             full_unicode: false,
             cursor_reposition: true,

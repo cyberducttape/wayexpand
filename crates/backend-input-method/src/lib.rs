@@ -1160,6 +1160,9 @@ impl TextInjector for InputMethodSource {
 
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities {
+            insertion_mode: "input-method-v2 text",
+            max_text_chars: 0,
+            expected_throughput_chars_per_sec: None,
             atomic_replace: true,
             full_unicode: true,
             cursor_reposition: false,

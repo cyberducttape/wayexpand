@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- UX: the active injector now publishes its insertion mode, character limit,
+  and paced throughput estimate; the GUI warns when a snippet exceeds that
+  live backend limit.
+
 - UX: onboarding now leads with user-facing integration properties and keeps
   capture/output backend names in the expanded technical details.
 

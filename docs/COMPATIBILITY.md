@@ -383,7 +383,7 @@ below are exactly what that response currently carries -- nothing more.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 1,
+  "status_schema": 2,
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
@@ -398,6 +398,9 @@ below are exactly what that response currently carries -- nothing more.
   "inject_full_unicode": true,
   "inject_cursor_reposition": false,
   "inject_key_passthrough": false,
+  "inject_insertion_mode": "input-method-v2 text",
+  "inject_max_text_chars": 0,
+  "inject_expected_throughput_chars_per_sec": 0,
   "command_queue_depth": 0,
   "command_in_flight": 0,
   "expansion_command_queue_depth": 0,
@@ -428,6 +431,9 @@ below are exactly what that response currently carries -- nothing more.
 - `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware` (bool): Negotiated input-source guarantees. Conservative false values are published while the source is disconnected or unknown.
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
 - `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
+- inject_insertion_mode (string): Negotiated insertion protocol, such as ei_text or libei keysym fallback.
+- inject_max_text_chars (integer): Mode-specific maximum replacement length in Unicode scalar values; 0 means no mode-specific limit is advertised.
+- inject_expected_throughput_chars_per_sec (integer): Approximate sustained output rate for paced modes; 0 means no rate estimate is advertised.
 - `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
 - `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing
 - `expansion_command_queue_depth` (integer): Accepted command-backed expansions waiting for the expansion worker

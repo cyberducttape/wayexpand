@@ -1067,6 +1067,17 @@ impl Strings {
         }
     }
 
+    pub fn insertion_limit_warning(&self, count: usize, limit: usize, mode: &str) -> String {
+        match self.lang {
+            Language::English => format!(
+                "This snippet has {count} characters, but the active {mode} mode supports at most {limit}. It may be refused before insertion."
+            ),
+            Language::German => format!(
+                "Dieses Snippet hat {count} Zeichen, aber der aktive Modus {mode} unterstützt höchstens {limit}. Die Einfügung wird möglicherweise abgelehnt."
+            ),
+        }
+    }
+
     pub fn save_changes(&self) -> &'static str {
         match self.lang {
             Language::English => "Save changes",

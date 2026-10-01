@@ -112,6 +112,9 @@ pub(crate) enum RouteState {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonCapabilities {
+    pub injection_mode: Option<&'static str>,
+    pub injection_max_text_chars: Option<usize>,
+    pub injection_throughput_chars_per_sec: Option<u32>,
     pub capture_sensitive_focus: Option<bool>,
     pub capture_exclusive: Option<bool>,
     pub capture_reliable_key_state: Option<bool>,
@@ -132,6 +135,32 @@ impl DaemonCapabilities {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
             };
+            match key {
+                "inject_insertion_mode" => {
+                    capabilities.injection_mode = match value {
+                        "ei_text" => Some("ei_text"),
+                        "libei keysym fallback" => Some("libei keysym fallback"),
+                        "wlroots virtual-keyboard key synthesis" => {
+                            Some("wlroots virtual-keyboard key synthesis")
+                        }
+                        "input-method-v2 text" => Some("input-method-v2 text"),
+                        _ => None,
+                    };
+                    found = true;
+                    continue;
+                }
+                "inject_max_text_chars" => {
+                    capabilities.injection_max_text_chars = value.parse().ok();
+                    found |= capabilities.injection_max_text_chars.is_some();
+                    continue;
+                }
+                "inject_expected_throughput_chars_per_sec" => {
+                    capabilities.injection_throughput_chars_per_sec = value.parse().ok();
+                    found |= capabilities.injection_throughput_chars_per_sec.is_some();
+                    continue;
+                }
+                _ => {}
+            }
             let Ok(value) = value.parse::<bool>() else {
                 continue;
             };
@@ -403,9 +432,12 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "capture_sensitive_focus=false\ncapture_exclusive=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\n",
+            "capture_sensitive_focus=false\ncapture_exclusive=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
+        assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
+        assert_eq!(capabilities.injection_max_text_chars, Some(250));
+        assert_eq!(capabilities.injection_throughput_chars_per_sec, Some(83));
         assert_eq!(capabilities.capture_sensitive_focus, Some(false));
         assert_eq!(capabilities.capture_exclusive, Some(true));
         assert_eq!(capabilities.capture_reliable_key_state, None);

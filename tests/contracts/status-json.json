@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "fields": {
     "response": "string",
     "source": "string",
@@ -16,6 +16,9 @@
     "inject_full_unicode": "boolean",
     "inject_cursor_reposition": "boolean",
     "inject_key_passthrough": "boolean",
+    "inject_insertion_mode": "string",
+    "inject_max_text_chars": "integer",
+    "inject_expected_throughput_chars_per_sec": "integer",
     "state": "string",
     "paused": "boolean",
     "config": "string",
