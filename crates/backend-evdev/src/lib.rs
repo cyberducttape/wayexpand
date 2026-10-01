@@ -61,7 +61,9 @@ const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 // Allow the focused compositor/application to commit the non-exclusive
 // physical keystrokes before the replacement backspaces are injected.
 const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
-const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+// Hotplug discovery is intentionally bounded and separate from event polling,
+// but a 30-second window is too surprising for a compatibility fallback.
+const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_PENDING_EVENTS: usize = 4096;
 
 #[derive(Debug, Error)]
@@ -133,7 +135,8 @@ impl EvdevSource {
             .map_err(|error| EvdevError::Keymap(error.to_string()))?;
         tracing::warn!(
             "evdev capture active: no per-field sensitive-content signal is available, so \
-             matching is never suspended in password or other sensitive fields (docs/SECURITY.md)"
+             matching is never suspended in password or other sensitive fields; the XKB state is \
+             a local snapshot and does not track compositor layout switching (docs/SECURITY.md)"
         );
         let pressed = discovery
             .keyboards

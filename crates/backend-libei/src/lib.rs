@@ -24,8 +24,9 @@
 //! tools (`xdotool`, `wtype`, `ydotool`) behave. This results in O(N×12ms)
 //! daemon thread blocking per expansion, where N is the number of characters.
 //!
-//! This tradeoff prioritizes correctness over speed: a slow expansion that
-//! completes successfully is preferable to a fast one with dropped characters.
+//! This tradeoff prioritizes correctness over speed for bounded replacements.
+//! Very large keysym fallbacks are refused before erasing the trigger rather
+//! than occupying the daemon's synchronous keyboard path for several seconds.
 //! If latency is a concern:
 //! - Prefer ei_text when available (no per-character delay)
 //! - Consider enabling ei_text support in your EIS server if you control it
@@ -65,6 +66,9 @@ const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// defaults to 12ms); below roughly this, compositors and toolkits start
 /// dropping keys out of a burst.
 const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
+/// Refuse a keysym fallback that would occupy the synchronous injection path
+/// for roughly three seconds or more. Native `ei_text` is unaffected.
+const MAX_KEYSYM_FALLBACK_CHARS: usize = 250;
 
 fn erase_grapheme_count(text: &str) -> usize {
     text.graphemes(true).count()
@@ -104,6 +108,14 @@ pub enum LibeiError {
     TextTooLarge { length: usize, maximum: usize },
     #[error("text contains unsupported control character U+{0:04X}")]
     ControlCharacter(u32),
+    #[error(
+        "keysym fallback for {characters} characters would take about {estimated_ms} ms; \
+         use an ei_text-capable backend or shorten the replacement"
+    )]
+    FallbackTooSlow {
+        characters: usize,
+        estimated_ms: u64,
+    },
 }
 
 impl LibeiError {
@@ -538,6 +550,14 @@ impl LibeiInjector {
     /// keymap.
     fn ensure_representable(&self, text: &str) -> Result<(), LibeiError> {
         if let TextMode::Keysym(typer) = &self.mode {
+            let characters = text.chars().count();
+            if characters > MAX_KEYSYM_FALLBACK_CHARS {
+                return Err(LibeiError::FallbackTooSlow {
+                    characters,
+                    estimated_ms: (characters.saturating_sub(1) as u64)
+                        .saturating_mul(KEY_EVENT_INTERVAL.as_millis() as u64),
+                });
+            }
             if let Some(character) = text.chars().find(|c| {
                 // Newline and tab are handled specially in type_keys
                 !matches!(c, '\n' | '\t') && !typer.chars.contains_key(c)
@@ -637,12 +657,12 @@ impl LibeiInjector {
         let return_keycode = typer.return_keycode;
         let tab_keycode = typer.tab_keycode;
 
-        let chars: Vec<char> = text.chars().collect();
-        for (i, c) in chars.iter().enumerate() {
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
             let (keycode, shift) = match c {
                 '\n' => (return_keycode, false),
                 '\t' => (tab_keycode, false),
-                _ => typer.chars[c],
+                _ => typer.chars[&c],
             };
 
             let serial = self.connection.serial();
@@ -665,7 +685,7 @@ impl LibeiInjector {
             self.connection
                 .flush()
                 .map_err(|error| LibeiError::Flush(error.to_string()))?;
-            if i < chars.len() - 1 {
+            if chars.peek().is_some() {
                 std::thread::sleep(KEY_EVENT_INTERVAL);
             }
         }

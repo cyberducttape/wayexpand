@@ -308,6 +308,14 @@ this is not an issue. For multi-layout switchers, consider:
 - Using input-method-v2 instead, which learns layout changes from the compositor
 - Using only ASCII triggers and replacements (no layout-dependent characters)
 
+**Hotplug and layout limitations:**
+Device discovery refreshes every five seconds, so a newly attached keyboard
+may take up to that long to enter the capture set. Evdev also creates a local
+XKB snapshot rather than consuming the compositor's live keymap; runtime
+layout switching, AltGr, Compose/dead keys, and multiple-keyboard state are
+therefore compatibility limitations. This is a fallback path, not an
+authoritative desktop keyboard integration.
+
 **Probe detection is deliberately conservative about device identity:**
 The evdev backend's `doctor` probe counts readable `/dev/input/event*` devices
 as a permission signal, while the evdev connection performs the authoritative

@@ -1461,7 +1461,8 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         } else {
             println!(
                 "Next step: use a compositor with input-method-v2 support, or \
-                 `--source=evdev` (requires `input` group membership; see SECURITY.md for the \
+                 `--source=evdev` (prefer active-seat logind/uaccess ACLs; the broader `input` \
+                 group is a legacy fallback; see SECURITY.md for the \
                  sensitive-field tradeoff) paired with `--backend=wlroots` or `--backend=libei`."
             );
         }
@@ -1512,7 +1513,7 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     }
     if evdev_readable {
         println!(
-            "  explicit evdev: requires the input group/udev grant and has no password-field signal"
+            "  explicit evdev: prefer the active-seat installer/uaccess grant; the input group is a broader legacy fallback, and password-field signaling is unavailable"
         );
     }
     if libei_plausible && evdev_readable {

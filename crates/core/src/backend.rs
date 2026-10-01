@@ -550,7 +550,8 @@ fn discover_evdev() -> (BackendState, String) {
             BackendState::RequiresPermission,
             format!(
                 "{total} input device(s) exist but none are readable by this user; \
-                 add your user to the `input` group and log in again. If this still fails after \
+                 install/repair active-seat logind/uaccess ACLs first (the broader legacy \
+                 `input` group is an explicit fallback) and log in again. If this still fails after \
                  logging out and back in, your systemd --user manager likely did not restart and \
                  is still running with your old group list -- run `loginctl terminate-user \
                  $USER` (ends all your sessions) or reboot, then retry"
