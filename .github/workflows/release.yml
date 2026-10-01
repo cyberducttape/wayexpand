@@ -133,6 +133,8 @@ jobs:
           echo "  ✓ debian/changelog: $changelog_upstream"
           echo "  ✓ PKGBUILD: $pkgbuild_version"
           echo "  ✓ wayexpand.spec: $spec_version"
+      - name: Verify release ancestry
+        run: bash scripts/check-release-ancestry.sh "$RELEASE_REF_NAME"
       - name: Build release binaries
         run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
