@@ -21,8 +21,9 @@ use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{explain_auto_selection, probe_capabilities};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    all_capabilities, default_config_path, discover_backends, import_espanso, BackendKind, Config,
-    ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy, CONTROL_STATUS_SCHEMA,
+    all_capabilities, default_config_path, discover_backends, import_espanso, import_pack,
+    inspect_pack, BackendKind, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode,
+    OrganizationPolicy, CONTROL_STATUS_SCHEMA,
 };
 
 use args::{take_json_flag, take_option};
@@ -464,6 +465,47 @@ fn run() -> Result<()> {
                 );
             }
             print!("{}", toml::to_string_pretty(&imported.config)?);
+        }
+        Some("pack") => {
+            let action = args
+                .next()
+                .ok_or_else(|| usage_error("usage: wayexpand pack inspect|import <directory>"))?;
+            let path = args
+                .next()
+                .ok_or_else(|| usage_error("usage: wayexpand pack inspect|import <directory>"))?;
+            if args.next().is_some() {
+                usage_bail!("usage: wayexpand pack inspect|import <directory>");
+            }
+            match action.as_str() {
+                "inspect" => {
+                    let inspection = inspect_pack(&path)?;
+                    println!(
+                        "{} {}",
+                        inspection.manifest.name, inspection.manifest.version
+                    );
+                    println!("id: {}", inspection.manifest.id);
+                    println!("publisher: {}", inspection.manifest.publisher);
+                    if !inspection.manifest.description.is_empty() {
+                        println!("description: {}", inspection.manifest.description);
+                    }
+                    println!("snippet files: {}", inspection.snippet_files);
+                    println!("expansions: {}", inspection.expansion_count);
+                    println!("hotkeys: {}", inspection.hotkey_count);
+                    println!(
+                        "commands: {} (disabled on import)",
+                        inspection.command_count
+                    );
+                }
+                "import" => {
+                    let (inspection, config, disabled_commands) = import_pack(&path)?;
+                    eprintln!(
+                        "pack {} {} imported; {} command action(s) disabled by default",
+                        inspection.manifest.name, inspection.manifest.version, disabled_commands
+                    );
+                    print!("{}", toml::to_string_pretty(&config)?);
+                }
+                _ => usage_bail!("usage: wayexpand pack inspect|import <directory>"),
+            }
         }
         Some("set-enabled") => {
             let trigger = args.next().ok_or_else(|| {

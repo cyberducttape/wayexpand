@@ -103,6 +103,7 @@ Then see [SECURITY.md](../SECURITY.md)
 |----------|----------|---------|
 | [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) | All users | Resource and safety boundaries |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Advanced users | Exact CLI/JSON/config contracts |
+| [PACKS.md](PACKS.md) | Advanced users | Local snippet packs and command-safety rules |
 | [GUI.md](GUI.md) | GUI users | Interface, themes, languages, fonts, and performance |
 
 ### Enterprise & Security

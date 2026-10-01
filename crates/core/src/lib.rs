@@ -15,6 +15,7 @@ mod fleet;
 mod keys;
 mod matcher;
 mod migration;
+mod pack;
 mod paths;
 mod policy;
 mod store;
@@ -42,6 +43,7 @@ pub use migration::{
     import_espanso, EspansoImport, EspansoImportReport, EspansoImportWarning,
     EspansoUnsupportedMatch, MigrationError,
 };
+pub use pack::{import_pack, inspect_pack, PackError, PackInspection, PackManifest};
 pub use paths::default_config_path;
 pub use policy::{
     load_organization_policy, load_organization_policy_from_paths, parse_organization_policy,
