@@ -1817,6 +1817,51 @@ impl GuiApp {
                 .max_height(560.0)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
+                    theme::section_header(ui, "", self.strings.compatibility_center());
+                    ui.label(
+                        RichText::new(self.strings.onboarding_certification_note())
+                            .small()
+                            .color(palette.warning),
+                    );
+                    if let Some(capabilities) = self.daemon_capabilities {
+                        theme::card(ui, palette, |ui| {
+                            ui.label(self.strings.active_route());
+                            ui.label(
+                                RichText::new(&self.daemon_status)
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            ui.add_space(4.0);
+                            for (key, value) in [
+                                (
+                                    "reliable_key_state",
+                                    capabilities.capture_reliable_key_state,
+                                ),
+                                ("atomic_replace", capabilities.inject_atomic_replace),
+                                ("unicode", capabilities.inject_full_unicode),
+                                ("window_tracker", capabilities.window_tracker_connected),
+                                ("sensitive_focus", capabilities.capture_sensitive_focus),
+                                ("composition", capabilities.capture_composition_aware),
+                            ] {
+                                self.render_capability_row(ui, palette, key, value);
+                            }
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                !self.diagnostics_running,
+                                egui::Button::new(self.strings.run_compatibility_test()),
+                            )
+                            .clicked()
+                        {
+                            self.refresh_diagnostics(true);
+                        }
+                        if self.diagnostics_running {
+                            ui.spinner();
+                        }
+                    });
+                    ui.add_space(8.0);
                     theme::section_header(ui, "", self.strings.runtime_health());
                     ui.add_space(4.0);
                     ui.label(

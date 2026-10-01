@@ -561,6 +561,27 @@ impl Strings {
         }
     }
 
+    pub fn compatibility_center(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Compatibility Center",
+            Language::German => "Kompatibilitätszentrum",
+        }
+    }
+
+    pub fn run_compatibility_test(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Run compatibility checks",
+            Language::German => "Kompatibilitätsprüfung ausführen",
+        }
+    }
+
+    pub fn active_route(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Active route",
+            Language::German => "Aktiver Weg",
+        }
+    }
+
     pub fn configuration_health(&self) -> &'static str {
         match self.lang {
             Language::English => "Configuration",
