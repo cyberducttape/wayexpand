@@ -48,6 +48,15 @@ evidence exists.
 | `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
+<!-- generated:route-contract:start -->
+| Route | Capture | Injection | Sensitive fields | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | yes | yes | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | no | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | no | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | yes | yes | none | experimental |
+<!-- generated:route-contract:end -->
+
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not
 evidence for layout-independent text injection. Certification checks

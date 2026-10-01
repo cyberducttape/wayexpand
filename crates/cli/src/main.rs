@@ -1173,9 +1173,9 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
 }
 
 struct SetupRecommendation {
-    backend: &'static str,
-    label: &'static str,
-    detail: &'static str,
+    backend: String,
+    label: String,
+    detail: String,
 }
 
 fn recommended_setup_backend(
@@ -1188,21 +1188,20 @@ fn recommended_setup_backend(
         setup_backend_allowed(policy, "ibus"),
         setup_backend_allowed(policy, "evdev"),
     ) {
-        Some(RecommendedRoute::IBus) => SetupRecommendation {
-            backend: RecommendedRoute::IBus.setup_backend(),
-            label: "IBus",
-            detail: "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access",
-        },
-        Some(RecommendedRoute::EvdevLibei) => SetupRecommendation {
-            backend: RecommendedRoute::EvdevLibei.setup_backend(),
-            label: "Maximum compatibility",
-            detail:
-                "evdev capture with a detected output path; password-field awareness is unavailable",
-        },
+        Some(route) => {
+            let contract = route.contract();
+            SetupRecommendation {
+                backend: contract.setup_backend.clone(),
+                label: contract.label.clone(),
+                detail: contract.setup_detail.clone(),
+            }
+        }
         None => SetupRecommendation {
-            backend: "unavailable",
-            label: "No safe automatic path",
-            detail: "setup will not enable an experimental or globally observing path automatically",
+            backend: "unavailable".into(),
+            label: "No safe automatic path".into(),
+            detail:
+                "setup will not enable an experimental or globally observing path automatically"
+                    .into(),
         },
     }
 }

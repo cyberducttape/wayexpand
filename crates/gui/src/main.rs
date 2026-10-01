@@ -82,20 +82,16 @@ fn route_recommendation(
     capabilities: &Capabilities,
     statuses: &[BackendStatus],
 ) -> RouteRecommendation {
-    let (capture, injection, sensitive_fields, atomic_replace) = match route {
-        RecommendedRoute::IBus => (
-            wayexpand_core::BackendKind::InputMethodV2,
-            wayexpand_core::BackendKind::InputMethodV2,
-            true,
-            true,
-        ),
-        RecommendedRoute::EvdevLibei => (
-            wayexpand_core::BackendKind::Evdev,
-            wayexpand_core::BackendKind::Libei,
-            false,
-            true,
-        ),
+    let contract = route.contract();
+    let backend_kind = |name: &str| match name {
+        "evdev" => wayexpand_core::BackendKind::Evdev,
+        "libei" => wayexpand_core::BackendKind::Libei,
+        "wlroots-virtual-keyboard" => wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
+        "input-method-v2" | "ibus" => wayexpand_core::BackendKind::InputMethodV2,
+        other => panic!("unknown route backend {other:?}"),
     };
+    let capture = backend_kind(&contract.capture);
+    let injection = backend_kind(&contract.injection);
     RouteRecommendation {
         capture,
         injection,
@@ -112,9 +108,14 @@ fn route_recommendation(
             RecommendedRoute::EvdevLibei => backend_state(statuses, injection),
         },
         focus_tracking: capabilities.has_window_tracker,
-        sensitive_fields,
-        atomic_replace,
-        certification: "Experimental",
+        sensitive_fields: contract.sensitive_fields,
+        atomic_replace: contract.atomic_replace,
+        certification: match contract.status.as_str() {
+            "experimental" => "Experimental",
+            "certified" => "Certified",
+            "unsupported" => "Unsupported",
+            _ => "Unverified",
+        },
     }
 }
 /// Built-in template variables offered as insert buttons. Their hover
@@ -4471,7 +4472,7 @@ mod tests {
         assert_eq!(route.capture, wayexpand_core::BackendKind::Evdev);
         assert_eq!(route.injection, wayexpand_core::BackendKind::Libei);
         assert!(!route.sensitive_fields);
-        assert!(route.atomic_replace);
+        assert!(!route.atomic_replace);
     }
 
     #[test]

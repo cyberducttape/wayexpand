@@ -27,6 +27,15 @@ availability claims, and no target is certified without reviewed evidence.
 | `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
+<!-- generated:route-contract:start -->
+| Route | Capture | Injection | Sensitive fields | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | yes | yes | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | no | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | no | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | yes | yes | none | experimental |
+<!-- generated:route-contract:end -->
+
 ## Detailed Certification Results
 
 ### ⚠️ KDE Plasma 6.6.x - HISTORICAL MANUAL OBSERVATIONS, NOT CERTIFIED
@@ -35,7 +44,7 @@ availability claims, and no target is certified without reviewed evidence.
 **Configuration:**
 - Desktop: KDE Plasma 6.6.x
 - WayExpand: 1.2.0
-- Capture: evdev (input group)
+- Capture: evdev (active-seat logind/uaccess ACL)
 - Injection: libei
 - Window Tracking: KWin D-Bus
 
@@ -56,7 +65,8 @@ availability claims, and no target is certified without reviewed evidence.
 - **Evdev capture cannot detect password fields.** Expansions fire in all input fields including passwords. Compositors using input-method-v2 for capture can provide sensitive-field signals; see [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
 - KWin D-Bus window tracking occasionally has ~100ms latency on window focus changes
 - Input method selection can be finicky (workaround: use IBus explicitly)
-- Evdev requires input group membership
+- Evdev should use active-seat logind/uaccess ACLs; input-group membership is
+  the broader legacy fallback.
 
 **Recommendation:** Heavily manually tested, but not certified for production.
 Evdev cannot provide password-field awareness; automated certification remains
@@ -74,12 +84,13 @@ authoritative sensitive-field signal where available.
 **Known Limitations:**
 - **No keyboard capture:** Function keys, arrow keys, Escape cannot be expanded. Use text-based alternatives.
 - **No window tracking:** `app_filter`-scoped expansions fail closed; they are not applied globally.
-- **No sensitive field detection:** Relies on GNOME's text input filtering (usually works, but not guaranteed)
+- **No sensitive field detection:** This route cannot make a password-field
+  protection guarantee.
 
 **When to Use:**
 - You primarily type text and don't need special keys
 - You want zero permission configuration
-- You need password field protection
+- You do not need a certified password-field protection guarantee
 
 **When NOT to Use:**
 - You need arrow key expansion (`;up` → Up, etc.)

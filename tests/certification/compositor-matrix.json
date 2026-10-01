@@ -1,5 +1,67 @@
 {
   "schema": 1,
+  "routes": [
+    {
+      "id": "ibus",
+      "label": "IBus",
+      "path": "ibus",
+      "capture": "ibus",
+      "injection": "ibus",
+      "sensitive_fields": true,
+      "atomic_replace": true,
+      "app_identity": "none",
+      "focus_tracking": false,
+      "status": "experimental",
+      "setup_backend": "ibus",
+      "certification_targets": ["kde", "gnome"],
+      "setup_detail": "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access"
+    },
+    {
+      "id": "kde-evdev-libei",
+      "label": "Maximum compatibility",
+      "path": "evdev+libei",
+      "capture": "evdev",
+      "injection": "libei",
+      "sensitive_fields": false,
+      "atomic_replace": false,
+      "app_identity": "kwin",
+      "focus_tracking": true,
+      "status": "experimental",
+      "setup_backend": "evdev",
+      "certification_targets": ["kde", "gnome"],
+      "setup_detail": "evdev capture with libei output; password-field awareness is unavailable"
+    },
+    {
+      "id": "sway-evdev-wlroots",
+      "label": "Evdev + wlroots",
+      "path": "evdev+wlroots",
+      "capture": "evdev",
+      "injection": "wlroots-virtual-keyboard",
+      "sensitive_fields": false,
+      "atomic_replace": false,
+      "app_identity": "none",
+      "focus_tracking": false,
+      "status": "experimental",
+      "setup_backend": "evdev",
+      "certification_targets": ["sway", "hyprland"],
+      "setup_detail": "evdev capture with wlroots virtual-keyboard output; password-field awareness is unavailable"
+    },
+    {
+      "id": "input-method-v2",
+      "label": "Input Method v2",
+      "path": "input-method-v2",
+      "capture": "input-method-v2",
+      "injection": "input-method-v2",
+      "sensitive_fields": true,
+      "atomic_replace": true,
+      "app_identity": "none",
+      "focus_tracking": false,
+      "status": "experimental",
+      "setup_backend": "input-method",
+      "certification_targets": ["kde", "gnome"],
+      "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification"
+    }
+  ],
   "outcome_types": ["pass", "fail", "unsupported-by-design", "UNVERIFIED"],
   "out_of_scope_capabilities": [
     {

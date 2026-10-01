@@ -4111,6 +4111,8 @@ dependencies = [
 name = "wayexpand-backend-selection"
 version = "1.2.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tracing",
  "wayexpand-backend-evdev",
  "wayexpand-backend-input-method",

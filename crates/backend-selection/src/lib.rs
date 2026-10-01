@@ -5,7 +5,8 @@
 //! WayExpand actually start? Keeping probing, policy, and explanation here
 //! prevents the user-facing answer from drifting away from daemon behavior.
 
-use std::{env, fmt};
+use serde::Deserialize;
+use std::{env, fmt, sync::OnceLock};
 use tracing::{debug, warn};
 use wayexpand_backend_evdev::readable_keyboard_available;
 use wayexpand_backend_input_method::InputMethodSource;
@@ -28,26 +29,66 @@ pub enum RecommendedRoute {
     EvdevLibei,
 }
 
+/// Operator-facing route metadata shared by setup, diagnostics, GUI copy,
+/// and certification documentation. The data is maintained in the checked-in
+/// certification matrix so route guarantees cannot silently diverge between
+/// frontends.
+#[derive(Debug, Deserialize)]
+pub struct RouteContract {
+    pub id: String,
+    pub label: String,
+    pub capture: String,
+    pub injection: String,
+    pub sensitive_fields: bool,
+    pub atomic_replace: bool,
+    pub app_identity: String,
+    pub focus_tracking: bool,
+    pub status: String,
+    pub setup_backend: String,
+    pub setup_detail: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RouteCatalog {
+    routes: Vec<RouteContract>,
+}
+
+static ROUTE_CATALOG: OnceLock<RouteCatalog> = OnceLock::new();
+
+fn route_catalog() -> &'static RouteCatalog {
+    ROUTE_CATALOG.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../../tests/certification/compositor-matrix.json"
+        ))
+        .expect("checked-in certification route contract must be valid")
+    })
+}
+
+impl RecommendedRoute {
+    pub fn contract(self) -> &'static RouteContract {
+        let id = match self {
+            Self::IBus => "ibus",
+            Self::EvdevLibei => "kde-evdev-libei",
+        };
+        route_catalog()
+            .routes
+            .iter()
+            .find(|route| route.id == id)
+            .unwrap_or_else(|| panic!("missing route contract {id:?}"))
+    }
+}
+
 impl RecommendedRoute {
     pub fn capture_label(self) -> &'static str {
-        match self {
-            Self::IBus => "input-method-v2",
-            Self::EvdevLibei => "evdev",
-        }
+        &self.contract().capture
     }
 
     pub fn injection_label(self) -> &'static str {
-        match self {
-            Self::IBus => "input-method-v2",
-            Self::EvdevLibei => "libei",
-        }
+        &self.contract().injection
     }
 
     pub fn setup_backend(self) -> &'static str {
-        match self {
-            Self::IBus => "ibus",
-            Self::EvdevLibei => "evdev",
-        }
+        &self.contract().setup_backend
     }
 }
 
@@ -665,5 +706,18 @@ mod tests {
             Some(RecommendedRoute::EvdevLibei)
         );
         assert_eq!(recommended_route(&capabilities, false, true, false), None);
+    }
+
+    #[test]
+    fn recommended_routes_have_complete_operator_contracts() {
+        for route in [RecommendedRoute::IBus, RecommendedRoute::EvdevLibei] {
+            let contract = route.contract();
+            assert!(!contract.id.is_empty());
+            assert!(!contract.capture.is_empty());
+            assert!(!contract.injection.is_empty());
+            assert!(!contract.setup_backend.is_empty());
+            assert!(!contract.setup_detail.is_empty());
+            assert_eq!(route.setup_backend(), contract.setup_backend);
+        }
     }
 }
