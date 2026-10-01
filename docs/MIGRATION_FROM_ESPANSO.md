@@ -2,48 +2,66 @@
 
 **Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Migrating from Espanso**
 
----
+Espanso is a mature cross-platform text expander with forms, scripts,
+packages, a search interface, and application-specific configuration on
+platforms where its window filters are available. Its current documentation
+also calls out that application-specific configuration is not available on
+Wayland. WayExpand is aimed at the gap around Wayland input correctness:
+explicit routes, diagnostics, policy controls, and evidence about what the
+current desktop can actually guarantee.
 
-Welcome! If you're switching from Espanso, WayExpand can import your existing snippets and offers several advantages for Wayland users. This guide covers the transition.
+Neither project should be treated as universally equivalent on every desktop.
+WayExpand's KWin application-tracking path is implemented but awaiting broader
+certification; filtered snippets fail closed elsewhere. Active IME/preedit
+composition is currently unsupported, and evdev is an explicit compatibility
+fallback with no sensitive-field signal. Check the [support matrix](SUPPORT_MATRIX.md)
+before switching a production workflow.
 
-## Quick Import
+## Import first, decide second
 
-WayExpand can automatically convert your Espanso YAML configs to TOML:
+Point the importer at an Espanso match file:
 
 ```bash
-wayexpand import espanso ~/.config/espanso/default.yml
+wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 ```
 
-This imports static trigger/replacement pairs and emits TOML on stdout. A
-migration report is printed to stderr with counts for fully migrated entries,
-entries with warnings, and unsupported entries. Every unmapped match option
-and top-level YAML key is called out for review; dynamic matches without a
-static replacement are listed as unsupported. `propagate_case` is mapped to
-WayExpand's equivalent option. The source file is never modified.
+The command writes converted TOML to stdout and prints a migration report to
+stderr. The report separates fully migrated entries, entries migrated with
+warnings or unmapped options, and unsupported dynamic matches.
 
-The GUI previews this report before applying. Its default merge preserves the
-existing library, adds new triggers, ignores identical duplicates, and keeps
-the existing snippet when a trigger conflicts. Replacing the library remains
-an explicit separate choice. Do not treat a warning-bearing entry as a
-semantics-preserving migration until you have reviewed the listed option.
+The source file is never modified. In the GUI, Import Espanso previews the
+same report and merges by default: new triggers are added, identical
+duplicates are ignored, and trigger conflicts keep the existing WayExpand
+entry. Replacing the whole library is a separate explicit action.
 
-## What's Different
+For a large migration, keep the report with the converted file:
 
-### Configuration Format
+```bash
+wayexpand import espanso ~/.config/espanso/match/base.yml \
+  > ~/wayexpand-import.toml 2> ~/wayexpand-import-report.txt
+wayexpand validate ~/wayexpand-import.toml
+```
 
-**Espanso (YAML):**
+This gives you a concrete answer such as “fully migrated / warnings /
+unsupported,” rather than assuming that a syntactically valid conversion is
+semantics-preserving.
+
+## Format conversion
+
+Espanso:
+
 ```yaml
 matches:
   - trigger: ";hello"
     replace: "Hello, world!"
-
   - trigger: ";sig"
     replace: |
       Best regards,
-      John
+      Alex
 ```
 
-**WayExpand (TOML):**
+WayExpand:
+
 ```toml
 [[expansion]]
 trigger = ";hello"
@@ -52,132 +70,52 @@ replacement = "Hello, world!"
 [[expansion]]
 trigger = ";sig"
 replacement = """Best regards,
-John"""
+Alex"""
 ```
 
-### Architecture
+Categories, tags, descriptions, enabled state, and case propagation have
+direct WayExpand representations. Dynamic matches, external filters, forms,
+extensions, and options with no direct equivalent are reported for manual
+review rather than silently approximated.
 
-| Aspect | Espanso | WayExpand |
-|--------|---------|-----------|
-| **Design** | Single unified daemon | Modular: engine separate from backends |
-| **Wayland support** | XTest via XWayland, or native Wayland | Native per-protocol backends (input-method-v2, libei, evdev, wlroots) |
-| **Backend selection** | Auto-detected silently | Explicitly chosen or auto-detected with explanation |
-| **Diagnostics** | Limited | `wayexpand doctor` shows what works and why |
-| **Config reload** | Replaces config immediately | Validates first, only swaps if valid |
-| **Password protection** | Not modeled | Explicit on backends that support it |
-| **GUI** | None (YAML files) | Native egui app with preview and diagnostics |
-| **Window filtering** | Not supported | `app_filter` for app-scoped snippets (when available) |
+## Capability comparison
 
-### Compatibility
+| Capability | Espanso | WayExpand today |
+| --- | --- | --- |
+| Static and multiline replacements | Supported | Supported |
+| Forms and interactive variables | Supported | Not yet supported as a general form system |
+| Scripts and command integrations | Supported | Structured command expansions with bounds and timeouts |
+| Community package workflow | Espanso Hub and package commands | Manual/local packs; signed bundles are future work |
+| Search interface | Supported | GUI library search and filtering |
+| Application-specific configuration | Supported on supported platforms; Espanso documents this as unavailable on Wayland | `app_filter` through the KWin tracker path; currently uncertified and fail-closed elsewhere |
+| Linux Wayland input route | Wayland distribution path with documented limitations | Native input/injection routes with explicit capability and lifecycle diagnostics |
+| Sensitive-field awareness | Depends on integration | Available only when the selected route/compositor supplies reliable content-purpose information; not universally certified |
+| Administrative policy | Project/package configuration | Organization policy, allowed backends/packs, command restrictions, and fleet-oriented config |
+| Evidence about the current route | Diagnose through project tooling | `wayexpand doctor`, runtime status, and compositor certification artifacts |
 
-**Espanso features WayExpand supports:**
-- ✅ String replacements
-- ✅ Multi-line text
-- ✅ Regex matching (with limitations)
-- ✅ Case propagation (`;hello` → `Hello` or `HELLO`)
-- ✅ Custom triggers
-- ✅ Categories and tags
-- ✅ Show UI option
-- ✅ Conditional expansion (via app_filter for window-specific)
+The useful WayExpand distinction is not “Espanso has no filtering” or
+“WayExpand has every Espanso feature.” It is that WayExpand makes the Wayland
+route and its limitations inspectable. A green certification result must come
+from a real evidence artifact, not from protocol availability alone.
 
-**Espanso features NOT in WayExpand:**
-- ❌ Shell scripts in expansions (use `[expansion.command]` instead)
-- ❌ External files (`external_filter`)
-- ❌ Extension system
-- ❌ X11-only backends (XTest)
-- ❌ Global form filling (use app_filter + commands)
+## Common conversions
 
-**WayExpand features you gain:**
-- ✅ Explicit backend diagnostics (`wayexpand doctor`)
-- ✅ App-scoped snippets (`app_filter`)
-- ✅ Command-backed snippets with output integration
-- ✅ Organization policy enforcement
-- ✅ Fleet deployment (Ansible, Puppet)
-- ✅ Structured command execution (no shell injection risk)
-- ✅ Native Wayland protocols (not XWayland translation)
+### Static replacement
 
-## Side-by-Side: Common Tasks
-
-### Simple replacement
-
-**Espanso:**
-```yaml
-matches:
-  - trigger: ";;addr"
-    replace: "123 Main St, Anytown"
-```
-
-**WayExpand:**
 ```toml
 [[expansion]]
 trigger = ";;addr"
-replacement = "123 Main St, Anytown"
+replacement = "123 Main Street, Anytown"
 ```
 
-### Multi-line text
+### Command-backed replacement
 
-**Espanso:**
-```yaml
-matches:
-  - trigger: ";;letter"
-    replace: |
-      Dear Sir or Madam,
-      
-      Thank you for your inquiry.
-      
-      Best regards,
-      John
-```
+WayExpand uses an explicit command object rather than a shell string:
 
-**WayExpand:**
-```toml
-[[expansion]]
-trigger = ";;letter"
-replacement = """Dear Sir or Madam,
-
-Thank you for your inquiry.
-
-Best regards,
-John"""
-```
-
-### Case propagation
-
-**Espanso:**
-```yaml
-matches:
-  - trigger: ";company"
-    replace: "Acme Corp"
-```
-
-Typing `;COMPANY` → `ACME CORP`, `;Company` → `Acme Corp`
-
-**WayExpand:** Identical behavior! Case propagation is automatic.
-
-```toml
-[[expansion]]
-trigger = ";company"
-replacement = "Acme Corp"
-```
-
-### Command execution
-
-**Espanso (shell script):**
-```yaml
-matches:
-  - trigger: ";date"
-    replace: "{{output}}"
-    vars:
-      - name: output
-        type: shell
-        params:
-          cmd: "date '+%Y-%m-%d'"
-```
-
-**WayExpand (structured command):**
 ```toml
 [[expansion]]
 trigger = ";date"
+replacement = ""
 description = "Insert today's date"
 
 [expansion.command]
@@ -186,270 +124,92 @@ args = ["+%Y-%m-%d"]
 timeout_ms = 5000
 ```
 
-**Advantages:**
-- No shell injection risk
-- Clear timeout handling
-- Output size bounded (1 MiB)
-- Can cache results
+Review command snippets as executable code. WayExpand bounds output and
+execution time, but a command still runs with the configured user identity and
+should not be treated as a sandbox or a credential boundary.
 
-### Window-specific snippets
+### App-aware snippets
 
-**Espanso:** Not directly supported
-
-**WayExpand (app_filter):**
 ```toml
 [[expansion]]
-trigger = ";close"
-replacement = "Thanks for using our app!"
-app_filter = ["app-id"]
+trigger = ";;ticket"
+replacement = "https://tickets.example.test/"
+app_filter = ["org.example.TicketApp"]
 ```
 
-Only expands in the specified app (when window tracking is available).
+This is useful only when the active route provides trustworthy window
+tracking. The current shipped tracker is KWin-specific. On other routes an
+app-filtered snippet fails closed instead of expanding globally.
 
-### Categories and organization
+### Categories and tags
 
-**Espanso:**
-```yaml
-matches:
-  - trigger: ";email"
-    replace: "john@example.com"
-    label: "Contact"
-
-  - trigger: ";phone"
-    replace: "+1-555-0123"
-    label: "Contact"
-```
-
-**WayExpand:**
 ```toml
 [[expansion]]
-trigger = ";email"
-replacement = "john@example.com"
+trigger = ";;email"
+replacement = "alex@example.test"
 category = "Contact"
 tags = ["personal", "email"]
-
-[[expansion]]
-trigger = ";phone"
-replacement = "+1-555-0123"
-category = "Contact"
-tags = ["personal", "phone"]
 ```
 
-The GUI filters by category and tags, making large libraries easier to navigate.
+The GUI indexes searchable fields and virtualizes large libraries, so imported
+collections can remain practical without requiring a package service.
 
-## Performance Comparison
+## A safe migration workflow
 
-| Metric | Espanso | WayExpand |
-|--------|---------|-----------|
-| Memory usage (baseline) | ~40 MB | ~50 MB |
-| Memory per 1000 snippets | ~2 MB | ~1-5 MB |
-| CPU (idle) | ~0.1% | <0.1% |
-| CPU (typing) | ~0.5-1% | ~1-2% |
-| Match latency (1000 snippets) | ~0.5 ms | ~0.3 ms |
+1. Export or copy the Espanso match files; keep the originals unchanged.
+2. Run the importer and save both its TOML output and migration report.
+3. Run `wayexpand validate` on the converted file.
+4. Review every warning and unsupported entry, especially forms, scripts,
+   external filters, and dynamic matches.
+5. Start with the recommended safe route shown by setup/diagnostics. Do not
+   enable evdev merely because it offers broader raw keyboard coverage.
+6. Test ordinary text fields, password fields, modifiers, Unicode, terminals,
+   GTK/Qt/Electron applications, focus changes, and your keyboard layouts.
+7. Keep Espanso available until the Wayland route and imported library are
+   proven for your workflow.
 
-Both are lightweight. WayExpand uses a trie-based matcher (O(n) where n is trigger length) vs. Espanso's regex engine.
+Use `wayexpand doctor` when an imported trigger does not expand. It reports
+the daemon state, selected route, backend capabilities, policy restrictions,
+and whether application context is available.
 
-## Installation
+## What WayExpand is trying to make different
 
-**Replace Espanso with WayExpand:**
+WayExpand is not currently a replacement for every Espanso feature. Its
+intended differentiators are:
 
-```bash
-# Stop Espanso
-systemctl --user disable espanso.service
-systemctl --user stop espanso.service
+- a Compatibility Center built from real compositor evidence;
+- one-click diagnosis and conservative route selection;
+- local-only diagnostics that explain why a snippet did or did not expand;
+- administrative policy and fleet-friendly configuration;
+- safe, reviewable imports with compatibility reports;
+- eventually, signed snippet bundles, forms, richer template variables, and
+  rollback/history workflows.
 
-# Install WayExpand (choose one)
-# Ubuntu via the PPA:
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
-# Debian: use the vendored source/release route in docs/PACKAGING.md.
-makepkg -si                       # Arch (preview)
-./scripts/install-user.sh         # Any distro
+The product promise is deliberately narrower and more testable: a Wayland
+text expander that tells you what its current route can provide.
 
-# Import your Espanso config
-wayexpand import espanso ~/.config/espanso/default.yml
+## Troubleshooting
 
-# Start WayExpand
-systemctl --user enable wayexpand-input-method.service
-systemctl --user start wayexpand-input-method.service
+If import reports an unsupported feature, do not delete the source entry. Keep
+it in the report and adapt it manually. Common cases include:
 
-# Launch the GUI
-wayexpand-gui
-```
+- Espanso forms or interactive variables: no general WayExpand equivalent yet;
+- `external_filter` or shell variables: consider a bounded structured command,
+  after reviewing its execution and data exposure;
+- application filters: verify that the current session is a certified KWin
+  route before relying on them;
+- IME/preedit workflows: active composition is currently outside WayExpand's
+  supported scope;
+- evdev fallback: it has no password-field signal and is not the recommended
+  production route.
 
-## Configuration Migration
+Validate and inspect status with:
 
-### Manual steps for advanced configs
-
-If the import report lists unsupported entries or unmapped options, adapt
-those entries manually before relying on equivalent behavior:
-
-**1. Shell commands → Structured commands:**
-
-Before (Espanso):
-```yaml
-matches:
-  - trigger: ";uptime"
-    replace: "{{output}}"
-    vars:
-      - name: output
-        type: shell
-        params:
-          cmd: "uptime"
-```
-
-After (WayExpand):
-```toml
-[[expansion]]
-trigger = ";uptime"
-
-[expansion.command]
-program = "uptime"
-timeout_ms = 5000
-```
-
-**2. Regex → Plain text or app_filter:**
-
-Before (Espanso):
-```yaml
-matches:
-  - trigger: "/(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})/"
-    replace: "$3-$1-$2"
-```
-
-After (WayExpand, plain trigger):
-```toml
-[[expansion]]
-trigger = ";date-us"
-replacement = "2024-01-15"
-```
-
-Or use Python/script to generate combinations.
-
-**3. External filters → Commands:**
-
-Espanso's `external_filter` can often be replaced with `[expansion.command]`:
-
-Before:
-```yaml
-matches:
-  - trigger: ";weather"
-    replace: "{{output}}"
-    vars:
-      - name: output
-        type: script
-        params:
-          args: "/path/to/get-weather.py"
-```
-
-After:
-```toml
-[[expansion]]
-trigger = ";weather"
-
-[expansion.command]
-program = "/path/to/get-weather.py"
-timeout_ms = 5000
-```
-
-### Testing your config
-
-**Validate before switching:**
 ```bash
 wayexpand validate ~/.config/wayexpand/expansions.toml
+wayexpand doctor ~/.config/wayexpand/expansions.toml
+journalctl --user -u wayexpand-input-method.service -n 50
 ```
 
-**Test in the GUI:**
-```bash
-wayexpand-gui
-```
-
-**Full diagnostics:**
-```bash
-wayexpand doctor
-```
-
-## Troubleshooting the Migration
-
-### "Import: unsupported feature"
-
-Some Espanso YAML features can't be automatically converted:
-- `external_filter` → rewrite as `[expansion.command]`
-- `shell_expand` → rewrite as multi-line replacement
-- Extension scripts → manual configuration
-
-**Solution:** Adapt these manually following the examples above.
-
-### "Snippets imported but don't expand"
-
-1. Check daemon is running: `systemctl --user status wayexpand-input-method.service`
-2. Run `wayexpand doctor` to see backend status
-3. Verify config: `wayexpand validate`
-4. Check logs: `journalctl --user -u wayexpand-input-method.service -n 50`
-
-### "Config file syntax errors"
-
-WayExpand uses TOML (not YAML). Common mistakes:
-- `=` instead of `:` for assignments
-- Missing quotes around strings
-- Tabs instead of spaces (TOML requires spaces)
-
-**Solution:** Use `wayexpand validate` to find and fix errors.
-
-### "Certain triggers don't work"
-
-If a trigger works in Espanso but not WayExpand:
-1. Ensure it's not using Regex (WayExpand uses plain text by default)
-2. Check that `match_mode = "trigger"` (or omit, it's the default)
-3. Verify no `app_filter` is blocking it: `wayexpand validate --merge-preview`
-
-## Feature Parity
-
-**Want to keep your Espanso setup alongside WayExpand?**
-
-You can run both:
-```bash
-# Espanso on one port
-systemctl --user start espanso.service
-
-# WayExpand on another
-systemctl --user start wayexpand-input-method.service
-```
-
-They won't interfere — each handles different triggers. Gradually migrate snippets to WayExpand as you get comfortable.
-
-## What You'll Appreciate
-
-1. **Better Wayland support:** Native protocols instead of XWayland translation
-2. **Diagnostics:** `wayexpand doctor` tells you exactly what works
-3. **Reliability:** Config validation before swap means no broken states
-4. **Privacy:** Password-field suppression is available through input-method-v2
-   when the compositor supplies reliable content-purpose information; validate
-   the compositor/client combination before treating it as certified
-5. **Organization:** App-scoped snippets and fleet deployment for teams
-6. **GUI:** Visual editor with live preview (no YAML editing required)
-
-## Uninstalling Espanso
-
-Once you're comfortable with WayExpand:
-
-```bash
-# Remove Espanso
-sudo apt remove espanso       # Ubuntu/Debian
-pacman -R espanso             # Arch
-
-# Optional: clean up config
-rm -rf ~/.config/espanso/
-rm -rf ~/.local/share/espanso/
-```
-
-## Getting Help
-
-- **Troubleshooting:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-- **Full documentation:** [GETTING_STARTED.md](GETTING_STARTED.md)
-- **Configuration reference:** [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)
-- **Support matrix:** [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)
-- **Issues:** https://github.com/cyberducttape/wayexpand/issues
-
-Welcome to WayExpand! If you have suggestions for improving the import process, please open an issue on GitHub.
+See [Getting Started](GETTING_STARTED.md), [Troubleshooting](TROUBLESHOOTING.md),
+and [Support Matrix](SUPPORT_MATRIX.md) for current route-specific guidance.
