@@ -2348,6 +2348,13 @@ impl Strings {
         }
     }
 
+    pub fn status_setup_cancelling(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Cancelling setup…",
+            Language::German => "Einrichtung wird abgebrochen…",
+        }
+    }
+
     pub fn status_setup_done(&self) -> &'static str {
         match self.lang {
             Language::English => "WayExpand is on · type a trigger in any app to try it",

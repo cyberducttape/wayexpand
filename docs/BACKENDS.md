@@ -54,14 +54,17 @@ and prevent key merging at the compositor, a safe delay is added between each
 synthesized character. This means:
 
 - **Normal case** (ei_text available): Sub-millisecond insertion (fast)
-- **Fallback case** (ei_keyboard only): ~10-50ms per character (slower)
+- **Fallback case** (ei_keyboard only): 12ms per character (slower)
 
 For short snippets (signatures, small templates), this is imperceptible.
 For long replacements (multi-paragraph code blocks, long administrative text),
 the total insertion time becomes noticeable:
 
-- 100-character replacement: ~1-5 seconds
-- 1000-character replacement: ~10-50 seconds
+- 100-character replacement: ~1.2 seconds
+- 250-character replacement: ~3 seconds (the hard fallback limit)
+
+Longer replacements are rejected before any erase or insertion because the
+fallback is synchronous and capped at 250 characters.
 
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.

@@ -305,7 +305,9 @@ wayexpand edit
 Recommended, Maximum compatibility, and Experimental modes, then selects the
 safest detected path. `--yes` supports reviewed automation. It never changes
 raw-input permissions or grants portal consent; those remain explicit security
-decisions. Use `wayexpand explain-backend` for protocol-level diagnostics.
+decisions. The GUI's one-click setup runs this command off the UI thread and
+aborts it after 30 seconds; the in-progress operation can also be cancelled.
+Use `wayexpand explain-backend` for protocol-level diagnostics.
 
 For expert manual backend selection, the input-method and evdev services remain
 available:

@@ -56,6 +56,7 @@ const MAX_UNDO_HISTORY: usize = 64;
 const MAX_UNDO_BYTES: usize = 16 * 1024 * 1024;
 const MIN_FIELD_WIDTH: f32 = 120.0;
 const REPLACEMENT_EDITOR_SALT: &str = "wayexpand-replacement-editor";
+const SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RouteRecommendation {
@@ -208,7 +209,7 @@ struct GuiApp {
     playground: playground::Playground,
     try_live_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
-    setup_task: Option<mpsc::Receiver<Result<String, String>>>,
+    setup_task: Option<SetupTask>,
     pending_save: Option<PendingSave>,
     next_save_id: u64,
 }
@@ -232,6 +233,17 @@ enum SaveIntent {
         enabled: bool,
         trigger: String,
     },
+}
+
+struct SetupTask {
+    receiver: mpsc::Receiver<Result<String, String>>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for SetupTask {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+    }
 }
 
 struct PendingSave {
@@ -1462,6 +1474,8 @@ impl GuiApp {
             return;
         }
         let (sender, receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
         // Prefer the CLI installed beside this binary (release archives and
         // development builds), else whatever `wayexpand` is on PATH.
         let cli = env::current_exe()
@@ -1472,33 +1486,49 @@ impl GuiApp {
         let spawned = thread::Builder::new()
             .name("wayexpand-setup".into())
             .spawn(move || {
-                let result = std::process::Command::new(&cli)
-                    .args(["setup", "--yes"])
-                    .stdin(std::process::Stdio::null())
-                    .output()
-                    .map_err(|error| error.to_string())
-                    .and_then(|output| {
-                        let text = |bytes: &[u8]| {
-                            String::from_utf8_lossy(bytes)
-                                .lines()
-                                .rev()
-                                .find(|line| !line.trim().is_empty())
-                                .unwrap_or_default()
-                                .trim()
-                                .trim_start_matches("Error: ")
-                                .to_owned()
-                        };
-                        if output.status.success() {
-                            Ok(text(&output.stdout))
-                        } else {
-                            Err(text(&output.stderr))
+                let result = (|| {
+                    let mut child = std::process::Command::new(&cli)
+                        .args(["setup", "--yes"])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                        .map_err(|error| error.to_string())?;
+                    let deadline = Instant::now() + SETUP_TIMEOUT;
+                    loop {
+                        if worker_cancel.load(Ordering::Acquire) {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err("Setup cancelled".to_owned());
                         }
-                    });
+                        if child
+                            .try_wait()
+                            .map_err(|error| error.to_string())?
+                            .is_some()
+                        {
+                            break;
+                        }
+                        if Instant::now() >= deadline {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err("Setup timed out after 30 seconds".to_owned());
+                        }
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    let output = child
+                        .wait_with_output()
+                        .map_err(|error| error.to_string())?;
+                    if output.status.success() {
+                        Ok(Self::setup_output_text(&output.stdout))
+                    } else {
+                        Err(Self::setup_output_text(&output.stderr))
+                    }
+                })();
                 let _ = sender.send(result);
             });
         match spawned {
             Ok(_) => {
-                self.setup_task = Some(receiver);
+                self.setup_task = Some(SetupTask { receiver, cancel });
                 self.status = Status::info(self.strings.status_setup_running());
             }
             Err(error) => {
@@ -1507,11 +1537,29 @@ impl GuiApp {
         }
     }
 
+    fn setup_output_text(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes)
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default()
+            .trim()
+            .trim_start_matches("Error: ")
+            .to_owned()
+    }
+
+    fn cancel_setup(&mut self) {
+        if let Some(task) = self.setup_task.as_ref() {
+            task.cancel.store(true, Ordering::Release);
+            self.status = Status::info(self.strings.status_setup_cancelling());
+        }
+    }
+
     fn poll_setup(&mut self, ctx: &egui::Context) {
-        let Some(receiver) = self.setup_task.as_ref() else {
+        let Some(task) = self.setup_task.as_ref() else {
             return;
         };
-        match receiver.try_recv() {
+        match task.receiver.try_recv() {
             Ok(result) => {
                 self.setup_task = None;
                 self.status = match result {
@@ -1525,7 +1573,7 @@ impl GuiApp {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.setup_task = None;
-                self.status = Status::error(self.strings.status_setup_failed(""));
+                self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
             }
         }
     }
@@ -1549,6 +1597,9 @@ impl GuiApp {
             .on_hover_text(self.strings.turn_on_tooltip());
         if response.clicked() {
             self.start_setup();
+        }
+        if running && ui.small_button(self.strings.cancel()).clicked() {
+            self.cancel_setup();
         }
     }
 
