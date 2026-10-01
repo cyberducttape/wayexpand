@@ -520,10 +520,17 @@ impl ExpansionEngine {
                 .spawn(move || {
                     while !command_shutdown.load(Ordering::Acquire) {
                         let received = {
-                            worker_receiver
-                                .lock()
-                                .expect("expansion command receiver lock poisoned")
-                                .recv_timeout(Duration::from_millis(50))
+                            match worker_receiver.lock() {
+                                Ok(receiver) => receiver.recv_timeout(Duration::from_millis(50)),
+                                Err(poisoned) => {
+                                    // A worker must not turn a recoverable
+                                    // receiver-poisoning event into a cascade
+                                    // that takes down every remaining worker.
+                                    poisoned
+                                        .into_inner()
+                                        .recv_timeout(Duration::from_millis(50))
+                                }
+                            }
                         };
                         let job = match received {
                             Ok(job) => job,
