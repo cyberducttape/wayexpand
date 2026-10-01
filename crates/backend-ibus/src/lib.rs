@@ -450,7 +450,11 @@ fn expansion_actions(
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
     let enforcement = policy.effective_enforcement_policy();
-    engine.set_commands_disabled(enforcement.disable_commands);
+    // IBus runs as its own user-session process, outside the hardened
+    // wayexpand.service boundary. Until command execution is brokered through
+    // one isolation boundary, command-backed expansions must never execute in
+    // this backend, including in audit mode.
+    engine.set_commands_disabled(true);
     engine.set_title_matching_disabled(enforcement.disable_title_matching);
 }
 
@@ -554,7 +558,7 @@ replacement = "signature"
     }
 
     #[test]
-    fn audit_absolute_command_policy_allows_relative_programs() {
+    fn ibus_disables_commands_even_in_audit_mode() {
         let config = Config::parse(
             r#"
             [[expansion]]
@@ -571,36 +575,23 @@ replacement = "signature"
             require_absolute_commands: true,
             ..OrganizationPolicy::default()
         };
-        let mut engine = ExpansionEngine::new(config).unwrap();
-        assert!(engine.enable_async_commands());
-        let mut adapter = IbusEngineAdapter::with_policy(engine, policy).unwrap();
+        let mut adapter =
+            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
 
         let mut key_actions = Vec::new();
         for character in ":cmd".chars() {
             key_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
-        assert!(key_actions.contains(&IbusAction::CommitText("d".into())));
-        let deadline = Instant::now() + Duration::from_secs(1);
-        let completed = loop {
-            let actions = adapter.drain_completed_commands();
-            if !actions.is_empty() {
-                break actions;
-            }
-            assert!(Instant::now() < deadline, "IBus command did not complete");
-            thread::sleep(Duration::from_millis(5));
-        };
-        assert_eq!(
-            completed,
-            vec![
-                IbusAction::DeleteSurroundingText { nchars: 4 },
-                IbusAction::CommitText("audit-ok".into())
-            ]
-        );
+        assert!(key_actions.iter().all(|action| matches!(
+            action,
+            IbusAction::CommitText(text) if text.chars().count() == 1
+        )));
+        assert!(adapter.drain_completed_commands().is_empty());
     }
 
     #[cfg(unix)]
     #[test]
-    fn command_execution_does_not_block_ibus_key_processing() {
+    fn command_backed_expansions_are_not_started_by_ibus() {
         let config = Config::parse(
             r#"
             [[expansion]]
@@ -613,9 +604,7 @@ replacement = "signature"
             "#,
         )
         .unwrap();
-        let mut engine = ExpansionEngine::new(config).unwrap();
-        assert!(engine.enable_async_commands());
-        let mut adapter = IbusEngineAdapter::new(engine);
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
         let started = Instant::now();
         let mut key_actions = Vec::new();
         for character in ":slow".chars() {
@@ -627,22 +616,7 @@ replacement = "signature"
         );
         assert!(key_actions.contains(&IbusAction::CommitText("w".into())));
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            let actions = adapter.drain_completed_commands();
-            if !actions.is_empty() {
-                assert_eq!(
-                    actions,
-                    vec![
-                        IbusAction::DeleteSurroundingText { nchars: 5 },
-                        IbusAction::CommitText("done".into())
-                    ]
-                );
-                break;
-            }
-            assert!(Instant::now() < deadline, "IBus command did not complete");
-            thread::sleep(Duration::from_millis(5));
-        }
+        assert!(adapter.drain_completed_commands().is_empty());
     }
 
     #[cfg(unix)]
@@ -683,18 +657,17 @@ replacement = "signature"
             actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
 
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while !marker.exists() {
-            assert!(Instant::now() < deadline, "the subprocess did not complete");
-            thread::sleep(Duration::from_millis(5));
-        }
-        thread::sleep(Duration::from_millis(20));
         actions.extend(adapter.drain_completed_commands());
+        thread::sleep(Duration::from_millis(20));
         assert!(
             !actions
                 .iter()
                 .any(|action| matches!(action, IbusAction::CommitText(text) if text.len() > 1)),
-            "oversized command output must not be committed"
+            "command output must not be committed by IBus"
+        );
+        assert!(
+            !marker.exists(),
+            "IBus must not spawn command-backed expansions"
         );
         let _ = std::fs::remove_file(marker);
     }
@@ -722,31 +695,16 @@ replacement = "signature"
         };
         let mut adapter =
             IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
-        assert!(adapter.engine_mut().enable_async_commands());
 
         for character in ":large".chars() {
             adapter.process_key_event(character as u32, 0, 0);
         }
-        let queued = adapter.process_key_event(' ' as u32, 0, 0);
-        assert!(queued.actions.contains(&IbusAction::CommitText(" ".into())));
-
-        let deadline = Instant::now() + Duration::from_secs(1);
-        loop {
-            let actions = adapter.drain_completed_commands();
-            if !actions.is_empty() {
-                assert_eq!(
-                    actions.first(),
-                    Some(&IbusAction::DeleteSurroundingText { nchars: 7 })
-                );
-                assert!(matches!(
-                    actions.get(1),
-                    Some(IbusAction::CommitText(text)) if text.len() == 258
-                ));
-                break;
-            }
-            assert!(Instant::now() < deadline, "the subprocess did not complete");
-            thread::sleep(Duration::from_millis(5));
-        }
+        let actions = adapter.process_key_event(' ' as u32, 0, 0).actions;
+        assert!(actions.iter().all(|action| !matches!(
+            action,
+            IbusAction::CommitText(text) if text.len() > 1
+        )));
+        assert!(adapter.drain_completed_commands().is_empty());
     }
 
     #[test]
@@ -825,7 +783,7 @@ replacement = "signature"
 
     #[cfg(unix)]
     #[test]
-    fn async_word_boundary_command_replaces_delivered_delimiter_transactionally() {
+    fn command_backed_word_boundary_is_forwarded_without_execution() {
         let config: Config = toml::from_str(
             r#"[settings]
 undo_chord = "Ctrl+Z"
@@ -842,39 +800,19 @@ timeout_ms = 1000
         )
         .unwrap();
         let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
-        assert!(adapter.engine_mut().enable_async_commands());
 
         let mut typed_actions = Vec::new();
         for character in ":sig ".chars() {
             typed_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
-        assert_eq!(
-            typed_actions.last(),
-            Some(&IbusAction::CommitText(" ".into()))
-        );
-
-        let deadline = Instant::now() + Duration::from_secs(1);
-        loop {
-            let actions = adapter.drain_completed_commands();
-            if !actions.is_empty() {
-                assert_eq!(
-                    actions,
-                    vec![
-                        IbusAction::DeleteSurroundingText { nchars: 5 },
-                        IbusAction::CommitText("signature ".into()),
-                    ]
-                );
-                let undo = adapter
-                    .engine()
-                    .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
-                    .expect("completed IBus command should be undoable");
-                assert_eq!(undo.matched_text, "signature ");
-                assert_eq!(undo.insert, ":sig ");
-                break;
-            }
-            assert!(Instant::now() < deadline, "IBus command did not complete");
-            thread::sleep(Duration::from_millis(5));
-        }
+        assert!(!typed_actions
+            .iter()
+            .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
+        assert!(!typed_actions.iter().any(|action| matches!(
+            action,
+            IbusAction::CommitText(text) if text.contains("signature")
+        )));
+        assert!(adapter.drain_completed_commands().is_empty());
     }
 
     #[test]

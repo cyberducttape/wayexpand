@@ -67,10 +67,6 @@ impl Factory {
         let engine = ExpansionEngine::new(config).map_err(|error| {
             zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
         })?;
-        let mut engine = engine;
-        if !engine.enable_async_commands() {
-            warn!("IBus command workers could not start; command-backed expansions will be unavailable");
-        }
         let adapter = Arc::new(Mutex::new(
             IbusEngineAdapter::with_policy(engine, (*self.policy).clone()).map_err(|error| {
                 zbus::fdo::Error::Failed(format!(

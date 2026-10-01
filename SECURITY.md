@@ -175,6 +175,12 @@ SRE command-execution boundary:
 - `ProtectHome=read-only`, `ProtectSystem=strict`, no network access
 - Prevents legitimate SRE tools from working: `kubectl`, `aws`, `vault`, `ssh`, etc.
 
+The IBus integration is intentionally stricter until the Action Broker exists:
+IBus runs outside the hardened daemon service, so command-backed expansions are
+disabled in that backend in both safe and audit modes. IBus supports static
+text expansions only; it does not provide an alternate command-execution
+boundary.
+
 **Enterprise/SRE use case conflict:**
 A typical SRE might want:
 ```toml
