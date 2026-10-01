@@ -169,14 +169,51 @@ impl Strings {
         }
     }
 
-    pub fn route_connected_status(&self) -> &'static str { "Expansion route: Connected" }
-    pub fn route_paused_status(&self) -> &'static str { "Expansion route: Paused" }
-    pub fn route_reconnecting_status(&self) -> &'static str { "Expansion route: Reconnecting…" }
-    pub fn route_starting_status(&self) -> &'static str { "Expansion route: Starting…" }
-    pub fn route_degraded_status(&self) -> &'static str { "Expansion route: Degraded" }
-    pub fn route_failed_status(&self) -> &'static str { "Expansion route: Failed" }
-    pub fn route_stopped_status(&self) -> &'static str { "Expansion route: Stopped" }
-    pub fn route_unknown_status(&self) -> &'static str { "Expansion route: Unknown" }
+    pub fn route_connected_status(&self) -> &'static str {
+        "Expansion route: Connected"
+    }
+    pub fn route_paused_status(&self) -> &'static str {
+        "Expansion route: Paused"
+    }
+    pub fn route_reconnecting_status(&self) -> &'static str {
+        "Expansion route: Reconnecting…"
+    }
+    pub fn route_starting_status(&self) -> &'static str {
+        "Expansion route: Starting…"
+    }
+
+    pub fn route_permission_required_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Expansion route: Permission required",
+            Language::German => "Erweiterungsroute: Berechtigung erforderlich",
+        }
+    }
+
+    pub fn route_portal_revoked_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Expansion route: Portal revoked",
+            Language::German => "Erweiterungsroute: Portal widerrufen",
+        }
+    }
+
+    pub fn route_unsupported_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Expansion route: Unsupported",
+            Language::German => "Erweiterungsroute: Nicht unterstützt",
+        }
+    }
+    pub fn route_degraded_status(&self) -> &'static str {
+        "Expansion route: Degraded"
+    }
+    pub fn route_failed_status(&self) -> &'static str {
+        "Expansion route: Failed"
+    }
+    pub fn route_stopped_status(&self) -> &'static str {
+        "Expansion route: Stopped"
+    }
+    pub fn route_unknown_status(&self) -> &'static str {
+        "Expansion route: Unknown"
+    }
 
     pub fn technical_details(&self) -> &'static str {
         match self.lang {
@@ -472,6 +509,34 @@ impl Strings {
         match self.lang {
             Language::English => "Runtime health",
             Language::German => "Laufzeit-Zustand",
+        }
+    }
+
+    pub fn configuration_health(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Configuration",
+            Language::German => "Konfiguration",
+        }
+    }
+
+    pub fn configuration_healthy(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Healthy",
+            Language::German => "In Ordnung",
+        }
+    }
+
+    pub fn configuration_invalid(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Invalid",
+            Language::German => "Ungültig",
+        }
+    }
+
+    pub fn safety(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Safety",
+            Language::German => "Sicherheit",
         }
     }
 

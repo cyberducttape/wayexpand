@@ -72,6 +72,9 @@ pub(crate) enum RouteState {
     Connected,
     Reconnecting,
     Starting,
+    PermissionRequired,
+    PortalRevoked,
+    Unsupported,
     Degraded,
     Failed,
     Stopped,
@@ -244,6 +247,9 @@ pub(crate) fn parse_route_state(response: &str) -> Option<RouteState> {
             "connected" | "running" => RouteState::Connected,
             "reconnecting" => RouteState::Reconnecting,
             "starting" => RouteState::Starting,
+            "permission_required" => RouteState::PermissionRequired,
+            "portal_revoked" => RouteState::PortalRevoked,
+            "unsupported" => RouteState::Unsupported,
             "degraded" => RouteState::Degraded,
             "failed" => RouteState::Failed,
             "stopped" => RouteState::Stopped,
@@ -296,11 +302,23 @@ mod tests {
 
     #[test]
     fn connection_parser_requires_the_daemon_state_field() {
-        assert_eq!(super::parse_route_state("state=connected\n"), Some(RouteState::Connected));
-        assert_eq!(super::parse_route_state("state=stopped\n"), Some(RouteState::Stopped));
+        assert_eq!(
+            super::parse_route_state("state=connected\n"),
+            Some(RouteState::Connected)
+        );
+        assert_eq!(
+            super::parse_route_state("state=stopped\n"),
+            Some(RouteState::Stopped)
+        );
         assert_eq!(super::parse_route_state("running\npaused=false\n"), None);
-        assert_eq!(super::parse_route_state("state=running\n"), Some(RouteState::Connected));
-        assert_eq!(super::parse_route_state("state=reconnecting\n"), Some(RouteState::Reconnecting));
+        assert_eq!(
+            super::parse_route_state("state=running\n"),
+            Some(RouteState::Connected)
+        );
+        assert_eq!(
+            super::parse_route_state("state=reconnecting\n"),
+            Some(RouteState::Reconnecting)
+        );
     }
 
     #[test]

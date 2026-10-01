@@ -1660,20 +1660,36 @@ impl GuiApp {
             None => (self.strings.daemon_unknown_status(), palette.muted),
         };
         let (route_label, route_color) = match self.route_state {
-            Some(runtime::RouteState::Connected) if self.paused =>
-                (self.strings.route_paused_status(), palette.warning),
-            Some(runtime::RouteState::Connected) =>
-                (self.strings.route_connected_status(), palette.success),
-            Some(runtime::RouteState::Reconnecting) =>
-                (self.strings.route_reconnecting_status(), palette.warning),
-            Some(runtime::RouteState::Starting) =>
-                (self.strings.route_starting_status(), palette.warning),
-            Some(runtime::RouteState::Degraded) =>
-                (self.strings.route_degraded_status(), palette.warning),
-            Some(runtime::RouteState::Failed) =>
-                (self.strings.route_failed_status(), palette.danger),
-            Some(runtime::RouteState::Stopped) =>
-                (self.strings.route_stopped_status(), palette.muted),
+            Some(runtime::RouteState::Connected) if self.paused => {
+                (self.strings.route_paused_status(), palette.warning)
+            }
+            Some(runtime::RouteState::Connected) => {
+                (self.strings.route_connected_status(), palette.success)
+            }
+            Some(runtime::RouteState::Reconnecting) => {
+                (self.strings.route_reconnecting_status(), palette.warning)
+            }
+            Some(runtime::RouteState::Starting) => {
+                (self.strings.route_starting_status(), palette.warning)
+            }
+            Some(runtime::RouteState::PermissionRequired) => {
+                (self.strings.route_permission_required_status(), palette.warning)
+            }
+            Some(runtime::RouteState::PortalRevoked) => {
+                (self.strings.route_portal_revoked_status(), palette.warning)
+            }
+            Some(runtime::RouteState::Unsupported) => {
+                (self.strings.route_unsupported_status(), palette.muted)
+            }
+            Some(runtime::RouteState::Degraded) => {
+                (self.strings.route_degraded_status(), palette.warning)
+            }
+            Some(runtime::RouteState::Failed) => {
+                (self.strings.route_failed_status(), palette.danger)
+            }
+            Some(runtime::RouteState::Stopped) => {
+                (self.strings.route_stopped_status(), palette.muted)
+            }
             None => (self.strings.route_unknown_status(), palette.muted),
         };
         let more_actions = self.strings.more_actions();
@@ -1818,6 +1834,41 @@ impl GuiApp {
                     });
                     if self.daemon_reachable == Some(true) {
                         let capabilities = self.daemon_capabilities.unwrap_or_default();
+                        theme::section_header(ui, "", self.strings.configuration_health());
+                        let configuration_ok = !self.fleet_status.starts_with("invalid:");
+                        ui.horizontal(|ui| {
+                            ui.label(self.strings.configuration_file());
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.colored_label(
+                                        if configuration_ok {
+                                            palette.success
+                                        } else {
+                                            palette.danger
+                                        },
+                                        if configuration_ok {
+                                            self.strings.configuration_healthy()
+                                        } else {
+                                            self.strings.configuration_invalid()
+                                        },
+                                    );
+                                },
+                            );
+                        });
+                        theme::section_header(ui, "", self.strings.safety());
+                        self.render_capability_row(
+                            ui,
+                            palette,
+                            "sensitive_focus",
+                            capabilities.capture_sensitive_focus,
+                        );
+                        self.render_capability_row(
+                            ui,
+                            palette,
+                            "atomic_replace",
+                            capabilities.inject_atomic_replace,
+                        );
                         ui.add_space(8.0);
                         theme::section_header(ui, "", self.strings.capture_guarantees());
                         for (key, value) in [
