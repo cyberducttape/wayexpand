@@ -1036,7 +1036,7 @@ fn apply_erases_before_inserting() {
         undoable: true,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &result).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
     assert_eq!(injector.calls, ["erase::x", "insert:value"]);
 }
 
@@ -1075,7 +1075,7 @@ fn apply_uses_atomic_backend_operation_when_available() {
         undoable: true,
     };
     let mut injector = AtomicInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &result).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
     assert_eq!(injector.calls, ["replace::x:value"]);
 }
 
@@ -1091,11 +1091,54 @@ fn apply_replaces_typed_trigger_and_commits_terminator() {
         undoable: true,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &result).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
     assert_eq!(
         injector.calls,
         ["erase::SIG ", "insert:Best regards, ", "left:3"]
     );
+}
+
+struct CursorFailingInjector;
+
+impl crate::TextInjector for CursorFailingInjector {
+    fn name(&self) -> &'static str {
+        "cursor-failing-test"
+    }
+
+    fn erase(&mut self, _: &str) -> Result<(), crate::InjectorError> {
+        Ok(())
+    }
+
+    fn insert(&mut self, _: &str) -> Result<(), crate::InjectorError> {
+        Ok(())
+    }
+
+    fn move_cursor_left(&mut self, _: usize) -> Result<(), crate::InjectorError> {
+        Err(crate::InjectorError {
+            backend: "cursor-failing-test",
+            message: "cursor movement failed".into(),
+            retryable: false,
+        })
+    }
+}
+
+#[test]
+fn cursor_failure_is_reported_after_replacement_is_applied() {
+    let result = ExpansionResult {
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "value".into(),
+        cursor_offset: Some(1),
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+    };
+    let outcome = ExpansionEngine::apply(&mut CursorFailingInjector, &result);
+    assert!(matches!(
+        &outcome,
+        crate::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+    ));
+    assert!(outcome.is_applied());
 }
 
 #[test]
@@ -1387,7 +1430,7 @@ fn propagate_case_tracks_unicode_matched_text_for_deletion() {
     assert_eq!(result.insert, "GRÜSSE");
 
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &result).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
     assert_eq!(injector.calls, ["erase:SS", "insert:GRÜSSE"]);
 }
 
@@ -1524,12 +1567,12 @@ fn undo_applies_by_erasing_the_inserted_text() {
     let mut engine = ExpansionEngine::new(config).unwrap();
     let expansion = engine.process(InputEvent::Text(":sig".into()))[0].clone();
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("an expansion is pending to undo");
-    ExpansionEngine::apply(&mut injector, &undo).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
 
     assert_eq!(
         injector.calls,
@@ -1554,14 +1597,14 @@ fn undo_round_trip_includes_reinserted_word_boundary() {
         .pop()
         .unwrap();
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("a boundary expansion should be undoable");
     assert_eq!(undo.matched_text, "Regards ");
     assert_eq!(undo.insert, ":sig ");
-    ExpansionEngine::apply(&mut injector, &undo).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
 
     assert_eq!(
         injector.calls,
@@ -1600,14 +1643,14 @@ timeout_ms = 500
         .unwrap();
     let expansion = dispatch_and_wait(&mut engine, pending);
     let mut injector = RecordingInjector { calls: Vec::new() };
-    ExpansionEngine::apply(&mut injector, &expansion).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("an async boundary expansion should be undoable");
     assert_eq!(undo.matched_text, "Regards ");
     assert_eq!(undo.insert, ":sig ");
-    ExpansionEngine::apply(&mut injector, &undo).unwrap();
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
 }
 
 #[test]

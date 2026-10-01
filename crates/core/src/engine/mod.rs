@@ -2,6 +2,7 @@ pub mod command_runtime;
 pub mod expansion;
 pub mod matching;
 pub mod transaction;
+pub use transaction::TransactionOutcome;
 
 use command_runtime::{
     configure_command_environment, configure_process_group, kill_process_group_by_pid,

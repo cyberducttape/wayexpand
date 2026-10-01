@@ -3,8 +3,64 @@
 //! Handles undo history, deferred match reservations, and transaction tracking
 //! for expansion results that need to maintain undo semantics across async completion.
 
-use super::{ExpansionEngine, ExpansionError, ExpansionResult};
-use crate::TextInjector;
+use super::{ExpansionEngine, ExpansionResult};
+use crate::{InjectorError, TextInjector};
+
+/// Result of the multi-stage replacement transaction.
+///
+/// The distinction between `NotApplied` and `UnknownPartialFailure` is
+/// intentional: callers may safely restore/retry only the former. Once a
+/// non-atomic backend may have erased or inserted part of the replacement,
+/// the original text must not be replayed automatically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionOutcome {
+    Applied,
+    AppliedWithCursorPositionFailure { source: InjectorError },
+    NotApplied { source: InjectorError },
+    UnknownPartialFailure { source: InjectorError },
+}
+
+impl TransactionOutcome {
+    pub fn is_applied(&self) -> bool {
+        matches!(
+            self,
+            Self::Applied | Self::AppliedWithCursorPositionFailure { .. }
+        )
+    }
+
+    pub fn source(&self) -> Option<&InjectorError> {
+        match self {
+            Self::Applied => None,
+            Self::AppliedWithCursorPositionFailure { source }
+            | Self::NotApplied { source }
+            | Self::UnknownPartialFailure { source } => Some(source),
+        }
+    }
+}
+
+impl std::fmt::Display for TransactionOutcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Applied => formatter.write_str("transaction applied"),
+            Self::AppliedWithCursorPositionFailure { source } => {
+                write!(
+                    formatter,
+                    "replacement applied but cursor repositioning failed: {source}"
+                )
+            }
+            Self::NotApplied { source } => write!(formatter, "transaction not applied: {source}"),
+            Self::UnknownPartialFailure { source } => {
+                write!(formatter, "transaction may be partially applied: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TransactionOutcome {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source().map(|source| source as &dyn std::error::Error)
+    }
+}
 
 /// Return the exact `(restore, erase)` strings for an expansion's undo
 /// transaction.
@@ -32,13 +88,21 @@ impl ExpansionEngine {
     pub fn apply<I: TextInjector + ?Sized>(
         injector: &mut I,
         result: &ExpansionResult,
-    ) -> Result<(), ExpansionError> {
+    ) -> TransactionOutcome {
         // Only a match that has to carry a terminating character through needs
         // new strings. The common case borrows the result directly rather than
         // copying the matched text and the whole replacement on every
         // expansion just to hand out references to the copies.
         match result.reinsert_after {
-            None => injector.replace(&result.matched_text, &result.insert)?,
+            None => {
+                if let Err(source) = injector.replace(&result.matched_text, &result.insert) {
+                    return if injector.capabilities().atomic_replace {
+                        TransactionOutcome::NotApplied { source }
+                    } else {
+                        TransactionOutcome::UnknownPartialFailure { source }
+                    };
+                }
+            }
             Some(character) => {
                 let mut erase =
                     String::with_capacity(result.matched_text.len() + character.len_utf8());
@@ -47,7 +111,13 @@ impl ExpansionEngine {
                 let mut insert = String::with_capacity(result.insert.len() + character.len_utf8());
                 insert.push_str(&result.insert);
                 insert.push(character);
-                injector.replace(&erase, &insert)?;
+                if let Err(source) = injector.replace(&erase, &insert) {
+                    return if injector.capabilities().atomic_replace {
+                        TransactionOutcome::NotApplied { source }
+                    } else {
+                        TransactionOutcome::UnknownPartialFailure { source }
+                    };
+                }
             }
         }
         let trailing_offset = usize::from(result.reinsert_after.is_some());
@@ -56,8 +126,10 @@ impl ExpansionEngine {
             .map(|offset| offset.saturating_add(trailing_offset))
             .filter(|offset| *offset > 0)
         {
-            let _ = injector.move_cursor_left(offset);
+            if let Err(source) = injector.move_cursor_left(offset) {
+                return TransactionOutcome::AppliedWithCursorPositionFailure { source };
+            }
         }
-        Ok(())
+        TransactionOutcome::Applied
     }
 }

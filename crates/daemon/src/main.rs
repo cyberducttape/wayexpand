@@ -35,9 +35,8 @@ use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_libei::portal_token_path;
 use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
-    default_config_path, CommandMetrics, ExpansionEngine, ExpansionError, ExpansionResult,
-    InjectorCapabilities, InputEvent, InputSource, InputSourceCapabilities, TextInjector,
-    WindowContext,
+    default_config_path, CommandMetrics, ExpansionEngine, ExpansionResult, InjectorCapabilities,
+    InputEvent, InputSource, InputSourceCapabilities, TextInjector, WindowContext,
 };
 
 /// How long to wait for physically held keys to be released before injecting
@@ -74,7 +73,7 @@ fn commands_disabled_for_startup(
 #[derive(Debug)]
 struct EventError {
     result: ExpansionResult,
-    source: ExpansionError,
+    source: wayexpand_core::TransactionOutcome,
 }
 
 #[derive(Default)]
@@ -166,15 +165,19 @@ impl std::error::Error for EventError {
 impl EventError {
     fn retryable(&self) -> bool {
         match &self.source {
-            ExpansionError::Injection(error) => error.retryable,
+            wayexpand_core::TransactionOutcome::NotApplied { source } => source.retryable,
+            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+            | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
+            | wayexpand_core::TransactionOutcome::Applied => false,
         }
     }
 
     fn expansion_rejected(&self) -> bool {
         matches!(
             &self.source,
-            ExpansionError::Injection(error)
-                if error.kind() == wayexpand_core::InjectorErrorKind::ExpansionRejected
+            wayexpand_core::TransactionOutcome::NotApplied { source }
+                | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source }
+                if source.kind() == wayexpand_core::InjectorErrorKind::ExpansionRejected
         )
     }
 }
@@ -1411,8 +1414,29 @@ fn process_event(
         if injector.is_some() {
             if let Some(result) = engine.prepare_undo(&chord) {
                 if let Some(backend) = injector.as_deref_mut() {
-                    if let Err(source) = latency::apply(backend, &result) {
-                        return Err(Box::new(EventError { result, source }));
+                    let outcome = latency::apply(backend, &result);
+                    if !outcome.is_applied() {
+                        if matches!(
+                            outcome,
+                            wayexpand_core::TransactionOutcome::NotApplied { .. }
+                        ) {
+                            // Only a transaction known not to have started may
+                            // safely retain the undo record for a retry.
+                            return Err(Box::new(EventError {
+                                result,
+                                source: outcome,
+                            }));
+                        }
+                        return Err(Box::new(EventError {
+                            result,
+                            source: outcome,
+                        }));
+                    }
+                    if let wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
+                        ref source,
+                    } = outcome
+                    {
+                        warn!(%source, "undo applied but cursor repositioning failed");
                     }
                     engine.commit_undo(&result);
                     info!("expansion undone");
@@ -1647,9 +1671,27 @@ fn apply_results(
         if let Some(backend) = injector.as_deref_mut() {
             let inject_result = latency::apply(backend, &result);
 
-            if let Err(source) = inject_result {
-                engine.restore_deferred_match(&result.matched_text);
-                return Err(Box::new(EventError { result, source }));
+            match inject_result {
+                wayexpand_core::TransactionOutcome::Applied => {}
+                wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
+                    ref source,
+                } => {
+                    warn!(%source, "expansion applied but cursor repositioning failed");
+                }
+                wayexpand_core::TransactionOutcome::NotApplied { .. } => {
+                    engine.restore_deferred_match(&result.matched_text);
+                    return Err(Box::new(EventError {
+                        result,
+                        source: inject_result,
+                    }));
+                }
+                wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+                    warn!("expansion transaction may have partially applied; refusing automatic retry");
+                    return Err(Box::new(EventError {
+                        result,
+                        source: inject_result,
+                    }));
+                }
             }
             engine.commit_applied_expansion(&result);
             info!(
@@ -2124,7 +2166,7 @@ mod tests {
         loop {
             let completed = engine.drain_completed_commands();
             for result in &completed {
-                ExpansionEngine::apply(&mut injector, result).unwrap();
+                assert!(ExpansionEngine::apply(&mut injector, result).is_applied());
             }
             let metrics = engine.command_metrics();
             if marker.exists() && metrics.command_queue_depth == 0 && metrics.command_in_flight == 0
@@ -2184,7 +2226,7 @@ mod tests {
             let results = engine.drain_completed_commands();
             if !results.is_empty() {
                 for result in &results {
-                    ExpansionEngine::apply(&mut injector, result).unwrap();
+                    assert!(ExpansionEngine::apply(&mut injector, result).is_applied());
                 }
                 break;
             }
@@ -2361,7 +2403,7 @@ mod tests {
             "libei",
         )
         .unwrap_err();
-        assert!(error.retryable());
+        assert!(!error.retryable());
 
         let mut retry_injector = RecordingInjector { calls: Vec::new() };
         process_event(
@@ -2639,7 +2681,7 @@ mod tests {
             "libei",
         )
         .unwrap_err();
-        assert!(error.retryable());
+        assert!(!error.retryable());
         assert_eq!(error.result.trigger, ":x");
         assert_eq!(error.result.insert, "ok");
     }

@@ -35,7 +35,7 @@ pub use config::{
 pub use engine::{
     run_command, run_command_cancellable, CommandError, CommandMetrics, ExpansionEngine,
     ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent, InsertError,
-    PendingExpansionDispatch, PendingExpansionResult, WindowContext,
+    PendingExpansionDispatch, PendingExpansionResult, TransactionOutcome, WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};

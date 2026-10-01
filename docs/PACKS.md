@@ -69,3 +69,9 @@ Until signed distribution exists:
 
 This conservative boundary is preferable to presenting an unsigned public
 marketplace as trusted.
+
+Pack loading treats pack contents as hostile input. The manifest is limited to
+64 KiB; each snippet file to 1 MiB; the snippets directory to 1,024 entries;
+and the aggregate snippet data to 16 MiB. Pack and snippet paths must be
+regular files/directories (symlinks and special files are rejected), and the
+pack is read and parsed once per operation.

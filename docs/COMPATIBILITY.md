@@ -507,8 +507,10 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   [FOR_SYSADMINS.md](FOR_SYSADMINS.md) for real-world examples.
 - `{{cursor}}` template marker — places the cursor at that position after
   the replacement is typed, instead of at the end. Supported on the libei
-  and wlroots backends; silently has no effect on input-method-v2 (no
-  protocol-level way to move the cursor after committing text).
+  and wlroots backends; input-method-v2 may report a cursor-position failure
+  because it has no protocol-level way to move the cursor after committing
+  text. A replacement that was already applied is never automatically
+  retried as though it had not happened.
 - `Settings::font_scale` (enum, default `"normal"`) — GUI font scaling;
   accepted values are `small`, `normal`, `large`, `extra-large`, and `huge`.
 - `Settings::libei_token_persistence` (bool, default `true`) — persist the

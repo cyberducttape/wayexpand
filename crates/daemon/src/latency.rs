@@ -9,7 +9,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::Instant,
 };
-use wayexpand_core::{ExpansionEngine, ExpansionError, ExpansionResult, TextInjector};
+use wayexpand_core::{ExpansionEngine, ExpansionResult, TextInjector, TransactionOutcome};
 
 const WINDOW_CAPACITY: usize = 1024;
 
@@ -86,10 +86,7 @@ pub fn snapshot() -> Snapshot {
         .snapshot()
 }
 
-pub fn apply(
-    injector: &mut dyn TextInjector,
-    result: &ExpansionResult,
-) -> Result<(), ExpansionError> {
+pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
     measure(|| ExpansionEngine::apply(injector, result))
 }
 
