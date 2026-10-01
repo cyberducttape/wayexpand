@@ -12,7 +12,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 thiserror.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true

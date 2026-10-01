@@ -12,6 +12,7 @@ use std::{
     os::unix::fs::OpenOptionsExt,
     os::unix::net::UnixStream,
     path::PathBuf,
+    sync::mpsc::{self, Receiver, SyncSender},
     time::Duration,
     time::Instant,
 };
@@ -35,6 +36,9 @@ struct App {
     undo: Option<Config>,
     external_edit: bool,
     last_status_poll: Instant,
+    status_requests: Option<SyncSender<()>>,
+    status_results: Option<Receiver<Option<bool>>>,
+    status_in_flight: bool,
     /// Cached visible_indices result and the query that produced it
     visible_cache: Option<(String, Vec<usize>)>,
     /// Cached preview result: (selected_index, trigger, result)
@@ -70,6 +74,9 @@ impl App {
             undo: None,
             external_edit: false,
             last_status_poll: Instant::now(),
+            status_requests: None,
+            status_results: None,
+            status_in_flight: false,
             visible_cache: None,
             preview_cache: None,
             preview_app: String::new(),
@@ -427,13 +434,54 @@ impl App {
     }
 
     fn refresh_daemon_state(&mut self) {
+        if let Some(results) = self.status_results.as_ref() {
+            match results.try_recv() {
+                Ok(paused) => {
+                    if let Some(paused) = paused {
+                        self.paused = paused;
+                    }
+                    self.status_in_flight = false;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.status_results = None;
+                    self.status_requests = None;
+                    self.status_in_flight = false;
+                }
+            }
+        }
         if self.last_status_poll.elapsed() < Duration::from_secs(1) {
             return;
         }
         self.last_status_poll = Instant::now();
-        if let Ok(status) = control_command("status") {
-            self.paused = status.lines().any(|line| line == "paused=true");
+        if self.status_in_flight {
+            return;
         }
+        if let Some(requests) = self.status_requests.as_ref() {
+            if requests.try_send(()).is_ok() {
+                self.status_in_flight = true;
+            }
+        }
+    }
+
+    fn start_status_worker(&mut self) {
+        let (request_sender, request_receiver) = mpsc::sync_channel(1);
+        let (result_sender, result_receiver) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("wayexpand-tui-status".into())
+            .spawn(move || {
+                while request_receiver.recv().is_ok() {
+                    let paused = control_command("status")
+                        .ok()
+                        .map(|status| status.lines().any(|line| line == "paused=true"));
+                    if result_sender.send(paused).is_err() {
+                        break;
+                    }
+                }
+            })
+            .ok();
+        self.status_requests = Some(request_sender);
+        self.status_results = Some(result_receiver);
     }
 }
 
@@ -475,24 +523,36 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let mut app = App::load(path)?;
-    if let Ok(status) = control_command("status") {
-        app.paused = status.lines().any(|line| line == "paused=true");
-    }
+    app.start_status_worker();
     let mut stdout = io::stdout();
     let _terminal_guard = TerminalGuard::enter(&mut stdout)?;
     run(&mut stdout, &mut app)
 }
 
 fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
+    // `draw` clears and repaints the whole screen, so it runs only when
+    // something visible may have changed. Repainting on every 250 ms idle
+    // tick made the TUI flicker, noticeably so over SSH.
+    let mut needs_draw = true;
     loop {
+        let paused = app.paused;
         app.refresh_daemon_state();
-        draw(stdout, app)?;
+        if needs_draw || app.paused != paused {
+            draw(stdout, app)?;
+            needs_draw = false;
+        }
         if !event::poll(Duration::from_millis(250))? {
             continue;
         }
-        let Event::Key(key) = event::read()? else {
-            continue;
+        let key = match event::read()? {
+            Event::Key(key) => key,
+            Event::Resize(..) => {
+                needs_draw = true;
+                continue;
+            }
+            _ => continue,
         };
+        needs_draw = true;
         if handle_key(app, key)? {
             return Ok(());
         }
