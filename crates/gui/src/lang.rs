@@ -1,3 +1,4 @@
+use crate::RouteRecommendation;
 use wayexpand_core::{BackendState, FontScale};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,39 +408,57 @@ impl Strings {
 
     pub fn onboarding_recommended_route(
         &self,
-        keyboard: wayexpand_core::BackendState,
-        injection: wayexpand_core::BackendState,
-    ) -> (&'static str, &'static str) {
-        let ready = matches!(keyboard, wayexpand_core::BackendState::Available)
-            && matches!(injection, wayexpand_core::BackendState::Available);
-        let permission = matches!(keyboard, wayexpand_core::BackendState::RequiresPermission)
-            || matches!(injection, wayexpand_core::BackendState::RequiresPermission);
-        match (self.lang, ready, permission) {
-            (Language::English, true, _) => (
-                "Input Method v2 → libei via the desktop portal",
-                "Detected on this machine",
+        recommendation: Option<RouteRecommendation>,
+    ) -> (String, String) {
+        let Some(route) = recommendation else {
+            return match self.lang {
+                Language::English => (
+                    "No complete safe route detected yet".into(),
+                    "Refresh diagnostics after starting the desktop session".into(),
+                ),
+                Language::German => (
+                    "Noch kein vollständiger sicherer Weg erkannt".into(),
+                    "Diagnose nach dem Start der Desktop-Sitzung aktualisieren".into(),
+                ),
+            };
+        };
+        let capture = route.capture.to_string();
+        let injection = route.injection.to_string();
+        let state = if matches!(
+            (route.capture_state, route.injection_state),
+            (BackendState::Available, BackendState::Available)
+        ) {
+            match self.lang {
+                Language::English => "Detected on this machine",
+                Language::German => "Auf diesem Rechner erkannt",
+            }
+        } else {
+            match self.lang {
+                Language::English => "Permission required before setup",
+                Language::German => "Vor der Einrichtung ist eine Berechtigung nötig",
+            }
+        };
+        let guarantees = match self.lang {
+            Language::English => format!(
+                "sensitive fields: {} · atomic replace: {} · focus tracking: {} · {}",
+                if route.sensitive_fields { "yes" } else { "no" },
+                if route.atomic_replace { "yes" } else { "no" },
+                if route.focus_tracking { "yes" } else { "no" },
+                route.certification,
             ),
-            (Language::German, true, _) => (
-                "Input Method v2 → libei über das Desktop-Portal",
-                "Auf diesem Rechner erkannt",
+            Language::German => format!(
+                "sensible Felder: {} · atomare Ersetzung: {} · Fokusverfolgung: {} · {}",
+                if route.sensitive_fields { "ja" } else { "nein" },
+                if route.atomic_replace { "ja" } else { "nein" },
+                if route.focus_tracking { "ja" } else { "nein" },
+                route.certification,
             ),
-            (Language::English, false, true) => (
-                "Safest detected route requires permission",
-                "Permission required before setup",
-            ),
-            (Language::German, false, true) => (
-                "Sicherster erkannter Weg benötigt eine Berechtigung",
-                "Vor der Einrichtung ist eine Berechtigung nötig",
-            ),
-            (Language::English, false, false) => (
-                "No complete safe route detected yet",
-                "Refresh diagnostics after starting the desktop session",
-            ),
-            (Language::German, false, false) => (
-                "Noch kein vollständiger sicherer Weg erkannt",
-                "Diagnose nach dem Start der Desktop-Sitzung aktualisieren",
-            ),
-        }
+        };
+        let label = match self.lang {
+            Language::English => format!("{capture} → {injection}"),
+            Language::German => format!("{capture} → {injection}"),
+        };
+        (label, format!("{state} · {guarantees}"))
     }
 
     pub fn onboarding_recommended_route_title(&self) -> &'static str {
@@ -1793,6 +1812,27 @@ impl Strings {
         match self.lang {
             Language::English => format!("Save failed: {detail}"),
             Language::German => format!("Speichern fehlgeschlagen: {detail}"),
+        }
+    }
+
+    pub fn status_saving(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Saving configuration…",
+            Language::German => "Konfiguration wird gespeichert…",
+        }
+    }
+
+    pub fn status_save_busy(&self) -> &'static str {
+        match self.lang {
+            Language::English => "A save is already in progress",
+            Language::German => "Ein Speichervorgang läuft bereits",
+        }
+    }
+
+    pub fn status_save_completed_with_newer_edits(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Save completed; newer edits remain unsaved",
+            Language::German => "Gespeichert; neuere Änderungen sind noch nicht gespeichert",
         }
     }
 

@@ -11,7 +11,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -35,6 +35,7 @@ const MAX_EXPANSIONS: usize = 10_000;
 const MAX_HOTKEYS: usize = 1_024;
 const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
 pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
+const CONFIG_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
 static EXPANSION_ID_FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -560,6 +561,8 @@ pub enum ConfigError {
     RootOwnedWriteRequiresAdmin { path: String },
     #[error("configuration changed since it was loaded; reload before saving")]
     RevisionConflict,
+    #[error("configuration {path} is busy; another writer holds its lock")]
+    Busy { path: String },
     #[error(
         "configuration parent {path} is writable by group or other users without sticky protection (mode {mode:04o})"
     )]
@@ -642,6 +645,26 @@ pub enum ConfigError {
 }
 
 impl ConfigError {
+    /// Stable class for frontends that need to present save failures without
+    /// parsing localized or evolving error text.
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::RevisionConflict => "Conflict",
+            Self::Busy { .. } => "Busy",
+            Self::Parse(_) | Self::InvalidUtf8 { .. } => "Parse",
+            Self::Read { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied => {
+                "Permission"
+            }
+            Self::Read { .. } => "IO",
+            Self::InsecurePermissions { .. }
+            | Self::InsecureOwner { .. }
+            | Self::RootOwnedWriteRequiresAdmin { .. }
+            | Self::InsecureParent { .. }
+            | Self::InsecureParentOwner { .. } => "Permission",
+            _ => "Validation",
+        }
+    }
+
     /// Return operator-useful diagnostics without echoing configuration text.
     /// The `Display` implementation remains detailed for library callers, but
     /// user-facing health checks should use this boundary-safe form.
@@ -659,6 +682,7 @@ impl ConfigError {
             Self::RevisionConflict => {
                 "configuration changed externally; reload before saving".into()
             }
+            Self::Busy { .. } => "configuration is busy; another writer holds its lock".into(),
             Self::InsecureParent { mode, .. } => {
                 format!("parent directory is insecure (mode {mode:04o})")
             }
@@ -1647,14 +1671,27 @@ impl ConfigWriteLock {
                 mode,
             });
         }
+        let deadline = Instant::now() + CONFIG_LOCK_TIMEOUT;
         loop {
             // SAFETY: `file` remains alive for this guard's lifetime and owns
             // a valid descriptor. flock does not retain the pointer.
-            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
             if result == 0 {
                 return Ok(Self { _file: file });
             }
             let source = std::io::Error::last_os_error();
+            if source
+                .raw_os_error()
+                .is_some_and(|error| error == libc::EWOULDBLOCK || error == libc::EAGAIN)
+            {
+                if Instant::now() >= deadline {
+                    return Err(ConfigError::Busy {
+                        path: lock_path.display().to_string(),
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(25));
+                continue;
+            }
             if source.kind() != std::io::ErrorKind::Interrupted {
                 return Err(ConfigError::Read {
                     path: lock_path.display().to_string(),

@@ -55,6 +55,72 @@ const MAX_UNDO_HISTORY: usize = 64;
 const MAX_UNDO_BYTES: usize = 16 * 1024 * 1024;
 const MIN_FIELD_WIDTH: f32 = 120.0;
 const REPLACEMENT_EDITOR_SALT: &str = "wayexpand-replacement-editor";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RouteRecommendation {
+    capture: wayexpand_core::BackendKind,
+    injection: wayexpand_core::BackendKind,
+    capture_state: BackendState,
+    injection_state: BackendState,
+    focus_tracking: bool,
+    sensitive_fields: bool,
+    atomic_replace: bool,
+    certification: &'static str,
+}
+
+fn backend_state(statuses: &[BackendStatus], kind: wayexpand_core::BackendKind) -> BackendState {
+    statuses
+        .iter()
+        .find(|status| status.kind == kind)
+        .map(|status| status.state)
+        .unwrap_or(BackendState::NotImplemented)
+}
+
+fn route_recommendation(statuses: &[BackendStatus]) -> Option<RouteRecommendation> {
+    let candidates = [
+        (
+            wayexpand_core::BackendKind::InputMethodV2,
+            wayexpand_core::BackendKind::Libei,
+            true,
+            true,
+        ),
+        (
+            wayexpand_core::BackendKind::Evdev,
+            wayexpand_core::BackendKind::Libei,
+            false,
+            true,
+        ),
+        (
+            wayexpand_core::BackendKind::Evdev,
+            wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
+            false,
+            false,
+        ),
+    ];
+    candidates
+        .into_iter()
+        .find_map(|(capture, injection, sensitive_fields, atomic_replace)| {
+            let capture_state = backend_state(statuses, capture);
+            let injection_state = backend_state(statuses, injection);
+            let usable = matches!(capture_state, BackendState::Available)
+                && matches!(injection_state, BackendState::Available);
+            let permission = matches!(capture_state, BackendState::RequiresPermission)
+                || matches!(injection_state, BackendState::RequiresPermission);
+            (usable || permission).then_some(RouteRecommendation {
+                capture,
+                injection,
+                capture_state,
+                injection_state,
+                focus_tracking: matches!(
+                    backend_state(statuses, wayexpand_core::BackendKind::WindowTracker),
+                    BackendState::Available
+                ),
+                sensitive_fields,
+                atomic_replace,
+                certification: "Experimental",
+            })
+        })
+}
 /// Built-in template variables offered as insert buttons. Their hover
 /// descriptions are translated in `Strings::template_variable_description`.
 const TEMPLATE_VARIABLES: &[&str] = &[
@@ -169,6 +235,36 @@ struct GuiApp {
     try_live_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
     setup_task: Option<mpsc::Receiver<Result<String, String>>>,
+    pending_save: Option<PendingSave>,
+    next_save_id: u64,
+}
+
+enum SaveIntent {
+    Settings,
+    Import(String),
+    Snippet {
+        is_new: bool,
+        index: usize,
+    },
+    Undo,
+    Created,
+    Duplicated,
+    Deleted {
+        index: usize,
+        trigger: String,
+    },
+    Toggled {
+        index: usize,
+        enabled: bool,
+        trigger: String,
+    },
+}
+
+struct PendingSave {
+    request_id: u64,
+    candidate: Config,
+    preview_revision: u64,
+    intent: SaveIntent,
 }
 
 /// The two halves of the settings window: display preferences that take
@@ -453,6 +549,8 @@ impl GuiApp {
             playground: playground::Playground::default(),
             try_live_open: true,
             setup_task: None,
+            pending_save: None,
+            next_save_id: 1,
         })
     }
 
@@ -514,6 +612,7 @@ impl GuiApp {
             self.diagnostics_running = false;
             self.pending_control = 0;
             self.pending_reload_revision = None;
+            self.pending_save = None;
             self.daemon_reachable = Some(false);
             self.route_state = None;
             self.status = Status::error(self.strings.background_runtime_stopped());
@@ -609,6 +708,9 @@ impl GuiApp {
                         }
                     }
                 }
+                runtime::Completion::ConfigSaved { request_id, result } => {
+                    self.finish_save(request_id, result);
+                }
             }
         }
         let now = Instant::now();
@@ -657,33 +759,201 @@ impl GuiApp {
         self.undo.push(entry);
     }
 
-    /// Give the GUI a clear pre-save warning. The definitive check is repeated
-    /// under the core store's writer lock during `save_config_candidate`, so
-    /// this early check is only a UX optimization, not the concurrency guard.
-    fn can_save_config(&mut self) -> bool {
-        let current = Config::load_versioned(&self.path);
-        if !current.is_ok_and(|loaded| loaded.revision == self.config_revision) {
-            self.status = Status::warning(self.strings.status_config_changed_externally());
+    fn queue_save_config(&mut self, candidate: Config, intent: SaveIntent) -> bool {
+        if self.pending_save.is_some() {
+            self.status = Status::warning(self.strings.status_save_busy());
             return false;
         }
+        let request_id = self.next_save_id;
+        self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
+        let pending = PendingSave {
+            request_id,
+            candidate,
+            preview_revision: self.preview_revision,
+            intent,
+        };
+        let Some(sender) = self.runtime_sender.as_ref() else {
+            // Headless unit tests construct GuiApp without the application
+            // runtime. Production starts the coordinator before rendering.
+            let result = runtime::save_config(
+                self.path.clone(),
+                pending.candidate.clone(),
+                self.config_document.clone(),
+                self.config_revision.clone(),
+            );
+            self.pending_save = Some(pending);
+            self.finish_save(request_id, result);
+            return true;
+        };
+        if sender
+            .try_send(runtime::Request::SaveConfig {
+                request_id,
+                path: self.path.clone(),
+                candidate: pending.candidate.clone(),
+                base_document: self.config_document.clone(),
+                expected_revision: self.config_revision.clone(),
+            })
+            .is_err()
+        {
+            self.status = Status::warning(self.strings.status_save_busy());
+            return false;
+        }
+        self.pending_save = Some(pending);
+        self.status = Status::info(self.strings.status_saving());
         true
     }
 
-    fn save_config_candidate(&mut self, candidate: &Config) -> Result<(), String> {
-        candidate.validate().map_err(|error| error.safe_summary())?;
-        let replacement = toml_edit::ser::to_document(candidate)
-            .map_err(|error| format!("could not serialize configuration: {error}"))?;
-        let document =
-            persistence::merge_config_document(self.config_document.clone(), replacement);
-        let revision = Config::save_atomic_text_if_revision_matches(
-            &self.path,
-            &document.to_string(),
-            &self.config_revision,
-        )
-        .map_err(|error| error.safe_summary())?;
+    fn finish_save(
+        &mut self,
+        request_id: u64,
+        result: Result<(wayexpand_core::ConfigRevision, toml_edit::DocumentMut), String>,
+    ) {
+        let Some(pending) = self.pending_save.take() else {
+            return;
+        };
+        if pending.request_id != request_id {
+            self.pending_save = Some(pending);
+            return;
+        }
+        let (revision, document) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.status = if error.starts_with("Conflict:") {
+                    Status::warning(self.strings.status_config_changed_externally())
+                } else if error.starts_with("Busy:") {
+                    Status::warning(self.strings.status_save_busy())
+                } else {
+                    Status::error(self.strings.status_save_failed(&error))
+                };
+                return;
+            }
+        };
         self.config_document = document;
         self.config_revision = revision;
-        Ok(())
+        let newer_draft_exists = self.preview_revision != pending.preview_revision;
+        if newer_draft_exists && matches!(&pending.intent, SaveIntent::Snippet { .. }) {
+            self.status = Status::warning(self.strings.status_save_completed_with_newer_edits());
+            return;
+        }
+        let candidate = pending.candidate;
+        match pending.intent {
+            SaveIntent::Settings => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.remember_undo(previous);
+                self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                self.settings_undo_chord =
+                    self.config.settings.undo_chord.clone().unwrap_or_default();
+                self.settings_open = false;
+                self.settings_error = None;
+                self.set_saved_status(Status::success(self.strings.status_settings_saved()));
+            }
+            SaveIntent::Import(message) => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                self.set_selected_index((!self.config.expansion.is_empty()).then_some(0));
+                self.draft = self
+                    .selected
+                    .map(|index| Draft::from_expansion(&self.config.expansion[index]));
+                self.import_open = false;
+                self.set_saved_status(Status::success(message));
+            }
+            SaveIntent::Snippet { is_new, index } => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                if is_new {
+                    self.new_draft = false;
+                    self.new_draft_origin = None;
+                    self.set_selected_index(Some(index));
+                }
+                self.draft = self
+                    .selected
+                    .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
+                self.preview_input = self
+                    .selected
+                    .map(|selected| self.config.expansion[selected].trigger.clone())
+                    .unwrap_or_default();
+                self.clear_command_preview();
+                self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
+                self.maybe_execute_pending_action();
+            }
+            SaveIntent::Undo => {
+                let entry = self.undo.pop().expect("undo entry remains pending");
+                self.undo_bytes = self.undo_bytes.saturating_sub(entry.estimated_bytes);
+                self.config = candidate;
+                self.rebuild_search_index();
+                let restored_selection = self
+                    .selected_id
+                    .as_ref()
+                    .and_then(|id| self.config.expansion.iter().position(|item| &item.id == id))
+                    .or_else(|| {
+                        self.selected
+                            .filter(|index| *index < self.config.expansion.len())
+                    });
+                self.set_selected_index(restored_selection);
+                self.draft = self
+                    .selected
+                    .map(|index| Draft::from_expansion(&self.config.expansion[index]));
+                self.clear_command_preview();
+                self.set_saved_status(Status::success(self.strings.status_undone()));
+            }
+            SaveIntent::Created => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                self.select(0);
+                self.set_saved_status(Status::success(self.strings.status_created()));
+            }
+            SaveIntent::Duplicated => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                self.select(self.config.expansion.len() - 1);
+                self.set_saved_status(Status::success(self.strings.status_duplicated()));
+            }
+            SaveIntent::Deleted { index, trigger } => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                let next_selection = (!self.config.expansion.is_empty())
+                    .then_some(index.min(self.config.expansion.len() - 1));
+                self.set_selected_index(next_selection);
+                self.draft = self
+                    .selected
+                    .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
+                self.clear_command_preview();
+                self.set_saved_status(Status::success(self.strings.status_deleted(&trigger)));
+            }
+            SaveIntent::Toggled {
+                index,
+                enabled,
+                trigger,
+            } => {
+                let previous = std::mem::replace(&mut self.config, candidate);
+                self.rebuild_search_index();
+                self.remember_undo(previous);
+                if self.selected == Some(index) {
+                    if let Some(draft) = self.draft.as_mut() {
+                        draft.enabled = enabled;
+                    }
+                }
+                let message = if enabled {
+                    self.strings.status_snippet_enabled(&trigger)
+                } else {
+                    self.strings.status_snippet_disabled(&trigger)
+                };
+                self.set_saved_status(Status::success(message));
+            }
+        }
+    }
+
+    fn maybe_execute_pending_action(&mut self) {
+        if self.pending_action.is_some() && !self.draft_is_dirty() {
+            if let Some(action) = self.pending_action.take() {
+                self.execute_action(action);
+            }
+        }
     }
 
     /// Reports a config change that was just saved to disk, then asks the
@@ -809,27 +1079,8 @@ impl GuiApp {
             self.settings_error = Some(detail);
             return;
         }
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.playground.invalidate();
-                self.remember_undo(previous);
-                self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
-                self.settings_undo_chord =
-                    self.config.settings.undo_chord.clone().unwrap_or_default();
-                self.settings_open = false;
-                self.settings_error = None;
-                theme::install_pack(ctx, self.colorpack, self.settings_font_scale);
-                self.set_saved_status(Status::success(self.strings.status_settings_saved()));
-            }
-            Err(error) => {
-                let detail = error;
-                self.status = Status::error(self.strings.status_settings_save_failed(&detail));
-                self.settings_error = Some(detail);
-            }
+        if self.queue_save_config(candidate, SaveIntent::Settings) {
+            theme::install_pack(ctx, self.colorpack, self.settings_font_scale);
         }
     }
 
@@ -865,42 +1116,24 @@ impl GuiApp {
             self.import_preview = Some((imported, report));
             return;
         }
-        if !self.can_save_config() {
+        let message = if let Some(stats) = merge_stats {
+            self.strings.status_import_merged(
+                stats.added,
+                stats.identical_duplicates,
+                stats.conflicts_kept,
+                report.fully_migrated,
+                report.migrated_with_warnings,
+                report.unsupported,
+            )
+        } else {
+            self.strings.status_imported_with_report(
+                report.fully_migrated,
+                report.migrated_with_warnings,
+                report.unsupported,
+            )
+        };
+        if !self.queue_save_config(candidate, SaveIntent::Import(message)) {
             self.import_preview = Some((imported, report));
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                self.set_selected_index((!self.config.expansion.is_empty()).then_some(0));
-                self.draft = self
-                    .selected
-                    .map(|index| Draft::from_expansion(&self.config.expansion[index]));
-                self.import_open = false;
-                let message = if let Some(stats) = merge_stats {
-                    self.strings.status_import_merged(
-                        stats.added,
-                        stats.identical_duplicates,
-                        stats.conflicts_kept,
-                        report.fully_migrated,
-                        report.migrated_with_warnings,
-                        report.unsupported,
-                    )
-                } else {
-                    self.strings.status_imported_with_report(
-                        report.fully_migrated,
-                        report.migrated_with_warnings,
-                        report.unsupported,
-                    )
-                };
-                self.set_saved_status(Status::success(message));
-            }
-            Err(error) => {
-                self.status = Status::error(self.strings.status_import_save_failed(&error));
-                self.import_preview = Some((imported, report));
-            }
         }
     }
 
@@ -1221,31 +1454,7 @@ impl GuiApp {
             self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
             return;
         }
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                if is_new {
-                    self.new_draft = false;
-                    self.new_draft_origin = None;
-                    self.set_selected_index(Some(index));
-                }
-                self.draft = self
-                    .selected
-                    .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
-                self.preview_input = self
-                    .selected
-                    .map(|selected| self.config.expansion[selected].trigger.clone())
-                    .unwrap_or_default();
-                self.clear_command_preview();
-                self.set_saved_status(Status::success(self.strings.status_snippet_saved()));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_save_failed(&error)),
-        }
+        self.queue_save_config(candidate, SaveIntent::Snippet { is_new, index });
     }
 
     /// One-click setup: run `wayexpand setup --yes`, which configures only
@@ -1370,45 +1579,7 @@ impl GuiApp {
                 return;
             }
         };
-        // Save the restored config to disk *before* committing it to GUI
-        // state or popping it off the undo stack. Doing it in the opposite
-        // order (as before) meant a failed save still left the undo entry
-        // consumed and the in-memory config changed, with disk untouched --
-        // GUI, daemon, and disk would all disagree about what the config is.
-        if !self.can_save_config() {
-            return;
-        }
-        if let Err(error) = self.save_config_candidate(&restored) {
-            self.status = Status::error(self.strings.status_undo_save_failed(&error));
-            return;
-        }
-        let entry = self.undo.pop().expect("checked non-empty above");
-        self.undo_bytes = self.undo_bytes.saturating_sub(entry.estimated_bytes);
-        self.config = restored;
-        self.rebuild_search_index();
-        let restored_selection = self
-            .selected_id
-            .as_ref()
-            .and_then(|id| {
-                self.config
-                    .expansion
-                    .iter()
-                    .position(|entry| &entry.id == id)
-            })
-            .or_else(|| {
-                self.selected
-                    .filter(|index| *index < self.config.expansion.len())
-            });
-        self.set_selected_index(restored_selection);
-        self.draft = self
-            .selected
-            .map(|index| Draft::from_expansion(&self.config.expansion[index]));
-        self.preview_input = self
-            .selected
-            .map(|index| self.config.expansion[index].trigger.clone())
-            .unwrap_or_default();
-        self.clear_command_preview();
-        self.set_saved_status(Status::success(self.strings.status_undone()));
+        self.queue_save_config(restored, SaveIntent::Undo);
     }
 
     fn create_new_snippet(&mut self) {
@@ -1464,19 +1635,7 @@ impl GuiApp {
             enabled: true,
             propagate_case: false,
         });
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                self.select(0);
-                self.set_saved_status(Status::success(self.strings.status_created()));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_create_failed(&error)),
-        }
+        self.queue_save_config(candidate, SaveIntent::Created);
     }
 
     fn duplicate_selected(&mut self) {
@@ -1504,19 +1663,7 @@ impl GuiApp {
         }
         let mut candidate = self.config.clone();
         candidate.expansion.push(duplicate);
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                self.select(self.config.expansion.len() - 1);
-                self.set_saved_status(Status::success(self.strings.status_duplicated()));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_duplicate_failed(&error)),
-        }
+        self.queue_save_config(candidate, SaveIntent::Duplicated);
     }
 
     fn perform_delete_selected(&mut self) {
@@ -1527,25 +1674,7 @@ impl GuiApp {
         let mut candidate = self.config.clone();
         let trigger = candidate.expansion[index].trigger.clone();
         candidate.expansion.remove(index);
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                let next_selection = (!self.config.expansion.is_empty())
-                    .then_some(index.min(self.config.expansion.len() - 1));
-                self.set_selected_index(next_selection);
-                self.draft = self
-                    .selected
-                    .map(|selected| Draft::from_expansion(&self.config.expansion[selected]));
-                self.clear_command_preview();
-                self.set_saved_status(Status::success(self.strings.status_deleted(&trigger)));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_delete_failed(&error)),
-        }
+        self.queue_save_config(candidate, SaveIntent::Deleted { index, trigger });
     }
 
     /// Flips a snippet's enabled flag directly from the sidebar dot and
@@ -1561,28 +1690,14 @@ impl GuiApp {
         candidate.expansion[index].enabled = !candidate.expansion[index].enabled;
         let now_enabled = candidate.expansion[index].enabled;
         let trigger = candidate.expansion[index].trigger.clone();
-        if !self.can_save_config() {
-            return;
-        }
-        match self.save_config_candidate(&candidate) {
-            Ok(()) => {
-                let previous = std::mem::replace(&mut self.config, candidate);
-                self.rebuild_search_index();
-                self.remember_undo(previous);
-                if self.selected == Some(index) {
-                    if let Some(draft) = self.draft.as_mut() {
-                        draft.enabled = now_enabled;
-                    }
-                }
-                let message = if now_enabled {
-                    self.strings.status_snippet_enabled(&trigger)
-                } else {
-                    self.strings.status_snippet_disabled(&trigger)
-                };
-                self.set_saved_status(Status::success(message));
-            }
-            Err(error) => self.status = Status::error(self.strings.status_toggle_failed(&error)),
-        }
+        self.queue_save_config(
+            candidate,
+            SaveIntent::Toggled {
+                index,
+                enabled: now_enabled,
+                trigger,
+            },
+        );
     }
 
     /// Renders a live preview for a plain (non-command) draft. Must never be
@@ -2748,38 +2863,15 @@ impl GuiApp {
                         status.kind == wayexpand_core::BackendKind::WindowTracker
                             && status.state == BackendState::Available
                     });
-                    let best_probe = |matches: fn(wayexpand_core::BackendKind) -> bool| {
-                        self.backend_status
-                            .iter()
-                            .filter(|status| matches(status.kind))
-                            .map(|status| status.state)
-                            .max_by_key(|state| match state {
-                                BackendState::Available => 4,
-                                BackendState::RequiresPermission => 3,
-                                BackendState::Implemented => 2,
-                                BackendState::Unavailable => 1,
-                                BackendState::NotImplemented => 0,
-                            })
-                            .unwrap_or(BackendState::NotImplemented)
-                    };
-                    let keyboard_probe = best_probe(|kind| {
-                        matches!(
-                            kind,
-                            wayexpand_core::BackendKind::InputMethodV2
-                                | wayexpand_core::BackendKind::Evdev
-                        )
-                    });
-                    let injection_probe = best_probe(|kind| {
-                        matches!(
-                            kind,
-                            wayexpand_core::BackendKind::Libei
-                                | wayexpand_core::BackendKind::WlrootsVirtualKeyboard
-                                | wayexpand_core::BackendKind::Uinput
-                        )
-                    });
-                    let (recommended_route, recommended_route_detail) = self
-                        .strings
-                        .onboarding_recommended_route(keyboard_probe, injection_probe);
+                    let recommendation = route_recommendation(&self.backend_status);
+                    let keyboard_probe = recommendation
+                        .map(|route| route.capture_state)
+                        .unwrap_or(BackendState::NotImplemented);
+                    let injection_probe = recommendation
+                        .map(|route| route.injection_state)
+                        .unwrap_or(BackendState::NotImplemented);
+                    let (recommended_route, recommended_route_detail) =
+                        self.strings.onboarding_recommended_route(recommendation);
                     let daemon_running = self.daemon_reachable == Some(true);
                     ui.vertical_centered(|ui| {
                         ui.add_space(26.0);
@@ -4337,6 +4429,40 @@ mod tests {
     }
 
     #[test]
+    fn route_recommendation_preserves_capture_and_injection_topology() {
+        let statuses = vec![
+            BackendStatus {
+                kind: wayexpand_core::BackendKind::InputMethodV2,
+                state: BackendState::Implemented,
+                detail: String::new(),
+            },
+            BackendStatus {
+                kind: wayexpand_core::BackendKind::Evdev,
+                state: BackendState::Available,
+                detail: String::new(),
+            },
+            BackendStatus {
+                kind: wayexpand_core::BackendKind::Libei,
+                state: BackendState::Unavailable,
+                detail: String::new(),
+            },
+            BackendStatus {
+                kind: wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
+                state: BackendState::Available,
+                detail: String::new(),
+            },
+        ];
+        let route = route_recommendation(&statuses).expect("complete route");
+        assert_eq!(route.capture, wayexpand_core::BackendKind::Evdev);
+        assert_eq!(
+            route.injection,
+            wayexpand_core::BackendKind::WlrootsVirtualKeyboard
+        );
+        assert!(!route.sensitive_fields);
+        assert!(!route.atomic_replace);
+    }
+
+    #[test]
     fn import_merge_deduplicates_and_keeps_existing_trigger_conflicts() {
         let current = Config {
             expansion: vec![
@@ -4948,10 +5074,16 @@ mod tests {
 
         let mut stale_candidate = app.config.clone();
         stale_candidate.expansion[0].replacement = "stale GUI edit".into();
-        assert!(app
-            .save_config_candidate(&stale_candidate)
-            .unwrap_err()
-            .contains("changed externally"));
+        let replacement = toml_edit::ser::to_document(&stale_candidate).unwrap();
+        let document = persistence::merge_config_document(app.config_document.clone(), replacement);
+        assert!(Config::save_atomic_text_if_revision_matches(
+            &path,
+            &document.to_string(),
+            &app.config_revision,
+        )
+        .unwrap_err()
+        .safe_summary()
+        .contains("changed externally"));
         assert_eq!(
             Config::load(&path).unwrap().expansion[0].replacement,
             "external edit"
@@ -5578,7 +5710,14 @@ mod tests {
         let mut candidate = app.config.clone();
         candidate.expansion[0].replacement = "Best regards".into();
 
-        app.save_config_candidate(&candidate).unwrap();
+        let replacement = toml_edit::ser::to_document(&candidate).unwrap();
+        let document = persistence::merge_config_document(app.config_document.clone(), replacement);
+        Config::save_atomic_text_if_revision_matches(
+            &path,
+            &document.to_string(),
+            &app.config_revision,
+        )
+        .unwrap();
         let saved = fs::read_to_string(&path).unwrap();
         assert!(saved.starts_with("# Maintained by the team; keep this note."));
         assert!(saved.contains("replacement = \"Best regards\""));

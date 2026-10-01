@@ -31,6 +31,13 @@ pub(crate) enum Request {
     ReloadConfig {
         path: PathBuf,
     },
+    SaveConfig {
+        request_id: u64,
+        path: PathBuf,
+        candidate: Config,
+        base_document: DocumentMut,
+        expected_revision: wayexpand_core::ConfigRevision,
+    },
 }
 
 pub(crate) enum Operation {
@@ -46,6 +53,10 @@ pub(crate) enum Completion {
         result: anyhow::Result<String>,
     },
     ConfigReloaded(Box<Result<ReloadSnapshot, String>>),
+    ConfigSaved {
+        request_id: u64,
+        result: Result<(wayexpand_core::ConfigRevision, DocumentMut), String>,
+    },
 }
 
 pub(crate) struct ReloadSnapshot {
@@ -147,6 +158,16 @@ pub(crate) fn start() -> std::io::Result<(
                     Request::ReloadConfig { path } => {
                         Completion::ConfigReloaded(Box::new(load_config_snapshot(path)))
                     }
+                    Request::SaveConfig {
+                        request_id,
+                        path,
+                        candidate,
+                        base_document,
+                        expected_revision,
+                    } => Completion::ConfigSaved {
+                        request_id,
+                        result: save_config(path, candidate, base_document, expected_revision),
+                    },
                     Request::Diagnostics { .. } => continue,
                 };
                 if control_completion_sender.send(completion).is_err() {
@@ -173,6 +194,27 @@ pub(crate) fn start() -> std::io::Result<(
             }
         })?;
     Ok((control_sender, diagnostics_sender, completion_receiver))
+}
+
+pub(crate) fn save_config(
+    path: PathBuf,
+    candidate: Config,
+    base_document: DocumentMut,
+    expected_revision: wayexpand_core::ConfigRevision,
+) -> Result<(wayexpand_core::ConfigRevision, DocumentMut), String> {
+    candidate
+        .validate()
+        .map_err(|error| format!("Validation: {}", error.safe_summary()))?;
+    let replacement = toml_edit::ser::to_document(&candidate)
+        .map_err(|error| format!("Validation: could not serialize configuration: {error}"))?;
+    let document = crate::persistence::merge_config_document(base_document, replacement);
+    let revision = Config::save_atomic_text_if_revision_matches(
+        path,
+        &document.to_string(),
+        &expected_revision,
+    )
+    .map_err(|error| format!("{}: {}", error.category(), error.safe_summary()))?;
+    Ok((revision, document))
 }
 
 fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
