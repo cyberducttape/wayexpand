@@ -6,6 +6,9 @@ runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 config_dir=${XDG_CONFIG_HOME:-"$HOME/.config"}/wayexpand
 state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}/wayexpand
 test_id=$$
+test_root="$runtime_dir/wayexpand-action-broker-audit-test.$test_id"
+config_dir="$test_root/config"
+state_root="$test_root/state"
 state_dir="$state_root/ci-audit-test.$test_id"
 unit_name=wayexpand-action-broker-audit-test-$test_id
 socket="$runtime_dir/wayexpand-broker-audit-test.$test_id.sock"
@@ -20,7 +23,7 @@ binary="$project_dir/target/debug/wayexpand-action-broker"
 cleanup() {
     systemctl --user stop "$unit_name.service" >/dev/null 2>&1 || true
     rm -f "$socket" "$config"
-    rm -rf "$state_dir"
+    rm -rf "$test_root"
 }
 trap cleanup EXIT INT TERM
 
@@ -50,7 +53,7 @@ systemd-run --user \
     --property=PrivateTmp=yes \
     --property=ProtectSystem=strict \
     --property=ProtectHome=read-only \
-    --property=ReadWritePaths="$runtime_dir $config_dir $state_root" \
+    --property=ReadWritePaths="$runtime_dir $test_root" \
     -- "$binary" --config "$config" --socket "$socket" \
     >"$state_dir/systemd-run.log" 2>&1 &
 

@@ -276,7 +276,19 @@ jobs:
             exit 1
           fi
       - name: Verify commit identity policy
-        run: bash scripts/check-commit-identity.sh HEAD
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            base='${{ github.event.before }}'
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+          else
+            base=''
+          fi
+          if [ -n "$base" ]; then
+            bash scripts/check-commit-identity.sh "$base..HEAD"
+          else
+            bash scripts/check-commit-identity.sh HEAD
+          fi
       - name: Install metadata validators
         run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils
       - name: Validate desktop metadata
@@ -382,6 +394,8 @@ jobs:
           done
       - name: Build RPM package and inspect manifest
         run: |
+          deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
+          test -n "$deb"
           version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           top=$(mktemp -d)
           source_dir="$top/sources/wayexpand-${version}"
