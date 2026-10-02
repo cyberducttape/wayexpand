@@ -28,9 +28,9 @@ pub use backend::{
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError, ConfigRevision,
-    ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy,
-    Settings,
+    validate_command_config, AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError,
+    ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
+    OrganizationPolicy, Settings,
 };
 pub use engine::{
     run_command, run_command_cancellable, CommandError, CommandMetrics, ExpansionEngine,

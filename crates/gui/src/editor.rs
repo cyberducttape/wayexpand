@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
-use wayexpand_core::{CommandConfig, CommandEnvironment, ExpansionConfig, MatchMode};
+use wayexpand_core::{
+    validate_command_config, CommandConfig, CommandEnvironment, ExpansionConfig, MatchMode,
+};
 
 const MAX_COMMAND_ARGS: usize = 32;
 const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
@@ -191,7 +193,7 @@ impl Draft {
         if cache_ms > MAX_COMMAND_CACHE_MS {
             anyhow::bail!("cache duration must not exceed 60000 milliseconds");
         }
-        Ok(Some(CommandConfig {
+        let command = CommandConfig {
             action: self.command_action_mode.then(|| action.to_owned()),
             program: if self.command_action_mode {
                 String::new()
@@ -203,7 +205,9 @@ impl Draft {
             cache_ms,
             environment: self.command_environment,
             pass_env: self.command_pass_env.clone(),
-        }))
+        };
+        validate_command_config(&command).map_err(anyhow::Error::msg)?;
+        Ok(Some(command))
     }
 }
 

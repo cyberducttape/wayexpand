@@ -571,6 +571,61 @@ pub struct CommandConfig {
     pub pass_env: Vec<String>,
 }
 
+/// Validate the invariants shared by expansion and hotkey commands.
+///
+/// Context-specific checks, such as organization policy for executable paths,
+/// remain at the owning configuration layer. Keeping the command shape and
+/// resource limits here prevents the two command consumers from drifting.
+pub fn validate_command_config(command: &CommandConfig) -> Result<(), &'static str> {
+    let has_action = command.action.is_some();
+    let has_program = !command.program.trim().is_empty();
+    if has_action == has_program {
+        return Err("command must specify exactly one of action or program");
+    }
+    if let Some(action) = &command.action {
+        if action.trim().is_empty()
+            || action.chars().count() > MAX_COMMAND_PROGRAM_CHARS
+            || action.contains('\0')
+        {
+            return Err("action ID is empty, too long, or contains NUL");
+        }
+    }
+    if command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS || command.program.contains('\0')
+    {
+        return Err("program is too long or contains NUL");
+    }
+    if command.args.len() > MAX_COMMAND_ARGS {
+        return Err("too many arguments");
+    }
+    let mut argument_chars = 0usize;
+    for argument in &command.args {
+        if argument.chars().count() > MAX_COMMAND_ARG_CHARS || argument.contains('\0') {
+            return Err("argument is too long or contains NUL");
+        }
+        argument_chars = argument_chars.saturating_add(argument.chars().count());
+        if argument_chars > MAX_COMMAND_ARG_DATA_CHARS {
+            return Err("argument data is too large");
+        }
+    }
+    if !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&command.timeout_ms) {
+        return Err("timeout must be between 1 and 5000 milliseconds");
+    }
+    if command.cache_ms > MAX_COMMAND_CACHE_MS {
+        return Err("cache must be between 0 and 60000 milliseconds");
+    }
+    if command.pass_env.len() > MAX_COMMAND_ENV_VARS
+        || command.pass_env.iter().any(|name| {
+            name.is_empty()
+                || name.chars().count() > MAX_COMMAND_ENV_NAME_CHARS
+                || name.contains('=')
+                || name.contains('\0')
+        })
+    {
+        return Err("pass_env contains an invalid or excessive environment name");
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum CommandEnvironment {
@@ -1200,30 +1255,8 @@ impl Config {
                     reason: "description is too long or contains NUL",
                 });
             }
-            if (binding.command.action.is_some() && !binding.command.program.trim().is_empty())
-                || (binding.command.action.is_none() && binding.command.program.trim().is_empty())
-                || binding.command.action.as_ref().is_some_and(|action| {
-                    action.trim().is_empty()
-                        || action.chars().count() > MAX_COMMAND_PROGRAM_CHARS
-                        || action.contains('\0')
-                })
-                || binding.command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
-                || binding.command.program.contains('\0')
-                || binding.command.args.len() > MAX_COMMAND_ARGS
-                || !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&binding.command.timeout_ms)
-                || binding.command.cache_ms > MAX_COMMAND_CACHE_MS
-                || binding.command.pass_env.len() > MAX_COMMAND_ENV_VARS
-                || binding.command.pass_env.iter().any(|name| {
-                    name.is_empty()
-                        || name.chars().count() > MAX_COMMAND_ENV_NAME_CHARS
-                        || name.contains('=')
-                        || name.contains('\0')
-                })
-            {
-                return Err(ConfigError::InvalidHotkey {
-                    index,
-                    reason: "command limits are invalid",
-                });
+            if let Err(reason) = validate_command_config(&binding.command) {
+                return Err(ConfigError::InvalidHotkey { index, reason });
             }
             if self
                 .organization
@@ -1355,21 +1388,8 @@ impl Config {
                 return Err(ConfigError::InvalidCategory { index });
             }
             if let Some(command) = &expansion.command {
-                if (command.action.is_some() && !command.program.trim().is_empty())
-                    || (command.action.is_none() && command.program.trim().is_empty())
-                {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "command must specify exactly one of action or program",
-                    });
-                }
-                if command.program.chars().count() > MAX_COMMAND_PROGRAM_CHARS
-                    || command.program.contains('\0')
-                {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "program is too long or contains NUL",
-                    });
+                if let Err(reason) = validate_command_config(command) {
+                    return Err(ConfigError::InvalidCommand { index, reason });
                 }
                 if command.action.is_none()
                     && self.organization.command_path_is_blocked(&command.program)
@@ -1377,53 +1397,6 @@ impl Config {
                     return Err(ConfigError::InvalidCommand {
                         index,
                         reason: "program must be an absolute path by organization policy",
-                    });
-                }
-                if command.args.len() > MAX_COMMAND_ARGS {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "too many arguments",
-                    });
-                }
-                let mut argument_chars = 0usize;
-                for argument in &command.args {
-                    if argument.chars().count() > MAX_COMMAND_ARG_CHARS || argument.contains('\0') {
-                        return Err(ConfigError::InvalidCommand {
-                            index,
-                            reason: "argument is too long or contains NUL",
-                        });
-                    }
-                    argument_chars = argument_chars.saturating_add(argument.chars().count());
-                    if argument_chars > MAX_COMMAND_ARG_DATA_CHARS {
-                        return Err(ConfigError::InvalidCommand {
-                            index,
-                            reason: "argument data is too large",
-                        });
-                    }
-                }
-                if !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&command.timeout_ms) {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "timeout must be between 1 and 5000 milliseconds",
-                    });
-                }
-                if command.cache_ms > MAX_COMMAND_CACHE_MS {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "cache must be between 0 and 60000 milliseconds",
-                    });
-                }
-                if command.pass_env.len() > MAX_COMMAND_ENV_VARS
-                    || command.pass_env.iter().any(|name| {
-                        name.is_empty()
-                            || name.chars().count() > MAX_COMMAND_ENV_NAME_CHARS
-                            || name.contains('=')
-                            || name.contains('\0')
-                    })
-                {
-                    return Err(ConfigError::InvalidCommand {
-                        index,
-                        reason: "pass_env contains an invalid or excessive environment name",
                     });
                 }
             } else if let Err(source) =
@@ -2294,6 +2267,24 @@ mod tests {
             config.expansion[0].command.as_ref().unwrap().program,
             "/usr/bin/git"
         );
+    }
+
+    #[test]
+    fn expansion_rejects_empty_named_action_ids() {
+        let error = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":cluster"
+            replacement = ""
+            command = { action = "" }
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::InvalidCommand { index: 0, .. }
+        ));
     }
 
     #[test]
