@@ -41,6 +41,12 @@ local, offline, no account, no telemetry.
 
 ## Install
 
+For production or managed deployment, use the release binaries and packages
+with their checksums/provenance attached to a GitHub release, or the Ubuntu
+PPA. These routes do not require Rust or Cargo on the target machine. Use the
+source installer for development, unavailable architectures, or when building
+an organization-maintained package.
+
 On Ubuntu:
 
 ```sh
@@ -50,7 +56,7 @@ sudo apt install wayexpand
 wayexpand-gui
 ```
 
-From source (any distribution):
+From source (development or local packaging):
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
@@ -62,7 +68,9 @@ wayexpand-gui
 New GitHub releases include installable `.deb` and `.rpm` packages for x86_64
 and an aarch64 archive: `sudo apt install ./wayexpand_*_amd64.deb` or
 `sudo dnf install ./wayexpand-*.x86_64.rpm`. Fedora/Copr, AUR, and Flathub are
-not published yet; see [Packaging](docs/PACKAGING.md).
+not published yet, so those users should use the matching release asset or
+their distribution's maintained package build; see [Packaging](docs/PACKAGING.md)
+for the current status.
 
 The installers never run as root, enable services, grant raw-input access, or
 accept portal consent for you.

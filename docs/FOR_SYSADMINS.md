@@ -31,9 +31,9 @@ cd wayexpand && makepkg -si
 
 **Packaging Status:**
 - ✅ Ubuntu: Available via PPA
-- ⚠️ Debian: Per-release x86_64 .deb planned; no APT repository, PPA is Ubuntu-only
+- ✅ Debian: Per-release x86_64 .deb on new tags; no APT repository, PPA is Ubuntu-only
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
-- ⚠️ Fedora: Per-release x86_64 RPM planned; no Copr repository published
+- ✅ Fedora: Per-release x86_64 RPM on new tags; no Copr repository published
 - 🔧 Others: Build from source using `./scripts/install-user.sh`
 
 **Admin overhead:** Minimal. Users manage their own configs.

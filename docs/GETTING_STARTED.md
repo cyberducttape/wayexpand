@@ -108,8 +108,8 @@ For the output-driven recovery flow, go directly to the
 
 ### Architecture note: aarch64
 
-The release archive currently has a pre-built Linux binary only for `x86_64`.
-New tagged releases include a native aarch64 archive; earlier releases may not.
+New tagged releases include pre-built Linux binaries for `x86_64` and native
+`aarch64`; earlier releases may be x86_64-only.
 Fedora Copr is not published yet; Fedora users can build from source or the
 maintained RPM spec for now. See the [packaging guide](PACKAGING.md) for the
 current release and repository status.

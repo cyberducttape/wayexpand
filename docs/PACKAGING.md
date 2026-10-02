@@ -4,12 +4,12 @@ This guide covers building and maintaining WayExpand packages for different Linu
 
 ## Rust toolchain policy
 
-WayExpand supports Rust **1.95 or newer**. This is the project MSRV and is
-declared in the workspace `Cargo.toml`; CI checks Rust 1.95 and the pinned
-project toolchain in `rust-toolchain.toml` (currently Rust 1.96.0).
-Distribution packages must provide at least `rustc 1.95` and `cargo 1.95`.
-Older Debian/Ubuntu releases may need a maintained Rust toolchain from the
-distribution backports or an isolated toolchain installation.
+WayExpand supports Rust **1.95 or newer** for source builds. This is the
+project MSRV and is declared in the workspace `Cargo.toml`; CI checks Rust 1.95
+and the pinned project toolchain in `rust-toolchain.toml` (currently Rust
+1.96.0). End users installing a release `.deb`, `.rpm`, PPA package, or binary
+archive do not need Rust or Cargo on the target machine. Only distribution
+packagers and source-build users need a compatible toolchain.
 
 ## Quick Reference
 
@@ -17,8 +17,8 @@ distribution backports or an isolated toolchain installation.
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 and aarch64 PKGBUILD |
 | Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
-| Debian | `.deb` release asset | Per-release x86_64 package planned for new tags; no APT repository | Ubuntu PPA remains Ubuntu-only |
-| Fedora/RHEL | `.rpm` release asset | Per-release x86_64 package planned for new tags; no DNF repository | RPM spec and CI build are maintained; Copr publication pending |
+| Debian | `.deb` release asset | Per-release x86_64 package on new tags; no APT repository | Ubuntu PPA remains Ubuntu-only |
+| Fedora/RHEL | `.rpm` release asset | Per-release x86_64 package on new tags; no DNF repository | RPM spec and CI build are maintained; Copr publication pending |
 | aarch64 | `wayexpand` | Native release archive on new tagged releases | Existing releases may be x86_64-only |
 
 ## Building Locally
