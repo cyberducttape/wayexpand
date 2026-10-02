@@ -43,6 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 signal-hook = "0.4"
 rustix = { version = "1", features = ["process"] }
 libc = "0.2"
+sha2 = "0.10"
 notify = "6.1"
 wayland-client = "0.31"
 wayland-protocols = "0.32.13"

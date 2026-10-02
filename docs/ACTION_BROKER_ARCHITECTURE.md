@@ -20,7 +20,7 @@ The standalone binary is part of normal workspace builds and release packages. S
 The design aims to provide:
 - **Daemon isolation** - Keyboard capture stays locked down (no network)
 - **Per-action control** - Fine-grained permissions for each action
-- **Audit trail** - Planned; no execution audit sink is currently implemented
+- **Audit trail** - Optional privacy-preserving JSONL execution audit sink
 - **Privilege separation** - Commands run with appropriate permissions
 
 ## Runtime architecture
@@ -120,6 +120,15 @@ What's implemented:
   - Has an operator-managed `wayexpand-action-broker.service` unit; it is not
     enabled automatically because the broker configuration is deployment-specific
 
+- **Execution audit sink**
+  - Enable with `[broker] audit_path = "/private/path/action-audit.jsonl"`
+  - Writes bounded JSONL events with request ID, action ID, caller PID and
+    executable when available, policy SHA-256, timing, exit/timeout status, and
+    output byte count
+  - Never records arguments, environment values, stdout, or stderr
+  - The sink is mode `0600`, synchronously appended, and capped at 16 MiB;
+    write failures are reported to the service journal while execution proceeds
+
 To build the standalone broker from a checkout:
 
 ```sh
@@ -142,14 +151,6 @@ What will be implemented:
   - Working directory restrictions
   - Network isolation through a concrete service/container sandbox (not a TOML boolean)
   - Timeout enforcement per action
-
-- **Audit Logging**
-  - Add a durable, bounded, privacy-reviewed audit sink
-  - Record action identity, policy decision, requesting daemon identity, timing,
-    termination/exit status, and broker correlation ID; do not record secrets,
-    arbitrary arguments, environment values, or action output by default
-  - Define retention, rotation, integrity, and behavior when audit persistence fails
-  - Integration with organization audit trail only after those guarantees are tested
 
 - **Standalone Broker Deployment**
   - Add a systemd user service and optional socket activation
@@ -248,12 +249,13 @@ action = "aws_sts_identity"
 - No escalated privileges (runs as regular user)
 
 ### Audit Trail
-- Not implemented in the current broker binary.
-- The configuration schema intentionally has no audit switch or path; adding
-  such a setting before a real, tested sink exists would create a false
-  compliance signal.
-- Audit logging remains a planned Phase 2 capability and must define its
-  privacy, rotation, failure, and integrity semantics before enablement.
+- Optional: set `[broker] audit_path` to enable the broker's JSONL execution
+  sink.
+- Events contain timing, action identity, request ID, peer metadata, policy
+  hash, exit/timeout status, and output size, but not arguments, environment
+  values, stdout, or stderr.
+- The sink is capped at 16 MiB and uses `sync_data`; persistence failures are
+  journaled and do not block action execution.
 
 ## Implementation Status
 
@@ -267,7 +269,7 @@ action = "aws_sts_identity"
 | Policy routing | ✅ Action policy | ✅ Pass | Broker validates the configured action catalog |
 | Broker binary | ✅ Integrated standalone binary | ✅ Workspace and package builds | `wayexpand-action-broker`; operator-configured service |
 | Systemd integration | ✅ User service | ✅ Verified | Operator enables the packaged broker unit |
-| Audit logging | ⏳ Phase 2 | ⏳ Pending | syslog/journald integration |
+| Audit logging | ✅ Optional JSONL sink | ✅ Pass | Privacy-preserving, bounded, mode `0600` |
 
 ## Benefits Over Current Approach
 
@@ -276,8 +278,8 @@ action = "aws_sts_identity"
 | Daemon network access | None | None |
 | Command execution | Direct `program` commands in daemon process | Named `action` commands in separate broker process |
 | Per-command control | Policy only (all or nothing) | Fine-grained per-action |
-| Audit trail | Not available | Planned; not implemented |
-| Security isolation | Moderate | Strong |
+| Audit trail | Not available | Optional privacy-preserving execution events |
+| Security isolation | Moderate | Strong process/policy boundary; same-UID trust remains |
 | Flexibility | Limited | High |
 
 ## Getting Help

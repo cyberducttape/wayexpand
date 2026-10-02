@@ -146,6 +146,10 @@ pub struct BrokerConfig {
     /// Default working directory if action doesn't specify one.
     #[serde(default)]
     pub default_cwd: Option<String>,
+
+    /// Optional privacy-preserving JSONL execution audit sink.
+    #[serde(default)]
+    pub audit_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +163,8 @@ pub struct BrokerSettings {
     pub strict_env: bool,
     #[serde(default)]
     pub default_cwd: Option<String>,
+    #[serde(default)]
+    pub audit_path: Option<String>,
 }
 
 fn default_strict_env() -> bool {
@@ -177,6 +183,7 @@ impl Default for BrokerConfig {
             require_absolute_paths: true,
             strict_env: true,
             default_cwd: None,
+            audit_path: None,
         }
     }
 }
@@ -189,6 +196,7 @@ impl BrokerConfig {
             config.require_absolute_paths = settings.require_absolute_paths;
             config.strict_env = settings.strict_env;
             config.default_cwd = settings.default_cwd;
+            config.audit_path = settings.audit_path;
         }
         Ok(config)
     }
@@ -202,6 +210,9 @@ impl BrokerConfig {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(cwd) = &self.default_cwd {
             validate_working_directory("default_cwd", cwd)?;
+        }
+        if let Some(path) = &self.audit_path {
+            validate_audit_path(path)?;
         }
         for (id, action) in &self.actions {
             action
@@ -286,6 +297,41 @@ fn validate_working_directory(label: &str, directory: &str) -> Result<(), String
                 "{} '{}' is not owned by the current user or root",
                 label, directory
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_audit_path(path: &str) -> Result<(), String> {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err("audit_path must be an absolute path".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "audit_path has no parent directory".to_string())?;
+    let parent = fs::canonicalize(parent)
+        .map_err(|error| format!("audit_path parent cannot be resolved: {error}"))?;
+    validate_path_ancestors(&parent, "audit_path", false)?;
+    let parent_metadata = fs::metadata(&parent)
+        .map_err(|error| format!("audit_path parent cannot be inspected: {error}"))?;
+    let uid = rustix::process::geteuid().as_raw();
+    if !parent_metadata.is_dir()
+        || (parent_metadata.mode() & 0o022 != 0)
+        || (parent_metadata.uid() != uid && parent_metadata.uid() != 0)
+    {
+        return Err("audit_path parent directory is not private and trusted".to_string());
+    }
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if !metadata.is_file() {
+            return Err("audit_path must name a regular file".to_string());
+        }
+        if metadata.uid() != uid && metadata.uid() != 0 {
+            return Err("audit_path is not owned by the current user or root".to_string());
+        }
+        let mode = metadata.mode() & 0o777;
+        if (metadata.uid() == uid && mode != 0o600) || (metadata.uid() == 0 && mode & 0o022 != 0) {
+            return Err("audit_path permissions are insecure".to_string());
         }
     }
     Ok(())
@@ -591,18 +637,14 @@ args_prefix = ["hello"]
     }
 
     #[test]
-    fn broker_config_rejects_unimplemented_audit_settings() {
-        for toml_str in [
-            "audit_enabled = true",
-            "audit_path = \"/var/log/wayexpand-actions.log\"",
-            "[broker]\naudit_enabled = true",
-            "[broker]\naudit_path = \"/var/log/wayexpand-actions.log\"",
-        ] {
-            assert!(
-                BrokerConfig::from_toml(toml_str).is_err(),
-                "unimplemented audit setting must be rejected: {toml_str}"
-            );
-        }
+    fn broker_config_accepts_audit_path() {
+        let config =
+            BrokerConfig::from_toml("[broker]\naudit_path = \"/tmp/wayexpand-actions.jsonl\"")
+                .unwrap();
+        assert_eq!(
+            config.audit_path.as_deref(),
+            Some("/tmp/wayexpand-actions.jsonl")
+        );
     }
 
     #[test]

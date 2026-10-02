@@ -98,8 +98,15 @@ pub struct BrokerServer {
     socket_identity: (u64, u64),
 }
 
+#[derive(Debug, Clone)]
+pub struct PeerIdentity {
+    pub pid: Option<u32>,
+    pub uid: u32,
+    pub executable: Option<String>,
+}
+
 #[cfg(target_os = "linux")]
-fn validate_peer(stream: &UnixStream) -> Result<(), std::io::Error> {
+fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
     let fd = stream.as_raw_fd();
     let mut credentials = libc::ucred {
         pid: 0,
@@ -127,7 +134,23 @@ fn validate_peer(stream: &UnixStream) -> Result<(), std::io::Error> {
             "broker client is not running as the broker user",
         ));
     }
-    Ok(())
+    let executable = std::fs::read_link(format!("/proc/{}/exe", credentials.pid))
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    Ok(PeerIdentity {
+        pid: u32::try_from(credentials.pid).ok(),
+        uid: credentials.uid,
+        executable,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn peer_identity(_stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
+    Ok(PeerIdentity {
+        pid: None,
+        uid: rustix::process::geteuid().as_raw(),
+        executable: None,
+    })
 }
 
 impl BrokerServer {
@@ -222,12 +245,15 @@ impl BrokerServer {
     /// Accept a new client connection.
     pub fn accept(&self) -> Result<ServerConnection, IpcError> {
         let (stream, _addr) = self.listener.accept()?;
-        #[cfg(target_os = "linux")]
-        validate_peer(&stream)?;
+        let peer = peer_identity(&stream)?;
         stream.set_read_timeout(Some(SOCKET_READ_TIMEOUT))?;
         stream.set_write_timeout(Some(SOCKET_WRITE_TIMEOUT))?;
         let reader = BufReader::new(stream.try_clone()?);
-        Ok(ServerConnection { stream, reader })
+        Ok(ServerConnection {
+            stream,
+            reader,
+            peer,
+        })
     }
 
     /// Get the socket path.
@@ -252,9 +278,14 @@ impl Drop for BrokerServer {
 pub struct ServerConnection {
     stream: UnixStream,
     reader: BufReader<UnixStream>,
+    peer: PeerIdentity,
 }
 
 impl ServerConnection {
+    pub fn peer_identity(&self) -> &PeerIdentity {
+        &self.peer
+    }
+
     /// Read an action request from the client.
     pub fn read_request(&mut self) -> Result<ActionRequest, IpcError> {
         let line = read_bounded_line(&mut self.reader, MAX_MESSAGE_BYTES)?;
@@ -473,6 +504,11 @@ mod tests {
         let mut server = ServerConnection {
             reader: BufReader::new(server_stream.try_clone().unwrap()),
             stream: server_stream,
+            peer: PeerIdentity {
+                pid: None,
+                uid: 0,
+                executable: None,
+            },
         };
         let mut client = BrokerClient {
             reader: BufReader::new(client_stream.try_clone().unwrap()),

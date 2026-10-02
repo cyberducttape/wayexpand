@@ -8,14 +8,18 @@
 //!   wayexpand-action-broker --config ~/.config/wayexpand-broker.toml \
 //!     --socket "$XDG_RUNTIME_DIR/wayexpand-broker.sock"
 
-use action_broker::{ActionExecutor, BrokerConfig, BrokerServer};
+use action_broker::{
+    policy_hash, ActionError, ActionExecutor, AuditEvent, AuditLogger, BrokerConfig, BrokerServer,
+};
 use anyhow::{anyhow, Result};
 use std::{
     fs,
     io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
@@ -116,6 +120,8 @@ CONFIGURATION:
     # Defaults to true; set false only for intentional PATH-based resolution.
     require_absolute_paths = true
     strict_env = true
+    # Optional JSONL execution audit sink (mode 0600, bounded to 16 MiB).
+    # audit_path = "/home/user/.local/state/wayexpand/action-audit.jsonl"
 
     [actions."example"]
     program = "/usr/bin/example"
@@ -133,7 +139,7 @@ For more information, see: https://github.com/cyberducttape/wayexpand
     );
 }
 
-fn load_config(path: &PathBuf) -> Result<BrokerConfig> {
+fn load_config(path: &PathBuf) -> Result<(BrokerConfig, String)> {
     const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
     let resolved = fs::canonicalize(path)
         .map_err(|e| anyhow!("Failed to resolve config file {}: {}", path.display(), e))?;
@@ -178,6 +184,7 @@ fn load_config(path: &PathBuf) -> Result<BrokerConfig> {
     if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err(anyhow!("config file exceeds {} bytes", MAX_CONFIG_BYTES));
     }
+    let policy_hash = policy_hash(&bytes);
     let content =
         String::from_utf8(bytes).map_err(|e| anyhow!("config file is not valid UTF-8: {}", e))?;
 
@@ -188,7 +195,34 @@ fn load_config(path: &PathBuf) -> Result<BrokerConfig> {
         .validate_and_canonicalize()
         .map_err(|e| anyhow!("Config validation failed: {}", e))?;
 
-    Ok(config)
+    Ok((config, policy_hash))
+}
+
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
+}
+
+fn audit_exit_status(response: &action_broker::ActionResponse) -> Option<i32> {
+    match response {
+        action_broker::ActionResponse::Success(output) => Some(output.exit_code),
+        action_broker::ActionResponse::Error(ActionError::ExitFailure { exit_code, .. }) => {
+            Some(*exit_code)
+        }
+        _ => None,
+    }
+}
+
+fn audit_output_size(response: &action_broker::ActionResponse) -> usize {
+    match response {
+        action_broker::ActionResponse::Success(output) => output.stdout.len() + output.stderr.len(),
+        action_broker::ActionResponse::Error(ActionError::ExitFailure { stderr, .. }) => {
+            stderr.len()
+        }
+        _ => 0,
+    }
 }
 
 fn validate_config_ancestors(path: &Path) -> Result<()> {
@@ -256,7 +290,7 @@ async fn main() -> Result<()> {
     );
 
     // Load configuration
-    let config = load_config(&options.config_file)?;
+    let (config, policy_hash) = load_config(&options.config_file)?;
     info!(
         action_count = config.actions.len(),
         require_absolute_paths = config.require_absolute_paths,
@@ -267,6 +301,15 @@ async fn main() -> Result<()> {
     let executor = Arc::new(
         ActionExecutor::new(&config).map_err(|e| anyhow!("Failed to create executor: {}", e))?,
     );
+    let audit_logger = match config.audit_path.as_deref() {
+        Some(path) => {
+            let logger = AuditLogger::new(Path::new(path), policy_hash.clone())
+                .map_err(|e| anyhow!("Failed to open audit log {}: {}", path, e))?;
+            info!(audit_path = %path, policy_hash = %logger.policy_hash(), "execution audit enabled");
+            Some(Arc::new(logger))
+        }
+        None => None,
+    };
 
     // Create server socket
     let server = Arc::new(
@@ -276,6 +319,7 @@ async fn main() -> Result<()> {
     let action_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
     let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let verbose = options.verbose;
+    let request_counter = Arc::new(AtomicU64::new(1));
 
     info!(
         socket_path = %options.socket_path.display(),
@@ -309,6 +353,8 @@ async fn main() -> Result<()> {
         };
         info!("accepted broker client connection");
         let executor = Arc::clone(&executor);
+        let audit_logger = audit_logger.clone();
+        let request_counter = Arc::clone(&request_counter);
         let action_slots = Arc::clone(&action_slots);
         tokio::spawn(async move {
             let _connection_permit = connection_permit;
@@ -329,6 +375,12 @@ async fn main() -> Result<()> {
                     return;
                 }
             };
+            let peer = conn.peer_identity().clone();
+            let request_id = format!(
+                "{}-{}",
+                std::process::id(),
+                request_counter.fetch_add(1, Ordering::Relaxed)
+            );
             if verbose {
                 info!(action_id = %request.action_id, timeout_ms = request.timeout_ms, "received action request");
             }
@@ -359,10 +411,35 @@ async fn main() -> Result<()> {
                 }
             };
             let _permit = permit;
+            let started_at = unix_time_ms();
+            let started = Instant::now();
             let action_response = match executor.execute(request).await {
                 Ok(output) => output,
                 Err(error) => action_broker::ActionResponse::Error(error),
             };
+            if let Some(logger) = &audit_logger {
+                let finished_at = unix_time_ms();
+                let event = AuditEvent {
+                    timestamp: started_at,
+                    request_id: &request_id,
+                    action_id: &action_id,
+                    caller_pid: peer.pid,
+                    caller_executable: peer.executable.as_deref(),
+                    policy_hash: logger.policy_hash(),
+                    start: started_at,
+                    finish: finished_at,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                    exit_status: audit_exit_status(&action_response),
+                    timed_out: matches!(
+                        action_response,
+                        action_broker::ActionResponse::Error(ActionError::Timeout { .. })
+                    ),
+                    output_size: audit_output_size(&action_response),
+                };
+                if let Err(error) = logger.record(&event) {
+                    error!(request_id = %request_id, error = %error, "failed to write action audit event");
+                }
+            }
             let success = action_response.is_success();
             match tokio::task::spawn_blocking(move || conn.write_response(&action_response)).await {
                 Ok(Ok(())) if verbose => info!(action_id = %action_id, success, "sent response"),

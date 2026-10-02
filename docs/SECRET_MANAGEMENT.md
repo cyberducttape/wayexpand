@@ -80,11 +80,11 @@ execution must be audited.
 
 ## Audit Logging
 
-WayExpand does not provide a complete command-execution or secret-retrieval
-audit sink. The service journal may contain lifecycle or policy messages, but
-must not be treated as a record of each command, argument, secret, or
-expansion. Enable auditing in the system that actually authorizes and releases
-credentials; avoid logging secret values or full command environments.
+The Action Broker can optionally write a bounded, privacy-preserving execution
+audit sink. It records action identity, timing, peer metadata, policy hash,
+status, and output size, but not command arguments, environment values, or
+output. This does not replace the audit device of the system that authorizes
+and releases credentials; avoid logging secret values or full environments.
 
 ## Compliance and Audit
 

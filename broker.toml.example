@@ -1,6 +1,10 @@
 [broker]
 require_absolute_paths = true
 strict_env = true
+# Optional privacy-preserving JSONL execution audit. The parent directory
+# must be private; audit events never include arguments, environment values,
+# or command output.
+# audit_path = "/home/user/.local/state/wayexpand/action-audit.jsonl"
 
 # Add only commands you explicitly approve. The broker validates executable
 # ownership, permissions, paths, timeouts, and environment allowlists.
