@@ -95,11 +95,17 @@ impl App {
         self.save_candidate(&candidate)
     }
 
-    fn visible_indices(&mut self) -> Vec<usize> {
-        if let Some((cached_query, cached_indices)) = &self.visible_cache {
-            if cached_query == &self.query {
-                return cached_indices.clone();
-            }
+    fn visible_indices(&mut self) -> &[usize] {
+        if self
+            .visible_cache
+            .as_ref()
+            .is_some_and(|(cached_query, _)| cached_query == &self.query)
+        {
+            return self
+                .visible_cache
+                .as_ref()
+                .map(|(_, indices)| indices.as_slice())
+                .unwrap_or(&[]);
         }
         let query = self.query.to_lowercase();
         let indices: Vec<usize> = self
@@ -120,12 +126,16 @@ impl App {
             })
             .map(|(index, _)| index)
             .collect();
-        self.visible_cache = Some((self.query.clone(), indices.clone()));
-        indices
+        self.visible_cache = Some((self.query.clone(), indices));
+        self.visible_cache
+            .as_ref()
+            .map(|(_, indices)| indices.as_slice())
+            .unwrap_or(&[])
     }
 
     fn selected_index(&mut self) -> Option<usize> {
-        self.visible_indices().get(self.selected).copied()
+        let selected = self.selected;
+        self.visible_indices().get(selected).copied()
     }
 
     fn toggle_selected(&mut self) {
@@ -826,9 +836,9 @@ fn external_edit_directory(runtime_dir: Option<std::ffi::OsString>) -> PathBuf {
 }
 
 fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
-    let visible = app.visible_indices();
     let selected_config_index = app.selected_index();
     let preview = app.preview();
+    let visible_len = app.visible_indices().len();
     execute!(
         stdout,
         cursor::MoveTo(0, 0),
@@ -852,11 +862,12 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
         },
         Print("\n\n")
     )?;
-    for (row, index) in visible.iter().enumerate() {
-        let expansion = &app.config.expansion[*index];
+    for row in 0..visible_len {
+        let index = app.visible_indices()[row];
+        let expansion = &app.config.expansion[index];
         let marker = if row == app.selected { "❯" } else { " " };
         let state = if expansion.enabled { "●" } else { "○" };
-        if Some(*index) == selected_config_index {
+        if Some(index) == selected_config_index {
             execute!(stdout, SetForegroundColor(Color::Yellow))?;
         }
         execute!(

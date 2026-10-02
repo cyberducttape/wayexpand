@@ -4,6 +4,8 @@ pub mod matching;
 pub mod transaction;
 pub use transaction::TransactionOutcome;
 
+use matching::GlobPattern;
+
 use command_runtime::{
     configure_command_environment, configure_process_group, kill_process_group_by_pid,
     run_command_with_shutdown, CommandMetricsState, QueueSendError,
@@ -218,6 +220,8 @@ pub struct ExpansionEngine {
     /// Case-folded app filters are immutable for the lifetime of an engine;
     /// avoid allocating them on every candidate match.
     app_filters: Vec<Vec<AppFilter>>,
+    /// Compiled app-id globs corresponding positionally to `app_filters`.
+    app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     matcher: Matcher,
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
@@ -408,7 +412,7 @@ impl ExpansionEngine {
             .collect();
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
-        let app_filters = config
+        let app_filters: Vec<Vec<AppFilter>> = config
             .expansion
             .iter()
             .map(|expansion| {
@@ -416,6 +420,18 @@ impl ExpansionEngine {
                     .app_filter
                     .iter()
                     .filter_map(|filter| AppFilter::parse(filter))
+                    .collect()
+            })
+            .collect();
+        let app_filter_globs = app_filters
+            .iter()
+            .map(|filters| {
+                filters
+                    .iter()
+                    .map(|filter| match filter {
+                        AppFilter::AppIdGlob(pattern) => Some(GlobPattern::compile(&pattern)),
+                        _ => None,
+                    })
                     .collect()
             })
             .collect();
@@ -442,6 +458,7 @@ impl ExpansionEngine {
         Ok(Self {
             config,
             app_filters,
+            app_filter_globs,
             matcher,
             matcher_indices,
             buffer: VecDeque::new(),

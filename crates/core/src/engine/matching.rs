@@ -9,40 +9,77 @@ use super::{ExpansionEngine, MatchPlan};
 use crate::config::capitalize_first_letter;
 use crate::{render_template_with_cursor, AppFilter, ExpansionConfig, MatchMode};
 
-fn glob_matches(pattern: &str, value: &str) -> bool {
-    // Match Unicode scalar values rather than UTF-8 bytes. In particular, `?`
-    // must consume one user-visible character such as `é`, `你`, or `Ж`, not
-    // one byte of its encoding.
-    let pattern = pattern.chars().collect::<Vec<_>>();
-    let value = value.chars().collect::<Vec<_>>();
-    let mut pattern_index = 0;
-    let mut value_index = 0;
-    let mut star = None;
-    let mut star_value_index = 0;
+#[derive(Debug, Clone)]
+pub(super) struct GlobPattern {
+    tokens: Vec<GlobToken>,
+}
 
-    while value_index < value.len() {
-        if pattern_index < pattern.len()
-            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == '?')
-        {
-            pattern_index += 1;
-            value_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == '*' {
-            star = Some(pattern_index);
-            pattern_index += 1;
-            star_value_index = value_index;
-        } else if let Some(star_index) = star {
-            pattern_index = star_index + 1;
-            star_value_index += 1;
-            value_index = star_value_index;
-        } else {
-            return false;
+#[derive(Debug, Clone, Copy)]
+enum GlobToken {
+    Literal(char),
+    Any,
+    Star,
+}
+
+impl GlobPattern {
+    pub(super) fn compile(pattern: &str) -> Self {
+        Self {
+            tokens: pattern
+                .chars()
+                .map(|character| match character {
+                    '?' => GlobToken::Any,
+                    '*' => GlobToken::Star,
+                    character => GlobToken::Literal(character),
+                })
+                .collect(),
         }
     }
 
-    while pattern_index < pattern.len() && pattern[pattern_index] == '*' {
-        pattern_index += 1;
+    fn matches(&self, value: &str) -> bool {
+        // Match Unicode scalar values rather than UTF-8 bytes. In particular, `?`
+        // must consume one user-visible character such as `é`, `你`, or `Ж`, not
+        // one byte of its encoding.
+        let value = value.chars().collect::<Vec<_>>();
+        let mut pattern_index = 0;
+        let mut value_index = 0;
+        let mut star = None;
+        let mut star_value_index = 0;
+
+        while value_index < value.len() {
+            if pattern_index < self.tokens.len()
+                && matches!(self.tokens[pattern_index], GlobToken::Literal(character) if character == value[value_index])
+                || pattern_index < self.tokens.len()
+                    && matches!(self.tokens[pattern_index], GlobToken::Any)
+            {
+                pattern_index += 1;
+                value_index += 1;
+            } else if pattern_index < self.tokens.len()
+                && matches!(self.tokens[pattern_index], GlobToken::Star)
+            {
+                star = Some(pattern_index);
+                pattern_index += 1;
+                star_value_index = value_index;
+            } else if let Some(star_index) = star {
+                pattern_index = star_index + 1;
+                star_value_index += 1;
+                value_index = star_value_index;
+            } else {
+                return false;
+            }
+        }
+
+        while pattern_index < self.tokens.len()
+            && matches!(self.tokens[pattern_index], GlobToken::Star)
+        {
+            pattern_index += 1;
+        }
+        pattern_index == self.tokens.len()
     }
-    pattern_index == pattern.len()
+}
+
+#[cfg(test)]
+fn glob_matches(pattern: &str, value: &str) -> bool {
+    GlobPattern::compile(pattern).matches(value)
 }
 
 pub(super) fn is_word_character(character: char) -> bool {
@@ -165,15 +202,17 @@ impl ExpansionEngine {
         };
         self.app_filters[config_index]
             .iter()
-            .any(|filter| match filter {
+            .enumerate()
+            .any(|(filter_index, filter)| match filter {
                 AppFilter::AppIdExact(app_id_filter) => window
                     .app_id
                     .as_deref()
                     .is_some_and(|app_id| app_id == app_id_filter),
-                AppFilter::AppIdGlob(app_id_filter) => window
-                    .app_id
-                    .as_deref()
-                    .is_some_and(|app_id| glob_matches(app_id_filter, app_id)),
+                AppFilter::AppIdGlob(_) => window.app_id.as_deref().is_some_and(|app_id| {
+                    self.app_filter_globs[config_index][filter_index]
+                        .as_ref()
+                        .is_some_and(|pattern| pattern.matches(app_id))
+                }),
                 AppFilter::TitleContains(title_filter) => {
                     if self.config.organization.disable_title_matching {
                         false
