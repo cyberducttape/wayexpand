@@ -179,6 +179,9 @@ struct StateData {
     keyboard_state: Option<State>,
     surrounding_text: Option<SurroundingText>,
     pending_sensitive: Option<bool>,
+    /// Local XKB dead-key/Compose state. This is separate from compositor
+    /// IME preedit, which zwp_input_method_v2 does not expose.
+    composition_active: bool,
     commit_serial: u32,
     initial_roundtrip_done: bool,
     error: Option<InputMethodError>,
@@ -203,6 +206,7 @@ impl StateData {
             keyboard_state: None,
             surrounding_text: None,
             pending_sensitive: None,
+            composition_active: false,
             commit_serial: 0,
             initial_roundtrip_done: false,
             error: None,
@@ -410,6 +414,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard = Some(proxy.grab_keyboard(qh, ()));
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
+                state.composition_active = false;
                 // Do not capture until the compositor has delivered the
                 // current content purpose. This prevents an activation race
                 // from briefly treating a password field as ordinary text.
@@ -423,6 +428,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard_state = None;
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
+                state.composition_active = false;
                 // Deactivation can race with already-queued keyboard events.
                 // Keep the engine disabled until a new activation reports a
                 // non-sensitive content type.
@@ -507,6 +513,11 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 state: WEnum::Value(key_state),
                 ..
             } => {
+                let composition_key = key_is_composition(state.keyboard_state.as_ref(), key);
+                if key_state == wl_keyboard::KeyState::Pressed && composition_key {
+                    state.composition_active = true;
+                    state.queue_event(InputEvent::CompositionChanged { active: true });
+                }
                 let is_modifier = state
                     .keyboard_state
                     .as_ref()
@@ -563,12 +574,14 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                         }
                     }
                     Some(KeyAction::Commit(text)) => {
+                        finish_local_composition(state);
                         forward_commit(state, connection, text);
                         state.queue_event(InputEvent::Delimiter(
                             text.chars().next().unwrap_or('\n'),
                         ));
                     }
                     Some(KeyAction::Text(text)) => {
+                        finish_local_composition(state);
                         forward_commit(state, connection, &text);
                         state.queue_event(InputEvent::Text(text));
                     }
@@ -590,6 +603,27 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
             }
             _ => {}
         }
+    }
+}
+
+fn key_is_composition(keyboard_state: Option<&State>, key: u32) -> bool {
+    let Some(keycode) = key.checked_add(8) else {
+        return false;
+    };
+    let Some(keysym) = keyboard_state.and_then(|state| state.key_get_one_sym(keycode)) else {
+        return false;
+    };
+    let Some(name) = keysym_get_name(&keysym) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    name.starts_with("dead_") || name == "multi_key"
+}
+
+fn finish_local_composition(state: &mut StateData) {
+    if state.composition_active {
+        state.composition_active = false;
+        state.queue_event(InputEvent::CompositionChanged { active: false });
     }
 }
 

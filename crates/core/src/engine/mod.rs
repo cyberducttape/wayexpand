@@ -50,6 +50,12 @@ pub enum InputEvent {
     FocusChanged {
         sensitive: bool,
     },
+    /// Indicates that an input method or keyboard compose sequence currently
+    /// owns the user's text. Matching is suspended until composition ends so
+    /// a trigger can never consume preedit text or interrupt an IME session.
+    CompositionChanged {
+        active: bool,
+    },
     /// User-initiated pause/resume of text expansion. Independent from
     /// `FocusChanged`: both conditions disable capture when active.
     /// Resuming does not re-enable capture if still in a sensitive field.
@@ -238,6 +244,8 @@ pub struct ExpansionEngine {
     /// Compositor/backend signal that focused field is sensitive (password,
     /// OTP, etc.). Independent from user_paused.
     sensitive_focus: bool,
+    /// Backend-reported active IME/dead-key/Compose composition state.
+    composition_active: bool,
     /// Backend-specific isolation gate for direct executable commands. Named
     /// broker actions use their own IPC boundary and are not blocked by this.
     direct_commands_disabled: bool,
@@ -466,6 +474,7 @@ impl ExpansionEngine {
             buffer_truncated: false,
             user_paused: false,
             sensitive_focus: false,
+            composition_active: false,
             direct_commands_disabled: false,
             command_cache,
             hotkeys,
@@ -1149,6 +1158,13 @@ impl ExpansionEngine {
         self.sensitive_focus
     }
 
+    /// Returns whether an input method or keyboard compose sequence owns the
+    /// current text stream. Expansion remains disabled until the backend
+    /// reports that composition has ended.
+    pub fn is_composition_active(&self) -> bool {
+        self.composition_active
+    }
+
     /// Restores sensitive field focus state from a previous engine instance.
     /// Critical for config reloads to preserve password-field protection.
     pub fn set_sensitive_focus(&mut self, sensitive: bool) {
@@ -1158,7 +1174,7 @@ impl ExpansionEngine {
     /// Whether text expansion capture is currently enabled.
     /// Both user pause and sensitive field focus independently disable capture.
     fn is_capture_enabled(&self) -> bool {
-        !self.user_paused && !self.sensitive_focus
+        !self.user_paused && !self.sensitive_focus && !self.composition_active
     }
 
     /// Invalidate pending asynchronous expansions by incrementing the generation

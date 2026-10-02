@@ -1,9 +1,13 @@
 # IME and Composition-Aware Input Roadmap
 
-**Status: planned architecture work; not implemented and not a release promise.**
+**Status: foundation implemented; external IME/preedit support is still
+planned and is not a release promise.**
 
 WayExpand currently matches direct keyboard input and text after an input
-method has committed it. Active preedit/composition is unsupported. See the
+method has committed it. Active external preedit/composition is unsupported.
+Local XKB dead-key and Compose sequences now have an explicit composition
+guard: the matcher is cleared while the sequence is active and resumes only
+after committed text arrives. See the
 [support matrix](SUPPORT_MATRIX.md) before deploying WayExpand in an IME-heavy
 workflow.
 
@@ -53,7 +57,10 @@ claim.
 
 ## Delivery gates
 
-1. **Protocol-neutral state model.** Add explicit enter/leave, activate/deactivate,
+1. **Protocol-neutral state model.** The core now has an explicit composition
+   active/inactive event and the input-method-v2 keyboard path recognizes local
+   XKB dead-key/Compose boundaries. Complete this model with protocol-level
+   enter/leave, activate/deactivate,
    preedit update/cancel, committed text, surrounding-text revision, content
    purpose, and protocol serial/state transitions. Preedit must never enter
    the committed matcher buffer. Every event must be generation/focus-bound.

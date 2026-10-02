@@ -83,6 +83,12 @@ impl ExpansionEngine {
         self.clear_buffer();
     }
 
+    fn on_composition_changed(&mut self, active: bool) {
+        self.bump_generation();
+        self.composition_active = active;
+        self.clear_buffer();
+    }
+
     fn on_pause_changed(&mut self, paused: bool) {
         self.bump_generation();
         self.user_paused = paused;
@@ -266,6 +272,10 @@ impl ExpansionEngine {
                 self.on_focus_changed(sensitive);
                 Vec::new()
             }
+            InputEvent::CompositionChanged { active } => {
+                self.on_composition_changed(active);
+                Vec::new()
+            }
             InputEvent::PauseChanged(paused) => {
                 self.on_pause_changed(paused);
                 Vec::new()
@@ -397,6 +407,10 @@ impl ExpansionEngine {
             }
             InputEvent::FocusChanged { sensitive } => {
                 self.on_focus_changed(sensitive);
+                Vec::new()
+            }
+            InputEvent::CompositionChanged { active } => {
+                self.on_composition_changed(active);
                 Vec::new()
             }
             InputEvent::PauseChanged(paused) => {

@@ -372,6 +372,23 @@ fn sensitive_focus_and_pause_are_independent() {
 }
 
 #[test]
+fn active_composition_suspends_matching_until_commit() {
+    let mut engine = engine();
+
+    engine.process(InputEvent::CompositionChanged { active: true });
+    assert!(engine.is_composition_active());
+    assert!(engine.process(InputEvent::Text(":hello".into())).is_empty());
+
+    // A committed composition ends the guard. The trigger starts cleanly and
+    // cannot combine with preedit text that arrived while composition was on.
+    engine.process(InputEvent::CompositionChanged { active: false });
+    assert!(!engine.is_composition_active());
+    let mut results = engine.process(InputEvent::Text(":hello".into()));
+    results.extend(engine.process(InputEvent::EndOfInput));
+    assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
+}
+
+#[test]
 fn dispatches_enabled_hotkey_actions_without_side_effects() {
     let config = Config::parse(
         r#"

@@ -10,8 +10,10 @@ Wayland session alone does not imply that a backend is usable.
 **Core engine and config are stable; desktop backend support is compositor-dependent.** See [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) for the authoritative automatic-selection and certification status. No compositor is certified by automated end-to-end tests yet. Run `wayexpand doctor` on your own session before relying on capture.
 
 **Product scope (current):** WayExpand is intended for direct keyboard input
-and text that an input method has already committed. Active IME/preedit
-composition is explicitly unsupported. This is a scope boundary, not a claim
+and text that an input method has already committed. Active external
+IME/preedit composition is explicitly unsupported. Local XKB dead-key and
+Compose sequences are treated as composition boundaries and are only matched
+after their committed Unicode text arrives. This is a scope boundary, not a claim
 that any desktop is currently production-certified; certification applies only
 to the tested backend, compositor, client, and layout combinations.
 
@@ -27,7 +29,7 @@ to the tested backend, compositor, client, and layout combinations.
 | Global hotkeys | Experimental | Backend capture and action tests |
 | Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification | KWin tracker exists; wlroots and GNOME paths explicitly report application filters unavailable rather than guessing |
 | Key pass-through | Experimental | libei-assisted lifecycle-aware press/release pass-through exists for input-method-v2; modifier chords, repetition, reconnect, and compositor/client behavior still require certification |
-| Preedit/IME composition | **Not supported** | ⚠️ Affects CJK, dead-keys, composition (see below) |
+| External preedit/IME composition | **Not supported** | ⚠️ Affects CJK and active Fcitx/IBus/Rime composition (see below) |
 
 ## Desktop coverage
 
@@ -60,8 +62,9 @@ evidence exists.
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not
 evidence for layout-independent text injection. Certification checks
-dead-key/Compose input and expansion only after composition is committed;
-active preedit is an explicit out-of-scope capability and does not become
+dead-key/Compose input and expansion only after composition is committed; the
+local keyboard-composition guard prevents a trigger from being matched while
+those sequences are active. External active preedit is an explicit out-of-scope capability and does not become
 supported through a passing certification. The machine-readable report lists
 this boundary under `out_of_scope_capabilities`.
 
@@ -79,20 +82,22 @@ notes.
 
 ## Known Limitations: Active IME and Preedit Composition
 
-**WayExpand does not support active Input Method Editor (IME) composition or preedit sequences.**
+**WayExpand does not support external active Input Method Editor (IME)
+composition or preedit sequences.**
 
 This affects users who rely on:
 
 - **CJK input** (Chinese, Japanese, Korean) using active IME composition
-- **Dead-key composition** (accented characters: é, ñ, ü, etc.) during composition
+- **External IME preedit** for CJK and other active composition engines
 - **Multi-key sequences** (e.g., Compose key combinations)
 - **Active IME/preedit composition workflows** (e.g., Fcitx, IBus engines, Rime, and similar systems actively composing text)
 
 ### Why Unsupported
 
 The supported workflow is direct keyboard input or text expansion after an
-input method has committed its text. WayExpand does not observe or control
-active composition sessions — typing an expansion trigger during IME
+input method has committed its text. WayExpand safely recognizes local XKB
+dead-key/Compose boundaries, but does not observe or control another engine's
+active IME session. Typing an expansion trigger during external IME
 composition may:
 
 - Interrupt ongoing composition
