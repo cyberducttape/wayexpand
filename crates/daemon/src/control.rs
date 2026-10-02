@@ -19,6 +19,7 @@ use std::{
 /// Large enough for `insert ` plus a maximum-length (128 character) trigger.
 const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const CONTROL_WORKERS: usize = 4;
 
 pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
@@ -125,22 +126,38 @@ impl ControlServer {
         let insert_slot = Arc::clone(&insert_requested);
         let focus_slot = Arc::clone(&focus_snapshot);
         let status_flag = Arc::clone(&status);
+        let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let active_requests_for_listener = Arc::clone(&active_requests);
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { break };
                 let flags = Flags {
-                    reload: &reload_flag,
-                    stop: &stop_flag,
-                    pause: &pause_flag,
-                    insert: &insert_slot,
-                    focus: &focus_slot,
-                    status: &status_flag,
+                    reload: Arc::clone(&reload_flag),
+                    stop: Arc::clone(&stop_flag),
+                    pause: Arc::clone(&pause_flag),
+                    insert: Arc::clone(&insert_slot),
+                    focus: Arc::clone(&focus_slot),
+                    status: Arc::clone(&status_flag),
                 };
-                if handle_request(stream, flags).is_err() {
-                    // The control socket is best-effort and must never take
-                    // down the keyboard/expansion loop.
+                let admitted = active_requests_for_listener.fetch_update(
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                    |active| (active < CONTROL_WORKERS).then_some(active + 1),
+                );
+                if admitted.is_err() {
+                    // Keep control-plane concurrency bounded. A busy or
+                    // malicious same-user client can be dropped without
+                    // delaying the accept loop or keyboard data plane.
                     continue;
                 }
+                let active_requests = Arc::clone(&active_requests_for_listener);
+                thread::spawn(move || {
+                    // The control plane is deliberately isolated from
+                    // keyboard processing. A client that holds a socket open
+                    // cannot head-of-line block later requests.
+                    let _ = handle_request(stream, flags);
+                    active_requests.fetch_sub(1, Ordering::AcqRel);
+                });
                 if stop_flag.load(Ordering::Acquire) {
                     break;
                 }
@@ -327,14 +344,14 @@ impl Drop for ControlServer {
 }
 
 /// The shared state one control request may touch.
-#[derive(Clone, Copy)]
-struct Flags<'a> {
-    reload: &'a AtomicBool,
-    stop: &'a AtomicBool,
-    pause: &'a AtomicBool,
-    insert: &'a Mutex<Option<InsertRequest>>,
-    focus: &'a Mutex<FocusSnapshot>,
-    status: &'a Mutex<String>,
+#[derive(Clone)]
+struct Flags {
+    reload: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    insert: Arc<Mutex<Option<InsertRequest>>>,
+    focus: Arc<Mutex<FocusSnapshot>>,
+    status: Arc<Mutex<String>>,
 }
 
 /// The trigger of an `insert <trigger>` request, taken verbatim: a
@@ -372,7 +389,7 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
     }))
 }
 
-fn handle_request(mut stream: UnixStream, flags: Flags<'_>) -> Result<()> {
+fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     let Flags {
         reload,
         stop,
@@ -483,17 +500,17 @@ mod tests {
         let pause_worker = Arc::clone(pause);
         let status_worker = Arc::clone(status);
         let join = thread::spawn(move || {
-            let insert = Mutex::new(None);
-            let focus = Mutex::new(FocusSnapshot::default());
+            let insert = Arc::new(Mutex::new(None));
+            let focus = Arc::new(Mutex::new(FocusSnapshot::default()));
             handle_request(
                 server,
                 Flags {
-                    reload: &reload_worker,
-                    stop: &stop_worker,
-                    pause: &pause_worker,
-                    insert: &insert,
-                    focus: &focus,
-                    status: &status_worker,
+                    reload: reload_worker,
+                    stop: stop_worker,
+                    pause: pause_worker,
+                    insert,
+                    focus,
+                    status: status_worker,
                 },
             )
             .unwrap();
@@ -539,25 +556,25 @@ mod tests {
 
     #[test]
     fn insert_takes_the_trigger_verbatim_and_refuses_control_characters() {
-        let reload = AtomicBool::new(false);
-        let stop = AtomicBool::new(false);
-        let pause = AtomicBool::new(false);
-        let insert = Mutex::new(None);
-        let focus = Mutex::new(FocusSnapshot::default());
-        let status = Mutex::new(String::new());
+        let reload = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(false));
+        let insert = Arc::new(Mutex::new(None));
+        let focus = Arc::new(Mutex::new(FocusSnapshot::default()));
+        let status = Arc::new(Mutex::new(String::new()));
         let flags = Flags {
-            reload: &reload,
-            stop: &stop,
-            pause: &pause,
-            insert: &insert,
-            focus: &focus,
-            status: &status,
+            reload,
+            stop,
+            pause,
+            insert: Arc::clone(&insert),
+            focus: Arc::clone(&focus),
+            status,
         };
         let send = |command: &str| {
             let (mut client, server) = UnixStream::pair().unwrap();
             client.write_all(command.as_bytes()).unwrap();
             client.shutdown(std::net::Shutdown::Write).unwrap();
-            handle_request(server, flags).unwrap();
+            handle_request(server, flags.clone()).unwrap();
             let mut response = String::new();
             client.read_to_string(&mut response).unwrap();
             response
