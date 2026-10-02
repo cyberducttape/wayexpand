@@ -51,6 +51,18 @@ pub struct AuditLogger {
     write_failures: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct AuditHealth {
+    pub dropped_events: u64,
+    pub write_failures: u64,
+}
+
+impl AuditHealth {
+    pub fn healthy(self) -> bool {
+        self.dropped_events == 0 && self.write_failures == 0
+    }
+}
+
 enum AuditMessage {
     Event(Vec<u8>),
     FlushAndStop,
@@ -110,6 +122,13 @@ impl AuditLogger {
 
     pub fn write_failures(&self) -> u64 {
         self.write_failures.load(Ordering::Relaxed)
+    }
+
+    pub fn health(&self) -> AuditHealth {
+        AuditHealth {
+            dropped_events: self.dropped_events(),
+            write_failures: self.write_failures(),
+        }
     }
 
     fn shutdown(&mut self) {

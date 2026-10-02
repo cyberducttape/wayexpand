@@ -28,7 +28,7 @@ pub mod executor;
 pub mod ipc;
 pub mod protocol;
 
-pub use audit::{policy_hash, AuditEvent, AuditLogger, CallerIdentity};
+pub use audit::{policy_hash, AuditEvent, AuditHealth, AuditLogger, CallerIdentity};
 pub use config::{ActionConfig, BrokerConfig};
 pub use executor::ActionExecutor;
 pub use ipc::{BrokerClient, BrokerServer};

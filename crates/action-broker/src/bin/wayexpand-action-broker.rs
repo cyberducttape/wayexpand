@@ -9,13 +9,14 @@
 //!     --socket "$XDG_RUNTIME_DIR/wayexpand-broker.sock"
 
 use action_broker::{
-    policy_hash, ActionError, ActionExecutor, AuditEvent, AuditLogger, BrokerConfig, BrokerServer,
+    policy_hash, ActionError, ActionExecutor, AuditEvent, AuditHealth, AuditLogger, BrokerConfig,
+    BrokerServer,
 };
 use anyhow::{anyhow, Result};
 use std::{
     fs,
-    io::Read,
-    os::unix::fs::MetadataExt,
+    io::{Read, Write},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     sync::Arc,
@@ -247,6 +248,53 @@ fn audit_output_size(response: &action_broker::ActionResponse) -> usize {
     }
 }
 
+fn broker_health_path(socket_path: &Path) -> PathBuf {
+    socket_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("wayexpand-broker-health.json")
+}
+
+fn write_broker_health(
+    path: &Path,
+    audit_logger: Option<&AuditLogger>,
+    running: bool,
+) -> std::io::Result<()> {
+    let health = audit_logger
+        .map(AuditLogger::health)
+        .unwrap_or(AuditHealth {
+            dropped_events: 0,
+            write_failures: 0,
+        });
+    let status = serde_json::json!({
+        "pid": std::process::id(),
+        "running": running,
+        "audit_enabled": audit_logger.is_some(),
+        "audit_queue_dropped_total": health.dropped_events,
+        "audit_write_failures_total": health.write_failures,
+        "audit_healthy": audit_logger.is_none() || health.healthy(),
+    });
+    let temporary = path.with_file_name(format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("wayexpand-broker-health.json"),
+        std::process::id()
+    ));
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary)?;
+    serde_json::to_writer(&mut file, &status)
+        .map_err(|error| std::io::Error::other(format!("serialize broker health: {error}")))?;
+    file.write_all(b"\n")?;
+    file.sync_data()?;
+    fs::rename(&temporary, path)?;
+    Ok(())
+}
+
 fn validate_config_ancestors(path: &Path) -> Result<()> {
     let current_uid = rustix::process::geteuid().as_raw();
     let mut current = path
@@ -332,12 +380,16 @@ async fn main() -> Result<()> {
         }
         None => None,
     };
+    let health_path = broker_health_path(&options.socket_path);
 
     // Create server socket
     let server = Arc::new(
         BrokerServer::bind(&options.socket_path)
             .map_err(|e| anyhow!("Failed to bind broker socket: {}", e))?,
     );
+    if let Err(error) = write_broker_health(&health_path, audit_logger.as_deref(), true) {
+        warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
+    }
     let action_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
     let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let verbose = options.verbose;
@@ -388,6 +440,7 @@ async fn main() -> Result<()> {
         info!("accepted broker client connection");
         let executor = Arc::clone(&executor);
         let audit_logger = audit_logger.clone();
+        let health_path = health_path.clone();
         let request_counter = Arc::clone(&request_counter);
         let action_slots = Arc::clone(&action_slots);
         tokio::spawn(async move {
@@ -473,6 +526,9 @@ async fn main() -> Result<()> {
                 if let Err(error) = logger.record(&event) {
                     error!(request_id = %request_id, error = %error, "failed to write action audit event");
                 }
+                if let Err(error) = write_broker_health(&health_path, Some(logger), true) {
+                    warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
+                }
             }
             let success = action_response.is_success();
             match tokio::task::spawn_blocking(move || conn.write_response(&action_response)).await {
@@ -484,6 +540,18 @@ async fn main() -> Result<()> {
         });
     }
 
+    if let Err(error) = write_broker_health(&health_path, audit_logger.as_deref(), false) {
+        warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
+    }
+    if let Some(logger) = audit_logger.as_deref() {
+        let health = logger.health();
+        info!(
+            audit_queue_dropped_total = health.dropped_events,
+            audit_write_failures_total = health.write_failures,
+            audit_healthy = health.healthy(),
+            "action audit health"
+        );
+    }
     drop(server);
     drop(audit_logger);
     info!("action broker stopped");

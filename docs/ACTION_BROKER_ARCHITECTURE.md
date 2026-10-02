@@ -131,6 +131,8 @@ What's implemented:
     rotates the active JSONL file at 16 MiB, retaining one `.1` generation
   - Clean broker shutdown flushes accepted queued events and joins the audit
     writer before the process exits
+  - Runtime health is published as mode `0600` JSON beside the broker socket;
+    `wayexpand doctor` reports queue drops, write failures, and health state
   - Slow or unavailable storage never blocks action execution; dropped events
     and writer failures are counted and reported to the service journal
 
@@ -274,6 +276,9 @@ missing broker service from an unknown or disabled action.
 - Events contain timing, action identity, request ID, peer metadata, policy
   hash, exit/timeout status, and output size, but not arguments, environment
   values, stdout, or stderr.
+- The broker publishes only audit health counters (not action contents) in its
+  private runtime health file; `wayexpand doctor` surfaces nonzero drops or
+  write failures.
 - The sink rotates at 16 MiB. A dedicated writer batches `sync_data` calls off
   the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
   and persistence failures are journaled and do not block action execution.

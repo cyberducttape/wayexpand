@@ -72,4 +72,17 @@ with open(os.environ["AUDIT_FILE"], encoding="utf-8") as audit:
 assert any(event["action_id"] == "integration-echo" for event in events), events
 PY
 
+HEALTH_FILE="$test_root/wayexpand-broker-health.json" python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["HEALTH_FILE"], encoding="utf-8") as health_file:
+    health = json.load(health_file)
+assert health["audit_enabled"] is True, health
+assert health["audit_queue_dropped_total"] == 0, health
+assert health["audit_write_failures_total"] == 0, health
+assert health["audit_healthy"] is True, health
+assert health["running"] is False, health
+PY
+
 printf '%s\n' "Action Broker end-to-end test passed"

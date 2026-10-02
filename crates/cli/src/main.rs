@@ -2110,6 +2110,19 @@ fn broker_socket_path() -> Option<PathBuf> {
         })
 }
 
+fn broker_health_path(socket: &Path) -> PathBuf {
+    socket
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("wayexpand-broker-health.json")
+}
+
+fn broker_health_status(socket: Option<&Path>) -> Option<serde_json::Value> {
+    let path = socket.map(broker_health_path)?;
+    let contents = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
 fn broker_service_active() -> bool {
     Command::new("systemctl")
         .args([
@@ -2143,6 +2156,18 @@ fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
     let socket = broker_socket_path();
     let socket_exists = socket.as_ref().is_some_and(|path| path.exists());
     let service_active = broker_service_active();
+    let audit_status = broker_health_status(socket.as_deref());
+    let audit_enabled = audit_status
+        .as_ref()
+        .and_then(|status| status.get("audit_enabled"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let audit_healthy = !audit_enabled
+        || audit_status
+            .as_ref()
+            .and_then(|status| status.get("audit_healthy"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
     let required = named_actions > 0;
     serde_json::json!({
         "required": required,
@@ -2156,7 +2181,12 @@ fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
             "unit": "wayexpand-action-broker.service",
             "active": service_active,
         },
-        "healthy": !required || (socket_exists && service_active),
+        "audit": audit_status.unwrap_or_else(|| serde_json::json!({
+            "available": false,
+            "audit_enabled": false,
+            "audit_healthy": true,
+        })),
+        "healthy": !required || (socket_exists && service_active && audit_healthy),
     })
 }
 
@@ -2170,6 +2200,18 @@ fn print_broker_diagnostics(config: Option<&Config>) -> bool {
     let active = broker["service"]["active"].as_bool().unwrap_or(false);
     let exists = broker["socket"]["exists"].as_bool().unwrap_or(false);
     println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}", broker["named_action_count"]);
+    if broker["audit"]["audit_enabled"].as_bool().unwrap_or(false) {
+        let dropped = broker["audit"]["audit_queue_dropped_total"]
+            .as_u64()
+            .unwrap_or(0);
+        let failures = broker["audit"]["audit_write_failures_total"]
+            .as_u64()
+            .unwrap_or(0);
+        let healthy = broker["audit"]["audit_healthy"].as_bool().unwrap_or(false);
+        println!(
+            "  Action audit: healthy={healthy}, queue_dropped_total={dropped}, write_failures_total={failures}"
+        );
+    }
     if !active || !exists {
         println!("  Enable it with: systemctl --user enable --now wayexpand-action-broker.service");
         return false;
