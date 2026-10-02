@@ -366,6 +366,13 @@ pub(crate) fn parse_route_state(response: &str) -> Option<RouteState> {
     })
 }
 
+pub(crate) fn status_field(response: &str, key: &str) -> Option<String> {
+    response.lines().find_map(|line| {
+        let (field, value) = line.split_once('=')?;
+        (field == key).then(|| value.to_owned())
+    })
+}
+
 pub(crate) fn parse_paused(response: &str) -> Option<bool> {
     response.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
@@ -427,6 +434,11 @@ mod tests {
             super::parse_route_state("state=reconnecting\n"),
             Some(RouteState::Reconnecting)
         );
+        assert_eq!(
+            super::status_field("source=input-method\nbackend=input-method-v2\n", "backend"),
+            Some("input-method-v2".into())
+        );
+        assert_eq!(super::status_field("state=connected\n", "backend"), None);
     }
 
     #[test]

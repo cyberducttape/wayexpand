@@ -149,6 +149,17 @@ impl Strings {
         }
     }
 
+    pub fn route_trust_status(&self, route: &str, maturity: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("{route} · {maturity} · desktop certification pending")
+            }
+            Language::German => {
+                format!("{route} · {maturity} · Desktop-Zertifizierung ausstehend")
+            }
+        }
+    }
+
     pub fn route_connected_status(&self) -> &'static str {
         "Typing integration: Ready"
     }
@@ -2261,8 +2272,8 @@ impl Strings {
 
     pub fn try_live_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Tests snippet matching and template rendering only. It does not test desktop capture or insertion; command snippets are not run.",
-            Language::German => "Testet nur Snippet-Matching und Template-Rendering. Desktop-Erfassung und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
+            Language::English => "Tests matching only — not desktop integration. It does not test capture, focus, portals, sensitive fields, or insertion; command snippets are not run.",
+            Language::German => "Testet nur Matching — keine Desktop-Integration. Erfassung, Fokus, Portale, sensible Felder und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
         }
     }
 

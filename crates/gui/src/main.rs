@@ -36,7 +36,9 @@ use std::{
 };
 
 use theme::Palette;
-use wayexpand_backend_selection::{Capabilities, RecommendedRoute, RouteBackend};
+use wayexpand_backend_selection::{
+    route_contract_for, Capabilities, RecommendedRoute, RouteBackend,
+};
 use wayexpand_core::{
     default_config_path, BackendState, BackendStatus, Config, ExpansionConfig, FontScale,
     MatchMode, OrganizationPolicy, Settings,
@@ -2045,6 +2047,13 @@ impl GuiApp {
             }
             None => (self.strings.route_unknown_status(), palette.muted),
         };
+        let route_trust = self.active_route_contract().map(|contract| {
+            (
+                self.strings
+                    .route_trust_status(&contract.label, &contract.status),
+                palette.warning,
+            )
+        });
         let more_actions = self.strings.more_actions();
         let actions_response = ui
             .menu_button(more_actions, |ui| {
@@ -2112,6 +2121,9 @@ impl GuiApp {
             self.diagnostics_open = true;
             self.refresh_diagnostics(true);
         }
+        if let Some((trust_label, trust_color)) = route_trust {
+            theme::pill(ui, trust_label, trust_color, theme::tint(trust_color, 34));
+        }
         // The first-run screen has its own step for this.
         theme::pill(
             ui,
@@ -2122,6 +2134,12 @@ impl GuiApp {
         if self.daemon_reachable == Some(false) && !self.config.expansion.is_empty() {
             self.turn_on_button(ui, palette);
         }
+    }
+
+    fn active_route_contract(&self) -> Option<&'static wayexpand_backend_selection::RouteContract> {
+        let source = runtime::status_field(&self.daemon_status, "source")?;
+        let backend = runtime::status_field(&self.daemon_status, "backend")?;
+        route_contract_for(&source, &backend)
     }
 
     /// The search field and its field-scope menu, laid out right to left.

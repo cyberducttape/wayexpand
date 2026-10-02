@@ -105,6 +105,18 @@ pub fn recommended_mode_description() -> &'static str {
     &route_catalog().recommended_description
 }
 
+/// Find the route contract represented by daemon status fields. The
+/// input-method daemon uses `source=input-method` while the contract names
+/// that capture path `input-method-v2`; keep that compatibility alias here so
+/// GUI and CLI consumers do not duplicate it.
+pub fn route_contract_for(source: &str, injection: &str) -> Option<&'static RouteContract> {
+    route_catalog().routes.iter().find(|route| {
+        let capture_matches = route.capture == source
+            || (source == "input-method" && route.capture == "input-method-v2");
+        capture_matches && route.injection == injection
+    })
+}
+
 impl RecommendedRoute {
     pub fn contract(self) -> &'static RouteContract {
         let id = match self {
@@ -762,5 +774,12 @@ mod tests {
         assert!(description.contains("IBus"));
         assert!(description.contains("evdev"));
         assert!(description.contains("never automatically"));
+    }
+
+    #[test]
+    fn daemon_route_status_resolves_through_the_shared_contract() {
+        let contract = route_contract_for("input-method", "input-method-v2").unwrap();
+        assert_eq!(contract.id, "input-method-v2");
+        assert!(route_contract_for("unknown", "backend").is_none());
     }
 }
