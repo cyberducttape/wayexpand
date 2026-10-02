@@ -24,7 +24,7 @@ snippet templates, and optional command-backed expansions.
 %autosetup -n %{name}-%{version}
 
 %build
-cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
 %check
 cargo test --frozen --workspace
@@ -32,6 +32,7 @@ cargo test --frozen --workspace
 %install
 install -Dm755 target/release/wayexpand %{buildroot}%{_bindir}/wayexpand
 install -Dm755 target/release/wayexpand-daemon %{buildroot}%{_bindir}/wayexpand-daemon
+install -Dm755 target/release/wayexpand-action-broker %{buildroot}%{_bindir}/wayexpand-action-broker
 install -Dm755 target/release/wayexpand-gui %{buildroot}%{_bindir}/wayexpand-gui
 install -Dm755 target/release/wayexpand-ui %{buildroot}%{_bindir}/wayexpand-ui
 install -Dm755 target/release/wayexpand-ibus %{buildroot}%{_bindir}/wayexpand-ibus
@@ -44,6 +45,7 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
 done
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
+install -Dm644 systemd/wayexpand-action-broker.service %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
 sed -i 's#%h/.local/bin/#/usr/bin/#g' %{buildroot}%{_userunitdir}/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
@@ -56,6 +58,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %doc README.md
 %{_bindir}/wayexpand
 %{_bindir}/wayexpand-daemon
+%{_bindir}/wayexpand-action-broker
 %{_bindir}/wayexpand-gui
 %{_bindir}/wayexpand-ui
 %{_bindir}/wayexpand-ibus
@@ -66,6 +69,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_mandir}/man1/wayexpand.1*
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
+%{_userunitdir}/wayexpand-action-broker.service
 %{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 %{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
 %config(noreplace) %{_sysconfdir}/wayexpand/expansions.toml.example

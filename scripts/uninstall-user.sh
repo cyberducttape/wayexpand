@@ -38,7 +38,7 @@ evdev_rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evde
 evdev_uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
 
 if command -v systemctl >/dev/null 2>&1; then
-    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
+    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
         if systemctl --user is-enabled "$service_name" >/dev/null 2>&1 \
             || systemctl --user is-active "$service_name" >/dev/null 2>&1; then
             printf '%s\n' "Stopping and disabling $service_name"
@@ -47,7 +47,7 @@ if command -v systemctl >/dev/null 2>&1; then
     done
 fi
 
-for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ -e "$bin_dir/$binary" ]; then
         rm -f -- "$bin_dir/$binary"
         printf '%s\n' "Removed $bin_dir/$binary"
@@ -62,7 +62,7 @@ if [ -e "$ibus_component_dir/wayexpand-ibus.xml" ]; then
     printf '%s\n' "Removed $ibus_component_dir/wayexpand-ibus.xml"
 fi
 
-for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service; do
+for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
     if [ -e "$unit_dir/$unit" ]; then
         rm -f -- "$unit_dir/$unit"
         printf '%s\n' "Removed $unit_dir/$unit"

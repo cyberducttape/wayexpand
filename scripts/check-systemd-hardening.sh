@@ -5,6 +5,7 @@
 set -eu
 
 units='systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service'
+broker_unit='systemd/wayexpand-action-broker.service'
 required='NoNewPrivileges=yes UMask=0077 PrivateTmp=yes ProtectSystem=strict ProtectHome=read-only ProtectHostname=yes ProtectProc=invisible ProcSubset=pid SystemCallArchitectures=native ProtectKernelTunables=yes ProtectControlGroups=yes RestrictSUIDSGID=yes RestrictNamespaces=yes RestrictRealtime=yes LockPersonality=yes MemoryDenyWriteExecute=yes RestrictAddressFamilies=AF_UNIX MemoryMax=256M TasksMax=32 LimitNOFILE=64 LimitCORE=0'
 
 for unit in $units; do
@@ -17,4 +18,11 @@ for unit in $units; do
     done
 done
 
-printf '%s\n' "systemd hardening contract passed for: $units"
+for expected in NoNewPrivileges=yes UMask=0077 PrivateTmp=yes ProtectSystem=strict ProtectHome=read-only ProtectHostname=yes ProtectProc=invisible ProcSubset=pid SystemCallArchitectures=native ProtectKernelTunables=yes ProtectControlGroups=yes RestrictSUIDSGID=yes RestrictNamespaces=yes RestrictRealtime=yes LockPersonality=yes MemoryDenyWriteExecute=yes MemoryMax=256M TasksMax=32 LimitNOFILE=64 LimitCORE=0; do
+    if ! grep -Fx "$expected" "$broker_unit" >/dev/null; then
+        printf '%s\n' "$broker_unit: required hardening directive missing or changed: $expected" >&2
+        exit 1
+    fi
+done
+
+printf '%s\n' "systemd hardening contract passed for: $units $broker_unit"

@@ -38,7 +38,7 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     exit 1
 fi
-for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ ! -x "$release_dir/bin/$binary" ]; then
         printf '%s\n' "error: $release_dir/bin/$binary not found" >&2
         printf '%s\n' "run this script from inside the extracted release tarball" >&2
@@ -55,6 +55,7 @@ metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
 
 install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
+install -Dm755 "$release_dir/bin/wayexpand-action-broker" "$bin_dir/wayexpand-action-broker"
 install -Dm755 "$release_dir/bin/wayexpand" "$bin_dir/wayexpand"
 install -Dm755 "$release_dir/bin/wayexpand-ui" "$bin_dir/wayexpand-ui"
 install -Dm755 "$release_dir/bin/wayexpand-gui" "$bin_dir/wayexpand-gui"
@@ -67,6 +68,8 @@ install -Dm644 "$release_dir/systemd/wayexpand-input-method.service" \
     "$unit_dir/wayexpand-input-method.service"
 install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
+install -Dm644 "$release_dir/systemd/wayexpand-action-broker.service" \
+    "$unit_dir/wayexpand-action-broker.service"
 install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 if [ -f "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" ]; then

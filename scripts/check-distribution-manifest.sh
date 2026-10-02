@@ -7,6 +7,7 @@ for relative in \
     desktop/wayexpand-ibus.xml \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
+    systemd/wayexpand-action-broker.service \
     udev/71-wayexpand-evdev.rules \
     udev/69-wayexpand-evdev-uaccess.rules; do
     test -f "$project_dir/$relative" || {
@@ -37,7 +38,7 @@ done
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     "$project_dir/.github/workflows/release.yml" \
     "$project_dir/scripts/install-release.sh" "$project_dir/scripts/install-user.sh"; do
-    for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
         grep -q -F "$binary" "$manifest" || {
             printf '%s\n' "manifest omits $binary: $manifest" >&2
             exit 1
@@ -49,7 +50,7 @@ test -f "$project_dir/wayexpand.spec" || {
     printf '%s\n' 'required Fedora RPM spec is missing' >&2
     exit 1
 }
-for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     grep -q -F "$binary" "$project_dir/wayexpand.spec" || {
         printf '%s\n' "manifest omits $binary: $project_dir/wayexpand.spec" >&2
         exit 1

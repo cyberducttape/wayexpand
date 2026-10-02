@@ -7,12 +7,13 @@ trap 'rm -rf "$test_root"' EXIT INT TERM
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
 mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component"
-for binary in wayexpand-daemon wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
 done
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
+install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/component/"
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
@@ -54,6 +55,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 
 [ -x "$test_root/home/.local/bin/wayexpand" ]
 [ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
+[ -x "$test_root/home/.local/bin/wayexpand-action-broker" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
@@ -63,6 +65,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 

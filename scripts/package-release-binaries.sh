@@ -34,11 +34,12 @@ fi
 
 mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" \
     "$root/scripts" "$root/udev" "$root/ibus/component"
-for binary in wayexpand wayexpand-daemon wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
 install -m 0755 "$project_dir/target/release/$binary" "$root/bin/"
 done
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" \
-    "$project_dir/systemd/wayexpand-evdev.service" "$root/systemd/"
+    "$project_dir/systemd/wayexpand-evdev.service" \
+    "$project_dir/systemd/wayexpand-action-broker.service" "$root/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$root/desktop/"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$root/ibus/component/"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" "$root/"

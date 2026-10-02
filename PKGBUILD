@@ -31,7 +31,7 @@ prepare() {
 
 build() {
     cd "${pkgname}-${pkgver}"
-    cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+    cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 }
 
 check() {
@@ -45,6 +45,7 @@ package() {
     # Install binaries
     install -Dm755 target/release/wayexpand "${pkgdir}/usr/bin/wayexpand"
     install -Dm755 target/release/wayexpand-daemon "${pkgdir}/usr/bin/wayexpand-daemon"
+    install -Dm755 target/release/wayexpand-action-broker "${pkgdir}/usr/bin/wayexpand-action-broker"
     install -Dm755 target/release/wayexpand-gui "${pkgdir}/usr/bin/wayexpand-gui"
     install -Dm755 target/release/wayexpand-ui "${pkgdir}/usr/bin/wayexpand-ui"
     install -Dm755 target/release/wayexpand-ibus "${pkgdir}/usr/bin/wayexpand-ibus"
@@ -66,12 +67,14 @@ package() {
     # Install systemd user units
     install -Dm644 systemd/wayexpand-input-method.service "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service"
     install -Dm644 systemd/wayexpand-evdev.service "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
+    install -Dm644 systemd/wayexpand-action-broker.service "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"
     # The source units target the user-local install layout used by the
     # release scripts. Distro packages must bind them to the package-owned
     # binaries so ~/.local/bin cannot shadow an installed update.
     sed -i 's#%h/.local/bin/#/usr/bin/#g' \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service" \
-        "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
+        "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service" \
+        "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"
 
     # Ship evdev policies inertly. Installing WayExpand must not change raw
     # input authorization; the explicit helper copies a selected policy into

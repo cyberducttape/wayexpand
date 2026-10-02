@@ -41,6 +41,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 
 [ -x "$test_root/home/.local/bin/wayexpand" ]
 [ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
+[ -x "$test_root/home/.local/bin/wayexpand-action-broker" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
@@ -50,6 +51,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 
 config_path="$test_root/config/wayexpand/expansions.toml"

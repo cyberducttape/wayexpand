@@ -26,7 +26,7 @@ fi
 
 CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
-    -p wayexpand -p wayexpand-daemon -p wayexpand-ui -p wayexpand-gui
+    -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui
 
 bin_dir="$test_root/home/.local/bin"
 config_dir="$test_root/home/.config/wayexpand"

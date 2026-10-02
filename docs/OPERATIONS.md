@@ -131,7 +131,7 @@ descendants. This is not a containment boundary. A deliberately written,
 trusted command can fork, call `setsid()`, detach from the process group, and
 outlive WayExpand's direct-command cleanup. The direct model is therefore for
 local trusted helpers only; service/cgroup-level containment belongs in the
-planned Action Broker.
+ separate Action Broker service.
 
 **Command-backed expansions and systemd sandbox:** Commands run under the
 daemon's systemd-enforced sandbox (see `systemd/wayexpand.service` for details).

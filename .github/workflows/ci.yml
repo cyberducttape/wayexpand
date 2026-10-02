@@ -136,8 +136,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
         run: cargo test --locked --workspace
-      - name: Test experimental Action Broker opt-in build
-        run: cargo test --locked -p action-broker --features experimental-action-broker
+      - name: Test Action Broker build
+        run: cargo test --locked -p action-broker
       - name: Run tests (locked, release)
         run: cargo test --locked --release --workspace
       - name: Clippy (locked, debug)
@@ -410,14 +410,16 @@ jobs:
       - name: Create dummy binaries for systemd verification
         run: |
           mkdir -p ~/.local/bin
-          touch ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon
-          chmod +x ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon
+          touch ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon ~/.local/bin/wayexpand-action-broker
+          chmod +x ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon ~/.local/bin/wayexpand-action-broker
       - name: Verify wayexpand.service
         run: systemd-analyze verify systemd/wayexpand.service
       - name: Verify wayexpand-input-method.service
         run: systemd-analyze verify systemd/wayexpand-input-method.service
       - name: Verify wayexpand-evdev.service
         run: systemd-analyze verify systemd/wayexpand-evdev.service
+      - name: Verify wayexpand-action-broker.service
+        run: systemd-analyze verify systemd/wayexpand-action-broker.service
       - name: Verify backend units are mutually exclusive
         run: |
           set -eu
@@ -425,7 +427,7 @@ jobs:
           grep -Fx 'Conflicts=wayexpand.service wayexpand-evdev.service' systemd/wayexpand-input-method.service
           grep -Fx 'Conflicts=wayexpand.service wayexpand-input-method.service' systemd/wayexpand-evdev.service
       - name: Security profile analysis
-        run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service
+        run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service systemd/wayexpand-action-broker.service
       - name: Enforce hardening contract
         run: bash scripts/check-systemd-hardening.sh
       - name: Enforce libei token storage contract

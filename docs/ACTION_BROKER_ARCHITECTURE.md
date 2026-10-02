@@ -13,7 +13,7 @@ working directory, timeout, output capture, and environment allowlist remain
 server-side policy. The broker is not itself an OS sandbox: network and
 filesystem isolation still require service-level hardening.
 
-The standalone binary is now part of normal workspace builds. Set
+The standalone binary is part of normal workspace builds and release packages. Set
 `WAYEXPAND_ACTION_BROKER_SOCKET` for the daemon (or use the default socket under
 `$XDG_RUNTIME_DIR`) and run the broker with a mode-0600 configuration.
 
@@ -73,7 +73,7 @@ cwd = "/home/stephan"
 └─────────────────────────────┘
 ```
 
-## Current implementation (experimental, not production-ready)
+## Current implementation (integrated, operator-configured)
 
 What's implemented:
 - **Protocol** (crates/action-broker/src/protocol.rs)
@@ -108,25 +108,25 @@ What's implemented:
   - Loads a validated broker configuration
   - Binds a protected Unix socket
   - Accepts bounded, authenticated requests and executes configured actions
-  - Is a tested workspace binary; current distribution installers do not ship
-    it because no managed service or daemon routing is enabled yet
+  - Is a tested workspace binary shipped by release installers and distro packages
+  - Has an operator-managed `wayexpand-action-broker.service` unit; it is not
+    enabled automatically because the broker configuration is deployment-specific
 
-To build the standalone prototype explicitly from a checkout:
+To build the standalone broker from a checkout:
 
 ```sh
   cargo build --locked -p action-broker \
   --bin wayexpand-action-broker
 ```
 
-This is a developer/research build instruction, not an installation or
-deployment recommendation.
+The packaged user service uses `~/.config/wayexpand/broker.toml` and
+`$XDG_RUNTIME_DIR/wayexpand-broker.sock`; enable it after creating that policy.
 
-## Phase 2: Enhanced Control (v1.3.x) - PLANNED
+## Next: Enhanced Control (v1.3.x) - PLANNED
 
 What will be implemented:
 - **Policy Integration**
-  - Wire `action_broker_socket` configuration to daemon
-  - Route explicitly broker-eligible actions based on policy decisions
+  - Add richer policy controls around the already-integrated action route
   - Fail closed when the broker is unavailable; never fall back to local daemon execution
 
 - **Per-Action Permissions**
@@ -193,31 +193,34 @@ cwd = "/home/user"
 enabled = true
 ```
 
-### Target daemon routing configuration (not active in v1.2)
+### Daemon routing configuration
 
 ```toml
-[organization]
-# Phase 1: Optional (no routing yet)
-# Phase 2: Will enable automatic routing
-action_broker_socket = "/run/user/1000/wayexpand-broker.sock"
+# Optional override for the daemon's broker socket.
+# The packaged service uses the default under $XDG_RUNTIME_DIR.
+# Set WAYEXPAND_ACTION_BROKER_SOCKET in the daemon service environment if needed.
 
 [[expansion]]
 trigger = ";kpods"
 replacement = ""
-# Phase 2: Will route to broker
-# action = "k8s_get_pods"
+
+[expansion.command]
+action = "k8s_get_pods"
 
 [[expansion]]
 trigger = ";aws-id"
 replacement = ""
-# Phase 2: Will route to broker
-# action = "aws_sts_identity"
+
+[expansion.command]
+action = "aws_sts_identity"
 ```
 
 ## Security Model
 
 ### Current daemon execution model
-- The daemon's mature command path can spawn configured command processes.
+- The daemon's mature direct-command path can spawn configured command processes.
+- Named `action` commands are sent to the standalone broker over its protected
+  Unix socket; they are not executed in the daemon process.
 - Expansion and organization policy are checked before dispatch.
 - The daemon service sandbox supplies additional restrictions such as no
   network access and read-only home/system protection.
@@ -252,10 +255,10 @@ replacement = ""
 | Config | ✅ Complete | ✅ Pass | TOML schema with validation |
 | Executor | ✅ Complete | ✅ Pass | Async execution with timeout |
 | IPC (Unix socket) | ✅ Complete | ✅ Pass | JSON over AF_UNIX streams |
-| Daemon integration | ❌ None | N/A | Daemon has no broker dependency or command-routing path |
-| Policy routing | ⏳ Phase 2 | ⏳ Pending | Will integrate with policy module |
-| Broker binary | ⚠️ Source implementation | ⚠️ Explicit experimental Cargo feature | `wayexpand-action-broker`; excluded from normal builds and distribution installers |
-| Systemd integration | ⏳ Phase 2 | ⏳ Pending | User service + socket activation |
+| Daemon integration | ✅ Named actions | ✅ Pass | Core routes actions to the standalone broker |
+| Policy routing | ✅ Action policy | ✅ Pass | Broker validates the configured action catalog |
+| Broker binary | ✅ Integrated standalone binary | ✅ Workspace and package builds | `wayexpand-action-broker`; operator-configured service |
+| Systemd integration | ✅ User service | ✅ Verified | Operator enables the packaged broker unit |
 | Audit logging | ⏳ Phase 2 | ⏳ Pending | syslog/journald integration |
 
 ## Benefits Over Current Approach
@@ -263,7 +266,7 @@ replacement = ""
 | Aspect | Current (v1.2) | With Action Broker (v1.3+) |
 |--------|-----------------|--------------------------|
 | Daemon network access | None | None |
-| Command execution | In daemon process under policy/sandbox | Separate broker process after Phase 2 routing |
+| Command execution | Direct `program` commands in daemon process | Named `action` commands in separate broker process |
 | Per-command control | Policy only (all or nothing) | Fine-grained per-action |
 | Audit trail | Not available | Planned; not implemented |
 | Security isolation | Moderate | Strong |
@@ -278,5 +281,5 @@ replacement = ""
 ## References
 
 - `crates/action-broker/` - Action Broker library
-- `crates/action-broker/Cargo.toml` - Explicit experimental binary feature gate
+- `crates/action-broker/Cargo.toml` - Standalone broker binary manifest
 - [Action Broker security architecture](ACTION_BROKER_ARCHITECTURE.md) - Current design and security status

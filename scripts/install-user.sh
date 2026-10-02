@@ -64,6 +64,7 @@ printf '%s\n' "Building WayExpand release binaries..."
 CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
     -p wayexpand-daemon \
+    -p action-broker \
     -p wayexpand \
     -p wayexpand-ui \
     -p wayexpand-gui \
@@ -71,6 +72,8 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
 
 install -Dm755 "$target_dir/release/wayexpand-daemon" \
     "$bin_dir/wayexpand-daemon"
+install -Dm755 "$target_dir/release/wayexpand-action-broker" \
+    "$bin_dir/wayexpand-action-broker"
 install -Dm755 "$target_dir/release/wayexpand" \
     "$bin_dir/wayexpand"
 install -Dm755 "$target_dir/release/wayexpand-ui" \
@@ -85,6 +88,8 @@ install -Dm644 "$project_dir/systemd/wayexpand-input-method.service" \
     "$unit_dir/wayexpand-input-method.service"
 install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
+install -Dm644 "$project_dir/systemd/wayexpand-action-broker.service" \
+    "$unit_dir/wayexpand-action-broker.service"
 install -Dm644 "$project_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \

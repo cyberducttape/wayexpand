@@ -14,10 +14,10 @@ WayExpand does **not** provide built-in secret management. This is intentional:
 
 **Production boundary:** Do not use command-backed expansions to retrieve or
 insert credentials, tokens, passwords, or other secret values. The normal
-command runner is intentionally confined by the daemon's systemd sandbox; the
-Action Broker is an experimental prototype that is not routed by the daemon and
-does not yet provide an independent sandbox or durable audit sink. Neither is
-a supported networked/credentialed action boundary. See
+command runner is intentionally confined by the daemon's systemd sandbox; named
+actions are routed through the integrated Action Broker, which still does not
+provide an independent sandbox or durable audit sink. Neither is a supported
+secret-release mechanism or audited credential boundary. See
 [Operations](OPERATIONS.md) and the [Action Broker status](ACTION_BROKER_ARCHITECTURE.md).
 
 ## Recommended Approach
@@ -39,8 +39,8 @@ directly in the application/workflow that needs the credential. Do not route
 secret retrieval through a WayExpand snippet. Command-backed expansions can
 run only within the restrictive daemon environment and are not an audited
 credential-release mechanism. For networked or credentialed actions, use a
-separately deployed and reviewed service until the broker's production gates
-are complete.
+separately deployed and reviewed service until the broker has an independently
+reviewed sandbox and audit sink.
 
 ## Security Best Practices
 

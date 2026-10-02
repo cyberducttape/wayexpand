@@ -65,6 +65,7 @@ def main() -> int:
     broker_source = ROOT / "crates/action-broker/src/bin/wayexpand-action-broker.rs"
     broker_manifest = (ROOT / "crates/action-broker/Cargo.toml").read_text(encoding="utf-8")
     daemon_manifest = (ROOT / "crates/daemon/Cargo.toml").read_text(encoding="utf-8")
+    core_manifest = (ROOT / "crates/core/Cargo.toml").read_text(encoding="utf-8")
     gui_doc = (ROOT / "docs/GUI.md").read_text(encoding="utf-8")
     architecture = (ROOT / "docs/ACTION_BROKER_ARCHITECTURE.md").read_text(
         encoding="utf-8"
@@ -156,18 +157,20 @@ def main() -> int:
 
     if not broker_source.is_file():
         errors.append("Action Broker standalone binary source is missing")
-    if 'required-features = ["experimental-action-broker"]' not in broker_manifest:
-        errors.append("Action Broker binary is not gated behind its explicit experimental feature")
+    if 'name = "wayexpand-action-broker"' not in broker_manifest:
+        errors.append("Action Broker standalone binary is missing from its package manifest")
+    if 'required-features = ["experimental-action-broker"]' in broker_manifest:
+        errors.append("Action Broker still uses the removed experimental feature gate")
     if "action-broker =" in daemon_manifest:
-        errors.append("production daemon still depends on the unrouted Action Broker")
-    if "wayexpand-action-broker" not in architecture or "Source implementation" not in architecture:
-        errors.append("Action Broker architecture does not describe the current standalone binary")
+        errors.append("daemon should consume broker routing through the core crate")
+    if "action-broker =" not in core_manifest:
+        errors.append("core crate is missing the Action Broker runtime dependency")
+    if "wayexpand-action-broker" not in architecture or "normal workspace builds" not in architecture:
+        errors.append("Action Broker architecture does not describe the current integrated binary")
 
     for document in active_documents():
         text = document.read_text(encoding="utf-8")
         relative = document.relative_to(ROOT)
-        if "wayexpand-action-broker.service" in text:
-            errors.append(f"{relative} mentions a nonexistent managed broker service")
         if "audit_enabled" in text or "audit_path" in text:
             errors.append(f"{relative} documents removed, inert broker audit settings")
 
