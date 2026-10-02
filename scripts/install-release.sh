@@ -57,6 +57,7 @@ metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
 
 install -d -m 0700 "$state_dir"
+chmod 0700 "$state_dir"
 
 install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
 install -Dm755 "$release_dir/bin/wayexpand-action-broker" "$bin_dir/wayexpand-action-broker"

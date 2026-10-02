@@ -63,6 +63,7 @@ case "$target_dir" in
 esac
 
 install -d -m 0700 "$state_dir"
+chmod 0700 "$state_dir"
 
 printf '%s\n' "Building WayExpand release binaries..."
 CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \

@@ -415,6 +415,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: 1.96.0
+      - name: Install broker build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Build Action Broker for sandbox test
+        run: cargo build --locked -p action-broker
       - name: Create dummy binaries for systemd verification
         run: |
           mkdir -p ~/.local/bin
@@ -440,6 +447,8 @@ jobs:
         run: bash scripts/check-systemd-hardening.sh
       - name: Enforce libei token storage contract
         run: bash scripts/check-libei-token-paths.sh
+      - name: Test Action Broker audit under service sandbox
+        run: bash scripts/test-action-broker-systemd-audit.sh
 
   udev:
     name: udev Rules Validation
