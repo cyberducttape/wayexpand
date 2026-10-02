@@ -78,6 +78,14 @@ def main() -> int:
     certification_doc = (ROOT / "docs/CERTIFICATION_MATRIX.md").read_text(
         encoding="utf-8"
     )
+    route_catalog = json.loads(
+        (ROOT / "crates/backend-selection/routes.json").read_text(encoding="utf-8")
+    )
+    recommended_description = route_catalog.get("recommended_description")
+    if not isinstance(recommended_description, str) or not recommended_description:
+        errors.append("backend route catalog is missing recommended_description")
+    elif recommended_description not in (ROOT / "README.md").read_text(encoding="utf-8"):
+        errors.append("README Recommended-mode safety description is out of sync with routes.json")
 
     generated_matrix_check = subprocess.run(
         [sys.executable, str(ROOT / "scripts/generate-desktop-matrix.py")],

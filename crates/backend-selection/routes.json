@@ -1,4 +1,5 @@
 {
+  "recommended_description": "Recommended mode configures IBus only when it is available and allowed by policy; it never automatically selects evdev or another globally observing path.",
   "routes": [
     {
       "id": "ibus",

@@ -100,9 +100,7 @@ Be precise about what works where:
 - **No compositor is certified yet** by automated end-to-end tests. Run
   `wayexpand doctor` on your own session before relying on a backend.
 - **evdev** (maximum compatibility) can observe typing in password fields.
-  Setup never grants keyboard-device access; the Recommended mode chooses
-  evdev only when this user can already read `/dev/input` and no IBus path is
-  available. Check `wayexpand doctor` to see which route it will pick.
+  Setup never grants keyboard-device access. Recommended mode configures IBus only when it is available and allowed by policy; it never automatically selects evdev or another globally observing path. Use an explicit maximum or experimental mode only after reviewing the security tradeoff.
 
 See the [support matrix](docs/SUPPORT_MATRIX.md) and
 [certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known

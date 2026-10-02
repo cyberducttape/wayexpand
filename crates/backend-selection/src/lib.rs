@@ -51,6 +51,7 @@ pub struct RouteContract {
 
 #[derive(Debug, Deserialize)]
 struct RouteCatalog {
+    recommended_description: String,
     routes: Vec<RouteContract>,
 }
 
@@ -61,6 +62,12 @@ fn route_catalog() -> &'static RouteCatalog {
         serde_json::from_str(include_str!("../routes.json"))
             .expect("checked-in certification route contract must be valid")
     })
+}
+
+/// Exact operator-facing description of Recommended mode. Keep published
+/// documentation synchronized with this catalog value.
+pub fn recommended_mode_description() -> &'static str {
+    &route_catalog().recommended_description
 }
 
 impl RecommendedRoute {
@@ -716,5 +723,9 @@ mod tests {
         assert!(!contract.setup_backend.is_empty());
         assert!(!contract.setup_detail.is_empty());
         assert_eq!(route.setup_backend(), contract.setup_backend);
+        let description = recommended_mode_description();
+        assert!(description.contains("IBus"));
+        assert!(description.contains("evdev"));
+        assert!(description.contains("never automatically"));
     }
 }
