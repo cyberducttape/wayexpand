@@ -400,6 +400,21 @@ mod tests {
         std::env::temp_dir().join(format!("wayexpand-reload-test-{nonce}.toml"))
     }
 
+    fn isolated_temporary_config() -> (PathBuf, PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-reload-test-dir-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock before epoch")
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("expansions.toml");
+        (directory, path)
+    }
+
     fn config_text(replacement: &str) -> String {
         format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
     }
@@ -658,7 +673,7 @@ mod tests {
 
     #[test]
     fn unchanged_configuration_does_not_scan_until_integrity_deadline() {
-        let path = temporary_config();
+        let (directory, path) = isolated_temporary_config();
         write_config(&path, &config_text("stable metadata"));
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
@@ -667,7 +682,10 @@ mod tests {
         // creation after the watcher is installed. Let that startup event
         // settle first; this test is about steady-state idle polling, not the
         // watcher backend's asynchronous startup queue.
-        let settle_deadline = Instant::now() + Duration::from_secs(2);
+        // Parallel stress runs can delay notify delivery and scheduling well
+        // beyond the normal startup path. This is still bounded, but should
+        // test watcher settling rather than the runner's load profile.
+        let settle_deadline = Instant::now() + Duration::from_secs(10);
         let mut quiet_since = Instant::now();
         loop {
             config.reload_if_changed();
@@ -691,6 +709,7 @@ mod tests {
         assert_eq!(config.observed, Some(stamp));
         assert!(config.watch_check_after.is_none());
         let _ = fs::remove_file(path);
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]
