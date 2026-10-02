@@ -429,7 +429,7 @@ impl ExpansionEngine {
                 filters
                     .iter()
                     .map(|filter| match filter {
-                        AppFilter::AppIdGlob(pattern) => Some(GlobPattern::compile(&pattern)),
+                        AppFilter::AppIdGlob(pattern) => Some(GlobPattern::compile(pattern)),
                         _ => None,
                     })
                     .collect()

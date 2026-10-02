@@ -3390,23 +3390,32 @@ fn dropping_async_runtime_discards_queued_commands() {
     let mut engine = ExpansionEngine::new(config).unwrap();
     assert!(engine.enable_async_commands());
 
+    // Fill every command worker so the next job is deterministically queued.
+    // A single in-flight command is insufficient because the runtime owns a
+    // small worker pool; under concurrent test execution the old test could
+    // let the supposedly queued command start before shutdown.
     let first = engine
         .process_deferred(InputEvent::Text(":one".into()))
         .pop()
         .unwrap();
-    assert_eq!(
-        engine.dispatch_pending_with_policy(first, 0),
-        Ok(PendingExpansionDispatch::Queued)
-    );
+    for _ in 0..ASYNC_COMMAND_WORKER_COUNT {
+        assert_eq!(
+            engine.dispatch_pending_with_policy(first.clone(), 0),
+            Ok(PendingExpansionDispatch::Queued)
+        );
+    }
 
     let deadline = Instant::now() + Duration::from_secs(1);
-    while engine.command_metrics().command_in_flight == 0 {
+    while engine.command_metrics().command_in_flight < ASYNC_COMMAND_WORKER_COUNT {
         assert!(Instant::now() < deadline, "first command did not start");
         thread::sleep(Duration::from_millis(5));
     }
     let metrics = engine.command_metrics();
     assert_eq!(metrics.expansion_command_queue_depth, 0);
-    assert!(metrics.expansion_command_in_flight > 0);
+    assert_eq!(
+        metrics.expansion_command_in_flight,
+        ASYNC_COMMAND_WORKER_COUNT
+    );
     assert_eq!(metrics.hotkey_queue_depth, 0);
     assert_eq!(metrics.hotkey_in_flight, 0);
 

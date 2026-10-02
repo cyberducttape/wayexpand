@@ -88,7 +88,7 @@ impl ChildSupervisor {
             if result != 0 {
                 return Err(io::Error::last_os_error());
             }
-            return Ok(unsafe { info.si_pid() } != 0);
+            Ok(unsafe { info.si_pid() } != 0)
         }
 
         #[cfg(not(target_os = "linux"))]
