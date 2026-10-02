@@ -12,9 +12,11 @@ use anyhow::Result;
 use control::{ControlServer, FocusSnapshot};
 use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
-    input_poll_interval, next_retry_delay, wait_for_retry,
+    input_poll_interval, next_retry_delay, spawn_stdin_reader, wait_for_retry,
 };
-use output_loop::{connect_output_backend, connect_output_with_retry, spawn_async_injector};
+use output_loop::{
+    connect_output_backend, connect_output_with_retry, shutdown_injector, spawn_async_injector,
+};
 use reload::ReloadableConfig;
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
@@ -425,24 +427,7 @@ fn main() -> Result<()> {
     );
 
     let receiver = if input_method.is_none() && evdev.is_none() {
-        let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_INPUT_LINES);
-        thread::spawn(move || {
-            let mut reader = io::BufReader::new(io::stdin().lock());
-            loop {
-                match read_bounded_line(&mut reader) {
-                    Ok(Some(line)) => {
-                        if sender.send(line).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(error) => {
-                        warn!(%error, "stdin line rejected");
-                    }
-                }
-            }
-        });
-        Some(receiver)
+        Some(spawn_stdin_reader())
     } else {
         None
     };
@@ -1165,44 +1150,7 @@ fn main() -> Result<()> {
     // still allowing libei to close its portal session and Tokio runtime
     // cleanly in the normal case.
     if let Some(injector) = injector.take() {
-        let backend = injector.name();
-        let (finished_sender, finished_receiver) = std::sync::mpsc::sync_channel(1);
-        info!(
-            backend,
-            event = "injector_shutdown_started",
-            "starting bounded backend shutdown"
-        );
-        let spawn = thread::Builder::new()
-            .name("wayexpand-injector-shutdown".into())
-            .spawn(move || {
-                injector.shutdown();
-                let _ = finished_sender.send(());
-            });
-        match spawn {
-            Ok(_) => match finished_receiver.recv_timeout(Duration::from_secs(5)) {
-                Ok(()) => info!(
-                    backend,
-                    event = "injector_shutdown_finished",
-                    "backend shutdown completed"
-                ),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
-                    backend,
-                    event = "injector_shutdown_deadline_exceeded",
-                    "backend shutdown exceeded its deadline; leaving the worker detached"
-                ),
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => warn!(
-                    backend,
-                    event = "injector_shutdown_worker_failed",
-                    "backend shutdown worker exited without completion"
-                ),
-            },
-            Err(error) => warn!(
-                backend,
-                %error,
-                event = "injector_shutdown_spawn_failed",
-                "could not start backend shutdown worker; backend will be reclaimed at process exit"
-            ),
-        }
+        shutdown_injector(injector);
     }
     Ok(())
 }

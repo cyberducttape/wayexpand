@@ -42,6 +42,50 @@ pub struct OutputFailure {
     pub retryable: bool,
 }
 
+/// Shut down an injector without allowing a broken portal implementation to
+/// hold up daemon termination indefinitely. Keeping this policy next to the
+/// output actor makes all backend shutdown paths use the same deadline.
+pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
+    let backend = injector.name();
+    let (finished_sender, finished_receiver) = std::sync::mpsc::sync_channel(1);
+    info!(
+        backend,
+        event = "injector_shutdown_started",
+        "starting bounded backend shutdown"
+    );
+    let spawn = thread::Builder::new()
+        .name("wayexpand-injector-shutdown".into())
+        .spawn(move || {
+            injector.shutdown();
+            let _ = finished_sender.send(());
+        });
+    match spawn {
+        Ok(_) => match finished_receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(()) => info!(
+                backend,
+                event = "injector_shutdown_finished",
+                "backend shutdown completed"
+            ),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
+                backend,
+                event = "injector_shutdown_deadline_exceeded",
+                "backend shutdown exceeded its deadline; leaving the worker detached"
+            ),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => warn!(
+                backend,
+                event = "injector_shutdown_worker_failed",
+                "backend shutdown worker exited without completion"
+            ),
+        },
+        Err(error) => warn!(
+            backend,
+            %error,
+            event = "injector_shutdown_spawn_failed",
+            "could not start backend shutdown worker; backend will be reclaimed at process exit"
+        ),
+    }
+}
+
 enum OutputCommand {
     Replace { trigger: String, text: String },
     Erase(String),

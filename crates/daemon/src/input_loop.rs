@@ -8,8 +8,10 @@
 
 use anyhow::Result;
 use std::{
+    io,
     path::Path,
     sync::atomic::AtomicBool,
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -25,6 +27,32 @@ const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 
 pub use crate::output_loop::connect_output_backend;
 use crate::{control, status};
+
+/// Start the stdin input source used by the testable/pipe-driven daemon mode.
+///
+/// Reading is isolated from the reactor because stdin has no useful polling
+/// timeout on all supported platforms. The bounded channel keeps a producer
+/// that writes faster than the matcher from consuming unbounded memory.
+pub fn spawn_stdin_reader() -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::sync_channel(crate::MAX_PENDING_INPUT_LINES);
+    thread::spawn(move || {
+        let mut reader = io::BufReader::new(io::stdin().lock());
+        loop {
+            match crate::read_bounded_line(&mut reader) {
+                Ok(Some(line)) => {
+                    if sender.send(line).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    warn!(%error, "stdin line rejected");
+                }
+            }
+        }
+    });
+    receiver
+}
 
 /// Determine polling interval based on async work queue depth.
 pub fn input_poll_interval(metrics: CommandMetrics) -> Duration {
