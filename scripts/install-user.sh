@@ -109,6 +109,13 @@ else
     install -Dm600 "$project_dir/expansions.toml" "$config_path"
     printf '%s\n' "Installed example configuration: $config_path"
 fi
+broker_config="$config_dir/broker.toml"
+if [ -e "$broker_config" ] || [ -L "$broker_config" ]; then
+    printf '%s\n' "Keeping existing broker policy: $broker_config"
+else
+    install -Dm600 "$project_dir/broker.toml.example" "$broker_config"
+    printf '%s\n' "Installed broker policy template: $broker_config"
+fi
 
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
@@ -123,6 +130,12 @@ printf '%s\n' "   export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' ""
 printf '%s\n' "2. Reload systemd:"
 printf '%s\n' "   systemctl --user daemon-reload"
+printf '%s\n' "   # If named actions are configured, create ~/.config/wayexpand/broker.toml and enable:"
+printf '%s\n' "   systemctl --user enable --now wayexpand-action-broker.service"
+if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet wayexpand-action-broker.service 2>/dev/null; then
+    printf '%s\n' "Active broker service still uses its current process; restart it after this upgrade:"
+    printf '%s\n' "  systemctl --user restart wayexpand-action-broker.service"
+fi
 printf '%s\n' ""
 printf '%s\n' "3. Check which backend your compositor supports:"
 printf '%s\n' "   wayexpand doctor"

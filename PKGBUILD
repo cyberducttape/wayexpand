@@ -89,4 +89,5 @@ package() {
 
     # Install example configuration
     install -Dm644 expansions.toml "${pkgdir}/etc/wayexpand/expansions.toml.example"
+    install -Dm600 broker.toml.example "${pkgdir}/etc/wayexpand/broker.toml.example"
 }

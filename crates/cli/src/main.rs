@@ -777,9 +777,10 @@ fn run() -> Result<()> {
             let config_ok = print_config_diagnostics(&config_path);
             let control_socket_ok = print_control_socket_diagnostics();
             let policy_ok = print_policy_diagnostics();
+            let broker_ok = print_broker_diagnostics(Config::load(&config_path).ok().as_ref());
             let capture_ready = print_backend_diagnostics(true);
             print_capabilities_diagnostics();
-            if !config_ok || !control_socket_ok || !policy_ok || !capture_ready {
+            if !config_ok || !control_socket_ok || !policy_ok || !broker_ok || !capture_ready {
                 bail!("doctor found configuration, runtime, or backend problems");
             }
         }
@@ -1963,6 +1964,7 @@ fn certification_scenario_category(scenario: &str) -> &'static str {
 fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let config_result = Config::load(path);
     let config_ok = config_result.is_ok();
+    let broker = broker_diagnostics(config_result.as_ref().ok());
     let socket_path = std::env::var_os("WAYEXPAND_SOCKET")
         .map(PathBuf::from)
         .or_else(|| {
@@ -2048,7 +2050,8 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && policy_ok
         && display_session_available()
         && (selection_ok || setup_recommendation["ready"].as_bool().unwrap_or(false))
-        && socket_valid;
+        && socket_valid
+        && broker["healthy"].as_bool().unwrap_or(false);
     println!(
         "{}",
         serde_json::json!({
@@ -2068,6 +2071,7 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "exists": socket_exists,
                 "valid": socket_valid,
             },
+            "action_broker": broker,
             "ibus": {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },
@@ -2095,6 +2099,82 @@ fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+fn broker_socket_path() -> Option<PathBuf> {
+    std::env::var_os("WAYEXPAND_ACTION_BROKER_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR")
+                .map(|dir| PathBuf::from(dir).join("wayexpand-broker.sock"))
+        })
+}
+
+fn broker_service_active() -> bool {
+    Command::new("systemctl")
+        .args([
+            "--user",
+            "is-active",
+            "--quiet",
+            "wayexpand-action-broker.service",
+        ])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
+    let named_actions = config.map_or(0, |config| {
+        config
+            .expansion
+            .iter()
+            .filter(|expansion| {
+                expansion
+                    .command
+                    .as_ref()
+                    .is_some_and(|command| command.action.is_some())
+            })
+            .count()
+            + config
+                .hotkey
+                .iter()
+                .filter(|hotkey| hotkey.command.action.is_some())
+                .count()
+    });
+    let socket = broker_socket_path();
+    let socket_exists = socket.as_ref().is_some_and(|path| path.exists());
+    let service_active = broker_service_active();
+    let required = named_actions > 0;
+    serde_json::json!({
+        "required": required,
+        "named_action_count": named_actions,
+        "socket": {
+            "path": socket,
+            "exists": socket_exists,
+            "valid": socket.as_deref().is_some_and(existing_control_socket_is_healthy),
+        },
+        "service": {
+            "unit": "wayexpand-action-broker.service",
+            "active": service_active,
+        },
+        "healthy": !required || (socket_exists && service_active),
+    })
+}
+
+fn print_broker_diagnostics(config: Option<&Config>) -> bool {
+    let broker = broker_diagnostics(config);
+    if !broker["required"].as_bool().unwrap_or(false) {
+        println!("Action Broker: not required (no named actions configured)");
+        return true;
+    }
+    let socket = broker["socket"]["path"].as_str().unwrap_or("unconfigured");
+    let active = broker["service"]["active"].as_bool().unwrap_or(false);
+    let exists = broker["socket"]["exists"].as_bool().unwrap_or(false);
+    println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}", broker["named_action_count"]);
+    if !active || !exists {
+        println!("  Enable it with: systemctl --user enable --now wayexpand-action-broker.service");
+        return false;
+    }
+    true
 }
 
 fn display_session_available() -> bool {
@@ -2262,6 +2342,10 @@ fn status_as_json(response: &str) -> Result<serde_json::Value> {
         };
         object.insert(key.to_owned(), value);
     }
+    object.insert(
+        "action_broker".into(),
+        broker_diagnostics(Config::load(&default_config_path()).ok().as_ref()),
+    );
     Ok(serde_json::Value::Object(object))
 }
 
@@ -2855,6 +2939,7 @@ mod tests {
                 "desktop",
                 "config",
                 "control_socket",
+                "action_broker",
                 "policy",
                 "backends",
                 "capabilities",

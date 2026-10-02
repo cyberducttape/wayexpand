@@ -138,6 +138,8 @@ jobs:
         run: cargo test --locked --workspace
       - name: Test Action Broker build
         run: cargo test --locked -p action-broker
+      - name: Action Broker end-to-end test
+        run: bash scripts/test-action-broker-e2e.sh
       - name: Run tests (locked, release)
         run: cargo test --locked --release --workspace
       - name: Clippy (locked, debug)

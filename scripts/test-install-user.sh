@@ -52,6 +52,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
+[ -f "$test_root/config/wayexpand/broker.toml" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 
 config_path="$test_root/config/wayexpand/expansions.toml"

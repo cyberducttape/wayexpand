@@ -265,6 +265,13 @@ Diagnostic output suitable for health checks and monitoring systems.
     "configured": true,
     "exists": true
   },
+  "action_broker": {
+    "required": true,
+    "named_action_count": 1,
+    "socket": {"path": "/run/user/1000/wayexpand-broker.sock", "exists": true, "valid": true},
+    "service": {"unit": "wayexpand-action-broker.service", "active": true},
+    "healthy": true
+  },
   "policy": {
     "path": "/etc/wayexpand/policy.toml",
     "exists": false,
@@ -330,6 +337,9 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
+- `action_broker` (object): Named-action runtime dependency status; `required` is false when the configuration has no named actions, and `healthy` is required for doctor health when it is true
+- `action_broker.socket` (object): Broker socket path and ownership/permission probe
+- `action_broker.service.active` (bool): Whether the packaged user service is active
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `policy.policy.require_absolute_commands` (bool): Whether command programs must use absolute paths; in audit mode this is reported but not enforced
 - `policy.policy.require_atomic_replace` (bool): Whether startup requires a protocol-level atomic replacement capability; enforced only when `safe_mode` is true
@@ -410,6 +420,13 @@ below are exactly what that response currently carries -- nothing more.
   "command_queue_rejected_total": 0,
   "command_timeout_total": 0,
   "command_failure_total": 0,
+  "action_broker": {
+    "required": false,
+    "named_action_count": 0,
+    "socket": {"path": null, "exists": false, "valid": false},
+    "service": {"unit": "wayexpand-action-broker.service", "active": false},
+    "healthy": true
+  },
   "injection_latency_sample_count": 0,
   "injection_latency_window_count": 0,
   "injection_latency_p50_us": 0,
@@ -443,6 +460,7 @@ below are exactly what that response currently carries -- nothing more.
 - `command_queue_rejected_total` (integer): Number of command actions rejected because the bounded queue was full or unavailable
 - `command_timeout_total` (integer): Number of command actions that exceeded their configured timeout
 - `command_failure_total` (integer): Number of command actions that failed for another reason, including spawn failures and non-zero exits
+- `action_broker` (object): Current named-action broker dependency status, matching the doctor field
 - `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
 - `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds

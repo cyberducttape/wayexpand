@@ -95,6 +95,13 @@ elif [ -f "$release_dir/expansions.toml" ]; then
     install -Dm600 "$release_dir/expansions.toml" "$config_path"
     printf '%s\n' "Installed example configuration: $config_path"
 fi
+broker_config="$config_dir/broker.toml"
+if [ -e "$broker_config" ] || [ -L "$broker_config" ]; then
+    printf '%s\n' "Keeping existing broker policy: $broker_config"
+elif [ -f "$release_dir/broker.toml.example" ]; then
+    install -Dm600 "$release_dir/broker.toml.example" "$broker_config"
+    printf '%s\n' "Installed broker policy template: $broker_config"
+fi
 
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
@@ -108,6 +115,8 @@ printf '%s\n' "  systemctl --user daemon-reload"
 printf '%s\n' "  wayexpand setup"
 printf '%s\n' "  wayexpand status"
 printf '%s\n' "  wayexpand doctor"
+printf '%s\n' "  # If named actions are configured, create ~/.config/wayexpand/broker.toml and enable:"
+printf '%s\n' "  systemctl --user enable --now wayexpand-action-broker.service"
 printf '%s\n' "  wayexpand explain-backend"
 printf '%s\n' "  wayexpand edit"
 printf '%s\n' "Setup never grants raw-input permissions or portal consent. If it reports"
@@ -115,7 +124,7 @@ printf '%s\n' "no safe automatic path, review doctor and the documented explicit
 printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."
 
 if command -v systemctl >/dev/null 2>&1; then
-    for active_service in wayexpand-input-method.service wayexpand-evdev.service; do
+    for active_service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
         if systemctl --user is-active --quiet "$active_service" 2>/dev/null; then
             printf '%s\n' "Active service $active_service still uses its current process; restart it after this upgrade:"
             printf '%s\n' "  systemctl --user restart $active_service"

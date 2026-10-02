@@ -51,6 +51,7 @@ done
 install -m 0644 "$project_dir/README.md" "$project_dir/LICENSE" \
     "$project_dir/SECURITY.md" "$project_dir/CHANGELOG.md" "$root/"
 install -m 0600 "$project_dir/expansions.toml" "$root/expansions.toml"
+install -m 0600 "$project_dir/broker.toml.example" "$root/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$root/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$root/scripts/"
 install -m 0755 "$project_dir/scripts/install-evdev-permissions.sh" "$root/scripts/"

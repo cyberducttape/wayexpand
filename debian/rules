@@ -59,3 +59,5 @@ override_dh_install:
 		debian/wayexpand/usr/bin/wayexpand-install-evdev-access
 	install -Dm644 expansions.toml \
 		debian/wayexpand/etc/wayexpand/expansions.toml.example
+	install -Dm600 broker.toml.example \
+		debian/wayexpand/etc/wayexpand/broker.toml.example

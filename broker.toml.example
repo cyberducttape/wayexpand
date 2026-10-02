@@ -1,0 +1,14 @@
+[broker]
+require_absolute_paths = true
+strict_env = true
+
+# Add only commands you explicitly approve. The broker validates executable
+# ownership, permissions, paths, timeouts, and environment allowlists.
+#
+# [actions."cluster-status"]
+# program = "/usr/bin/kubectl"
+# args = ["cluster-info"]
+# timeout_ms = 3000
+# pass_env = ["KUBECONFIG"]
+# cwd = "/home/user"
+# enabled = true

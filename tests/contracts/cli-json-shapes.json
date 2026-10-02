@@ -2,6 +2,6 @@
   "test": ["matched", "results"],
   "preview": ["matched"],
   "list": ["config", "count", "hotkey_count", "expansions", "hotkeys"],
-  "doctor": ["healthy", "wayland", "desktop", "config", "control_socket", "policy", "backends", "capabilities", "automatic_selection", "setup_recommendation", "capture_readiness"],
+  "doctor": ["healthy", "wayland", "desktop", "config", "control_socket", "action_broker", "policy", "backends", "capabilities", "automatic_selection", "setup_recommendation", "capture_readiness"],
   "status": ["response", "source", "backend", "backend_mode", "state", "paused", "config", "config_state", "capture_sensitive_focus", "capture_exclusive", "capture_reliable_key_state", "capture_key_passthrough", "capture_composition_aware", "window_tracker_connected", "inject_atomic_replace", "inject_full_unicode", "inject_cursor_reposition", "inject_key_passthrough", "inject_insertion_mode", "inject_max_text_chars", "inject_expected_throughput_chars_per_sec", "command_queue_depth", "command_in_flight", "expansion_command_queue_depth", "expansion_command_in_flight", "hotkey_queue_depth", "hotkey_in_flight", "command_queue_rejected_total", "command_timeout_total", "command_failure_total", "injection_latency_sample_count", "injection_latency_window_count", "injection_latency_p50_us", "injection_latency_p95_us", "injection_latency_p99_us"]
 }

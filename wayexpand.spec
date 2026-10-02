@@ -51,6 +51,7 @@ install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_datadir}/wayexpand/u
 install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
 install -Dm755 scripts/install-evdev-permissions.sh %{buildroot}%{_bindir}/wayexpand-install-evdev-access
 install -Dm644 expansions.toml %{buildroot}%{_sysconfdir}/wayexpand/expansions.toml.example
+install -Dm600 broker.toml.example %{buildroot}%{_sysconfdir}/wayexpand/broker.toml.example
 install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 
 %files
@@ -73,6 +74,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 %{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
 %config(noreplace) %{_sysconfdir}/wayexpand/expansions.toml.example
+%config(noreplace) %{_sysconfdir}/wayexpand/broker.toml.example
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 
 %changelog

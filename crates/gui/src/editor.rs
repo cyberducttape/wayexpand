@@ -23,6 +23,7 @@ pub(crate) struct Draft {
     pub(crate) match_mode: MatchMode,
     pub(crate) propagate_case: bool,
     pub(crate) command_enabled: bool,
+    pub(crate) command_action: String,
     pub(crate) command_program: String,
     pub(crate) command_args: Vec<String>,
     pub(crate) command_timeout_ms: String,
@@ -40,6 +41,7 @@ impl Draft {
     pub(crate) fn from_expansion(expansion: &ExpansionConfig) -> Self {
         let (
             command_enabled,
+            command_action,
             command_program,
             command_args,
             command_timeout_ms,
@@ -49,6 +51,7 @@ impl Draft {
         ) = match &expansion.command {
             Some(command) => (
                 true,
+                command.action.clone().unwrap_or_default(),
                 command.program.clone(),
                 command.args.clone(),
                 command.timeout_ms.to_string(),
@@ -58,6 +61,7 @@ impl Draft {
             ),
             None => (
                 false,
+                String::new(),
                 String::new(),
                 Vec::new(),
                 "500".into(),
@@ -77,6 +81,7 @@ impl Draft {
             match_mode: expansion.match_mode,
             propagate_case: expansion.propagate_case,
             command_enabled,
+            command_action,
             command_program,
             command_args,
             command_timeout_ms,
@@ -104,6 +109,7 @@ impl Draft {
         match command {
             Some(command) => {
                 self.command_enabled
+                    && self.command_action == command.action.clone().unwrap_or_default()
                     && self.command_program == command.program
                     && self.command_args == command.args
                     && self.command_timeout_ms == command.timeout_ms.to_string()
@@ -114,6 +120,7 @@ impl Draft {
             None => {
                 !self.command_enabled
                     && self.command_program.is_empty()
+                    && self.command_action.is_empty()
                     && self.command_args.is_empty()
                     && self.command_timeout_ms == "500"
                     && self.command_cache_ms == "0"
@@ -127,10 +134,11 @@ impl Draft {
         if !self.command_enabled {
             return Ok(None);
         }
-        if self.command_program.trim().is_empty() {
-            anyhow::bail!("program is required when command expansion is enabled");
+        let action = self.command_action.trim();
+        let program = self.command_program.as_str();
+        if action.is_empty() == program.trim().is_empty() {
+            anyhow::bail!("enter exactly one broker action ID or direct program");
         }
-        let program = &self.command_program;
         let timeout_ms = self
             .command_timeout_ms
             .trim()
@@ -142,6 +150,12 @@ impl Draft {
             .parse::<u64>()
             .context("cache duration must be an integer in milliseconds")?;
         let args = self.command_args.clone();
+        if action.chars().count() > MAX_COMMAND_PROGRAM_CHARS {
+            anyhow::bail!("action ID is too long");
+        }
+        if action.contains('\0') {
+            anyhow::bail!("action ID cannot contain NUL bytes");
+        }
         if program.chars().count() > MAX_COMMAND_PROGRAM_CHARS {
             anyhow::bail!("program is too long");
         }
@@ -168,8 +182,8 @@ impl Draft {
             anyhow::bail!("cache duration must not exceed 60000 milliseconds");
         }
         Ok(Some(CommandConfig {
-            action: None,
-            program: program.clone(),
+            action: (!action.is_empty()).then(|| action.to_owned()),
+            program: program.to_owned(),
             args,
             timeout_ms,
             cache_ms,

@@ -8,6 +8,7 @@ for relative in \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
     systemd/wayexpand-action-broker.service \
+    broker.toml.example \
     udev/71-wayexpand-evdev.rules \
     udev/69-wayexpand-evdev-uaccess.rules; do
     test -f "$project_dir/$relative" || {

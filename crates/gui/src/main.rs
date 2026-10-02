@@ -3600,6 +3600,20 @@ impl GuiApp {
                             }
                             ui.add_enabled_ui(draft.command_enabled, |ui| {
                                 ui.horizontal(|ui| {
+                                    ui.label("Broker action ID (optional)");
+                                    ui.add(
+                                        TextEdit::singleline(&mut draft.command_action)
+                                            .margin(theme::FIELD_MARGIN)
+                                            .hint_text("cluster-status")
+                                            .desired_width(300.0),
+                                    );
+                                });
+                                ui.label(
+                                    RichText::new("Use an action ID for the installed Action Broker, or leave it blank for a direct program.")
+                                        .small()
+                                        .color(palette.muted),
+                                );
+                                ui.horizontal(|ui| {
                                     ui.label(self.strings.program());
                                     ui.add(
                                         TextEdit::singleline(&mut draft.command_program)
@@ -4595,6 +4609,7 @@ mod tests {
             match_mode: MatchMode::Immediate,
             propagate_case: false,
             command_enabled: true,
+            command_action: String::new(),
             command_program: "uname".into(),
             command_args: vec!["-s".into(), "-r".into()],
             command_timeout_ms: "500".into(),

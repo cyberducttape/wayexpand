@@ -17,6 +17,7 @@ install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/component/"
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
+install -m 0600 "$project_dir/broker.toml.example" "$release_dir/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-evdev-permissions.sh" "$release_dir/scripts/"
@@ -68,6 +69,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
+[ -f "$test_root/config/wayexpand/broker.toml" ]
 
 PATH="$stub_bin:$PATH" \
 SYSTEMCTL_LOG="$systemctl_log" \
