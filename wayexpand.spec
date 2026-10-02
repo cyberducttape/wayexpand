@@ -46,7 +46,10 @@ done
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 install -Dm644 systemd/wayexpand-action-broker.service %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
-sed -i 's#%h/.local/bin/#/usr/bin/#g' %{buildroot}%{_userunitdir}/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
+sed -i 's#%h/.local/bin/#/usr/bin/#g' \
+    %{buildroot}%{_userunitdir}/wayexpand-input-method.service \
+    %{buildroot}%{_userunitdir}/wayexpand-evdev.service \
+    %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
 install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
 install -Dm755 scripts/install-evdev-permissions.sh %{buildroot}%{_bindir}/wayexpand-install-evdev-access

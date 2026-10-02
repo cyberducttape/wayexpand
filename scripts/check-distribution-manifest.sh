@@ -100,6 +100,47 @@ if test -f "$project_dir/wayexpand.spec"; then
     fi
 fi
 
+# Systemd user units use %h/.local/bin in the source tree for source installs.
+# Distro packages install binaries in /usr/bin, so every packaged service must
+# be rewritten, including the Action Broker.
+package_units='wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service'
+spec_transform=$(sed -n "/^sed -i 's#%h\\/.local\\/bin\\/#\\/usr\\/bin\\/#g'/,/^install/p" "$project_dir/wayexpand.spec") || {
+    printf '%s\n' 'RPM spec does not rewrite packaged service binaries to /usr/bin' >&2
+    exit 1
+}
+for unit in $package_units; do
+    printf '%s\n' "$spec_transform" | grep -F "$unit" >/dev/null || {
+        printf '%s\n' "RPM spec omits packaged unit from /usr/bin rewrite: $unit" >&2
+        exit 1
+    }
+done
+grep -F "sed -i 's#%h/.local/bin/#/usr/bin/#g'" "$project_dir/debian/rules" >/dev/null || {
+    printf '%s\n' 'Debian rules do not rewrite packaged service binaries to /usr/bin' >&2
+    exit 1
+}
+
+staged_units=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-packaged-units.XXXXXX")
+trap 'rm -rf "$staged_units"' EXIT INT TERM
+for unit in $package_units; do
+    sed 's#%h/.local/bin/#/usr/bin/#g' \
+        "$project_dir/systemd/$unit" >"$staged_units/$unit"
+done
+grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
+    "$staged_units/wayexpand-input-method.service" >/dev/null || {
+    printf '%s\n' 'staged IBus unit does not use /usr/bin/wayexpand-daemon' >&2
+    exit 1
+}
+grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \
+    "$staged_units/wayexpand-evdev.service" >/dev/null || {
+    printf '%s\n' 'staged evdev unit does not use /usr/bin/wayexpand-daemon' >&2
+    exit 1
+}
+grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock' \
+    "$staged_units/wayexpand-action-broker.service" >/dev/null || {
+    printf '%s\n' 'staged Action Broker unit does not use /usr/bin/wayexpand-action-broker' >&2
+    exit 1
+}
+
 # License files must be declared at the same path where each package installs
 # them. This catches RPM's easy-to-miss distinction between the source file
 # name and the generated %{_licensedir}/%{name}/ path.

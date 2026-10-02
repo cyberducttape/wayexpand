@@ -354,7 +354,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential debhelper devscripts \
-            dpkg-dev rpm libwayland-dev libxkbcommon-dev pkg-config
+            dpkg-dev rpm cpio libwayland-dev libxkbcommon-dev pkg-config
           rustc --version
           cargo --version
       - name: Vendor dependencies for offline package builds
@@ -406,6 +406,22 @@ jobs:
             rpm -qlp "$rpm" | grep -F "$path"
           done
           rpm -qlp "$rpm" | grep -E '^/usr/share/man/man1/wayexpand\.1(\.gz)?$'
+          deb_root=$(mktemp -d)
+          dpkg-deb -x "$deb" "$deb_root"
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
+            "$deb_root/usr/lib/systemd/user/wayexpand-input-method.service"
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \
+            "$deb_root/usr/lib/systemd/user/wayexpand-evdev.service"
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock' \
+            "$deb_root/usr/lib/systemd/user/wayexpand-action-broker.service"
+          rpm_root=$(mktemp -d)
+          (cd "$rpm_root" && rpm2cpio "$rpm" | cpio -idm --quiet)
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
+            "$rpm_root/usr/lib/systemd/user/wayexpand-input-method.service"
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \
+            "$rpm_root/usr/lib/systemd/user/wayexpand-evdev.service"
+          grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock' \
+            "$rpm_root/usr/lib/systemd/user/wayexpand-action-broker.service"
 
   systemd:
     name: Systemd Unit Validation
