@@ -31,6 +31,13 @@ enum ChildRunError {
 type ChildRunOutput = (ExitStatus, Vec<u8>, Vec<u8>, bool, bool);
 
 #[cfg(unix)]
+#[derive(Default)]
+struct ReadAvailable {
+    eof: bool,
+    truncated: bool,
+}
+
+#[cfg(unix)]
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
     let fd = stream.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -45,19 +52,31 @@ fn read_available<R: Read>(
     stream: &mut R,
     bytes: &mut Vec<u8>,
     limit: usize,
-) -> Result<bool, std::io::Error> {
+) -> Result<ReadAvailable, std::io::Error> {
     let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
     loop {
         match stream.read(&mut buffer) {
-            Ok(0) => return Ok(true),
+            Ok(0) => {
+                return Ok(ReadAvailable {
+                    eof: true,
+                    truncated,
+                })
+            }
             Ok(count) => {
-                bytes.extend_from_slice(&buffer[..count]);
-                if bytes.len() >= limit {
-                    bytes.truncate(limit);
-                    return Ok(true);
+                let remaining = limit.saturating_sub(bytes.len());
+                let retained = count.min(remaining);
+                bytes.extend_from_slice(&buffer[..retained]);
+                if retained < count {
+                    truncated = true;
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Ok(ReadAvailable {
+                    eof: false,
+                    truncated,
+                })
+            }
             Err(error) => return Err(error),
         }
     }
@@ -82,25 +101,31 @@ fn run_child_unix(
     let deadline = Instant::now() + timeout;
     let mut stdout_bytes = Vec::new();
     let mut stderr_bytes = Vec::new();
+    let mut stdout_truncated = false;
+    let mut stderr_truncated = false;
     let mut stdout_eof = stdout.is_none();
     let mut stderr_eof = stderr.is_none();
 
     let status = loop {
         if !stdout_eof {
-            stdout_eof = read_available(
+            let result = read_available(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
+            stdout_eof = result.eof;
+            stdout_truncated |= result.truncated;
         }
         if !stderr_eof {
-            stderr_eof = read_available(
+            let result = read_available(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
+            stderr_eof = result.eof;
+            stderr_truncated |= result.truncated;
         }
         if guard.has_exited().map_err(ChildRunError::Io)? {
             // On Linux has_exited uses waitid(WNOWAIT), keeping the leader
@@ -123,20 +148,24 @@ fn run_child_unix(
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
         if !stdout_eof {
-            stdout_eof = read_available(
+            let result = read_available(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
+            stdout_eof = result.eof;
+            stdout_truncated |= result.truncated;
         }
         if !stderr_eof {
-            stderr_eof = read_available(
+            let result = read_available(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
+            stderr_eof = result.eof;
+            stderr_truncated |= result.truncated;
         }
         if !stdout_eof || !stderr_eof {
             std::thread::sleep(Duration::from_millis(5));
@@ -145,8 +174,6 @@ fn run_child_unix(
     if !stdout_eof || !stderr_eof {
         return Err(ChildRunError::IncompleteOutput);
     }
-    let stdout_truncated = stdout_bytes.len() >= MAX_STREAM_OUTPUT_BYTES;
-    let stderr_truncated = stderr_bytes.len() >= MAX_STREAM_OUTPUT_BYTES;
     Ok((
         status,
         stdout_bytes,
@@ -658,5 +685,40 @@ mod tests {
         assert!(stdout.lines().any(|line| line == "CLIENT_VALUE=accepted"));
         assert!(!stdout.lines().any(|line| line.contains("client-spoof")));
         std::env::remove_var("WAYEXPAND_BROKER_TEST_VALUE");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executor_drains_large_output_without_timing_out() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "noisy".to_string(),
+            ActionConfig {
+                program: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "yes x | head -c 20971520".to_string()],
+                timeout_ms: 2000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "noisy".to_string(),
+                timeout_ms: 2000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+            })
+            .await
+            .expect("large output should be drained without a timeout");
+        let output = response.output().expect("noisy action should succeed");
+        assert!(output.stdout_truncated);
+        assert_eq!(output.stdout.len(), MAX_STREAM_OUTPUT_BYTES);
     }
 }

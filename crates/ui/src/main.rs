@@ -282,6 +282,8 @@ impl App {
         let previous = self.config.clone();
         let trigger = self.config.expansion[index].trigger.clone();
         self.config.expansion.remove(index);
+        self.visible_cache = None;
+        self.preview_cache = None;
         self.selected = self
             .selected
             .min(self.visible_indices().len().saturating_sub(1));
@@ -291,8 +293,6 @@ impl App {
         } else {
             self.message = format!("Deleted {trigger}");
             self.undo = Some(previous);
-            self.visible_cache = None;
-            self.preview_cache = None;
         }
         self.confirm_delete = None;
     }
@@ -303,6 +303,8 @@ impl App {
             return;
         };
         let current = std::mem::replace(&mut self.config, previous);
+        self.visible_cache = None;
+        self.preview_cache = None;
         if let Err(error) = self.save_current() {
             self.config = current;
             self.message = format!("Undo failed: {}", error.safe_summary());
@@ -311,8 +313,6 @@ impl App {
                 .selected
                 .min(self.visible_indices().len().saturating_sub(1));
             self.message = "Undid the last saved change".into();
-            self.visible_cache = None;
-            self.preview_cache = None;
         }
     }
 
@@ -344,11 +344,11 @@ impl App {
                     self.config = previous;
                     self.message = format!("Create failed: {}", error.safe_summary());
                 } else {
+                    self.visible_cache = None;
+                    self.preview_cache = None;
                     self.selected = self.visible_indices().len().saturating_sub(1);
                     self.message = "Snippet created".into();
                     self.undo = Some(previous);
-                    self.visible_cache = None;
-                    self.preview_cache = None;
                 }
             }
             Some(Prompt::EditReplacement { index, trigger }) => {
@@ -1015,6 +1015,30 @@ mod tests {
         (App::load(path.clone()).unwrap(), path)
     }
 
+    fn test_app_with_triggers(triggers: &[&str]) -> (App, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-tui-reducer-many-{}-{:?}.toml",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_file(&path);
+        let config = Config::parse(
+            &triggers
+                .iter()
+                .enumerate()
+                .map(|(index, trigger)| {
+                    format!(
+                        "[[expansion]]\ntrigger = \"{trigger}\"\nreplacement = \"value-{index}\"\n"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        config.save_atomic(&path).unwrap();
+        (App::load(path.clone()).unwrap(), path)
+    }
+
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
@@ -1039,6 +1063,58 @@ mod tests {
         update(&mut app, key(KeyCode::Char('u'))).unwrap();
         assert_eq!(app.config.expansion.len(), 2);
         assert_eq!(Config::load(path).unwrap().expansion.len(), 2);
+    }
+
+    #[test]
+    fn reducer_delete_last_visible_item_clamps_selection_after_cache_invalidation() {
+        let (mut app, _path) = test_app();
+        app.selected = 1;
+        assert_eq!(app.visible_indices(), &[0, 1]);
+
+        app.delete_confirmed(1);
+
+        assert_eq!(app.config.expansion.len(), 1);
+        assert_eq!(app.selected, 0);
+        assert_eq!(app.visible_indices(), &[0]);
+    }
+
+    #[test]
+    fn reducer_delete_while_filtering_invalidates_visible_cache() {
+        let (mut app, _path) = test_app();
+        app.query = "two".to_string();
+        assert_eq!(app.visible_indices(), &[1]);
+
+        app.delete_confirmed(1);
+
+        assert!(app.visible_indices().is_empty());
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn reducer_undo_while_filtering_rebuilds_visible_cache() {
+        let (mut app, _path) = test_app();
+        app.query = "two".to_string();
+        assert_eq!(app.visible_indices(), &[1]);
+        app.delete_confirmed(1);
+        assert!(app.visible_indices().is_empty());
+
+        app.undo_last();
+
+        assert_eq!(app.visible_indices(), &[1]);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn reducer_delete_before_selection_preserves_following_item() {
+        let (mut app, _path) = test_app_with_triggers(&[":one", ":two", ":three"]);
+        app.selected = 2;
+        assert_eq!(app.selected_index(), Some(2));
+
+        app.delete_confirmed(0);
+
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.selected_index(), Some(1));
+        assert_eq!(app.config.expansion[1].trigger, ":three");
     }
 
     #[test]
