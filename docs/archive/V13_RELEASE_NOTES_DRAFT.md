@@ -33,7 +33,7 @@ The biggest architectural improvement since v1.2: separate command execution fro
 program = "/usr/bin/kubectl"
 args = ["get", "pods"]
 timeout_ms = 10000
-pass_env = ["KUBECONFIG"]
+server_env = ["KUBECONFIG"]
 ```
 
 ### 📋 Command Path Determinism ✅ SHIPPED (v1.2)

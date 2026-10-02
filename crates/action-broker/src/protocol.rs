@@ -19,8 +19,9 @@ pub struct ActionRequest {
     /// is selected exclusively by the server-side ActionConfig.
     pub inherit_env: bool,
 
-    /// Environment variables to pass to the action.
-    /// Format: ["KEY=value", ...]. Only server-allowlisted names are accepted.
+    /// Client-provided environment variables to pass to the action.
+    /// Format: ["KEY=value", ...]. Only `client_forward_env` names are
+    /// accepted; server-owned variables are never taken from this field.
     pub env_vars: Vec<String>,
 
     /// Whether to capture and return stdout/stderr from the action.

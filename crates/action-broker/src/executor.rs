@@ -228,26 +228,22 @@ impl ActionExecutor {
 
         // The action configuration is authoritative; request.inherit_env is
         // deliberately ignored. Even an explicitly inheriting action receives
-        // only the command runner's small baseline plus its pass_env entries.
+        // only the command runner's small baseline plus broker-owned values.
         if action_config.inherit_env && !self.config.strict_env {
-            for key in ["HOME", "USER", "LANG", "PATH"] {
+            for key in ["HOME", "USER", "LANG"] {
                 if let Some(value) = std::env::var_os(key) {
                     cmd.env(key, value);
                 }
             }
-            for key in &action_config.pass_env {
-                if let Some(value) = std::env::var_os(key) {
-                    cmd.env(key, value);
-                }
+        }
+        for key in &action_config.server_env {
+            if let Some(value) = std::env::var_os(key) {
+                cmd.env(key, value);
             }
-        } else {
-            // Restricted mode: accept only client-supplied variables that appear
-            // in the action's pass_env allowlist. An empty allowlist means
-            // nothing is permitted.
-            let allowed_vars = self.build_env_map(&request.env_vars, &action_config.pass_env);
-            for (key, value) in allowed_vars {
-                cmd.env(&key, value);
-            }
+        }
+        let allowed_vars = self.build_env_map(&request.env_vars, &action_config.client_forward_env);
+        for (key, value) in allowed_vars {
+            cmd.env(&key, value);
         }
 
         let capture_stdout = request.stdout_capture;
@@ -390,7 +386,9 @@ mod tests {
                 program: "/bin/echo".to_string(),
                 args: vec![],
                 timeout_ms: 5000,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: false,
@@ -440,7 +438,9 @@ mod tests {
                 program: "/bin/sleep".to_string(),
                 args: vec!["60".to_string()],
                 timeout_ms: 200,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: true,
@@ -483,7 +483,9 @@ mod tests {
                     ),
                 ],
                 timeout_ms: 5_000,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: true,
@@ -528,7 +530,9 @@ mod tests {
                 program: "/bin/echo".to_string(),
                 args: vec!["hi".to_string()],
                 timeout_ms: 500,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: true,
@@ -559,7 +563,9 @@ mod tests {
                 program: "/usr/bin/env".to_string(),
                 args: vec![],
                 timeout_ms: 1000,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: true,
@@ -587,5 +593,47 @@ mod tests {
             "unexpected environment: {}",
             output.stdout
         );
+    }
+
+    #[tokio::test]
+    async fn executor_reads_server_environment_and_rejects_client_override() {
+        std::env::set_var("WAYEXPAND_BROKER_TEST_VALUE", "broker-owned");
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "print-env".to_string(),
+            ActionConfig {
+                program: "/usr/bin/env".to_string(),
+                args: vec![],
+                timeout_ms: 1000,
+                server_env: vec!["WAYEXPAND_BROKER_TEST_VALUE".to_string()],
+                client_forward_env: vec!["CLIENT_VALUE".to_string()],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "print-env".to_string(),
+                timeout_ms: 1000,
+                inherit_env: false,
+                env_vars: vec![
+                    "WAYEXPAND_BROKER_TEST_VALUE=client-spoof".to_string(),
+                    "CLIENT_VALUE=accepted".to_string(),
+                ],
+                stdout_capture: true,
+            })
+            .await
+            .expect("environment command should succeed");
+        let stdout = &response.output().unwrap().stdout;
+        assert!(stdout
+            .lines()
+            .any(|line| line == "WAYEXPAND_BROKER_TEST_VALUE=broker-owned"));
+        assert!(stdout.lines().any(|line| line == "CLIENT_VALUE=accepted"));
+        assert!(!stdout.lines().any(|line| line.contains("client-spoof")));
+        std::env::remove_var("WAYEXPAND_BROKER_TEST_VALUE");
     }
 }

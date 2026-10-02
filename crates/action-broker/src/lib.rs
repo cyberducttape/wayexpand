@@ -2,6 +2,8 @@
 //!
 //! The action broker separates command execution from the keyboard capture daemon,
 //! enabling per-action security policies without compromising daemon isolation.
+//! Its Unix-socket authorization trusts the broker user's UID; it is not a
+//! sandbox against compromised software running as that same user.
 //!
 //! ## Architecture
 //!

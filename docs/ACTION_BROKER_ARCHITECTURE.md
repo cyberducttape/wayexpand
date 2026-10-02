@@ -47,9 +47,17 @@ The corresponding broker policy fixes what may run:
 program = "/usr/bin/kubectl"
 args = ["cluster-info"]
 timeout_ms = 3000
-pass_env = ["KUBECONFIG"]
+server_env = ["KUBECONFIG"]
 cwd = "/home/stephan"
 ```
+
+`server_env` values are read from the broker's environment and cannot be
+overridden by an IPC client. Use `client_forward_env` only for values that a
+same-UID client is explicitly allowed to provide. Loader and interpreter
+variables such as `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `PERL5LIB`,
+`RUBYOPT`, `BASH_ENV`, `ENV`, and `PATH` are rejected unless an action opts into
+`allow_dangerous_env = true`. The broker authenticates the peer UID; it is not
+a sandbox against compromised software running as the same desktop user.
 
 ```
 ┌─────────────────────────────┐
@@ -172,7 +180,7 @@ strict_env = true
 program = "/usr/bin/kubectl"
 args = ["get", "pods"]
 timeout_ms = 10000
-pass_env = ["KUBECONFIG", "HOME"]
+server_env = ["KUBECONFIG", "HOME"]
 enabled = true
 
 # Action: AWS CLI identity check
@@ -180,7 +188,7 @@ enabled = true
 program = "/usr/bin/aws"
 args = ["sts", "get-caller-identity"]
 timeout_ms = 5000
-pass_env = ["AWS_PROFILE", "AWS_REGION"]
+client_forward_env = ["AWS_PROFILE", "AWS_REGION"]
 enabled = true
 
 # Action: Local file operations (no network)
@@ -188,7 +196,7 @@ enabled = true
 program = "/usr/bin/stat"
 args = []
 timeout_ms = 2000
-pass_env = ["HOME"]
+server_env = ["HOME"]
 cwd = "/home/user"
 enabled = true
 ```

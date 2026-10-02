@@ -23,9 +23,21 @@ pub struct ActionConfig {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
 
-    /// Environment variables to pass to the action.
+    /// Environment variable names whose values are read from the broker's
+    /// own environment. Client requests cannot override these values.
     #[serde(default)]
-    pub pass_env: Vec<String>,
+    pub server_env: Vec<String>,
+
+    /// Environment variable names that a same-UID client may provide.
+    /// Values are still restricted to this allowlist and dangerous loader /
+    /// interpreter variables are rejected unless explicitly opted in.
+    #[serde(default)]
+    pub client_forward_env: Vec<String>,
+
+    /// Permit variables such as LD_PRELOAD or PATH for a deliberately
+    /// specialized deployment. Disabled by default.
+    #[serde(default)]
+    pub allow_dangerous_env: bool,
 
     /// Whether to enable the action's minimal inherited environment baseline.
     /// This never means inheriting the complete daemon environment.
@@ -65,18 +77,44 @@ impl ActionConfig {
         if self.args.iter().any(|argument| argument.contains('\0')) {
             return Err("args cannot contain NUL characters".to_string());
         }
-        if self
-            .pass_env
-            .iter()
-            .any(|name| name.is_empty() || name.contains('=') || name.contains('\0'))
-        {
-            return Err("pass_env contains an invalid environment name".to_string());
+        if self.server_env.len() > 64 || self.client_forward_env.len() > 64 {
+            return Err("environment allowlist is too large".to_string());
+        }
+        for (label, names) in [
+            ("server_env", &self.server_env),
+            ("client_forward_env", &self.client_forward_env),
+        ] {
+            if names.iter().any(|name| {
+                name.is_empty()
+                    || name.contains('=')
+                    || name.contains('\0')
+                    || (!self.allow_dangerous_env && is_dangerous_environment_name(name))
+            }) {
+                return Err(format!(
+                    "{} contains an invalid or dangerous environment name",
+                    label
+                ));
+            }
         }
         if self.timeout_ms == 0 {
             return Err("timeout_ms must be > 0".to_string());
         }
         Ok(())
     }
+}
+
+fn is_dangerous_environment_name(name: &str) -> bool {
+    matches!(
+        name,
+        "LD_PRELOAD"
+            | "LD_LIBRARY_PATH"
+            | "PYTHONPATH"
+            | "PERL5LIB"
+            | "RUBYOPT"
+            | "BASH_ENV"
+            | "ENV"
+            | "PATH"
+    )
 }
 
 /// Complete broker configuration.
@@ -374,7 +412,9 @@ mod tests {
             program: "/usr/bin/kubectl".to_string(),
             args: vec!["get".to_string()],
             timeout_ms: 5000,
-            pass_env: vec!["KUBECONFIG".to_string()],
+            server_env: vec!["KUBECONFIG".to_string()],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
             enabled: true,
@@ -390,7 +430,9 @@ mod tests {
             program: String::new(),
             args: vec![],
             timeout_ms: 5000,
-            pass_env: vec![],
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
             enabled: true,
@@ -405,7 +447,9 @@ mod tests {
             program: "/usr/bin/echo".to_string(),
             args: vec!["ok\0bad".to_string()],
             timeout_ms: 5000,
-            pass_env: vec![],
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
             enabled: true,
@@ -414,11 +458,30 @@ mod tests {
         assert!(config.validate().is_err());
 
         config.args = vec![];
-        config.pass_env = vec!["BAD=NAME".to_string()];
+        config.client_forward_env = vec!["BAD=NAME".to_string()];
         assert!(config.validate().is_err());
 
-        config.pass_env = vec!["BAD\0NAME".to_string()];
+        config.client_forward_env = vec!["BAD\0NAME".to_string()];
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn action_config_rejects_dangerous_environment_by_default() {
+        let mut config = ActionConfig {
+            program: "/usr/bin/echo".to_string(),
+            args: vec![],
+            timeout_ms: 5000,
+            server_env: vec!["LD_PRELOAD".to_string()],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            enabled: true,
+            description: None,
+        };
+        assert!(config.validate().is_err());
+        config.allow_dangerous_env = true;
+        assert!(config.validate().is_ok());
     }
 
     #[test]
@@ -489,7 +552,9 @@ program = "echo"
                 program: "echo".to_string(), // Not absolute
                 args: vec![],
                 timeout_ms: 5000,
-                pass_env: vec![],
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
                 enabled: true,
@@ -566,7 +631,7 @@ strict_env = true
 program = "/usr/bin/example"
 args = []
 timeout_ms = 5000
-pass_env = ["HOME"]
+client_forward_env = ["HOME"]
 enabled = true
 "#;
         let config =
@@ -595,7 +660,9 @@ enabled = true
                     program: executable.to_string_lossy().into_owned(),
                     args: vec![],
                     timeout_ms: 1000,
-                    pass_env: vec![],
+                    server_env: vec![],
+                    client_forward_env: vec![],
+                    allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
                     enabled: true,
@@ -622,7 +689,9 @@ enabled = true
                     program: "/definitely/missing/wayexpand-action".to_string(),
                     args: vec![],
                     timeout_ms: 1000,
-                    pass_env: vec![],
+                    server_env: vec![],
+                    client_forward_env: vec![],
+                    allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
                     enabled: true,
@@ -645,7 +714,9 @@ enabled = true
                         .into_owned(),
                     args: vec![],
                     timeout_ms: 1000,
-                    pass_env: vec![],
+                    server_env: vec![],
+                    client_forward_env: vec![],
+                    allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
                     enabled: true,

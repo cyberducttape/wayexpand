@@ -119,6 +119,8 @@ fn validate_peer(stream: &UnixStream) -> Result<(), std::io::Error> {
     if result != 0 {
         return Err(std::io::Error::last_os_error());
     }
+    // SO_PEERCRED authenticates the Unix identity, not the calling process's
+    // intent. Same-UID applications are inside the broker's trust boundary.
     if credentials.uid != rustix::process::geteuid().as_raw() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

@@ -98,7 +98,9 @@ fn broker_config_validation() {
             program: "/usr/bin/echo".to_string(),
             args: vec!["hello".to_string()],
             timeout_ms: 5000,
-            pass_env: vec!["HOME".to_string()],
+            server_env: vec![],
+            client_forward_env: vec!["HOME".to_string()],
+            allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
             enabled: true,
@@ -125,7 +127,9 @@ fn broker_config_rejects_relative_paths_when_required() {
             program: "echo".to_string(), // Not absolute
             args: vec![],
             timeout_ms: 5000,
-            pass_env: vec![],
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
             enabled: true,
@@ -147,7 +151,7 @@ strict_env = true
 program = "/usr/bin/echo"
 args = ["hello"]
 timeout_ms = 3000
-pass_env = ["HOME"]
+client_forward_env = ["HOME"]
 enabled = true
 "#;
 

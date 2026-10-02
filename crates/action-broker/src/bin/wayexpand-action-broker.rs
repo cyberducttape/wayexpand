@@ -121,7 +121,7 @@ CONFIGURATION:
     program = "/usr/bin/example"
     args = []
     timeout_ms = 5000
-    pass_env = ["HOME"]
+    server_env = ["HOME"]
     enabled = true
 
 For more information, see: https://github.com/cyberducttape/wayexpand
