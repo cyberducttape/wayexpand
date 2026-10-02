@@ -159,3 +159,58 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
     let _ = pid;
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{process::Command, thread, time::Duration};
+
+    fn wait_until_exited(supervisor: &mut ChildSupervisor) {
+        for _ in 0..1000 {
+            if supervisor
+                .has_exited()
+                .expect("exit observation should succeed")
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("child did not exit within the test deadline");
+    }
+
+    #[test]
+    fn exit_observation_does_not_reap_before_group_cleanup() {
+        let mut command = Command::new("true");
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test child");
+        let mut supervisor = ChildSupervisor::new(child);
+
+        wait_until_exited(&mut supervisor);
+        // A second observation must still work. On Linux this proves the
+        // waitid call used WNOWAIT rather than reaping the process leader.
+        assert!(supervisor
+            .has_exited()
+            .expect("repeated exit observation should succeed"));
+
+        supervisor.kill_group();
+        let status = supervisor.reap().expect("reap after group cleanup");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn group_cleanup_invalidates_the_identifier_before_killing() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30 & wait"]);
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn process-group test child");
+        let mut supervisor = ChildSupervisor::new(child);
+
+        supervisor.kill_group();
+        assert!(supervisor.pid.is_none());
+        let status = supervisor.reap().expect("reap killed process group leader");
+        assert!(!status.success());
+
+        // A repeated cleanup call cannot target a recycled process-group ID.
+        supervisor.kill_group();
+    }
+}
