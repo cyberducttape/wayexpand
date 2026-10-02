@@ -67,6 +67,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
 [ -d "$test_root/home/.local/state/wayexpand" ]
 [ "$(stat -c '%a' "$test_root/home/.local/state/wayexpand")" = 700 ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
@@ -110,6 +111,7 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 
 printf '%s\n' "release install/uninstall test passed"

@@ -122,6 +122,7 @@ What's implemented:
 
 - **Execution audit sink**
   - Enable with `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"`; the default state location is `$HOME/.local/state/wayexpand`
+  - Installers create a `wayexpand-action-broker.service.d/10-state-directory.conf` drop-in for the resolved `XDG_STATE_HOME`, so custom state locations remain writable under the service sandbox
   - Writes bounded JSONL events with request ID, action ID, caller PID and
     executable when available, policy SHA-256, timing, exit/timeout status, and
     output byte count
@@ -267,7 +268,7 @@ missing broker service from an unknown or disabled action.
 - No escalated privileges (runs as regular user)
 
 ### Audit Trail
-- Optional: set `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"` to enable the broker's JSONL execution audit. WayExpand resolves `$XDG_STATE_HOME` from the environment and falls back to `$HOME/.local/state`; installers create the private state directory and the user service grants the broker access to it.
+- Optional: set `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"` to enable the broker's JSONL execution audit. WayExpand resolves `$XDG_STATE_HOME` from the environment and falls back to `$HOME/.local/state`; installers create the private state directory and generate a service drop-in granting the broker access to the resolved location.
 - Events contain timing, action identity, request ID, peer metadata, policy
   hash, exit/timeout status, and output size, but not arguments, environment
   values, stdout, or stderr.

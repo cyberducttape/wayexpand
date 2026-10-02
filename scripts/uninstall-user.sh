@@ -70,6 +70,12 @@ for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.ser
         printf '%s\n' "Removed $unit_dir/$unit"
     fi
 done
+broker_dropin_dir="$unit_dir/wayexpand-action-broker.service.d"
+if [ -e "$broker_dropin_dir/10-state-directory.conf" ]; then
+    rm -f -- "$broker_dropin_dir/10-state-directory.conf"
+    rmdir "$broker_dropin_dir" 2>/dev/null || true
+    printf '%s\n' "Removed $broker_dropin_dir/10-state-directory.conf"
+fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload || true
 fi

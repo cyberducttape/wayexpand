@@ -52,10 +52,21 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
 [ -d "$test_root/home/.local/state/wayexpand" ]
 [ "$(stat -c '%a' "$test_root/home/.local/state/wayexpand")" = 700 ]
 [ -f "$test_root/config/wayexpand/broker.toml" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
+
+custom_state_home="$test_root/custom-state"
+HOME="$test_root/home" \
+XDG_CONFIG_HOME="$test_root/config" \
+XDG_STATE_HOME="$custom_state_home" \
+"$project_dir/scripts/install-user.sh"
+[ -d "$custom_state_home/wayexpand" ]
+[ "$(stat -c '%a' "$custom_state_home/wayexpand")" = 700 ]
+grep -Fx "ReadWritePaths=\"$custom_state_home/wayexpand\"" \
+    "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf"
 
 config_path="$test_root/config/wayexpand/expansions.toml"
 custom_config=$(mktemp "$test_root/custom-config.XXXXXX")

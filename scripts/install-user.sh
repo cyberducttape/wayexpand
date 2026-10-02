@@ -56,6 +56,13 @@ application_dir="$HOME/.local/share/applications"
 ibus_component_dir="$HOME/.local/share/ibus/component"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
+case "$state_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_STATE_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
 target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
 case "$target_dir" in
     /*) ;;
@@ -95,6 +102,13 @@ install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$project_dir/systemd/wayexpand-action-broker.service" \
     "$unit_dir/wayexpand-action-broker.service"
+broker_dropin_dir="$unit_dir/wayexpand-action-broker.service.d"
+install -d -m 0755 "$broker_dropin_dir"
+{
+    printf '%s\n' '[Service]'
+    printf 'ReadWritePaths="%s"\n' "$state_dir"
+} >"$broker_dropin_dir/10-state-directory.conf"
+chmod 0644 "$broker_dropin_dir/10-state-directory.conf"
 install -Dm644 "$project_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
