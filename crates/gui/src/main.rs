@@ -212,6 +212,7 @@ struct GuiApp {
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
     setup_task: Option<SetupTask>,
     pending_save: Option<PendingSave>,
+    queued_save: Option<PendingSave>,
     next_save_id: u64,
 }
 
@@ -539,6 +540,7 @@ impl GuiApp {
             try_live_open: true,
             setup_task: None,
             pending_save: None,
+            queued_save: None,
             next_save_id: 1,
         })
     }
@@ -752,17 +754,29 @@ impl GuiApp {
 
     fn queue_save_config(&mut self, candidate: Config, intent: SaveIntent) -> bool {
         if self.pending_save.is_some() {
-            self.status = Status::warning(self.strings.status_save_busy());
-            return false;
+            let request_id = self.next_save_id;
+            self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
+            self.queued_save = Some(PendingSave {
+                request_id,
+                candidate,
+                preview_revision: self.preview_revision,
+                intent,
+            });
+            self.status = Status::info(self.strings.status_saving());
+            return true;
         }
         let request_id = self.next_save_id;
         self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
-        let pending = PendingSave {
+        self.dispatch_save(PendingSave {
             request_id,
             candidate,
             preview_revision: self.preview_revision,
             intent,
-        };
+        })
+    }
+
+    fn dispatch_save(&mut self, pending: PendingSave) -> bool {
+        let request_id = pending.request_id;
         let Some(sender) = self.runtime_sender.as_ref() else {
             // Headless unit tests construct GuiApp without the application
             // runtime. Production starts the coordinator before rendering.
@@ -794,6 +808,14 @@ impl GuiApp {
         true
     }
 
+    fn dispatch_queued_save(&mut self) {
+        if self.pending_save.is_none() {
+            if let Some(pending) = self.queued_save.take() {
+                let _ = self.dispatch_save(pending);
+            }
+        }
+    }
+
     fn finish_save(
         &mut self,
         request_id: u64,
@@ -813,10 +835,12 @@ impl GuiApp {
             Ok(result) => result,
             Err(runtime::SaveFailure::Conflict) => {
                 self.status = Status::warning(self.strings.status_config_changed_externally());
+                self.dispatch_queued_save();
                 return;
             }
             Err(runtime::SaveFailure::Busy) => {
                 self.status = Status::warning(self.strings.status_save_busy());
+                self.dispatch_queued_save();
                 return;
             }
             Err(runtime::SaveFailure::Failed(error)) => {
@@ -831,6 +855,7 @@ impl GuiApp {
                     SaveIntent::Deleted { .. } => strings.status_delete_failed(&error),
                     SaveIntent::Toggled { .. } => strings.status_toggle_failed(&error),
                 });
+                self.dispatch_queued_save();
                 return;
             }
         };
@@ -875,6 +900,7 @@ impl GuiApp {
                 if newer_draft_exists {
                     self.status =
                         Status::warning(self.strings.status_save_completed_with_newer_edits());
+                    self.dispatch_queued_save();
                     return;
                 }
                 self.draft = self
@@ -956,6 +982,7 @@ impl GuiApp {
                 self.set_saved_status(Status::success(message));
             }
         }
+        self.dispatch_queued_save();
     }
 
     fn maybe_execute_pending_action(&mut self) {
@@ -5441,6 +5468,31 @@ mod tests {
                 index: 0,
             },
         });
+
+        // Two edits arriving while the first write is in flight coalesce to
+        // the newest desired state instead of being rejected as "busy".
+        let mut queued = app.config.clone();
+        queued.expansion[0].replacement = "newest".into();
+        assert!(app.queue_save_config(
+            queued,
+            SaveIntent::Snippet {
+                is_new: false,
+                index: 0,
+            }
+        ));
+        let mut latest = app.config.clone();
+        latest.expansion[0].replacement = "latest".into();
+        assert!(app.queue_save_config(
+            latest,
+            SaveIntent::Snippet {
+                is_new: false,
+                index: 0,
+            }
+        ));
+        assert_eq!(
+            app.queued_save.as_ref().unwrap().candidate.expansion[0].replacement,
+            "latest"
+        );
         app.invalidate_preview();
         let result = runtime::save_config(
             path.clone(),
@@ -5450,10 +5502,10 @@ mod tests {
         );
         app.finish_save(41, result);
 
-        assert_eq!(app.config.expansion[0].replacement, "saved");
+        assert_eq!(app.config.expansion[0].replacement, "latest");
         assert_eq!(
             Config::load(&path).unwrap().expansion[0].replacement,
-            "saved"
+            "latest"
         );
         fs::remove_file(path).unwrap();
     }
