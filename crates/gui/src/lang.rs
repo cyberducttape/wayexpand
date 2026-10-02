@@ -738,7 +738,7 @@ impl Strings {
         }
     }
 
-    pub fn cancel(&self) -> &'static str {
+    pub fn picker_cancel(&self) -> &'static str {
         match self.lang {
             Language::English => "Cancel",
             Language::German => "Abbrechen",
@@ -2335,6 +2335,45 @@ impl Strings {
             Language::German => {
                 format!("{trigger} kopiert · mit Strg+V einfügen, dann Esc drücken")
             }
+        }
+    }
+
+    pub fn picker_inserting(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("Inserting {trigger}…"),
+            Language::German => format!("{trigger} wird eingefügt …"),
+        }
+    }
+
+    pub fn picker_waiting_for_focus(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Waiting for the original window to regain focus safely.",
+            Language::German => {
+                "Warten, bis das ursprüngliche Fenster sicher wieder fokussiert ist."
+            }
+        }
+    }
+
+    pub fn picker_insert_failed(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Could not safely return to the original window.",
+            Language::German => {
+                "Das ursprüngliche Fenster konnte nicht sicher wieder fokussiert werden."
+            }
+        }
+    }
+
+    pub fn picker_copy_instead(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Copy instead",
+            Language::German => "Stattdessen kopieren",
+        }
+    }
+
+    pub fn cancel(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Cancel",
+            Language::German => "Abbrechen",
         }
     }
 

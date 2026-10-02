@@ -10,6 +10,7 @@
 
 use std::{
     path::PathBuf,
+    sync::mpsc::{self, Receiver, TryRecvError},
     thread,
     time::{Duration, Instant},
 };
@@ -85,14 +86,8 @@ struct SearchEntry {
     description: String,
 }
 
-/// What the user chose, handed back to `main` after the window closes.
-#[derive(Default)]
-pub(crate) struct Outcome {
-    pub trigger: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FocusTarget {
+pub(crate) struct FocusTarget {
     generation: u64,
     token: String,
 }
@@ -111,7 +106,22 @@ pub(crate) struct PickerApp {
     daemon_available: bool,
     copied: Option<String>,
     focus_requested: bool,
-    outcome: std::sync::Arc<std::sync::Mutex<Outcome>>,
+    target_focus: Option<FocusTarget>,
+    insert_state: InsertState,
+}
+
+enum InsertState {
+    Ready,
+    Waiting {
+        trigger: String,
+        text: String,
+        receiver: Receiver<Result<(), String>>,
+    },
+    Failed {
+        trigger: String,
+        text: String,
+        error: String,
+    },
 }
 
 impl PickerApp {
@@ -122,7 +132,7 @@ impl PickerApp {
         colorpack: ColorPack,
         dark: bool,
         daemon_available: bool,
-        outcome: std::sync::Arc<std::sync::Mutex<Outcome>>,
+        target_focus: Option<FocusTarget>,
     ) -> Self {
         Self {
             search_index: config
@@ -145,7 +155,8 @@ impl PickerApp {
             daemon_available,
             copied: None,
             focus_requested: false,
-            outcome,
+            target_focus,
+            insert_state: InsertState::Ready,
         }
     }
 
@@ -184,22 +195,76 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
+        let text = render_template_with_cursor(&expansion.replacement, &TemplateContext::system())
+            .map(|(text, _)| text)
+            .unwrap_or_else(|_| expansion.replacement.clone());
         if self.daemon_available {
-            if let Ok(mut outcome) = self.outcome.lock() {
-                outcome.trigger = Some(expansion.trigger.clone());
-            }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            let Some(target_focus) = self.target_focus.clone() else {
+                self.insert_state = InsertState::Failed {
+                    trigger: expansion.trigger.clone(),
+                    text,
+                    error: "Could not identify the original focused window; refusing to insert."
+                        .to_owned(),
+                };
+                return;
+            };
+            let (sender, receiver) = mpsc::channel();
+            let trigger = expansion.trigger.clone();
+            let worker_trigger = trigger.clone();
+            thread::spawn(move || {
+                let result = wait_for_focus_and_insert(target_focus, &worker_trigger);
+                let _ = sender.send(result);
+            });
+            self.insert_state = InsertState::Waiting {
+                trigger,
+                text,
+                receiver,
+            };
             return;
         }
         // No daemon to type for us: offer the text on the clipboard. The
         // window stays open because a Wayland clipboard is served by the
         // process that set it.
-        match render_template_with_cursor(&expansion.replacement, &TemplateContext::system()) {
-            Ok((text, _)) => {
-                ctx.copy_text(text);
-                self.copied = Some(expansion.trigger.clone());
+        ctx.copy_text(text);
+        self.copied = Some(expansion.trigger.clone());
+    }
+
+    fn poll_insert(&mut self, ctx: &egui::Context) {
+        let state = std::mem::replace(&mut self.insert_state, InsertState::Ready);
+        let InsertState::Waiting {
+            trigger,
+            text,
+            receiver,
+        } = state
+        else {
+            self.insert_state = state;
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(())) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Ok(Err(error)) => {
+                self.insert_state = InsertState::Failed {
+                    trigger,
+                    text,
+                    error,
+                };
             }
-            Err(_) => self.copied = None,
+            Err(TryRecvError::Empty) => {
+                self.insert_state = InsertState::Waiting {
+                    trigger,
+                    text,
+                    receiver,
+                };
+                ctx.request_repaint_after(FOCUS_POLL_INTERVAL);
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.insert_state = InsertState::Failed {
+                    trigger,
+                    text,
+                    error: "The insertion worker stopped before the insert was confirmed."
+                        .to_owned(),
+                };
+            }
         }
     }
 }
@@ -208,9 +273,11 @@ impl eframe::App for PickerApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let palette = self.palette;
+        self.poll_insert(&ctx);
         self.refresh_results();
         let result_indices = self.result_indices.clone();
         let count = result_indices.len();
+        let ready = matches!(self.insert_state, InsertState::Ready);
         let (up, down, enter, escape) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowUp),
@@ -229,7 +296,7 @@ impl eframe::App for PickerApp {
             self.selected = self.selected.saturating_sub(1);
         }
         self.selected = self.selected.min(count.saturating_sub(1));
-        let mut chosen = (enter && count > 0).then(|| result_indices[self.selected]);
+        let mut chosen = (ready && enter && count > 0).then(|| result_indices[self.selected]);
 
         egui::CentralPanel::default()
             .frame(
@@ -257,6 +324,44 @@ impl eframe::App for PickerApp {
                 }
                 ui.add_space(10.0);
 
+                match &self.insert_state {
+                    InsertState::Waiting { trigger, .. } => {
+                        ui.group(|ui| {
+                            ui.label(
+                                RichText::new(self.strings.picker_inserting(trigger)).strong(),
+                            );
+                            ui.label(self.strings.picker_waiting_for_focus());
+                        });
+                        ui.add_space(10.0);
+                    }
+                    InsertState::Failed {
+                        trigger,
+                        error,
+                        text,
+                    } => {
+                        ui.group(|ui| {
+                            ui.label(
+                                RichText::new(self.strings.picker_insert_failed())
+                                    .strong()
+                                    .color(palette.warning),
+                            );
+                            ui.label(error);
+                            ui.horizontal(|ui| {
+                                if ui.button(self.strings.picker_copy_instead()).clicked() {
+                                    ctx.copy_text(text.clone());
+                                    self.copied = Some(trigger.clone());
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                                if ui.button(self.strings.picker_cancel()).clicked() {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                            });
+                        });
+                        ui.add_space(10.0);
+                    }
+                    InsertState::Ready => {}
+                }
+
                 let footer_height = 30.0;
                 egui::ScrollArea::vertical()
                     .max_height(ui.available_height() - footer_height)
@@ -281,7 +386,7 @@ impl eframe::App for PickerApp {
                             if response.hovered() && ui.input(|input| input.pointer.is_moving()) {
                                 self.selected = index;
                             }
-                            if response.clicked() {
+                            if ready && response.clicked() {
                                 chosen = Some(expansion_index);
                             }
                         }
@@ -382,7 +487,39 @@ fn picker_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Run the picker, then hand the chosen trigger to the daemon.
+fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result<(), String> {
+    let deadline = Instant::now() + FOCUS_RETURN_TIMEOUT;
+    loop {
+        let current = crate::runtime::control_command("focus")
+            .ok()
+            .and_then(|response| focus_target_from_response(&response));
+        if let Some(current) = current {
+            if current.token == target_focus.token && current.generation > target_focus.generation {
+                let response = crate::runtime::control_command(&format!(
+                    "insert-target {} {} {trigger}",
+                    current.generation, current.token
+                ))
+                .map_err(|error| error.to_string())?;
+                if response.trim_end() != "insert scheduled" {
+                    return Err(format!(
+                        "daemon refused the insert: {}",
+                        response.trim_end()
+                    ));
+                }
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "Focus did not return to the original window; refusing to insert.".to_owned(),
+            );
+        }
+        thread::sleep(FOCUS_POLL_INTERVAL);
+    }
+}
+
+/// Run the picker. Insertion remains inside the picker until the guarded
+/// focus handoff succeeds, so a safe failure remains visible to the user.
 pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let loaded = Config::load_versioned(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
@@ -393,8 +530,6 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
         .ok()
         .and_then(|response| focus_target_from_response(&response));
     let daemon_available = target_focus.is_some();
-    let outcome = std::sync::Arc::new(std::sync::Mutex::new(Outcome::default()));
-    let app_outcome = std::sync::Arc::clone(&outcome);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -428,45 +563,11 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
                 prefs.colorpack,
                 dark,
                 daemon_available,
-                app_outcome,
+                target_focus,
             )))
         }),
     )
     .map_err(|error| anyhow::anyhow!("picker failed: {error}"))?;
-
-    let trigger = outcome
-        .lock()
-        .ok()
-        .and_then(|mut outcome| outcome.trigger.take());
-    if let Some(trigger) = trigger {
-        let Some(target_focus) = target_focus else {
-            anyhow::bail!("could not identify the original focused window; copied instead");
-        };
-        let deadline = Instant::now() + FOCUS_RETURN_TIMEOUT;
-        loop {
-            let current = crate::runtime::control_command("focus")
-                .ok()
-                .and_then(|response| focus_target_from_response(&response));
-            if let Some(current) = current {
-                if current.token == target_focus.token
-                    && current.generation > target_focus.generation
-                {
-                    let response = crate::runtime::control_command(&format!(
-                        "insert-target {} {} {trigger}",
-                        current.generation, current.token
-                    ))?;
-                    if response.trim_end() != "insert scheduled" {
-                        anyhow::bail!("daemon refused the insert: {}", response.trim_end());
-                    }
-                    break;
-                }
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!("focus did not return to the original window; refusing to insert");
-            }
-            thread::sleep(FOCUS_POLL_INTERVAL);
-        }
-    }
     Ok(())
 }
 
