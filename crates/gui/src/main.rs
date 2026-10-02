@@ -18,7 +18,7 @@ mod theme;
 use anyhow::{Context, Result};
 use colorpack::{ColorPack, ColorScheme};
 use dialogs::{AppDetection, PendingAction};
-use editor::Draft;
+use editor::{broker_action_ids, Draft};
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
@@ -3600,28 +3600,64 @@ impl GuiApp {
                             }
                             ui.add_enabled_ui(draft.command_enabled, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label("Broker action ID (optional)");
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.command_action)
-                                            .margin(theme::FIELD_MARGIN)
-                                            .hint_text("cluster-status")
-                                            .desired_width(300.0),
-                                    );
+                                    ui.label("Execution type");
+                                    if ui
+                                        .radio(!draft.command_action_mode, "Direct executable")
+                                        .clicked()
+                                    {
+                                        draft.command_action_mode = false;
+                                        draft.command_action.clear();
+                                    }
+                                    if ui
+                                        .radio(draft.command_action_mode, "Managed action")
+                                        .clicked()
+                                    {
+                                        draft.command_action_mode = true;
+                                        draft.command_program.clear();
+                                        draft.command_args.clear();
+                                    }
                                 });
-                                ui.label(
-                                    RichText::new("Use an action ID for the installed Action Broker, or leave it blank for a direct program.")
-                                        .small()
-                                        .color(palette.muted),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.strings.program());
-                                    ui.add(
-                                        TextEdit::singleline(&mut draft.command_program)
-                                            .margin(theme::FIELD_MARGIN)
-                                            .hint_text(self.strings.program_hint())
-                                            .desired_width(300.0),
-                                    );
-                                });
+                                if draft.command_action_mode {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Action");
+                                        let action_ids = broker_action_ids();
+                                        egui::ComboBox::from_id_salt("broker_action_id")
+                                            .selected_text(if draft.command_action.is_empty() {
+                                                "Select or type an action"
+                                            } else {
+                                                &draft.command_action
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                for action_id in action_ids {
+                                                    if ui
+                                                        .selectable_label(
+                                                            draft.command_action == action_id,
+                                                            &action_id,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        draft.command_action = action_id;
+                                                    }
+                                                }
+                                            });
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.command_action)
+                                                .margin(theme::FIELD_MARGIN)
+                                                .hint_text("cluster-status")
+                                                .desired_width(240.0),
+                                        );
+                                    });
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.label(self.strings.program());
+                                        ui.add(
+                                            TextEdit::singleline(&mut draft.command_program)
+                                                .margin(theme::FIELD_MARGIN)
+                                                .hint_text(self.strings.program_hint())
+                                                .desired_width(300.0),
+                                        );
+                                    });
+                                }
                                 ui.horizontal(|ui| {
                                     ui.label(self.strings.timeout_ms());
                                     ui.add(
@@ -3636,53 +3672,55 @@ impl GuiApp {
                                             .desired_width(90.0),
                                     );
                                 });
-                                ui.label(self.strings.arguments());
-                                let mut remove_arg = None;
-                                let mut move_arg = None;
-                                for index in 0..draft.command_args.len() {
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            TextEdit::multiline(&mut draft.command_args[index])
-                                                .margin(theme::FIELD_MARGIN)
-                                                .desired_rows(1)
-                                                .desired_width(
-                                                    (ui.available_width() - 108.0)
-                                                        .max(MIN_FIELD_WIDTH),
-                                                ),
-                                        );
-                                        if ui
-                                            .small_button("↑")
-                                            .on_hover_text(self.strings.move_up())
-                                            .clicked()
-                                            && index > 0
-                                        {
-                                            move_arg = Some((index, index - 1));
-                                        }
-                                        if ui
-                                            .small_button("↓")
-                                            .on_hover_text(self.strings.move_down())
-                                            .clicked()
-                                            && index + 1 < draft.command_args.len()
-                                        {
-                                            move_arg = Some((index, index + 1));
-                                        }
-                                        if ui
-                                            .small_button("×")
-                                            .on_hover_text(self.strings.remove_argument())
-                                            .clicked()
-                                        {
-                                            remove_arg = Some(index);
-                                        }
-                                    });
-                                }
-                                if let Some(index) = remove_arg {
-                                    draft.command_args.remove(index);
-                                }
-                                if let Some((from, to)) = move_arg {
-                                    draft.command_args.swap(from, to);
-                                }
-                                if ui.small_button(self.strings.add_argument()).clicked() {
-                                    draft.command_args.push(String::new());
+                                if !draft.command_action_mode {
+                                    ui.label(self.strings.arguments());
+                                    let mut remove_arg = None;
+                                    let mut move_arg = None;
+                                    for index in 0..draft.command_args.len() {
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                TextEdit::multiline(&mut draft.command_args[index])
+                                                    .margin(theme::FIELD_MARGIN)
+                                                    .desired_rows(1)
+                                                    .desired_width(
+                                                        (ui.available_width() - 108.0)
+                                                            .max(MIN_FIELD_WIDTH),
+                                                    ),
+                                            );
+                                            if ui
+                                                .small_button("↑")
+                                                .on_hover_text(self.strings.move_up())
+                                                .clicked()
+                                                && index > 0
+                                            {
+                                                move_arg = Some((index, index - 1));
+                                            }
+                                            if ui
+                                                .small_button("↓")
+                                                .on_hover_text(self.strings.move_down())
+                                                .clicked()
+                                                && index + 1 < draft.command_args.len()
+                                            {
+                                                move_arg = Some((index, index + 1));
+                                            }
+                                            if ui
+                                                .small_button("×")
+                                                .on_hover_text(self.strings.remove_argument())
+                                                .clicked()
+                                            {
+                                                remove_arg = Some(index);
+                                            }
+                                        });
+                                    }
+                                    if let Some(index) = remove_arg {
+                                        draft.command_args.remove(index);
+                                    }
+                                    if let Some((from, to)) = move_arg {
+                                        draft.command_args.swap(from, to);
+                                    }
+                                    if ui.small_button(self.strings.add_argument()).clicked() {
+                                        draft.command_args.push(String::new());
+                                    }
                                 }
                                 ui.horizontal(|ui| {
                                     ui.label(self.strings.environment())
@@ -4609,6 +4647,7 @@ mod tests {
             match_mode: MatchMode::Immediate,
             propagate_case: false,
             command_enabled: true,
+            command_action_mode: false,
             command_action: String::new(),
             command_program: "uname".into(),
             command_args: vec!["-s".into(), "-r".into()],
@@ -4680,6 +4719,35 @@ mod tests {
         assert_eq!(command.args, ["-s", "-r"]);
         assert_eq!(command.timeout_ms, 500);
         assert_eq!(command.cache_ms, 1000);
+    }
+
+    #[test]
+    fn command_editor_round_trips_managed_action_configuration() {
+        let source = wayexpand_core::ExpansionConfig {
+            id: wayexpand_core::ExpansionConfig::new_id(),
+            trigger: ":cluster".into(),
+            replacement: String::new(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: Some(wayexpand_core::CommandConfig {
+                action: Some("cluster-status".into()),
+                program: String::new(),
+                args: Vec::new(),
+                timeout_ms: 3000,
+                cache_ms: 0,
+                environment: wayexpand_core::CommandEnvironment::Minimal,
+                pass_env: vec!["KUBECONFIG".into()],
+            }),
+            enabled: true,
+            propagate_case: false,
+        };
+        let form = Draft::from_expansion(&source);
+        assert!(form.command_action_mode);
+        assert!(form.matches_command(source.command.as_ref()));
+        assert_eq!(form.command_config().unwrap(), source.command);
     }
 
     #[test]

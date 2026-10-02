@@ -23,6 +23,7 @@ pub(crate) struct Draft {
     pub(crate) match_mode: MatchMode,
     pub(crate) propagate_case: bool,
     pub(crate) command_enabled: bool,
+    pub(crate) command_action_mode: bool,
     pub(crate) command_action: String,
     pub(crate) command_program: String,
     pub(crate) command_args: Vec<String>,
@@ -41,6 +42,7 @@ impl Draft {
     pub(crate) fn from_expansion(expansion: &ExpansionConfig) -> Self {
         let (
             command_enabled,
+            command_action_mode,
             command_action,
             command_program,
             command_args,
@@ -51,6 +53,7 @@ impl Draft {
         ) = match &expansion.command {
             Some(command) => (
                 true,
+                command.action.is_some(),
                 command.action.clone().unwrap_or_default(),
                 command.program.clone(),
                 command.args.clone(),
@@ -60,6 +63,7 @@ impl Draft {
                 command.pass_env.clone(),
             ),
             None => (
+                false,
                 false,
                 String::new(),
                 String::new(),
@@ -81,6 +85,7 @@ impl Draft {
             match_mode: expansion.match_mode,
             propagate_case: expansion.propagate_case,
             command_enabled,
+            command_action_mode,
             command_action,
             command_program,
             command_args,
@@ -110,6 +115,7 @@ impl Draft {
             Some(command) => {
                 self.command_enabled
                     && self.command_action == command.action.clone().unwrap_or_default()
+                    && self.command_action_mode == command.action.is_some()
                     && self.command_program == command.program
                     && self.command_args == command.args
                     && self.command_timeout_ms == command.timeout_ms.to_string()
@@ -121,6 +127,7 @@ impl Draft {
                 !self.command_enabled
                     && self.command_program.is_empty()
                     && self.command_action.is_empty()
+                    && !self.command_action_mode
                     && self.command_args.is_empty()
                     && self.command_timeout_ms == "500"
                     && self.command_cache_ms == "0"
@@ -136,8 +143,11 @@ impl Draft {
         }
         let action = self.command_action.trim();
         let program = self.command_program.as_str();
-        if action.is_empty() == program.trim().is_empty() {
-            anyhow::bail!("enter exactly one broker action ID or direct program");
+        if self.command_action_mode && action.is_empty() {
+            anyhow::bail!("a broker action ID is required");
+        }
+        if !self.command_action_mode && program.trim().is_empty() {
+            anyhow::bail!("program is required for direct execution");
         }
         let timeout_ms = self
             .command_timeout_ms
@@ -182,8 +192,12 @@ impl Draft {
             anyhow::bail!("cache duration must not exceed 60000 milliseconds");
         }
         Ok(Some(CommandConfig {
-            action: (!action.is_empty()).then(|| action.to_owned()),
-            program: program.to_owned(),
+            action: self.command_action_mode.then(|| action.to_owned()),
+            program: if self.command_action_mode {
+                String::new()
+            } else {
+                program.to_owned()
+            },
             args,
             timeout_ms,
             cache_ms,
@@ -191,6 +205,40 @@ impl Draft {
             pass_env: self.command_pass_env.clone(),
         }))
     }
+}
+
+/// Return action IDs from the operator's broker policy for the editor's
+/// picker. The text field remains editable so a policy can be prepared before
+/// the broker is installed or while a fleet-managed policy is being rolled out.
+pub(crate) fn broker_action_ids() -> Vec<String> {
+    let path = std::env::var_os("WAYEXPAND_ACTION_BROKER_CONFIG")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_CONFIG_HOME").map(|dir| {
+                std::path::PathBuf::from(dir)
+                    .join("wayexpand")
+                    .join("broker.toml")
+            })
+        })
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                .join(".config/wayexpand/broker.toml")
+        });
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(document) = source.parse::<toml_edit::DocumentMut>() else {
+        return Vec::new();
+    };
+    let Some(actions) = document.get("actions").and_then(toml_edit::Item::as_table) else {
+        return Vec::new();
+    };
+    let mut ids = actions
+        .iter()
+        .map(|(id, _)| id.to_owned())
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
 }
 
 /// `tokens` plus the trimmed `pending` entry, unless it is empty or already

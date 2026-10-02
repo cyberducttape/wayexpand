@@ -83,7 +83,11 @@ configuration files receive IDs when loaded, and the next save writes them;
 the GUI uses these IDs to keep selection, undo snapshots, and TOML comments
 attached to the same snippet through trigger edits and reordering. IDs normally
 need no manual editing.
-It can also create and edit bounded direct-program expansions. Each argument
+It can also create and edit bounded direct-program expansions. The command
+editor explicitly selects either **Direct executable** or **Managed action**.
+Managed actions preserve the action ID during load/save and offer IDs found in
+the user's `broker.toml` policy as a picker; direct programs retain their
+argument editor. Each argument
 has its own editable row, so empty strings, whitespace, and embedded newlines
 are preserved exactly; rows can be reordered or removed. The editor also
 exposes the command environment policy and explicitly passed environment
