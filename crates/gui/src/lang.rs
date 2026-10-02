@@ -149,13 +149,33 @@ impl Strings {
         }
     }
 
-    pub fn route_trust_status(&self, route: &str, maturity: &str) -> String {
+    pub fn route_trust_status(
+        &self,
+        route: &str,
+        maturity: &str,
+        sensitive_fields: bool,
+        atomic_replace: bool,
+    ) -> String {
+        let semantics = match (self.lang, sensitive_fields, atomic_replace) {
+            (Language::English, true, true) => "sensitive-field aware · atomic replacement",
+            (Language::English, true, false) => "sensitive-field aware · non-atomic replacement",
+            (Language::English, false, true) => "global keyboard visibility · atomic replacement",
+            (Language::English, false, false) => {
+                "global keyboard visibility · non-atomic replacement"
+            }
+            (Language::German, true, true) => "passwortfeldbewusst · atomare Ersetzung",
+            (Language::German, true, false) => "passwortfeldbewusst · nicht-atomare Ersetzung",
+            (Language::German, false, true) => "globale Tastatursichtbarkeit · atomare Ersetzung",
+            (Language::German, false, false) => {
+                "globale Tastatursichtbarkeit · nicht-atomare Ersetzung"
+            }
+        };
         match self.lang {
             Language::English => {
-                format!("{route} · {maturity} · desktop certification pending")
+                format!("{route} · {maturity} · {semantics} · certification pending")
             }
             Language::German => {
-                format!("{route} · {maturity} · Desktop-Zertifizierung ausstehend")
+                format!("{route} · {maturity} · {semantics} · Zertifizierung ausstehend")
             }
         }
     }
@@ -2425,10 +2445,8 @@ impl Strings {
 
     pub fn status_setup_done(&self) -> &'static str {
         match self.lang {
-            Language::English => "WayExpand is on · type a trigger in any app to try it",
-            Language::German => {
-                "WayExpand ist aktiv · tippen Sie einen Auslöser in einer beliebigen App"
-            }
+            Language::English => "WayExpand is on · try a normal text field in an app you use; see Desktop details for route limits",
+            Language::German => "WayExpand ist aktiv · probieren Sie ein normales Textfeld in einer verwendeten App; siehe Desktop-Details für Einschränkungen",
         }
     }
 
