@@ -249,8 +249,8 @@ impl Strings {
 
     pub fn search_fields(&self) -> &'static str {
         match self.lang {
-            Language::English => "Fields",
-            Language::German => "Felder",
+            Language::English => "Search fields",
+            Language::German => "Suchfelder",
         }
     }
 
@@ -517,22 +517,22 @@ impl Strings {
 
     pub fn onboarding_evdev_setup(&self) -> &'static str {
         match self.lang {
-            Language::English => "Compatibility fallback: raw keyboard input…",
-            Language::German => "Kompatibilitätsfallback: rohe Tastatureingabe…",
+            Language::English => "Enable raw keyboard capture — advanced…",
+            Language::German => "Rohe Tastaturerfassung aktivieren — erweitert…",
         }
     }
 
     pub fn evdev_setup_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Maximum compatibility uses raw keyboard input",
-            Language::German => "Maximale Kompatibilität verwendet rohe Tastatureingaben",
+            Language::English => "Enable raw keyboard capture — advanced",
+            Language::German => "Rohe Tastaturerfassung aktivieren — erweitert",
         }
     }
 
     pub fn evdev_setup_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => "WayExpand can observe typing in password fields in this mode and cannot detect sensitive fields. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
-            Language::German => "WayExpand kann in diesem Modus Eingaben in Passwortfeldern beobachten und sensible Felder nicht erkennen. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
+            Language::English => "Works in more applications, but can observe password-field typing because this mode has no sensitive-field signal. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
+            Language::German => "Funktioniert in mehr Anwendungen, kann aber Eingaben in Passwortfeldern beobachten, weil dieser Modus kein Signal für sensible Felder hat. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
         }
     }
 
