@@ -25,17 +25,19 @@ currently interpreted.
 The IBus service loads the same root-owned `/etc/wayexpand/policy.toml` as the
 daemon. Invalid or insecure policy files prevent startup, and active policy
 limits (including replacement size and allowed backend) are enforced for IBus
-expansions. Command-backed expansions are always disabled in IBus: the IBus
-service is not the hardened `wayexpand.service` command-execution boundary.
-They remain unavailable in audit mode as well. The backend is identified as
+expansions. Direct executable commands remain disabled in IBus because the
+IBus service is not the hardened `wayexpand.service` command-execution
+boundary. Named Action Broker commands are allowed: they cross the broker's
+authenticated Unix-socket boundary and fail closed when the broker is
+unavailable. The backend is identified as
 `input-method-v2` for `allowed_backends` policy checks.
 
 Each IBus `CreateEngine` request owns one engine object and adapter. IBus
 releases that object through `Destroy`; the service removes the adapter from
 its registry and unregisters the D-Bus object at that point. The service does
-not maintain a periodic completion scanner or per-engine command worker pool:
-IBus command execution is disabled until a shared hardened execution boundary
-exists.
+not maintain a periodic completion scanner or per-engine command worker pool;
+named actions use the shared broker boundary and direct programs remain
+disabled.
 
 After installing, make sure `~/.local/bin` is on `PATH`, then restart IBus and
 select `WayExpand` (`wayexpand` engine) in the desktop input-method settings.

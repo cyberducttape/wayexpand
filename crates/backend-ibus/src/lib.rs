@@ -138,6 +138,9 @@ impl IbusEngineAdapter {
     pub fn new(mut engine: ExpansionEngine) -> Self {
         let policy = OrganizationPolicy::default();
         apply_policy_to_engine(&mut engine, &policy);
+        // Keep IBus key handling non-blocking for broker actions. Direct
+        // programs are still rejected by the backend-specific gate below.
+        let _ = engine.enable_async_commands();
         Self {
             engine,
             enabled: true,
@@ -151,6 +154,7 @@ impl IbusEngineAdapter {
     ) -> Result<Self, wayexpand_core::ConfigError> {
         engine.apply_administrator_policy(&policy)?;
         apply_policy_to_engine(&mut engine, &policy);
+        let _ = engine.enable_async_commands();
         Ok(Self {
             engine,
             enabled: true,
@@ -209,6 +213,7 @@ impl IbusEngineAdapter {
         engine.set_sensitive_focus(self.engine.is_sensitive_focus());
         engine.set_current_window(self.engine.current_window().cloned());
         engine.set_commands_disabled(self.engine.commands_disabled());
+        engine.set_direct_commands_disabled(self.engine.direct_commands_disabled());
         engine.set_title_matching_disabled(self.engine.title_matching_disabled());
         engine.set_reinsert_terminators(self.engine.reinserts_terminators());
         if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
@@ -317,23 +322,25 @@ impl IbusEngineAdapter {
             let has_command = pending_result.command.is_some();
 
             if let Some(command) = &pending_result.command {
-                if let Some(violation) = self.policy.command_path_violation(&command.program) {
-                    if self.policy.command_path_is_blocked(&command.program) {
-                        self.engine
-                            .restore_deferred_match(&pending_result.matched_text);
-                        error!(
+                if command.action.is_none() {
+                    if let Some(violation) = self.policy.command_path_violation(&command.program) {
+                        if self.policy.command_path_is_blocked(&command.program) {
+                            self.engine
+                                .restore_deferred_match(&pending_result.matched_text);
+                            error!(
+                                audit_prefix = %self.policy.audit_prefix,
+                                violation = %violation,
+                                "IBus command blocked by organization path policy"
+                            );
+                            policy_blocked = true;
+                            continue;
+                        }
+                        warn!(
                             audit_prefix = %self.policy.audit_prefix,
                             violation = %violation,
-                            "IBus command blocked by organization path policy"
+                            "IBus command violates organization path policy; audit mode permits it"
                         );
-                        policy_blocked = true;
-                        continue;
                     }
-                    warn!(
-                        audit_prefix = %self.policy.audit_prefix,
-                        violation = %violation,
-                        "IBus command violates organization path policy; audit mode permits it"
-                    );
                 }
             }
 
@@ -450,11 +457,11 @@ fn expansion_actions(
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
     let enforcement = policy.effective_enforcement_policy();
-    // IBus runs as its own user-session process, outside the hardened
-    // wayexpand.service boundary. Until command execution is brokered through
-    // one isolation boundary, command-backed expansions must never execute in
-    // this backend, including in audit mode.
-    engine.set_commands_disabled(true);
+    // IBus runs outside the hardened wayexpand.service boundary. Direct
+    // executable commands remain disabled here, but managed Action Broker
+    // requests cross a separate authenticated Unix-socket boundary and are
+    // allowed to fail closed if that broker is unavailable.
+    engine.set_direct_commands_disabled(true);
     engine.set_title_matching_disabled(enforcement.disable_title_matching);
 }
 
@@ -577,6 +584,7 @@ replacement = "signature"
         };
         let mut adapter =
             IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap();
+        assert!(adapter.engine().direct_commands_disabled());
 
         let mut key_actions = Vec::new();
         for character in ":cmd".chars() {
@@ -587,6 +595,24 @@ replacement = "signature"
             IbusAction::CommitText(text) if text.chars().count() == 1
         )));
         assert!(adapter.drain_completed_commands().is_empty());
+    }
+
+    #[test]
+    fn ibus_keeps_managed_actions_enabled_behind_the_broker_boundary() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":action"
+            replacement = ""
+            [expansion.command]
+            action = "cluster-status"
+            timeout_ms = 3000
+            "#,
+        )
+        .unwrap();
+        let adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        assert!(adapter.engine().direct_commands_disabled());
+        assert!(!adapter.engine().commands_disabled());
     }
 
     #[cfg(unix)]

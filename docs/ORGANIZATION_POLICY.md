@@ -126,7 +126,8 @@ audit_prefix = "corp-policy"
 This permits command-backed expansions only inside the daemon's existing
 systemd restrictions. It does **not** enable network access, credential access,
 home-directory writes, or a supported `kubectl`/cloud/Vault workflow. The broker
-is not yet a production command boundary.
+is the production boundary for named actions; direct executable commands remain
+confined to the daemon's service sandbox.
 
 ```toml
 [organization]

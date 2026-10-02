@@ -72,7 +72,11 @@ impl ExpansionEngine {
     /// a plan (three `String`s and the command `Arc`) on each match only to
     /// throw the copy away.
     pub(super) fn preflight_allows(&self, plan: &MatchPlan) -> bool {
-        if plan.is_command_backed() && self.config.organization.disable_commands {
+        if plan
+            .command
+            .as_deref()
+            .is_some_and(|command| self.command_execution_disabled(command))
+        {
             return false;
         }
         !self.user_paused && !self.sensitive_focus

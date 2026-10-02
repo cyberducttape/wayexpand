@@ -234,6 +234,9 @@ pub struct ExpansionEngine {
     /// Compositor/backend signal that focused field is sensitive (password,
     /// OTP, etc.). Independent from user_paused.
     sensitive_focus: bool,
+    /// Backend-specific isolation gate for direct executable commands. Named
+    /// broker actions use their own IPC boundary and are not blocked by this.
+    direct_commands_disabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
     hotkeys: Vec<(KeyChord, usize)>,
     current_window: Option<WindowContext>,
@@ -422,7 +425,7 @@ impl ExpansionEngine {
         let undo_chord = config
             .settings
             .undo_chord
-            .as_deref()
+            .as_ref()
             .and_then(|chord| KeyChord::parse(chord).ok());
         let command_cache = vec![None; config.expansion.len()];
         let hotkeys = config
@@ -446,6 +449,7 @@ impl ExpansionEngine {
             buffer_truncated: false,
             user_paused: false,
             sensitive_focus: false,
+            direct_commands_disabled: false,
             command_cache,
             hotkeys,
             current_window: None,
@@ -732,6 +736,22 @@ impl ExpansionEngine {
         self.config.organization.disable_commands
     }
 
+    /// Disable only direct executable commands while retaining managed broker
+    /// actions. Backends outside the daemon sandbox, such as IBus, use this
+    /// to preserve the broker isolation boundary.
+    pub fn set_direct_commands_disabled(&mut self, disabled: bool) {
+        self.direct_commands_disabled = disabled;
+    }
+
+    pub fn direct_commands_disabled(&self) -> bool {
+        self.direct_commands_disabled
+    }
+
+    pub(super) fn command_execution_disabled(&self, command: &CommandConfig) -> bool {
+        self.config.organization.disable_commands
+            || (self.direct_commands_disabled && command.action.is_none())
+    }
+
     /// Check the active, enforcement-mode backend requirements against the
     /// connected injector and input source. Keeping this decision in the
     /// engine's policy snapshot ensures reloads and fleet policy cannot drift
@@ -848,7 +868,11 @@ impl ExpansionEngine {
         {
             return Err(CommandError::StaleInput);
         }
-        if pending.command.is_some() && self.config.organization.disable_commands {
+        if pending
+            .command
+            .as_ref()
+            .is_some_and(|command| self.command_execution_disabled(command))
+        {
             return Err(CommandError::PolicyBlocked);
         }
 
@@ -909,7 +933,11 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
         }
-        if pending.command.is_some() && self.config.organization.disable_commands {
+        if pending
+            .command
+            .as_ref()
+            .is_some_and(|command| self.command_execution_disabled(command))
+        {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::PolicyBlocked);
         }
