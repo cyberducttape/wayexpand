@@ -56,9 +56,11 @@ daemon and CLI.
 Each sidebar row shows the trigger, description (or command-backed marker),
 category, and enabled state. The editor exposes matching mode and tags for the
 selected snippet. Word-boundary snippets wait until a trailing boundary is
-observed, preventing accidental expansion inside larger words. Command-backed snippets run their
-configured direct program when previewed or matched; see the command security
-limits in the operations guide.
+observed, preventing accidental expansion inside larger words. Command-backed
+snippets use an explicit preview action. Managed actions run through the
+configured Action Broker; direct programs are clearly labelled as advanced
+local GUI execution and do not reproduce the daemon service sandbox. See the
+command security limits in the operations guide.
 
 If the daemon is not running, editing and preview still work. Pause/resume is
 reported in the status area as unavailable until the user session socket is
@@ -786,11 +788,13 @@ and tracks fixes for them.
 
 ### Explicit command previews no longer freeze the GUI
 
-The **Run once** action for a command-backed draft executes in a background
-worker and reports `Running…` while it waits. The UI remains interactive while
-the command uses its bounded timeout. Results are associated with the draft
-that started them, so output from an older draft is not displayed after the
-editor changes.
+The command preview action executes in a background worker and reports
+`Running…` while it waits. Managed actions are labelled **Run through broker**
+and use the configured broker policy; direct programs are labelled **Run
+locally (advanced)** because they run with GUI-process privileges rather than
+the daemon service sandbox. Both use the bounded timeout, and results are
+associated with the draft that started them, so output from an older draft is
+not displayed after the editor changes.
 
 ### "Use current app" Button Could Freeze the GUI Indefinitely
 

@@ -1481,8 +1481,15 @@ impl Strings {
 
     pub fn run_once(&self) -> &'static str {
         match self.lang {
-            Language::English => "Run once",
-            Language::German => "Einmal ausführen",
+            Language::English => "Run locally (advanced)",
+            Language::German => "Lokal ausführen (erweitert)",
+        }
+    }
+
+    pub fn run_through_broker(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Run through broker",
+            Language::German => "Über Broker ausführen",
         }
     }
 
@@ -1493,13 +1500,24 @@ impl Strings {
         }
     }
 
-    pub fn command_preview_help(&self) -> &'static str {
+    pub fn managed_command_preview_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "This snippet runs a program instead of inserting fixed text. Its output is not shown automatically — run it once to see what it currently produces."
+                "This managed action runs through the configured Action Broker, using its policy, timeout, and environment restrictions. Run it once to see the current output."
             }
             Language::German => {
-                "Dieses Snippet führt ein Programm aus, statt festen Text einzufügen. Die Ausgabe wird nicht automatisch angezeigt — einmal ausführen, um das aktuelle Ergebnis zu sehen."
+                "Diese verwaltete Aktion läuft über den konfigurierten Action Broker mit dessen Richtlinien, Zeitlimit und Umgebungsbeschränkungen. Einmal ausführen, um die aktuelle Ausgabe zu sehen."
+            }
+        }
+    }
+
+    pub fn direct_command_preview_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "This direct program runs locally in the GUI process with desktop-user privileges. It does not reproduce the daemon service sandbox; use it only as an advanced preview."
+            }
+            Language::German => {
+                "Dieses direkte Programm läuft lokal im GUI-Prozess mit den Rechten des Desktop-Benutzers. Die Sandbox des Daemons wird nicht reproduziert; verwenden Sie dies nur als erweiterte Vorschau."
             }
         }
     }

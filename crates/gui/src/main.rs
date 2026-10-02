@@ -3822,7 +3822,15 @@ impl GuiApp {
                                 .corner_radius(egui::CornerRadius::same(8))
                                 .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
-                                    ui.label(self.strings.command_preview_help());
+                                    let managed_action = self
+                                        .draft
+                                        .as_ref()
+                                        .is_some_and(|draft| draft.command_action_mode);
+                                    ui.label(if managed_action {
+                                        self.strings.managed_command_preview_help()
+                                    } else {
+                                        self.strings.direct_command_preview_help()
+                                    });
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
                                         let preview_is_current =
@@ -3833,6 +3841,8 @@ impl GuiApp {
                                                 egui::Button::new(
                                                     if self.command_preview_receiver.is_some() {
                                                         self.strings.running()
+                                                    } else if managed_action {
+                                                        self.strings.run_through_broker()
                                                     } else {
                                                         self.strings.run_once()
                                                     },
