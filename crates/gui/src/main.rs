@@ -2049,8 +2049,12 @@ impl GuiApp {
         };
         let route_trust = self.active_route_contract().map(|contract| {
             (
-                self.strings
-                    .route_trust_status(&contract.label, &contract.status),
+                self.strings.route_trust_status(
+                    &contract.label,
+                    &contract.status,
+                    contract.sensitive_fields,
+                    contract.atomic_replace,
+                ),
                 palette.warning,
             )
         });
