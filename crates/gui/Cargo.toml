@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-read-fonts = "0.41.0"
+read-fonts = "0.44.0"
 anyhow.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
 serde.workspace = true
