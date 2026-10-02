@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 action-broker = { path = "../action-broker" }
+wayexpand-process-supervisor = { path = "../process-supervisor" }
 serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true

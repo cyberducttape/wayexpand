@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::io::Read;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
+#[cfg(unix)]
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024; // 1 MiB per stream
 
@@ -21,48 +21,11 @@ pub struct ActionExecutor {
     config: BrokerConfig,
 }
 
-#[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(unix)]
-fn kill_process_group(pid: u32) {
-    if let Ok(pid) = libc::pid_t::try_from(pid) {
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
-    }
-}
-
 #[derive(Debug)]
 enum ChildRunError {
     Timeout,
     IncompleteOutput,
     Io(std::io::Error),
-}
-
-#[cfg(unix)]
-struct ChildGuard {
-    child: Option<Child>,
-    pid: u32,
-}
-
-#[cfg(unix)]
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        kill_process_group(self.pid);
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.wait();
-        }
-    }
 }
 
 #[cfg(unix)]
@@ -101,11 +64,7 @@ fn run_child_unix(
     stderr: Option<ChildStderr>,
     timeout: Duration,
 ) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), ChildRunError> {
-    let pid = child.id();
-    let mut guard = ChildGuard {
-        child: Some(child),
-        pid,
-    };
+    let mut guard = ChildSupervisor::new(child);
     let mut stdout = stdout;
     let mut stderr = stderr;
     if let Some(stream) = stdout.as_ref() {
@@ -135,28 +94,24 @@ fn run_child_unix(
             )
             .map_err(ChildRunError::Io)?;
         }
-        match guard
-            .child
-            .as_mut()
-            .expect("child guard is armed")
-            .try_wait()
-            .map_err(ChildRunError::Io)?
-        {
-            Some(status) => break status,
-            None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            None => {
-                kill_process_group(pid);
-                let _ = guard.child.as_mut().expect("child guard is armed").wait();
-                guard.child = None;
-                return Err(ChildRunError::Timeout);
-            }
+        if guard.has_exited().map_err(ChildRunError::Io)? {
+            // On Linux has_exited uses waitid(WNOWAIT), keeping the leader
+            // unreaped until the entire process group has been terminated.
+            guard.kill_group();
+            let status = guard.reap().map_err(ChildRunError::Io)?;
+            break status;
+        }
+        if Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        } else {
+            guard.kill_group();
+            let _ = guard.reap();
+            return Err(ChildRunError::Timeout);
         }
     };
 
     // A successful/failed leader may have left ordinary descendants behind.
     // Remove the whole action process group before returning to the caller.
-    kill_process_group(pid);
-    guard.child = None;
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
         if !stdout_eof {

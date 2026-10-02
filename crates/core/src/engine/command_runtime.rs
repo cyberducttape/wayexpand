@@ -14,9 +14,11 @@ use std::{
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
-use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+use std::os::fd::OwnedFd;
 #[cfg(unix)]
-use std::os::unix::process::CommandExt;
+use wayexpand_process_supervisor::ChildSupervisor;
+#[cfg(unix)]
+pub(super) use wayexpand_process_supervisor::{configure_process_group, kill_process_group_by_pid};
 
 use super::{
     CommandConfig, CommandEnvironment, CommandError, MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
@@ -160,24 +162,6 @@ fn run_broker_action(
 }
 
 #[cfg(unix)]
-struct ChildGuard {
-    child: Option<Child>,
-    pid: Option<u32>,
-}
-
-#[cfg(unix)]
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if let Some(pid) = self.pid {
-            kill_process_group_by_pid(pid);
-        }
-        if let Some(ref mut child) = self.child {
-            let _ = child.wait();
-        }
-    }
-}
-
-#[cfg(unix)]
 fn run_command_unix(
     child: Child,
     mut stdout: ChildStdout,
@@ -185,14 +169,9 @@ fn run_command_unix(
     timeout_ms: u64,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
-    let pid = child.id();
-    let mut guard = ChildGuard {
-        child: Some(child),
-        pid: Some(pid),
-    };
+    let mut guard = ChildSupervisor::new(child);
     set_nonblocking_stdout(&stdout)?;
     set_nonblocking_stderr(&stderr)?;
-    let pidfd = open_pidfd(pid);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut bytes = Vec::new();
     let mut stderr_bytes = Vec::new();
@@ -209,31 +188,25 @@ fn run_command_unix(
         if !stderr_eof {
             stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
         }
-        match child_exit_observed(guard.child.as_mut().unwrap(), pid, pidfd.as_ref())? {
-            ChildExitObservation::Running => {}
-            ChildExitObservation::Exited(status) => {
-                // On Linux this observation uses waitid(WNOWAIT), so the
-                // leader remains a zombie and its PID/PGID cannot be
-                // recycled while the process group is cleaned up. Only reap
-                // after the group kill.
-                thread::sleep(Duration::from_millis(10));
-                #[cfg(target_os = "linux")]
-                kill_process_group_by_pid(pid);
-                guard.pid = None;
-                if let Some(status) = status {
-                    break status;
-                }
-                let mut child = guard.child.take().expect("child guard owns the child");
-                break child
-                    .wait()
-                    .map_err(|error| CommandError::WaitFailed(error.to_string()))?;
-            }
+        if guard
+            .has_exited()
+            .map_err(|error| CommandError::WaitFailed(error.to_string()))?
+        {
+            // On Linux this observation uses waitid(WNOWAIT), so the
+            // leader remains a zombie and its PID/PGID cannot be
+            // recycled while the process group is cleaned up. Only reap
+            // after the group kill.
+            thread::sleep(Duration::from_millis(10));
+            guard.kill_group();
+            break guard
+                .reap()
+                .map_err(|error| CommandError::WaitFailed(error.to_string()))?;
         }
         if Instant::now() < deadline {
             wait_for_command_event(
                 &stdout,
                 &stderr,
-                pidfd.as_ref(),
+                guard.pidfd(),
                 deadline,
                 shutdown.is_some(),
             )?;
@@ -259,64 +232,7 @@ fn run_command_unix(
         return Err(CommandError::IncompleteOutput);
     }
     let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
-    guard.child = None;
     Ok(trim_trailing_newlines(output))
-}
-
-#[cfg(unix)]
-enum ChildExitObservation {
-    Running,
-    Exited(Option<std::process::ExitStatus>),
-}
-
-/// Observe whether the child has exited without reaping it, so the leader
-/// stays a zombie and its PID/PGID cannot be recycled before the group kill.
-#[cfg(target_os = "linux")]
-fn child_exit_observed(
-    _child: &mut Child,
-    pid: u32,
-    pidfd: Option<&OwnedFd>,
-) -> Result<ChildExitObservation, CommandError> {
-    let (id_type, id) = if let Some(pidfd) = pidfd {
-        (libc::P_PIDFD, pidfd.as_raw_fd() as libc::id_t)
-    } else {
-        (libc::P_PID, pid as libc::id_t)
-    };
-    // SAFETY: siginfo_t is plain data; waitid only writes into `info`.
-    let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
-    let result = unsafe {
-        libc::waitid(
-            id_type,
-            id,
-            &mut info,
-            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-        )
-    };
-    if result != 0 {
-        return Err(CommandError::WaitFailed(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(if unsafe { info.si_pid() } != 0 {
-        ChildExitObservation::Exited(None)
-    } else {
-        ChildExitObservation::Running
-    })
-}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn child_exit_observed(
-    child: &mut Child,
-    _pid: u32,
-    _pidfd: Option<&OwnedFd>,
-) -> Result<ChildExitObservation, CommandError> {
-    child
-        .try_wait()
-        .map(|status| match status {
-            Some(status) => ChildExitObservation::Exited(Some(status)),
-            None => ChildExitObservation::Running,
-        })
-        .map_err(|error| CommandError::WaitFailed(error.to_string()))
 }
 
 /// Drops trailing CR/LF in place. Command output is bounded at one megabyte,
@@ -353,19 +269,6 @@ fn set_nonblocking_stderr(stderr: &ChildStderr) -> Result<(), CommandError> {
         return Err(CommandError::OutputChannelLost);
     }
     Ok(())
-}
-
-#[cfg(unix)]
-fn open_pidfd(pid: u32) -> Option<OwnedFd> {
-    #[cfg(target_os = "linux")]
-    {
-        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
-        if fd >= 0 {
-            // SAFETY: the successful syscall returned a newly-owned fd.
-            return Some(unsafe { OwnedFd::from_raw_fd(fd as RawFd) });
-        }
-    }
-    None
 }
 
 #[cfg(unix)]
@@ -505,25 +408,4 @@ pub(super) fn configure_command_environment(process: &mut Command, command: &Com
         }
     }
     process.env("PATH", MINIMAL_COMMAND_PATH);
-}
-
-#[cfg(unix)]
-pub(super) fn configure_process_group(command: &mut Command) {
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(unix)]
-pub(super) fn kill_process_group_by_pid(pid: u32) {
-    if let Ok(pid) = libc::pid_t::try_from(pid) {
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
-    }
 }

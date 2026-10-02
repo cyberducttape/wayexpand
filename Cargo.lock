@@ -130,6 +130,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "wayexpand-process-supervisor",
 ]
 
 [[package]]
@@ -4148,6 +4149,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "unicode-segmentation",
+ "wayexpand-process-supervisor",
 ]
 
 [[package]]
@@ -4185,6 +4187,13 @@ dependencies = [
  "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
  "wayexpand-core",
+]
+
+[[package]]
+name = "wayexpand-process-supervisor"
+version = "1.2.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
