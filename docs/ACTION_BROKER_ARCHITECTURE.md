@@ -126,8 +126,10 @@ What's implemented:
     executable when available, policy SHA-256, timing, exit/timeout status, and
     output byte count
   - Never records arguments, environment values, stdout, or stderr
-  - The sink is mode `0600`, synchronously appended, and capped at 16 MiB;
-    write failures are reported to the service journal while execution proceeds
+  - The sink is mode `0600`; a bounded writer queue batches persistence and
+    rotates the active JSONL file at 16 MiB, retaining one `.1` generation
+  - Slow or unavailable storage never blocks action execution; dropped events
+    and writer failures are counted and reported to the service journal
 
 - Captured action output is limited to 128 KiB total (64 KiB per stream). A
   successful response remains successful when a stream reaches its limit and
@@ -266,12 +268,12 @@ missing broker service from an unknown or disabled action.
 
 ### Audit Trail
 - Optional: set `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"` to enable the broker's JSONL execution audit. WayExpand resolves `$XDG_STATE_HOME` from the environment and falls back to `$HOME/.local/state`; installers create the private state directory and the user service grants the broker access to it.
-  sink.
 - Events contain timing, action identity, request ID, peer metadata, policy
   hash, exit/timeout status, and output size, but not arguments, environment
   values, stdout, or stderr.
-- The sink is capped at 16 MiB and uses `sync_data`; persistence failures are
-  journaled and do not block action execution.
+- The sink rotates at 16 MiB. A dedicated writer batches `sync_data` calls off
+  the Tokio runtime; queue drops and persistence failures are journaled and do
+  not block action execution.
 
 ## Implementation Status
 

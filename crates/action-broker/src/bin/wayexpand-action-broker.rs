@@ -120,7 +120,7 @@ CONFIGURATION:
     # Defaults to true; set false only for intentional PATH-based resolution.
     require_absolute_paths = true
     strict_env = true
-    # Optional JSONL execution audit sink (mode 0600, bounded to 16 MiB).
+    # Optional JSONL execution audit sink (mode 0600, rotates at 16 MiB).
     # audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"
 
     [actions."example"]
