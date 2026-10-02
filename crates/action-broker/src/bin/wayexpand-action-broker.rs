@@ -27,6 +27,28 @@ use tracing::{error, info, warn};
 const MAX_CONCURRENT_ACTIONS: usize = 16;
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .expect("failed to install SIGINT handler");
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = interrupt.recv() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl-C handler");
+    }
+}
+
 struct BrokerOptions {
     config_file: PathBuf,
     socket_path: PathBuf,
@@ -327,9 +349,21 @@ async fn main() -> Result<()> {
     );
 
     // Main service loop - accept connections and handle requests
+    let mut shutdown = Box::pin(wait_for_shutdown_signal());
     loop {
         let accept_server = Arc::clone(&server);
-        let accepted = tokio::task::spawn_blocking(move || accept_server.accept()).await;
+        let accepted = tokio::select! {
+            _ = &mut shutdown => {
+                info!("shutdown signal received; flushing audit events");
+                let wake_path = server.socket_path().to_owned();
+                let _ = tokio::task::spawn_blocking(move || {
+                    std::os::unix::net::UnixStream::connect(wake_path)
+                })
+                .await;
+                break;
+            }
+            accepted = tokio::task::spawn_blocking(move || accept_server.accept()) => accepted,
+        };
         let conn = match accepted {
             Ok(Ok(conn)) => conn,
             Ok(Err(e)) => {
@@ -449,6 +483,11 @@ async fn main() -> Result<()> {
             }
         });
     }
+
+    drop(server);
+    drop(audit_logger);
+    info!("action broker stopped");
+    Ok(())
 }
 
 #[cfg(test)]

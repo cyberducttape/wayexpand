@@ -13,6 +13,7 @@ cat >"$config" <<EOF
 [broker]
 require_absolute_paths = true
 strict_env = true
+audit_path = "$test_root/action-audit.jsonl"
 
 [actions."integration-echo"]
 program = "/bin/printf"
@@ -56,6 +57,19 @@ response = json.loads(client.makefile("rb").readline())
 client.close()
 assert response["Success"]["stdout"] == "broker-e2e-pass", response
 assert response["Success"]["exit_code"] == 0, response
+PY
+
+kill -TERM "$broker_pid"
+wait "$broker_pid"
+broker_pid=0
+
+AUDIT_FILE="$test_root/action-audit.jsonl" python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["AUDIT_FILE"], encoding="utf-8") as audit:
+    events = [json.loads(line) for line in audit if line.strip()]
+assert any(event["action_id"] == "integration-echo" for event in events), events
 PY
 
 printf '%s\n' "Action Broker end-to-end test passed"

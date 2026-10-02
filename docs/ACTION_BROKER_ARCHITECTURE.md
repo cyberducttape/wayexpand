@@ -129,6 +129,8 @@ What's implemented:
   - Never records arguments, environment values, stdout, or stderr
   - The sink is mode `0600`; a bounded writer queue batches persistence and
     rotates the active JSONL file at 16 MiB, retaining one `.1` generation
+  - Clean broker shutdown flushes accepted queued events and joins the audit
+    writer before the process exits
   - Slow or unavailable storage never blocks action execution; dropped events
     and writer failures are counted and reported to the service journal
 
@@ -273,8 +275,8 @@ missing broker service from an unknown or disabled action.
   hash, exit/timeout status, and output size, but not arguments, environment
   values, stdout, or stderr.
 - The sink rotates at 16 MiB. A dedicated writer batches `sync_data` calls off
-  the Tokio runtime; queue drops and persistence failures are journaled and do
-  not block action execution.
+  the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
+  and persistence failures are journaled and do not block action execution.
 
 ## Implementation Status
 

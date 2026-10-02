@@ -44,10 +44,16 @@ pub struct AuditEvent<'a> {
 }
 
 pub struct AuditLogger {
-    sender: SyncSender<Vec<u8>>,
+    sender: Option<SyncSender<AuditMessage>>,
+    worker: Option<thread::JoinHandle<()>>,
     policy_hash: String,
     dropped_events: Arc<AtomicU64>,
     write_failures: Arc<AtomicU64>,
+}
+
+enum AuditMessage {
+    Event(Vec<u8>),
+    FlushAndStop,
 }
 
 impl AuditLogger {
@@ -57,12 +63,13 @@ impl AuditLogger {
         let dropped_events = Arc::new(AtomicU64::new(0));
         let write_failures = Arc::new(AtomicU64::new(0));
         let writer_failures = Arc::clone(&write_failures);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("wayexpand-audit".to_string())
             .spawn(move || run_writer(writer, receiver, writer_failures))
             .map_err(|error| io::Error::other(format!("failed to start audit writer: {error}")))?;
         Ok(Self {
-            sender,
+            sender: Some(sender),
+            worker: Some(worker),
             policy_hash,
             dropped_events,
             write_failures,
@@ -77,13 +84,18 @@ impl AuditLogger {
         let mut line = serde_json::to_vec(event)
             .map_err(|error| io::Error::other(format!("serialize audit event: {error}")))?;
         line.push(b'\n');
-        match self.sender.try_send(line) {
+        let sender = self
+            .sender
+            .as_ref()
+            .ok_or_else(|| io::Error::other("audit writer is shutting down"))?;
+        match sender.try_send(AuditMessage::Event(line)) {
             Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
+            Err(mpsc::TrySendError::Full(AuditMessage::Event(_))) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
                 Err(io::Error::other("audit queue is full; event dropped"))
             }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
+            Err(mpsc::TrySendError::Full(AuditMessage::FlushAndStop))
+            | Err(mpsc::TrySendError::Disconnected(_)) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
                 Err(io::Error::other(
                     "audit writer is unavailable; event dropped",
@@ -98,6 +110,24 @@ impl AuditLogger {
 
     pub fn write_failures(&self) -> u64 {
         self.write_failures.load(Ordering::Relaxed)
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(AuditMessage::FlushAndStop);
+        }
+        if let Some(worker) = self.worker.take() {
+            if worker.join().is_err() {
+                self.write_failures.fetch_add(1, Ordering::Relaxed);
+                tracing::error!("audit writer thread panicked during shutdown");
+            }
+        }
+    }
+}
+
+impl Drop for AuditLogger {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -155,16 +185,24 @@ impl AuditWriter {
 
 fn run_writer(
     mut writer: AuditWriter,
-    receiver: mpsc::Receiver<Vec<u8>>,
+    receiver: mpsc::Receiver<AuditMessage>,
     write_failures: Arc<AtomicU64>,
 ) {
-    while let Ok(first) = receiver.recv() {
+    while let Ok(message) = receiver.recv() {
+        let AuditMessage::Event(first) = message else {
+            break;
+        };
         let mut batch = vec![first];
+        let mut stop_after_batch = false;
         while batch.len() < AUDIT_BATCH_SIZE {
             match receiver.recv_timeout(AUDIT_BATCH_WAIT) {
-                Ok(line) => batch.push(line),
-                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                Ok(AuditMessage::Event(line)) => batch.push(line),
+                Ok(AuditMessage::FlushAndStop) => {
+                    stop_after_batch = true;
                     break;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                    break
                 }
             }
         }
@@ -174,6 +212,9 @@ fn run_writer(
             if let Ok(reopened) = AuditWriter::open(&writer.path) {
                 writer = reopened;
             }
+        }
+        if stop_after_batch {
+            break;
         }
     }
 }
@@ -217,17 +258,8 @@ mod tests {
                 output_size: 12,
             })
             .unwrap();
-        let line = (0..50)
-            .find_map(|_| {
-                let contents = std::fs::read_to_string(&path).ok()?;
-                if contents.is_empty() {
-                    std::thread::sleep(Duration::from_millis(10));
-                    None
-                } else {
-                    Some(contents)
-                }
-            })
-            .expect("audit writer should flush the queued event");
+        drop(logger);
+        let line = std::fs::read_to_string(&path).expect("audit writer should flush on drop");
         let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
         assert_eq!(value["action_id"], "cluster-status");
         assert!(value.get("stdout").is_none());
