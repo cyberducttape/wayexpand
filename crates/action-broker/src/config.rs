@@ -8,6 +8,39 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+/// systemd user services that use `ReadWritePaths=` may run in a mount/user
+/// namespace where host-root-owned ancestors appear as UID 65534 (unmapped
+/// nobody). Treat that representation as root only when `/proc` confirms that
+/// namespace UID 0 is unmapped; never broaden ownership checks on a normal
+/// host where 65534 can be a real owner.
+pub fn is_root_owner(uid: u32) -> bool {
+    uid == 0
+        || (uid == 65_534
+            && fs::read_to_string("/proc/self/uid_map")
+                .ok()
+                .is_some_and(|mapping| {
+                    !mapping.lines().any(|line| {
+                        let mut fields = line.split_whitespace();
+                        let Some(namespace_start) =
+                            fields.next().and_then(|v| v.parse::<u64>().ok())
+                        else {
+                            return false;
+                        };
+                        let Some(_host_start) = fields.next() else {
+                            return false;
+                        };
+                        let Some(length) = fields.next().and_then(|v| v.parse::<u64>().ok()) else {
+                            return false;
+                        };
+                        namespace_start == 0 && length > 0
+                    })
+                }))
+}
+
+pub fn is_user_or_root_owner(uid: u32, current_uid: u32) -> bool {
+    uid == current_uid || is_root_owner(uid)
+}
+
 /// Configuration for a single action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -295,7 +328,7 @@ fn validate_working_directory(label: &str, directory: &str) -> Result<(), String
             ));
         }
         let uid = rustix::process::geteuid().as_raw();
-        if metadata.uid() != uid && metadata.uid() != 0 {
+        if !is_user_or_root_owner(metadata.uid(), uid) {
             return Err(format!(
                 "{} '{}' is not owned by the current user or root",
                 label, directory
@@ -322,7 +355,7 @@ fn validate_audit_path(path: &str) -> Result<(), String> {
     let uid = rustix::process::geteuid().as_raw();
     if !parent_metadata.is_dir()
         || (parent_metadata.mode() & 0o022 != 0)
-        || (parent_metadata.uid() != uid && parent_metadata.uid() != 0)
+        || !is_user_or_root_owner(parent_metadata.uid(), uid)
     {
         return Err("audit_path parent directory is not private and trusted".to_string());
     }
@@ -330,11 +363,13 @@ fn validate_audit_path(path: &str) -> Result<(), String> {
         if !metadata.is_file() {
             return Err("audit_path must name a regular file".to_string());
         }
-        if metadata.uid() != uid && metadata.uid() != 0 {
+        if !is_user_or_root_owner(metadata.uid(), uid) {
             return Err("audit_path is not owned by the current user or root".to_string());
         }
         let mode = metadata.mode() & 0o777;
-        if (metadata.uid() == uid && mode != 0o600) || (metadata.uid() == 0 && mode & 0o022 != 0) {
+        if (metadata.uid() == uid && mode != 0o600)
+            || (is_root_owner(metadata.uid()) && mode & 0o022 != 0)
+        {
             return Err("audit_path permissions are insecure".to_string());
         }
     }
@@ -414,7 +449,7 @@ fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), Strin
             ));
         }
         let uid = rustix::process::geteuid().as_raw();
-        if metadata.uid() != uid && metadata.uid() != 0 {
+        if !is_user_or_root_owner(metadata.uid(), uid) {
             return Err(format!(
                 "action '{}': program '{}' is not owned by the current user or root",
                 action_id, program
@@ -450,7 +485,7 @@ fn validate_path_ancestors(
                 current.display()
             ));
         }
-        if metadata.uid() != uid && metadata.uid() != 0 {
+        if !is_user_or_root_owner(metadata.uid(), uid) {
             return Err(format!(
                 "{} ancestor '{}' is not owned by the current user or root",
                 label,
@@ -460,7 +495,7 @@ fn validate_path_ancestors(
         if metadata.mode() & 0o022 != 0 {
             let trusted_sticky = allow_trusted_sticky
                 && metadata.mode() & 0o1000 != 0
-                && (metadata.uid() == uid || metadata.uid() == 0);
+                && is_user_or_root_owner(metadata.uid(), uid);
             if !trusted_sticky {
                 return Err(format!(
                     "{} ancestor '{}' is writable by group or other users",
