@@ -88,11 +88,14 @@ services require access to the home directory or system-wide state, so they are
 still blocked by the filesystem isolation settings above. A command that works
 with D-Bus when run manually may fail under the daemon's constraints.
 
-There is currently no supported path for SRE commands that require network,
-home-directory, or broader filesystem access. The planned Action Broker is a
-separate privilege/environment boundary for that use case; it must receive an
-explicit action name and enforce its own allowlist, environment, cwd, network
-policy, timeout, output limit, and audit result. See
+Named actions provide a supported policy-controlled path for selected SRE
+commands that require capabilities unavailable to the daemon sandbox. The
+integrated Action Broker is a separate same-user process and policy boundary;
+it receives an explicit action name and enforces its executable, arguments,
+environment, cwd, timeout, output limit, and optional audit result. It is not an
+OS sandbox or a boundary against compromised software running as the same UID;
+network and filesystem isolation must be supplied by its systemd service policy.
+See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](docs/ACTION_BROKER_ARCHITECTURE.md).
 
 **Note:** The `wayexpand-gui` preview feature does NOT run commands under the
@@ -175,11 +178,11 @@ SRE command-execution boundary:
 - `ProtectHome=read-only`, `ProtectSystem=strict`, no network access
 - Prevents legitimate SRE tools from working: `kubectl`, `aws`, `vault`, `ssh`, etc.
 
-The IBus integration is intentionally stricter until the Action Broker exists:
-IBus runs outside the hardened daemon service, so command-backed expansions are
-disabled in that backend in both safe and audit modes. IBus supports static
-text expansions only; it does not provide an alternate command-execution
-boundary.
+The IBus integration keeps direct `program` commands disabled because IBus runs
+outside the hardened daemon service. Named `action` commands are allowed only
+through the integrated Action Broker, where broker availability and policy are
+checked before execution. IBus therefore supports static expansions, direct
+program commands remain disabled, and managed actions use the broker boundary.
 
 **Enterprise/SRE use case conflict:**
 A typical SRE might want:
@@ -195,16 +198,16 @@ args = ["get", "svc", "-o", "wide"]
 This command fails in the current sandbox and cannot be fixed without materially
 weakening the daemon's security posture for all users.
 
-**P1 mitigation: Action Broker architecture (not implemented)**
+**Action Broker architecture (implemented for named actions)**
 
-Future versions will separate concerns:
+The current implementation separates concerns:
 
 ```
 Capture/Match/Injection Process (extremely locked down)
          │
          │ constrained IPC (command name + args only)
          ▼
-Optional Action Broker (per-user policy engine)
+Action Broker (per-user policy engine)
          └─ allowed executables whitelist
          └─ network access policy
          └─ filesystem access policy
@@ -220,4 +223,7 @@ Benefits:
 - Legitimate commands can be whitelisted by organization policy
 
 This approach is particularly valuable for the target audience: SREs and system
-administrators who need to trust WayExpand in hardened environments.
+administrators who need to trust WayExpand in hardened environments. Configure
+the broker service and action catalog before using `action = "..."`; an
+unavailable broker or missing action fails closed rather than falling back to a
+direct command.

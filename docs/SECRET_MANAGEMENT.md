@@ -15,9 +15,10 @@ WayExpand does **not** provide built-in secret management. This is intentional:
 **Production boundary:** Do not use command-backed expansions to retrieve or
 insert credentials, tokens, passwords, or other secret values. The normal
 command runner is intentionally confined by the daemon's systemd sandbox; named
-actions are routed through the integrated Action Broker, which still does not
-provide an independent sandbox or durable audit sink. Neither is a supported
-secret-release mechanism or audited credential boundary. See
+actions are routed through the integrated Action Broker, which provides a
+policy-controlled same-UID execution boundary and an optional privacy-preserving
+audit sink, but is not an independent OS sandbox or credential-release boundary.
+Neither path should be treated as a supported secret-release mechanism. See
 [Operations](OPERATIONS.md) and the [Action Broker status](ACTION_BROKER_ARCHITECTURE.md).
 
 ## Recommended Approach

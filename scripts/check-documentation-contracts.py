@@ -171,7 +171,7 @@ def main() -> int:
     for document in active_documents():
         text = document.read_text(encoding="utf-8")
         relative = document.relative_to(ROOT)
-        if "audit_enabled" in text or "audit_path" in text:
+        if "audit_enabled" in text:
             errors.append(f"{relative} documents removed, inert broker audit settings")
 
     if errors:

@@ -161,8 +161,14 @@ jobs:
       fail-fast: false
       matrix:
         package:
+          - action-broker
+          - wayexpand-daemon
+          - wayexpand-gui
           - wayexpand-core
           - wayexpand-ui
+          - wayexpand-backend-ibus
+          - wayexpand-backend-input-method
+          - wayexpand-backend-libei
     env:
       # The default lane deliberately serializes tests that share desktop
       # state. This lane is the complementary race detector: packages here

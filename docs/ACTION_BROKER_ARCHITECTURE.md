@@ -2,7 +2,7 @@
 
 **Version:** 1.2.0
 **Status:** Integrated named-action execution; network/filesystem isolation remains a deployment responsibility
-**Next:** Managed service packaging and per-action OS sandbox profiles
+**Next:** Per-action OS sandbox profiles and broader operational tooling
 
 ## Overview
 
@@ -152,10 +152,11 @@ What will be implemented:
   - Network isolation through a concrete service/container sandbox (not a TOML boolean)
   - Timeout enforcement per action
 
-- **Standalone Broker Deployment**
-  - Add a systemd user service and optional socket activation
-  - Document operator-managed startup and lifecycle
-  - Integrate daemon policy routing and action-name configuration
+- **Deployment hardening**
+  - Add per-action OS sandbox profiles or service-level containment
+  - Evaluate optional socket activation without changing the current default
+    socket lifecycle
+  - Improve upgrade diagnostics and policy-revision reporting
 
 ## Phase 3: Enterprise Features (v1.4+) - FUTURE
 
@@ -224,6 +225,16 @@ replacement = ""
 action = "aws_sts_identity"
 ```
 
+When the daemon encounters a named action, it connects to the configured broker
+socket and sends only the action ID and request limits. The broker looks up the
+ID in its own policy, executes the fixed program and arguments, and returns
+bounded output. If the broker is unavailable or the action is not allowed, the
+expansion fails closed; WayExpand does not fall back to direct local execution.
+The packaged service is intentionally operator-enabled rather than automatic,
+because its action catalog and service-level network/filesystem policy are
+deployment-specific. Use the CLI `status` or `doctor` commands to distinguish a
+missing broker service from an unknown or disabled action.
+
 ## Security Model
 
 ### Current daemon execution model
@@ -233,12 +244,12 @@ action = "aws_sts_identity"
 - Expansion and organization policy are checked before dispatch.
 - The daemon service sandbox supplies additional restrictions such as no
   network access and read-only home/system protection.
-- This is not equivalent to the separate-process isolation described below;
-  the daemon is not currently a broker-only command router.
+- Direct `program` commands remain subject to the daemon's systemd sandbox;
+  named actions use the separate broker process and its action policy.
 
-### Target broker permissions (when routing is enabled)
-- The keyboard daemon would retain a minimal AF_UNIX-only permission set and
-  would not spawn action commands itself.
+### Broker permissions and deployment boundary
+- The keyboard daemon retains a minimal AF_UNIX-only permission set and does
+  not spawn named action commands itself.
 - Only configured programs allowed
 - Action arguments are fixed by the validated action definition; any future
   request-supplied arguments must use a separately constrained allowlisted
