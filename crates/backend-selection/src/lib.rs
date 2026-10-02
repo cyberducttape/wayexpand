@@ -20,6 +20,31 @@ pub enum InjectorBackend {
     Wlroots,
 }
 
+/// Backends that can appear in the checked-in route contract. Keeping this
+/// mapping here makes consumers exhaustive over the contract vocabulary
+/// instead of independently matching its string representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteBackend {
+    IBus,
+    Evdev,
+    Libei,
+    WlrootsVirtualKeyboard,
+    InputMethodV2,
+}
+
+impl RouteBackend {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "ibus" => Self::IBus,
+            "evdev" => Self::Evdev,
+            "libei" => Self::Libei,
+            "wlroots-virtual-keyboard" => Self::WlrootsVirtualKeyboard,
+            "input-method-v2" => Self::InputMethodV2,
+            _ => return None,
+        })
+    }
+}
+
 /// A route that `setup --mode recommended` can configure without an expert
 /// backend override. Raw evdev is intentionally absent: it remains an
 /// explicit maximum-compatibility opt-in because it can observe password
@@ -47,6 +72,16 @@ pub struct RouteContract {
     pub status: String,
     pub setup_backend: String,
     pub setup_detail: String,
+}
+
+impl RouteContract {
+    pub fn capture_backend(&self) -> Option<RouteBackend> {
+        RouteBackend::parse(&self.capture)
+    }
+
+    pub fn injection_backend(&self) -> Option<RouteBackend> {
+        RouteBackend::parse(&self.injection)
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -36,7 +36,7 @@ use std::{
 };
 
 use theme::Palette;
-use wayexpand_backend_selection::{Capabilities, RecommendedRoute};
+use wayexpand_backend_selection::{Capabilities, RecommendedRoute, RouteBackend};
 use wayexpand_core::{
     default_config_path, BackendState, BackendStatus, Config, ExpansionConfig, FontScale,
     MatchMode, OrganizationPolicy, Settings,
@@ -71,18 +71,19 @@ struct RouteRecommendation {
     atomic_replace: bool,
 }
 
-fn route_recommendation(route: RecommendedRoute) -> RouteRecommendation {
+fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> {
     let contract = route.contract();
-    let backend_kind = |name: &str| match name {
-        "evdev" => wayexpand_core::BackendKind::Evdev,
-        "libei" => wayexpand_core::BackendKind::Libei,
-        "wlroots-virtual-keyboard" => wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
-        "input-method-v2" | "ibus" => wayexpand_core::BackendKind::InputMethodV2,
-        other => panic!("unknown route backend {other:?}"),
+    let backend_kind = |backend: RouteBackend| match backend {
+        RouteBackend::IBus | RouteBackend::InputMethodV2 => {
+            wayexpand_core::BackendKind::InputMethodV2
+        }
+        RouteBackend::Evdev => wayexpand_core::BackendKind::Evdev,
+        RouteBackend::Libei => wayexpand_core::BackendKind::Libei,
+        RouteBackend::WlrootsVirtualKeyboard => wayexpand_core::BackendKind::WlrootsVirtualKeyboard,
     };
-    let capture = backend_kind(&contract.capture);
-    let injection = backend_kind(&contract.injection);
-    RouteRecommendation {
+    let capture = backend_kind(contract.capture_backend()?);
+    let injection = backend_kind(contract.injection_backend()?);
+    Some(RouteRecommendation {
         capture,
         injection,
         capture_label: &contract.capture,
@@ -92,7 +93,7 @@ fn route_recommendation(route: RecommendedRoute) -> RouteRecommendation {
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
-    }
+    })
 }
 /// Built-in template variables offered as insert buttons. Their hover
 /// descriptions are translated in `Strings::template_variable_description`.
@@ -2911,7 +2912,7 @@ impl GuiApp {
                         status.kind == wayexpand_core::BackendKind::WindowTracker
                             && status.state == BackendState::Available
                     });
-                    let recommendation = self.recommended_route.map(route_recommendation);
+                    let recommendation = self.recommended_route.and_then(route_recommendation);
                     let keyboard_probe = recommendation
                         .map(|route| route.capture_state)
                         .unwrap_or(BackendState::NotImplemented);
@@ -4585,7 +4586,8 @@ mod tests {
     #[test]
     fn route_recommendation_preserves_ibus_topology() {
         let shared_route = RecommendedRoute::IBus;
-        let route = route_recommendation(shared_route);
+        let route =
+            route_recommendation(shared_route).expect("the IBus route contract is supported");
         assert_eq!(route.capture, wayexpand_core::BackendKind::InputMethodV2);
         assert_eq!(route.injection, wayexpand_core::BackendKind::InputMethodV2);
         assert_eq!(route.capture_label, "ibus");
