@@ -28,7 +28,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 install -d -m 0700 "$config_dir" "$state_root" "$state_dir"
-chmod 0700 "$config_dir" "$state_root" "$state_dir"
+chmod 0700 "$test_root" "$config_dir" "$state_root" "$state_dir"
 rm -f "$socket"
 cat >"$config" <<EOF
 [broker]
@@ -96,6 +96,12 @@ then
 fi
 
 audit_file="$state_dir/action-audit.jsonl"
+for _ in $(seq 1 50); do
+    if [ -s "$audit_file" ]; then
+        break
+    fi
+    sleep 0.1
+done
 test -s "$audit_file"
 AUDIT_FILE="$audit_file" python3 - <<'PY'
 import json

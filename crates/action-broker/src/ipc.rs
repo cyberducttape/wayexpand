@@ -3,6 +3,7 @@
 //! Uses JSON serialization over Unix stream sockets for platform independence
 //! and debuggability (can inspect with netcat, socat, etc).
 
+use crate::config::is_user_or_root_owner;
 use crate::protocol::{ActionError, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES};
 use serde_json;
 use std::io::{BufRead, BufReader, Write};
@@ -206,7 +207,7 @@ impl BrokerServer {
         Self::validate_socket_ancestors(&parent, uid)?;
 
         if let Ok(metadata) = std::fs::symlink_metadata(path) {
-            if !metadata.file_type().is_socket() || (metadata.uid() != uid && metadata.uid() != 0) {
+            if !metadata.file_type().is_socket() || !is_user_or_root_owner(metadata.uid(), uid) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "refusing to replace a non-socket or untrusted broker path",
@@ -217,7 +218,7 @@ impl BrokerServer {
             let current = std::fs::symlink_metadata(path)?;
             if !current.file_type().is_socket()
                 || (current.dev(), current.ino()) != identity
-                || (current.uid() != uid && current.uid() != 0)
+                || !is_user_or_root_owner(current.uid(), uid)
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
@@ -252,7 +253,7 @@ impl BrokerServer {
                 )
                 .into());
             }
-            if metadata.uid() != uid && metadata.uid() != 0 {
+            if !is_user_or_root_owner(metadata.uid(), uid) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "broker socket ancestor is not owned by the current user or root",
@@ -262,7 +263,7 @@ impl BrokerServer {
             let group_or_other_writable = metadata.mode() & 0o022 != 0;
             let is_sticky_directory = metadata.mode() & 0o1000 != 0;
             let is_trusted_sticky_directory =
-                is_sticky_directory && (metadata.uid() == uid || metadata.uid() == 0);
+                is_sticky_directory && is_user_or_root_owner(metadata.uid(), uid);
             if group_or_other_writable && !is_trusted_sticky_directory {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,

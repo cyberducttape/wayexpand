@@ -9,6 +9,7 @@
 //!     --socket "$XDG_RUNTIME_DIR/wayexpand-broker.sock"
 
 use action_broker::{
+    config::{is_root_owner, is_user_or_root_owner},
     policy_hash, ActionError, ActionExecutor, AuditEvent, AuditHealth, AuditLogger, BrokerConfig,
     BrokerServer,
 };
@@ -184,14 +185,14 @@ fn load_config(path: &PathBuf) -> Result<(BrokerConfig, String)> {
         ));
     }
     let current_uid = rustix::process::geteuid().as_raw();
-    if metadata.uid() != current_uid && metadata.uid() != 0 {
+    if !is_user_or_root_owner(metadata.uid(), current_uid) {
         return Err(anyhow!(
             "config file is not owned by the current user or root"
         ));
     }
     let mode = metadata.mode() & 0o777;
     if (metadata.uid() == current_uid && mode != 0o600)
-        || (metadata.uid() == 0 && mode & 0o022 != 0)
+        || (is_root_owner(metadata.uid()) && mode & 0o022 != 0)
     {
         return Err(anyhow!(
             "config file permissions are insecure (expected 0600 for user-owned files)"
@@ -311,9 +312,12 @@ fn validate_config_ancestors(path: &Path) -> Result<()> {
         if !metadata.is_dir() {
             return Err(anyhow!("config ancestor is not a directory"));
         }
-        if metadata.uid() != current_uid && metadata.uid() != 0 {
+        if !is_user_or_root_owner(metadata.uid(), current_uid) {
             return Err(anyhow!(
-                "config ancestor is not owned by the current user or root"
+                "config ancestor '{}' is not owned by the current user or root (owner uid {}, current uid {})",
+                current.display(),
+                metadata.uid(),
+                current_uid
             ));
         }
         if metadata.mode() & 0o022 != 0 {
