@@ -121,13 +121,18 @@ What's implemented:
     enabled automatically because the broker configuration is deployment-specific
 
 - **Execution audit sink**
-  - Enable with `[broker] audit_path = "/private/path/action-audit.jsonl"`
+  - Enable with `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"`; the default state location is `$HOME/.local/state/wayexpand`
   - Writes bounded JSONL events with request ID, action ID, caller PID and
     executable when available, policy SHA-256, timing, exit/timeout status, and
     output byte count
   - Never records arguments, environment values, stdout, or stderr
   - The sink is mode `0600`, synchronously appended, and capped at 16 MiB;
     write failures are reported to the service journal while execution proceeds
+
+- Captured action output is limited to 128 KiB total (64 KiB per stream). A
+  successful response remains successful when a stream reaches its limit and
+  reports `stdout_truncated` or `stderr_truncated`; the 1 MiB IPC frame limit
+  is only a transport bound.
 
 To build the standalone broker from a checkout:
 
@@ -260,7 +265,7 @@ missing broker service from an unknown or disabled action.
 - No escalated privileges (runs as regular user)
 
 ### Audit Trail
-- Optional: set `[broker] audit_path` to enable the broker's JSONL execution
+- Optional: set `[broker] audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"` to enable the broker's JSONL execution audit. WayExpand resolves `$XDG_STATE_HOME` from the environment and falls back to `$HOME/.local/state`; installers create the private state directory and the user service grants the broker access to it.
   sink.
 - Events contain timing, action identity, request ID, peer metadata, policy
   hash, exit/timeout status, and output size, but not arguments, environment

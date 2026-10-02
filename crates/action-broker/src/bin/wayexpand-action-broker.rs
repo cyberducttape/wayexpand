@@ -121,7 +121,7 @@ CONFIGURATION:
     require_absolute_paths = true
     strict_env = true
     # Optional JSONL execution audit sink (mode 0600, bounded to 16 MiB).
-    # audit_path = "/home/user/.local/state/wayexpand/action-audit.jsonl"
+    # audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"
 
     [actions."example"]
     program = "/usr/bin/example"

@@ -28,6 +28,8 @@ fi
 bin_dir="$HOME/.local/bin"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
@@ -103,6 +105,11 @@ else
     if [ -e "$config_dir" ]; then
         printf '%s\n' "Kept configuration: $config_dir (rerun with --purge to remove it)"
     fi
+fi
+
+if [ "$purge_config" -eq 1 ] && [ -e "$state_dir" ]; then
+    rm -rf -- "$state_dir"
+    printf '%s\n' "Removed $state_dir"
 fi
 
 raw_input_configured=0

@@ -25,4 +25,9 @@ for expected in NoNewPrivileges=yes UMask=0077 PrivateTmp=yes ProtectSystem=stri
     fi
 done
 
+if ! grep -Fx 'ReadWritePaths=%t %h/.config/wayexpand %h/.local/state/wayexpand' "$broker_unit" >/dev/null; then
+    printf '%s\n' "$broker_unit: audit state directory must be writable by the broker" >&2
+    exit 1
+fi
+
 printf '%s\n' "systemd hardening contract passed for: $units $broker_unit"

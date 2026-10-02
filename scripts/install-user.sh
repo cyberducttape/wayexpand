@@ -49,6 +49,8 @@ fi
 bin_dir="$HOME/.local/bin"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 ibus_component_dir="$HOME/.local/share/ibus/component"
@@ -59,6 +61,8 @@ case "$target_dir" in
     /*) ;;
     *) target_dir="$project_dir/$target_dir" ;;
 esac
+
+install -d -m 0700 "$state_dir"
 
 printf '%s\n' "Building WayExpand release binaries..."
 CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \

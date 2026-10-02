@@ -51,6 +51,8 @@ async fn broker_client_server_echo_request_response() {
             exit_code: 0,
             stdout: "Hello from broker".to_string(),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: 100,
         });
         conn.write_response(&response)
@@ -196,6 +198,8 @@ async fn action_response_success() {
         exit_code: 0,
         stdout: "success".to_string(),
         stderr: String::new(),
+        stdout_truncated: false,
+        stderr_truncated: false,
         duration_ms: 50,
     });
 

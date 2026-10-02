@@ -33,7 +33,7 @@ MemoryMax=256M
 TasksMax=32
 LimitNOFILE=64
 LimitCORE=0
-ReadWritePaths=%t %h/.config/wayexpand
+ReadWritePaths=%t %h/.config/wayexpand %h/.local/state/wayexpand
 
 [Install]
 WantedBy=graphical-session.target

@@ -3,7 +3,7 @@
 //! Uses JSON serialization over Unix stream sockets for platform independence
 //! and debuggability (can inspect with netcat, socat, etc).
 
-use crate::protocol::{ActionError, ActionRequest, ActionResponse};
+use crate::protocol::{ActionError, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES};
 use serde_json;
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
@@ -16,6 +16,8 @@ use thiserror::Error;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+const MAX_STREAM_OUTPUT_BYTES: usize = MAX_OUTPUT_BYTES / 2;
 
 fn encode_frame<T: serde::Serialize>(message: &T) -> Result<Vec<u8>, IpcError> {
     let json = serde_json::to_vec(message)?;
@@ -31,6 +33,45 @@ fn write_frame(stream: &mut UnixStream, json: &[u8]) -> Result<(), IpcError> {
     stream.write_all(b"\n")?;
     stream.flush()?;
     Ok(())
+}
+
+fn truncate_utf8(value: &mut String, limit: usize) -> bool {
+    if value.len() <= limit {
+        return false;
+    }
+    let mut end = limit;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    true
+}
+
+fn bounded_response(response: &ActionResponse) -> ActionResponse {
+    match response {
+        ActionResponse::Success(output) => {
+            let mut output = output.clone();
+            output.stdout_truncated |= truncate_utf8(&mut output.stdout, MAX_STREAM_OUTPUT_BYTES);
+            output.stderr_truncated |= truncate_utf8(&mut output.stderr, MAX_STREAM_OUTPUT_BYTES);
+            ActionResponse::Success(output)
+        }
+        ActionResponse::Error(ActionError::ExitFailure {
+            action_id,
+            exit_code,
+            stderr,
+        }) => {
+            let mut stderr = stderr.clone();
+            truncate_utf8(&mut stderr, MAX_STREAM_OUTPUT_BYTES);
+            ActionResponse::Error(ActionError::ExitFailure {
+                action_id: action_id.clone(),
+                exit_code: *exit_code,
+                stderr,
+            })
+        }
+        _ => ActionResponse::Error(ActionError::OutputTruncated {
+            limit_bytes: MAX_MESSAGE_BYTES,
+        }),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -297,12 +338,9 @@ impl ServerConnection {
         match encode_frame(response) {
             Ok(json) => write_frame(&mut self.stream, &json),
             Err(IpcError::MessageTooLarge(_, _)) => {
-                // Keep the protocol usable when an action fills either output
-                // stream. The receiver gets a small, valid response instead
-                // of a frame that it must reject halfway through parsing.
-                let bounded = ActionResponse::Error(ActionError::OutputTruncated {
-                    limit_bytes: MAX_MESSAGE_BYTES,
-                });
+                // Keep a successful action successful when JSON escaping or
+                // an older/foreign client produces an oversized response.
+                let bounded = bounded_response(response);
                 let json = encode_frame(&bounded).expect("bounded response must fit IPC frame");
                 write_frame(&mut self.stream, &json)
             }
@@ -448,6 +486,8 @@ mod tests {
                 exit_code: 0,
                 stdout: "test output".to_string(),
                 stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
                 duration_ms: 100,
             });
             conn.write_response(&response).unwrap();
@@ -499,7 +539,7 @@ mod tests {
         server_thread.join().unwrap();
     }
 
-    fn assert_oversized_response_is_bounded(response: ActionResponse) {
+    fn assert_oversized_success_is_bounded(response: ActionResponse) {
         let (server_stream, client_stream) = UnixStream::pair().unwrap();
         let mut server = ServerConnection {
             reader: BufReader::new(server_stream.try_clone().unwrap()),
@@ -516,31 +556,56 @@ mod tests {
         };
 
         server.write_response(&response).unwrap();
-        assert!(matches!(
-            client.recv_response().unwrap(),
-            ActionResponse::Error(ActionError::OutputTruncated {
-                limit_bytes: MAX_MESSAGE_BYTES
-            })
-        ));
+        match client.recv_response().unwrap() {
+            ActionResponse::Success(output) => {
+                assert!(output.stdout_truncated || output.stderr_truncated);
+                assert!(output.stdout.len() + output.stderr.len() <= MAX_OUTPUT_BYTES);
+            }
+            other => panic!("oversized success must remain successful: {other:?}"),
+        }
     }
 
     #[test]
     fn ipc_bounds_response_with_large_stdout() {
-        assert_oversized_response_is_bounded(ActionResponse::Success(ActionOutput {
+        assert_oversized_success_is_bounded(ActionResponse::Success(ActionOutput {
             exit_code: 0,
             stdout: "x".repeat(MAX_MESSAGE_BYTES),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: 1,
         }));
     }
 
     #[test]
     fn ipc_bounds_response_with_large_stderr() {
-        assert_oversized_response_is_bounded(ActionResponse::Error(ActionError::ExitFailure {
-            action_id: "large-output".to_string(),
-            exit_code: 1,
-            stderr: "e".repeat(MAX_MESSAGE_BYTES),
-        }));
+        let (server_stream, client_stream) = UnixStream::pair().unwrap();
+        let mut server = ServerConnection {
+            reader: BufReader::new(server_stream.try_clone().unwrap()),
+            stream: server_stream,
+            peer: PeerIdentity {
+                pid: None,
+                uid: 0,
+                executable: None,
+            },
+        };
+        let mut client = BrokerClient {
+            reader: BufReader::new(client_stream.try_clone().unwrap()),
+            stream: client_stream,
+        };
+        server
+            .write_response(&ActionResponse::Error(ActionError::ExitFailure {
+                action_id: "large-output".to_string(),
+                exit_code: 1,
+                stderr: "e".repeat(MAX_MESSAGE_BYTES),
+            }))
+            .unwrap();
+        match client.recv_response().unwrap() {
+            ActionResponse::Error(ActionError::ExitFailure { stderr, .. }) => {
+                assert!(stderr.len() <= MAX_OUTPUT_BYTES / 2);
+            }
+            other => panic!("oversized failure must remain a failure: {other:?}"),
+        }
     }
 
     #[test]
@@ -549,10 +614,12 @@ mod tests {
         assert!(escape_heavy.len() < MAX_MESSAGE_BYTES);
         assert!(serde_json::to_vec(&escape_heavy).unwrap().len() > MAX_MESSAGE_BYTES);
 
-        assert_oversized_response_is_bounded(ActionResponse::Success(ActionOutput {
+        assert_oversized_success_is_bounded(ActionResponse::Success(ActionOutput {
             exit_code: 0,
             stdout: escape_heavy,
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: 1,
         }));
     }

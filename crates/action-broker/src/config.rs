@@ -235,6 +235,9 @@ impl BrokerConfig {
     /// explicit instead of retaining a symlink or `..` spelling until spawn.
     pub fn validate_and_canonicalize(&mut self) -> Result<(), String> {
         self.validate()?;
+        if let Some(path) = self.audit_path.clone() {
+            self.audit_path = Some(resolve_audit_path(&path)?.to_string_lossy().into_owned());
+        }
         if self.require_absolute_paths {
             for (id, action) in &mut self.actions {
                 let canonical = fs::canonicalize(&action.program)
@@ -303,7 +306,8 @@ fn validate_working_directory(label: &str, directory: &str) -> Result<(), String
 }
 
 fn validate_audit_path(path: &str) -> Result<(), String> {
-    let path = Path::new(path);
+    let path = resolve_audit_path(path)?;
+    let path = path.as_path();
     if !path.is_absolute() {
         return Err("audit_path must be an absolute path".to_string());
     }
@@ -335,6 +339,33 @@ fn validate_audit_path(path: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn resolve_audit_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let path = if let Some(suffix) = path.strip_prefix("$XDG_STATE_HOME") {
+        let state_home = std::env::var_os("XDG_STATE_HOME")
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| Path::new(&home).join(".local/state").into_os_string())
+            })
+            .ok_or_else(|| {
+                "audit_path uses $XDG_STATE_HOME but neither XDG_STATE_HOME nor HOME is set"
+                    .to_string()
+            })?;
+        Path::new(&state_home).join(suffix.trim_start_matches('/'))
+    } else if let Some(suffix) = path.strip_prefix("~/") {
+        let home = std::env::var_os("HOME")
+            .ok_or_else(|| "audit_path uses ~ but HOME is not set".to_string())?;
+        Path::new(&home).join(suffix)
+    } else {
+        Path::new(path).to_path_buf()
+    };
+    if !path.is_absolute() {
+        return Err(
+            "audit_path must be an absolute path or use $XDG_STATE_HOME/ or ~/".to_string(),
+        );
+    }
+    Ok(path)
 }
 
 fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), String> {

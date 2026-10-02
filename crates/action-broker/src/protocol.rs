@@ -6,6 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// Total captured action output returned in a response, across stdout and
+/// stderr. Each stream receives half of this budget.
+pub const MAX_OUTPUT_BYTES: usize = 128 * 1024;
+
 /// Action execution request from daemon to broker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActionRequest {
@@ -46,6 +50,14 @@ pub struct ActionOutput {
 
     /// Captured stderr (if requested).
     pub stderr: String,
+
+    /// Whether stdout was bounded by the output budget.
+    #[serde(default)]
+    pub stdout_truncated: bool,
+
+    /// Whether stderr was bounded by the output budget.
+    #[serde(default)]
+    pub stderr_truncated: bool,
 
     /// Total execution time in milliseconds.
     pub duration_ms: u64,
@@ -192,6 +204,8 @@ mod tests {
             exit_code: 0,
             stdout: "test output".to_string(),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             duration_ms: 100,
         };
         let json = serde_json::to_string(&output).unwrap();

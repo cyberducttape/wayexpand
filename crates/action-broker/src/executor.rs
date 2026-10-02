@@ -4,7 +4,7 @@
 
 use crate::{
     config::BrokerConfig,
-    protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
+    protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES},
 };
 use std::collections::HashMap;
 use std::io::Read;
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
-const MAX_OUTPUT_BYTES: usize = 1024 * 1024; // 1 MiB per stream
+const MAX_STREAM_OUTPUT_BYTES: usize = MAX_OUTPUT_BYTES / 2;
 
 pub struct ActionExecutor {
     config: BrokerConfig,
@@ -28,6 +28,8 @@ enum ChildRunError {
     Io(std::io::Error),
 }
 
+type ChildRunOutput = (ExitStatus, Vec<u8>, Vec<u8>, bool, bool);
+
 #[cfg(unix)]
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
     let fd = stream.as_raw_fd();
@@ -39,16 +41,20 @@ fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
 }
 
 #[cfg(unix)]
-fn read_available<R: Read>(stream: &mut R, bytes: &mut Vec<u8>) -> Result<bool, std::io::Error> {
+fn read_available<R: Read>(
+    stream: &mut R,
+    bytes: &mut Vec<u8>,
+    limit: usize,
+) -> Result<bool, std::io::Error> {
     let mut buffer = [0_u8; 8192];
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => return Ok(true),
             Ok(count) => {
                 bytes.extend_from_slice(&buffer[..count]);
-                if bytes.len() >= MAX_OUTPUT_BYTES {
-                    bytes.truncate(MAX_OUTPUT_BYTES);
-                    return Ok(false);
+                if bytes.len() >= limit {
+                    bytes.truncate(limit);
+                    return Ok(true);
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
@@ -63,7 +69,7 @@ fn run_child_unix(
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
     timeout: Duration,
-) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), ChildRunError> {
+) -> Result<ChildRunOutput, ChildRunError> {
     let mut guard = ChildSupervisor::new(child);
     let mut stdout = stdout;
     let mut stderr = stderr;
@@ -84,6 +90,7 @@ fn run_child_unix(
             stdout_eof = read_available(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
+                MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
         }
@@ -91,6 +98,7 @@ fn run_child_unix(
             stderr_eof = read_available(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
+                MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
         }
@@ -118,6 +126,7 @@ fn run_child_unix(
             stdout_eof = read_available(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
+                MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
         }
@@ -125,6 +134,7 @@ fn run_child_unix(
             stderr_eof = read_available(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
+                MAX_STREAM_OUTPUT_BYTES,
             )
             .map_err(ChildRunError::Io)?;
         }
@@ -135,7 +145,15 @@ fn run_child_unix(
     if !stdout_eof || !stderr_eof {
         return Err(ChildRunError::IncompleteOutput);
     }
-    Ok((status, stdout_bytes, stderr_bytes))
+    let stdout_truncated = stdout_bytes.len() >= MAX_STREAM_OUTPUT_BYTES;
+    let stderr_truncated = stderr_bytes.len() >= MAX_STREAM_OUTPUT_BYTES;
+    Ok((
+        status,
+        stdout_bytes,
+        stderr_bytes,
+        stdout_truncated,
+        stderr_truncated,
+    ))
 }
 
 #[cfg(not(unix))]
@@ -144,7 +162,7 @@ fn run_child_fallback(
     stdout: Option<impl Read + Send + 'static>,
     stderr: Option<impl Read + Send + 'static>,
     timeout: Duration,
-) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), ChildRunError> {
+) -> Result<ChildRunOutput, ChildRunError> {
     let deadline = Instant::now() + timeout;
     let stdout_thread =
         std::thread::spawn(move || stdout.map(bounded_read_stream).unwrap_or_default());
@@ -155,7 +173,9 @@ fn run_child_fallback(
             Some(status) => {
                 let stdout = stdout_thread.join().unwrap_or_default();
                 let stderr = stderr_thread.join().unwrap_or_default();
-                return Ok((status, stdout, stderr));
+                let stdout_truncated = stdout.len() >= MAX_STREAM_OUTPUT_BYTES;
+                let stderr_truncated = stderr.len() >= MAX_STREAM_OUTPUT_BYTES;
+                return Ok((status, stdout, stderr, stdout_truncated, stderr_truncated));
             }
             None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
             None => {
@@ -167,7 +187,8 @@ fn run_child_fallback(
     }
 }
 
-/// Read up to MAX_OUTPUT_BYTES from a stream, silently truncating beyond that.
+/// Read up to one stream's share of MAX_OUTPUT_BYTES, retaining whether the
+/// stream exceeded that budget.
 #[cfg(not(unix))]
 fn bounded_read_stream<R: Read>(stream: Option<R>) -> Vec<u8> {
     let Some(stream) = stream else {
@@ -176,9 +197,9 @@ fn bounded_read_stream<R: Read>(stream: Option<R>) -> Vec<u8> {
     let mut buf = Vec::new();
     // Read one byte beyond the limit to detect truncation, then truncate.
     let _ = stream
-        .take((MAX_OUTPUT_BYTES + 1) as u64)
+        .take((MAX_STREAM_OUTPUT_BYTES + 1) as u64)
         .read_to_end(&mut buf);
-    buf.truncate(MAX_OUTPUT_BYTES);
+    buf.truncate(MAX_STREAM_OUTPUT_BYTES);
     buf
 }
 
@@ -293,7 +314,7 @@ impl ActionExecutor {
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok((status, stdout_bytes, stderr_bytes)) => {
+            Ok((status, stdout_bytes, stderr_bytes, stdout_truncated, stderr_truncated)) => {
                 let exit_code = status.code().unwrap_or(-1);
                 let stdout = if capture_stdout {
                     String::from_utf8_lossy(&stdout_bytes).to_string()
@@ -307,6 +328,8 @@ impl ActionExecutor {
                         exit_code,
                         stdout,
                         stderr,
+                        stdout_truncated,
+                        stderr_truncated,
                         duration_ms,
                     }))
                 } else {

@@ -49,10 +49,14 @@ done
 bin_dir="$HOME/.local/bin"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
+
+install -d -m 0700 "$state_dir"
 
 install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
 install -Dm755 "$release_dir/bin/wayexpand-action-broker" "$bin_dir/wayexpand-action-broker"
