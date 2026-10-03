@@ -4046,3 +4046,110 @@ fn explain_applies_safe_mode_backend_policy() {
     );
     assert!(engine.explain(":sig", "input-method-v2").would_expand());
 }
+
+fn render_first(
+    config: &str,
+    typed: &str,
+    clipboard: Option<&'static str>,
+) -> Vec<ExpansionResult> {
+    let mut engine = ExpansionEngine::new(Config::parse(config).unwrap()).unwrap();
+    if let Some(text) = clipboard {
+        engine.set_clipboard_reader(Some(crate::ClipboardReader(std::sync::Arc::new(
+            move || Some(text.to_owned()),
+        ))));
+    }
+    let mut results = engine.process(InputEvent::Text(typed.into()));
+    results.extend(engine.process(InputEvent::EndOfInput));
+    results
+}
+
+#[test]
+fn env_variables_read_only_allowlisted_names() {
+    std::env::set_var("WAYEXPAND_TEST_TICKET_PREFIX", "OPS-");
+    let config = "[settings]\ntemplate_env = [\"WAYEXPAND_TEST_TICKET_PREFIX\"]\n\
+                  [[expansion]]\ntrigger = \":t\"\nreplacement = \"{{env:WAYEXPAND_TEST_TICKET_PREFIX}}42\"\n";
+    assert_eq!(render_first(config, ":t", None)[0].insert, "OPS-42");
+
+    let unlisted = "[[expansion]]\ntrigger = \":t\"\nreplacement = \"{{env:HOME}}\"\n";
+    assert!(matches!(
+        Config::parse(unlisted),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::EnvNotAllowed { .. },
+            ..
+        })
+    ));
+    let bad_name = "[settings]\ntemplate_env = [\"1BAD\"]\n";
+    assert!(matches!(
+        Config::parse(bad_name),
+        Err(crate::ConfigError::InvalidTemplateEnv { .. })
+    ));
+}
+
+#[test]
+fn safe_mode_policy_can_disable_env_and_clipboard_variables() {
+    let config =
+        "[organization]\nsafe_mode = true\ndisable_template_env = true\ndisable_clipboard = true\n\
+                  [settings]\ntemplate_env = [\"USER\"]\nallow_clipboard = true\n\
+                  [[expansion]]\ntrigger = \":e\"\nreplacement = \"{{env:USER}}\"\n\
+                  [[expansion]]\ntrigger = \":c\"\nreplacement = \"{{clipboard}}\"\n";
+    // Blocked variables fail closed: the snippet does not expand.
+    assert!(render_first(config, ":e", None).is_empty());
+    assert!(render_first(config, ":c", Some("secret")).is_empty());
+}
+
+#[test]
+fn snippet_includes_render_static_snippets_and_reject_cycles() {
+    let config = "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Best, Sam\"\n\
+                  [[expansion]]\ntrigger = \":reply\"\nreplacement = \"Thanks!{{newline}}{{snippet::sig}}\"\n";
+    assert_eq!(
+        render_first(config, ":reply", None)[0].insert,
+        "Thanks!\nBest, Sam"
+    );
+
+    let cycle = "[[expansion]]\ntrigger = \":a\"\nreplacement = \"{{snippet::b}}\"\n\
+                 [[expansion]]\ntrigger = \":b\"\nreplacement = \"{{snippet::a}}\"\n";
+    assert!(matches!(
+        Config::parse(cycle),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::IncludeTooDeep,
+            ..
+        })
+    ));
+    let command = "[[expansion]]\ntrigger = \":cmd\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/true\"\n\
+                   [[expansion]]\ntrigger = \":x\"\nreplacement = \"{{snippet::cmd}}\"\n";
+    assert!(matches!(
+        Config::parse(command),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::UnknownSnippet,
+            ..
+        })
+    ));
+    let cursor = "[[expansion]]\ntrigger = \":a\"\nreplacement = \"x{{cursor}}\"\n\
+                  [[expansion]]\ntrigger = \":b\"\nreplacement = \"{{snippet::a}}\"\n";
+    assert!(matches!(
+        Config::parse(cursor),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::CursorInInclude,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn clipboard_requires_opt_in_and_fails_closed() {
+    let disabled = "[[expansion]]\ntrigger = \":c\"\nreplacement = \"{{clipboard}}\"\n";
+    assert!(matches!(
+        Config::parse(disabled),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::ClipboardDisabled,
+            ..
+        })
+    ));
+    let enabled = "[settings]\nallow_clipboard = true\n[[expansion]]\ntrigger = \":c\"\nreplacement = \"> {{clipboard}}\"\n";
+    assert_eq!(
+        render_first(enabled, ":c", Some("quoted"))[0].insert,
+        "> quoted"
+    );
+    // No reader (or an unreadable clipboard) means no expansion.
+    assert!(render_first(enabled, ":c", None).is_empty());
+}

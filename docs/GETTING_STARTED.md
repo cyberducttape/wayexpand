@@ -263,6 +263,9 @@ replacement = "1 Main Street"
 Every alias uses the snippet's match mode and options, and an alias may not
 collide with any other trigger.
 
+See [TEMPLATES.md](TEMPLATES.md) for every variable, including snippet
+includes, allowlisted environment variables, and the opt-in clipboard.
+
 **Date (auto-generated):**
 ```toml
 [[expansion]]

@@ -54,4 +54,7 @@ pub use policy::{
     ORGANIZATION_POLICY_PATH,
 };
 pub use store::{ConfigStore, ConfigStoreStatus};
-pub use template::{render_template, render_template_with_cursor, TemplateContext, TemplateError};
+pub use template::{
+    render_template, render_template_with_cursor, template_variables, ClipboardReader,
+    TemplateContext, TemplateError,
+};

@@ -155,11 +155,9 @@ impl ExpansionEngine {
         let (replacement_text, cursor_offset) = if expansion.command.is_some() {
             (expansion.replacement.clone(), None)
         } else {
-            let (rendered, cursor_offset) = render_template_with_cursor(
-                &expansion.replacement,
-                &crate::TemplateContext::system(),
-            )
-            .ok()?;
+            let (rendered, cursor_offset) =
+                render_template_with_cursor(&expansion.replacement, &self.template_context())
+                    .ok()?;
             (rendered, cursor_offset)
         };
         let start = self.buffer.len().saturating_sub(length);
