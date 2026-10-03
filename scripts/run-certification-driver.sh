@@ -56,15 +56,17 @@ jq -en --arg apps "$target_apps" '
     exit 2
 }
 [ -n "$output" ] || { printf '%s\n' 'error: --output is required' >&2; exit 2; }
-target_apps_lower=$(printf '%s' "$target_apps" | tr '[:upper:]' '[:lower:]')
 required_client_markers=$(jq -r --arg compositor "$compositor" \
     '.targets[] | select(.id == $compositor) | .required_client_markers[]' "$matrix")
 while IFS= read -r marker; do
     [ -n "$marker" ] || continue
-    case "$target_apps_lower" in
-        *"$marker"*) ;;
-        *) printf '%s\n' "error: --target-apps must include a client matching '$marker'" >&2; exit 2 ;;
-    esac
+    if ! jq -en --arg apps "$target_apps" --arg marker "$marker" '
+        any(($apps | split(","))[];
+            (ascii_downcase | test("(^|[._+-])" + ($marker | ascii_downcase) + "([0-9._+-]|$)")))
+    ' >/dev/null; then
+        printf '%s\n' "error: --target-apps must include a client matching '$marker'" >&2
+        exit 2
+    fi
 done <<EOF
 $required_client_markers
 EOF

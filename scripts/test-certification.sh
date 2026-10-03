@@ -244,6 +244,17 @@ if "$project_dir/scripts/certify-compositor.sh" --format json \
     exit 1
 fi
 
+# Client markers are exact identifiers. A name such as "notgtk" must not
+# satisfy the required "gtk" marker by substring accident.
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
+    --target-apps notgtk,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
+    --results "$results" --cli "$certification_cli" \
+    --output "$test_root/ambiguous-client-marker.json" >/dev/null 2>&1; then
+    printf '%s\n' 'certification accepted an ambiguous client marker' >&2
+    exit 1
+fi
+
 missing="$test_root/missing.txt"
 sed '$d' "$results" >"$missing"
 if run_certification --results "$missing" --output "$test_root/missing.md"; then

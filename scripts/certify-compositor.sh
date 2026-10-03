@@ -7,16 +7,15 @@ set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 matrix="$project_dir/tests/certification/compositor-matrix.json"
+command -v jq >/dev/null 2>&1 || {
+    printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
+    exit 2
+}
 status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
     "$project_dir/tests/contracts/status-json.json") || {
     printf '%s\n' 'error: status protocol contract has no valid schema_version' >&2
     exit 2
 }
-command -v jq >/dev/null 2>&1 || {
-    printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
-    exit 2
-}
-
 compositor=
 compositor_version=
 backend=
@@ -86,7 +85,6 @@ EOF
     printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
     exit 2
 }
-target_apps_lower=$(printf '%s' "$target_apps" | tr '[:upper:]' '[:lower:]')
 jq -en --arg apps "$target_apps" '
     ($apps | split(",")) as $items |
     ([ $items[] | select(test("^[a-zA-Z0-9._+-]+$")) ] | length) == ($items | length) and
@@ -99,10 +97,13 @@ required_client_markers=$(jq -r --arg compositor "$compositor" \
     '.targets[] | select(.id == $compositor) | .required_client_markers[]' "$matrix")
 while IFS= read -r marker; do
     [ -n "$marker" ] || continue
-    case "$target_apps_lower" in
-        *"$marker"*) ;;
-        *) printf '%s\n' "error: --target-apps must include a client matching '$marker'" >&2; exit 2 ;;
-    esac
+    if ! jq -en --arg apps "$target_apps" --arg marker "$marker" '
+        any(($apps | split(","))[];
+            (ascii_downcase | test("(^|[._+-])" + ($marker | ascii_downcase) + "([0-9._+-]|$)")))
+    ' >/dev/null; then
+        printf '%s\n' "error: --target-apps must include a client matching '$marker'" >&2
+        exit 2
+    fi
 done <<EOF
 $required_client_markers
 EOF
