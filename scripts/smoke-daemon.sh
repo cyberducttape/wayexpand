@@ -94,6 +94,16 @@ wait_for_log() {
     return 1
 }
 
+# The daemon answers explain requests from its live engine state.
+explain=$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" explain ';;hello')
+printf '%s\n' "$explain" | grep -F 'recognized as ;;hello' >/dev/null
+printf '%s\n' "$explain" | grep -F 'daemon: running with stdin capture' >/dev/null
+printf '%s\n' "$explain" | grep -F 'Result: would expand.' >/dev/null
+[ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" pause)" = "paused" ]
+XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" explain ';;hello' --json \
+    | grep -F '"suppressed_by":"paused"' >/dev/null
+[ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" resume)" = "resumed" ]
+
 # Explicit inserts reach the event loop; with no injection backend the
 # daemon reports that instead of typing, and unknown triggers are refused.
 [ "$(XDG_RUNTIME_DIR="$runtime_dir" "$project_dir/target/debug/wayexpand" insert ';;hello')" = "insert scheduled" ]

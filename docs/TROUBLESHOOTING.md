@@ -38,7 +38,19 @@ journalctl --user -u wayexpand-input-method.service -n 80 --no-pager
 
 **Symptoms:** Daemon is running, but triggers don't work
 
-**Diagnosis:**
+**Diagnosis:** start with `wayexpand explain`, which asks the running daemon
+why a specific trigger would or would not expand right now: whether the trigger
+or an alias is recognized, the match mode, the focused application against the
+snippet's app filter, pause, password-field and composition state, the
+replacement, organization policy, and whether the output backend is connected.
+It ends with the first check that blocks the expansion.
+
+```sh
+wayexpand explain ';sig'           # Live answer from the daemon
+wayexpand explain ';sig' --json    # The same, for scripts
+wayexpand explain ';sig' --app org.kde.konsole --offline  # From the config alone
+```
+
 ```sh
 wayexpand status           # Check connection state
 wayexpand doctor           # Verify backend selection

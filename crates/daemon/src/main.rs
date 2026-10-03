@@ -457,6 +457,7 @@ fn main() -> Result<()> {
             input_loop::IDLE_MAINTENANCE_INTERVAL
         };
         daemon.apply_completed_commands()?;
+        daemon.answer_explain_request();
         if daemon.handle_insert_request()? {
             continue;
         }

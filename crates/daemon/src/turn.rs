@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use crate::*;
+use wayexpand_core::CheckStatus;
 
 impl Daemon {
     /// Apply window, pause, reload, and stop transitions; report hotkey results and worker failures. Breaks when the daemon should stop.
@@ -323,5 +324,59 @@ impl Daemon {
             }
         }
         Ok(())
+    }
+
+    /// Answer a pending `explain` request from the live engine state, adding
+    /// what only the daemon knows: whether the output route is connected.
+    pub(crate) fn answer_explain_request(&mut self) {
+        let Some(request) = self.control.take_explain_request() else {
+            return;
+        };
+        let backend = wayexpand_core::policy_backend_name(self.active_source, self.active_backend);
+        let mut explanation = self.config.engine.explain(&request.text, backend);
+        explanation.push(
+            "daemon",
+            CheckStatus::Pass,
+            format!(
+                "running with {} capture and {} output",
+                self.active_source, self.active_backend
+            ),
+        );
+        let output_connected = if self.input_method_mode {
+            self.input_method.is_some()
+        } else {
+            self.backend_name == "none" || self.injector.is_some()
+        };
+        if self.backend_name == "none" && !self.input_method_mode {
+            explanation.push(
+                "output backend",
+                CheckStatus::Info,
+                "no output backend (test mode): matches are reported, not typed",
+            );
+        } else if output_connected {
+            explanation.push("output backend", CheckStatus::Pass, "connected");
+        } else {
+            explanation.push(
+                "output backend",
+                CheckStatus::Fail,
+                format!("not connected ({})", self.connection_state),
+            );
+        }
+        let answer = if request.json {
+            let suppressed_by = explanation.suppressed_by().map(|check| check.name);
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "would_expand": suppressed_by.is_none(),
+                    "suppressed_by": suppressed_by,
+                    "typed": explanation.typed,
+                    "snippet": explanation.snippet,
+                    "checks": explanation.checks,
+                })
+            )
+        } else {
+            explanation.render_text()
+        };
+        let _ = request.reply.try_send(answer);
     }
 }
