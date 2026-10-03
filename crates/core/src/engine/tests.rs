@@ -3799,3 +3799,42 @@ fn explicit_insert_by_trigger_follows_the_typed_expansion_safety_rules() {
     engine.process(InputEvent::PauseChanged(true));
     assert_eq!(engine.prepare_insert(sig), Err(InsertError::Paused));
 }
+
+fn typed_results(trigger: &str, typed: &str) -> Vec<ExpansionResult> {
+    let config = crate::Config::parse(&format!(
+        "[[expansion]]\ntrigger = \"{trigger}\"\nreplacement = \"coffee\"\n"
+    ))
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut results = Vec::new();
+    for character in typed.chars() {
+        results.extend(engine.process(InputEvent::Text(character.to_string())));
+    }
+    results
+}
+
+#[test]
+fn canonically_equivalent_input_matches_and_deletes_what_was_typed() {
+    const NFC: &str = ":caf\u{e9}";
+    const NFD: &str = ":cafe\u{301}";
+    for (trigger, typed) in [(NFC, NFC), (NFC, NFD), (NFD, NFC), (NFD, NFD)] {
+        let results = typed_results(trigger, typed);
+        assert_eq!(results.len(), 1, "trigger {trigger:?} typed {typed:?}");
+        // The deletion covers the scalars in the document, not the
+        // configured spelling.
+        assert_eq!(results[0].matched_text, typed);
+        assert_eq!(results[0].insert, "coffee");
+    }
+}
+
+#[test]
+fn canonically_equivalent_triggers_in_two_snippets_are_duplicates() {
+    let config = crate::Config::parse(
+        "[[expansion]]\ntrigger = \":caf\u{e9}\"\nreplacement = \"a\"\n\
+         [[expansion]]\ntrigger = \":cafe\u{301}\"\nreplacement = \"b\"\n",
+    );
+    assert!(matches!(
+        config.and_then(|config| config.validate().map(|()| config)),
+        Err(crate::ConfigError::DuplicateTrigger { .. })
+    ));
+}
