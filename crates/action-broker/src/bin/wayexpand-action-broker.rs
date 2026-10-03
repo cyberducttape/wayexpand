@@ -1,8 +1,8 @@
 //! WayExpand Action Broker Service
 //!
-//! Standalone service that executes actions with fine-grained per-action permissions.
-//! The binary is implemented and tested, but remains opt-in until daemon
-//! policy routing and an operator-managed service deployment are available.
+//! Standalone service that executes named actions with fine-grained per-action
+//! permissions. It is shipped and integrated with daemon policy routing, but
+//! remains operator-enabled because its action catalog is deployment-specific.
 //!
 //! Usage:
 //!   wayexpand-action-broker --config ~/.config/wayexpand-broker.toml \
