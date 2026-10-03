@@ -2155,6 +2155,9 @@ fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
     });
     let socket = broker_socket_path();
     let socket_exists = socket.as_ref().is_some_and(|path| path.exists());
+    let socket_valid = socket
+        .as_deref()
+        .is_some_and(existing_control_socket_is_healthy);
     let service_active = broker_service_active();
     let audit_status = broker_health_status(socket.as_deref());
     let audit_enabled = audit_status
@@ -2175,7 +2178,7 @@ fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
         "socket": {
             "path": socket,
             "exists": socket_exists,
-            "valid": socket.as_deref().is_some_and(existing_control_socket_is_healthy),
+            "valid": socket_valid,
         },
         "service": {
             "unit": "wayexpand-action-broker.service",
@@ -2186,7 +2189,7 @@ fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
             "audit_enabled": false,
             "audit_healthy": true,
         })),
-        "healthy": !required || (socket_exists && service_active && audit_healthy),
+        "healthy": !required || (socket_exists && socket_valid && service_active && audit_healthy),
     })
 }
 
@@ -2199,7 +2202,8 @@ fn print_broker_diagnostics(config: Option<&Config>) -> bool {
     let socket = broker["socket"]["path"].as_str().unwrap_or("unconfigured");
     let active = broker["service"]["active"].as_bool().unwrap_or(false);
     let exists = broker["socket"]["exists"].as_bool().unwrap_or(false);
-    println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}", broker["named_action_count"]);
+    let valid = broker["socket"]["valid"].as_bool().unwrap_or(false);
+    println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}, socket_valid={valid}", broker["named_action_count"]);
     if broker["audit"]["audit_enabled"].as_bool().unwrap_or(false) {
         let dropped = broker["audit"]["audit_queue_dropped_total"]
             .as_u64()
@@ -2212,7 +2216,7 @@ fn print_broker_diagnostics(config: Option<&Config>) -> bool {
             "  Action audit: healthy={healthy}, queue_dropped_total={dropped}, write_failures_total={failures}"
         );
     }
-    if !active || !exists {
+    if !active || !exists || !valid {
         println!("  Enable it with: systemctl --user enable --now wayexpand-action-broker.service");
         return false;
     }
