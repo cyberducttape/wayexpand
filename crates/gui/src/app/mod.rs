@@ -11,5 +11,6 @@ mod toolbar;
 
 pub(crate) use saving::UndoEntry;
 pub(crate) use setup::onboarding_step;
+mod runtime_events;
 mod saving;
 mod snippets;
