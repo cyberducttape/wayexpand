@@ -639,6 +639,14 @@ mod tests {
         assert!(!engine.adapter.lock().unwrap().engine().is_sensitive_focus());
     }
 
+    /// Broker-backed tests share the process-wide broker socket variable, so
+    /// they must not overlap even when tests run on many threads.
+    static BROKER_LOCK: Mutex<()> = Mutex::new(());
+
+    const BROKER_CONFIG: &str = "[settings]\nundo_chord = \"Ctrl+Z\"\n\
+         [[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
+         [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n";
+
     /// Serve exactly one broker request on `socket`, answering with `stdout`
     /// after `delay`. Returns the action id the engine asked for.
     fn fake_broker(
@@ -660,167 +668,293 @@ mod tests {
                 "stdout_truncated": false, "stderr_truncated": false, "duration_ms": 1,
             }});
             let mut stream = stream;
-            writeln!(stream, "{response}").unwrap();
+            let _ = writeln!(stream, "{response}");
             let request: serde_json::Value = serde_json::from_str(&request).unwrap();
             request["action_id"].as_str().unwrap_or_default().to_owned()
         })
     }
 
-    #[test]
-    fn broker_result_reaches_the_ibus_client_through_the_completion_pump() {
-        let root = std::env::temp_dir().join(format!(
-            "wayexpand-ibus-broker-{}-{}",
-            std::process::id(),
-            ENGINE_PATH.len()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let socket = root.join("broker.sock");
-        // Only this test runs a broker action in this crate.
-        std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", &socket);
-        let broker = fake_broker(socket, "from-broker", Duration::from_millis(150));
+    /// A broker answering one request, with the socket variable pointing at
+    /// it for the lifetime of the value.
+    struct BrokerFixture {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        root: std::path::PathBuf,
+        broker: Option<std::thread::JoinHandle<String>>,
+    }
 
-        let config: Config = toml::from_str(
-            "[[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
-             [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n",
-        )
-        .unwrap();
-        let connection_slot = Arc::new(Mutex::new(None));
-        let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
-        let (completion_sender, completion_receiver) = mpsc::channel();
-        let factory = Factory {
-            connection: Arc::clone(&connection_slot),
-            config: Arc::new(Mutex::new(config)),
-            policy: Arc::new(OrganizationPolicy::default()),
-            instances: Arc::clone(&instances),
-            next_id: AtomicU64::new(1),
-            completions: completion_sender,
-        };
-
-        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
-        let server = std::thread::spawn(move || {
-            Builder::async_io_unix_stream(server_stream)
-                .server(zbus::Guid::generate())
-                .unwrap()
-                .p2p()
-                .serve_at(FACTORY_PATH, factory)
-                .unwrap()
-                .build()
-                .unwrap()
-        });
-        let client = Builder::async_io_unix_stream(client_stream)
-            .p2p()
-            .build()
-            .unwrap();
-        let server = server.join().unwrap();
-        *connection_slot.lock().unwrap() = Some(server.clone());
-        {
-            let instances = Arc::clone(&instances);
-            let connection = Arc::clone(&connection_slot);
-            std::thread::spawn(move || {
-                run_completion_pump(completion_receiver, instances, connection)
-            });
+    impl BrokerFixture {
+        fn start(name: &str, stdout: &'static str, delay: Duration) -> Self {
+            let guard = BROKER_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let root =
+                std::env::temp_dir().join(format!("wayexpand-ibus-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            let socket = root.join("broker.sock");
+            std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", &socket);
+            let broker = Some(fake_broker(socket, stdout, delay));
+            Self {
+                _guard: guard,
+                root,
+                broker,
+            }
         }
 
-        // Collect CommitText payloads the engine emits to the client.
-        let (commit_sender, commit_receiver) = mpsc::channel();
-        let messages = zbus::blocking::MessageIterator::from(&client);
-        std::thread::spawn(move || {
-            for message in messages.flatten() {
-                let header = message.header();
-                if header.member().map(|member| member.as_str()) == Some("CommitText") {
-                    let (text,): (OwnedValue,) = message.body().deserialize().unwrap();
-                    let _ = commit_sender.send(ibus_text_string(&text).unwrap());
-                }
+        /// Wait until the broker has answered; returns the requested action.
+        fn answered(&mut self) -> String {
+            self.broker.take().unwrap().join().unwrap()
+        }
+    }
+
+    impl Drop for BrokerFixture {
+        fn drop(&mut self) {
+            std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET");
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// The real factory, completion pump, and engine objects behind a
+    /// peer-to-peer D-Bus connection, with a client that records every
+    /// `CommitText` it receives.
+    struct Harness {
+        client: Connection,
+        engine: OwnedObjectPath,
+        commits: mpsc::Receiver<String>,
+        instances: Instances,
+    }
+
+    impl Harness {
+        fn start(config: &str) -> Self {
+            let config: Config = toml::from_str(config).unwrap();
+            let connection_slot = Arc::new(Mutex::new(None));
+            let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+            let (completion_sender, completion_receiver) = mpsc::channel();
+            let factory = Factory {
+                connection: Arc::clone(&connection_slot),
+                config: Arc::new(Mutex::new(config)),
+                policy: Arc::new(OrganizationPolicy::default()),
+                instances: Arc::clone(&instances),
+                next_id: AtomicU64::new(1),
+                completions: completion_sender,
+            };
+            let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+            let server = std::thread::spawn(move || {
+                Builder::async_io_unix_stream(server_stream)
+                    .server(zbus::Guid::generate())
+                    .unwrap()
+                    .p2p()
+                    .serve_at(FACTORY_PATH, factory)
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            });
+            let client = Builder::async_io_unix_stream(client_stream)
+                .p2p()
+                .build()
+                .unwrap();
+            let server = server.join().unwrap();
+            *connection_slot.lock().unwrap() = Some(server);
+            {
+                let instances = Arc::clone(&instances);
+                let connection = Arc::clone(&connection_slot);
+                std::thread::spawn(move || {
+                    run_completion_pump(completion_receiver, instances, connection)
+                });
             }
-        });
-
-        let engine: OwnedObjectPath = client
-            .call_method(
-                None::<&str>,
-                FACTORY_PATH,
-                Some("org.freedesktop.IBus.Factory"),
-                "CreateEngine",
-                &("wayexpand",),
-            )
-            .unwrap()
-            .body()
-            .deserialize()
-            .unwrap();
-        let invoke = |method: &str| {
-            client
+            let (commit_sender, commits) = mpsc::channel();
+            let messages = zbus::blocking::MessageIterator::from(&client);
+            std::thread::spawn(move || {
+                for message in messages.flatten() {
+                    let header = message.header();
+                    if header.member().map(|member| member.as_str()) == Some("CommitText") {
+                        let (text,): (OwnedValue,) = message.body().deserialize().unwrap();
+                        let _ = commit_sender.send(ibus_text_string(&text).unwrap());
+                    }
+                }
+            });
+            let engine: OwnedObjectPath = client
                 .call_method(
                     None::<&str>,
-                    engine.as_str(),
-                    Some("org.freedesktop.IBus.Engine"),
-                    method,
-                    &(),
-                )
-                .unwrap();
-        };
-        invoke("FocusIn");
-        invoke("Enable");
-        client
-            .call_method(
-                None::<&str>,
-                engine.as_str(),
-                Some("org.freedesktop.IBus.Engine"),
-                "SetCapabilities",
-                &(crate::IBUS_CAP_SURROUNDING_TEXT,),
-            )
-            .unwrap();
-        client
-            .call_method(
-                None::<&str>,
-                engine.as_str(),
-                Some("org.freedesktop.IBus.Engine"),
-                "SetContentType",
-                &(0_u32, 0_u32),
-            )
-            .unwrap();
-
-        // `:` passes through to the client; `o` and `k` are committed by the
-        // engine, and `k` queues the broker action. The client reports its
-        // text before each key, as ibus-gtk does.
-        let mut handled = Vec::new();
-        for (key, before) in [(':', ""), ('o', ":"), ('k', ":o")] {
-            let cursor = before.chars().count() as u32;
-            client
-                .call_method(
-                    None::<&str>,
-                    engine.as_str(),
-                    Some("org.freedesktop.IBus.Engine"),
-                    "SetSurroundingText",
-                    &(Value::from(ibus_text_value(before)), cursor, cursor),
-                )
-                .unwrap();
-            let reply: bool = client
-                .call_method(
-                    None::<&str>,
-                    engine.as_str(),
-                    Some("org.freedesktop.IBus.Engine"),
-                    "ProcessKeyEvent",
-                    &(key as u32, 0_u32, 0_u32),
+                    FACTORY_PATH,
+                    Some("org.freedesktop.IBus.Factory"),
+                    "CreateEngine",
+                    &("wayexpand",),
                 )
                 .unwrap()
                 .body()
                 .deserialize()
                 .unwrap();
-            handled.push(reply);
-        }
-        assert_eq!(handled, [false, true, true]);
-        assert_eq!(broker.join().unwrap(), "status");
-
-        let mut commits = Vec::new();
-        while let Ok(text) = commit_receiver.recv_timeout(Duration::from_secs(5)) {
-            let done = text == "from-broker";
-            commits.push(text);
-            if done {
-                break;
+            Self {
+                client,
+                engine,
+                commits,
+                instances,
             }
         }
-        assert_eq!(commits, ["o", "k", "from-broker"]);
-        std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET");
-        let _ = std::fs::remove_dir_all(root);
+
+        fn call<B>(&self, method: &str, body: &B) -> zbus::Message
+        where
+            B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
+        {
+            self.client
+                .call_method(
+                    None::<&str>,
+                    self.engine.as_str(),
+                    Some("org.freedesktop.IBus.Engine"),
+                    method,
+                    body,
+                )
+                .unwrap()
+        }
+
+        /// The sequence ibus-daemon sends when an ordinary text field gains
+        /// focus.
+        fn focus_text_field(&self) {
+            self.call("FocusIn", &());
+            self.call("Enable", &());
+            self.call("SetCapabilities", &(crate::IBUS_CAP_SURROUNDING_TEXT,));
+            self.call("SetContentType", &(0_u32, 0_u32));
+        }
+
+        /// Report `before` as the text before the cursor, then press `key`.
+        fn key(&self, key: char, before: &str) -> bool {
+            let cursor = before.chars().count() as u32;
+            self.call(
+                "SetSurroundingText",
+                &(Value::from(ibus_text_value(before)), cursor, cursor),
+            );
+            self.call("ProcessKeyEvent", &(key as u32, 0_u32, 0_u32))
+                .body()
+                .deserialize()
+                .unwrap()
+        }
+
+        /// Type `:ok`: `:` passes through, `o` and `k` are committed by the
+        /// engine, and `k` queues the broker action.
+        fn type_trigger(&self) {
+            let handled: Vec<bool> = [(':', ""), ('o', ":"), ('k', ":o")]
+                .into_iter()
+                .map(|(key, before)| self.key(key, before))
+                .collect();
+            assert_eq!(handled, [false, true, true]);
+        }
+
+        /// Every commit received until `quiet` passes with nothing new.
+        fn commits(&self, quiet: Duration) -> Vec<String> {
+            let mut commits = Vec::new();
+            while let Ok(text) = self.commits.recv_timeout(quiet) {
+                commits.push(text);
+            }
+            commits
+        }
+    }
+
+    #[test]
+    fn broker_result_reaches_the_ibus_client_through_the_completion_pump() {
+        let mut broker =
+            BrokerFixture::start("delivered", "from-broker", Duration::from_millis(150));
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.type_trigger();
+        assert_eq!(broker.answered(), "status");
+        assert_eq!(
+            harness.commits(Duration::from_secs(2)),
+            ["o", "k", "from-broker"]
+        );
+    }
+
+    #[test]
+    fn completion_after_destroy_is_dropped_without_output() {
+        let mut broker =
+            BrokerFixture::start("destroyed", "from-broker", Duration::from_millis(200));
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.type_trigger();
+        harness.call("Destroy", &());
+        assert!(harness.instances.lock().unwrap().is_empty());
+        broker.answered();
+        assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k"]);
+    }
+
+    #[test]
+    fn switching_to_a_password_field_discards_an_in_flight_result() {
+        let mut broker =
+            BrokerFixture::start("to-password", "from-broker", Duration::from_millis(200));
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.type_trigger();
+        harness.call("SetContentType", &(8_u32, 0_u32));
+        broker.answered();
+        assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k"]);
+    }
+
+    #[test]
+    fn refocus_without_a_content_type_discards_an_in_flight_result() {
+        let mut broker = BrokerFixture::start("refocus", "from-broker", Duration::from_millis(200));
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.type_trigger();
+        harness.call("FocusOut", &());
+        harness.call("FocusIn", &());
+        broker.answered();
+        assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k"]);
+    }
+
+    #[test]
+    fn typing_before_completion_discards_the_stale_result() {
+        let mut broker =
+            BrokerFixture::start("typing-on", "from-broker", Duration::from_millis(200));
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.type_trigger();
+        assert!(harness.key('x', ":ok"));
+        broker.answered();
+        assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k", "x"]);
+    }
+
+    #[test]
+    fn failed_emission_after_delete_resets_without_recording_the_expansion() {
+        // Fault injection: the delete was sent but the commit failed. The
+        // engine must reset, must not record an undoable expansion, and must
+        // not emit the result again.
+        let mut broker =
+            BrokerFixture::start("emit-fails", "from-broker", Duration::from_millis(50));
+        let config: Config = toml::from_str(BROKER_CONFIG).unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        let (completed, completion) = mpsc::channel();
+        adapter.set_completion_notifier(Some(Arc::new(move || {
+            let _ = completed.send(());
+        })));
+        adapter.focus_in();
+        adapter.set_capabilities(crate::IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        for (key, before) in [(':', ""), ('o', ":"), ('k', ":o")] {
+            let cursor = before.chars().count() as u32;
+            adapter.set_surrounding_text(before, cursor, cursor);
+            adapter.process_key_event(key as u32, 0, 0);
+        }
+        broker.answered();
+        completion.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let mut attempted = Vec::new();
+        let result = adapter.drain_completed_commands_with(|actions| {
+            attempted.extend_from_slice(actions);
+            Err("commit signal failed")
+        });
+        assert_eq!(result, Err("commit signal failed"));
+        assert_eq!(
+            attempted,
+            [
+                IbusAction::DeleteSurroundingText { nchars: 3 },
+                IbusAction::CommitText("from-broker".into())
+            ]
+        );
+        let undo = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
+        assert!(adapter.engine().prepare_undo(&undo).is_none());
+        assert_eq!(
+            adapter.drain_completed_commands_with(|_| Ok::<(), &str>(())),
+            Ok(0)
+        );
     }
 }
