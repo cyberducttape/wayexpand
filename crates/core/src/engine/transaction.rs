@@ -83,12 +83,61 @@ pub(super) fn transaction_texts(
 }
 
 impl ExpansionEngine {
+    fn preflight_output<I: TextInjector + ?Sized>(
+        injector: &I,
+        result: &ExpansionResult,
+    ) -> Result<(), InjectorError> {
+        let capabilities = injector.capabilities();
+        let output_chars =
+            result.insert.chars().count() + result.reinsert_after.map_or(0, char::len_utf8);
+        if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
+            return Err(InjectorError {
+                backend: injector.name(),
+                message: format!(
+                    "replacement requires {output_chars} characters but {} supports at most {}",
+                    capabilities.insertion_mode, capabilities.max_text_chars
+                ),
+                retryable: false,
+            });
+        }
+        if !capabilities.full_unicode
+            && result
+                .insert
+                .chars()
+                .chain(result.reinsert_after)
+                .any(|character| !character.is_ascii())
+        {
+            return Err(InjectorError {
+                backend: injector.name(),
+                message: format!(
+                    "replacement contains Unicode that {} cannot guarantee",
+                    capabilities.insertion_mode
+                ),
+                retryable: false,
+            });
+        }
+        if result.cursor_offset.is_some() && !capabilities.cursor_reposition {
+            return Err(InjectorError {
+                backend: injector.name(),
+                message: format!(
+                    "replacement requests cursor repositioning but {} does not support it",
+                    capabilities.insertion_mode
+                ),
+                retryable: false,
+            });
+        }
+        Ok(())
+    }
+
     /// Apply an expansion as one backend transaction, including optional
     /// delimiter reinsertion and cursor repositioning.
     pub fn apply<I: TextInjector + ?Sized>(
         injector: &mut I,
         result: &ExpansionResult,
     ) -> TransactionOutcome {
+        if let Err(source) = Self::preflight_output(injector, result) {
+            return TransactionOutcome::NotApplied { source };
+        }
         // Only a match that has to carry a terminating character through needs
         // new strings. The common case borrows the result directly rather than
         // copying the matched text and the whole replacement on every

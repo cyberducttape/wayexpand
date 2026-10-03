@@ -1033,6 +1033,15 @@ impl crate::TextInjector for RecordingInjector {
         "test"
     }
 
+    fn capabilities(&self) -> crate::InjectorCapabilities {
+        crate::InjectorCapabilities {
+            insertion_mode: "test",
+            cursor_reposition: true,
+            full_unicode: true,
+            ..crate::InjectorCapabilities::default()
+        }
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), crate::InjectorError> {
         self.calls.push(format!("erase:{trigger}"));
         Ok(())
@@ -1047,6 +1056,91 @@ impl crate::TextInjector for RecordingInjector {
         self.calls.push(format!("left:{count}"));
         Ok(())
     }
+}
+
+struct CapabilityInjector {
+    calls: Vec<String>,
+    capabilities: crate::InjectorCapabilities,
+}
+
+impl crate::TextInjector for CapabilityInjector {
+    fn name(&self) -> &'static str {
+        "capability-test"
+    }
+
+    fn capabilities(&self) -> crate::InjectorCapabilities {
+        self.capabilities
+    }
+
+    fn erase(&mut self, trigger: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("erase:{trigger}"));
+        Ok(())
+    }
+
+    fn insert(&mut self, text: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("insert:{text}"));
+        Ok(())
+    }
+
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("left:{count}"));
+        Ok(())
+    }
+}
+
+#[test]
+fn apply_preflights_backend_capabilities_before_destructive_output() {
+    let result = ExpansionResult {
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "x".repeat(251),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "keysym fallback",
+            max_text_chars: 250,
+            ..crate::InjectorCapabilities::default()
+        },
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::NotApplied { ref source }
+            if source.message.contains("supports at most 250")
+    ));
+    assert!(injector.calls.is_empty());
+}
+
+#[test]
+fn apply_rejects_unrepresentable_unicode_before_output() {
+    let result = ExpansionResult {
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "café".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "keysym fallback",
+            ..crate::InjectorCapabilities::default()
+        },
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::NotApplied { ref source }
+            if source.message.contains("cannot guarantee")
+    ));
+    assert!(injector.calls.is_empty());
 }
 
 #[test]
@@ -1128,6 +1222,14 @@ struct CursorFailingInjector;
 impl crate::TextInjector for CursorFailingInjector {
     fn name(&self) -> &'static str {
         "cursor-failing-test"
+    }
+
+    fn capabilities(&self) -> crate::InjectorCapabilities {
+        crate::InjectorCapabilities {
+            insertion_mode: "cursor-failing-test",
+            cursor_reposition: true,
+            ..crate::InjectorCapabilities::default()
+        }
     }
 
     fn erase(&mut self, _: &str) -> Result<(), crate::InjectorError> {

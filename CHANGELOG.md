@@ -40,6 +40,9 @@ Changes not yet released.
   state, preventing matching from resuming during dead-key, Compose, or IME
   preedit. Action Broker IPC now observes the configured command deadline and
   shutdown cancellation instead of relying on longer fixed socket timeouts.
+- **Output preflight:** injector capabilities are now enforced before any
+  erase/insert operation. Unsupported replacement lengths, Unicode, and cursor
+  placement fail closed before the target application is modified.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that
