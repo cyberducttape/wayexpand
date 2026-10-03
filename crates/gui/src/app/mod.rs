@@ -10,3 +10,4 @@ mod setup;
 mod toolbar;
 
 pub(crate) use setup::onboarding_step;
+mod snippets;
