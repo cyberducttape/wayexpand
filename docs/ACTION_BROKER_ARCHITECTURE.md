@@ -1,6 +1,6 @@
 # Action Broker Architecture
 
-**Version:** 1.2.0
+**Version:** 1.3.0
 **Status:** Integrated named-action execution; network/filesystem isolation remains a deployment responsibility
 **Next:** Per-action OS sandbox profiles and broader operational tooling
 

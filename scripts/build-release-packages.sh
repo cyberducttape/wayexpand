@@ -25,7 +25,7 @@ top=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-rpm-${version}.XXXXXXXX")
 trap 'rm -rf "$top"' EXIT INT TERM
 source_dir="$top/sources/wayexpand-${version}"
 mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
-git archive --format=tar HEAD | tar -xf - -C "$source_dir"
+git archive --format=tar HEAD^{tree} | tar -xf - -C "$source_dir"
 cp -a .cargo vendor "$source_dir/"
 tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
     "wayexpand-${version}"

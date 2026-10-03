@@ -93,7 +93,7 @@ distribution, or the vendored tarball for offline builds. A quick local check
 is:
 
 ```sh
-git archive --format=tar --prefix="wayexpand-${VERSION}/" HEAD \
+git archive --format=tar --prefix="wayexpand-${VERSION}/" HEAD^{tree} \
   | gzip -n > "wayexpand-${VERSION}.tar.gz"
 if tar -tzf "wayexpand-${VERSION}.tar.gz" \
     | grep -E '(^|/)\.git(/|$)' >/dev/null; then

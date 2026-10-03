@@ -621,6 +621,10 @@ Changes not yet released.
   output is applied only if no intervening input or focus-state change makes
   the original trigger location stale.
 
+## [1.3.0] - 2026-10-03
+
+Release v1.3.0. Move the unreleased entries above into this section before publishing.
+
 ## [1.2.0] - 2026-09-23
 
 ### Backend & Keyboard Correctness
@@ -895,7 +899,8 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/cyberducttape/wayexpand/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/cyberducttape/wayexpand/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/cyberducttape/wayexpand/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/cyberducttape/wayexpand/compare/v1.1.0...v1.1.1

@@ -243,7 +243,7 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Create git archive (simulate release tarball)
-        run: git archive --format=tar HEAD | gzip -n > wayexpand.tar.gz
+        run: git archive --format=tar HEAD^{tree} | gzip -n > wayexpand.tar.gz
       - name: Extract to clean directory
         run: |
           mkdir -p /tmp/clean-build
@@ -421,7 +421,7 @@ jobs:
           top=$(mktemp -d)
           source_dir="$top/sources/wayexpand-${version}"
           mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
-          git archive --format=tar HEAD | tar -x -C "$source_dir"
+          git archive --format=tar HEAD^{tree} | tar -x -C "$source_dir"
           test -f "$source_dir/docs/wayexpand.1"
           cp -a .cargo vendor "$source_dir/"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
