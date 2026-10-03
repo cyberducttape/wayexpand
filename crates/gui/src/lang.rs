@@ -2130,6 +2130,27 @@ impl Strings {
         }
     }
 
+    pub fn aliases(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Aliases",
+            Language::German => "Aliase",
+        }
+    }
+
+    pub fn add_alias(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Add alias…",
+            Language::German => "Alias hinzufügen…",
+        }
+    }
+
+    pub fn remove_alias(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove alias",
+            Language::German => "Alias entfernen",
+        }
+    }
+
     pub fn add_tag(&self) -> &'static str {
         match self.lang {
             Language::English => "Add tag…",

@@ -45,9 +45,11 @@ impl GuiApp {
                 command,
                 enabled: draft.enabled,
                 propagate_case: draft.propagate_case,
+                aliases: draft.committed_aliases(),
             });
         } else {
             candidate.expansion[index].trigger = draft.trigger.clone();
+            candidate.expansion[index].aliases = draft.committed_aliases();
             candidate.expansion[index].description = draft.description.clone();
             candidate.expansion[index].tags = draft.committed_tags();
             candidate.expansion[index].category = draft.category.clone();
@@ -84,7 +86,7 @@ impl GuiApp {
             .config
             .expansion
             .iter()
-            .any(|item| item.trigger == trigger)
+            .any(|item| item.answers_to(&trigger))
         {
             trigger = format!(":new-{suffix}");
             suffix += 1;
@@ -101,6 +103,7 @@ impl GuiApp {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         };
         self.new_draft_origin = self.selected_id.clone();
         self.new_draft = true;
@@ -129,6 +132,7 @@ impl GuiApp {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         });
         self.queue_save_config(candidate, SaveIntent::Created);
     }
@@ -146,7 +150,7 @@ impl GuiApp {
             .config
             .expansion
             .iter()
-            .any(|item| item.trigger == trigger)
+            .any(|item| item.answers_to(&trigger))
         {
             trigger = format!("{base}-{suffix}");
             suffix += 1;

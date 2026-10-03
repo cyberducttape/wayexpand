@@ -141,6 +141,22 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
     Ok(())
 }
 
+/// One human-readable library line: state, trigger, aliases, description.
+fn expansion_line(expansion: &wayexpand_core::ExpansionConfig) -> String {
+    let mut line = format!(
+        "{} {}",
+        if expansion.enabled { "[on ]" } else { "[off]" },
+        expansion.trigger
+    );
+    if !expansion.aliases.is_empty() {
+        line.push_str(&format!(" (also {})", expansion.aliases.join(", ")));
+    }
+    if !expansion.description.is_empty() {
+        line.push_str(&format!(" — {}", expansion.description));
+    }
+    line
+}
+
 pub(crate) fn list_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
@@ -171,16 +187,7 @@ pub(crate) fn list_command(args: Args) -> Result<()> {
             path.display()
         );
         for expansion in config.expansion {
-            println!(
-                "{} {}{}",
-                if expansion.enabled { "[on ]" } else { "[off]" },
-                expansion.trigger,
-                if expansion.description.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", expansion.description)
-                }
-            );
+            println!("{}", expansion_line(&expansion));
         }
     }
     Ok(())
@@ -207,8 +214,9 @@ pub(crate) fn search_command(mut args: Args) -> Result<()> {
         .into_iter()
         .filter(|expansion| {
             format!(
-                "{} {} {}",
+                "{} {} {} {}",
                 expansion.trigger,
+                expansion.aliases.join(" "),
                 expansion.description,
                 expansion.tags.join(" ")
             )
@@ -230,16 +238,7 @@ pub(crate) fn search_command(mut args: Args) -> Result<()> {
         println!("no expansions matched {query:?}");
     } else {
         for expansion in &matches {
-            println!(
-                "{} {}{}",
-                if expansion.enabled { "[on ]" } else { "[off]" },
-                expansion.trigger,
-                if expansion.description.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", expansion.description)
-                }
-            );
+            println!("{}", expansion_line(expansion));
         }
     }
     Ok(())
@@ -430,7 +429,7 @@ pub(crate) fn set_enabled_command(mut args: Args) -> Result<()> {
     let Some(expansion) = config
         .expansion
         .iter_mut()
-        .find(|expansion| expansion.trigger == trigger)
+        .find(|expansion| expansion.answers_to(&trigger))
     else {
         bail!("no expansion found for trigger {trigger:?}");
     };
@@ -482,7 +481,7 @@ pub(crate) fn set_mode_command(mut args: Args) -> Result<()> {
     let Some(expansion) = config
         .expansion
         .iter_mut()
-        .find(|expansion| expansion.trigger == trigger)
+        .find(|expansion| expansion.answers_to(&trigger))
     else {
         bail!("no expansion found for trigger {trigger:?}");
     };

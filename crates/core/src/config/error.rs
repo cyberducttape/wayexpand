@@ -50,6 +50,8 @@ pub enum ConfigError {
         length: usize,
         maximum: usize,
     },
+    #[error("expansion {index} has too many aliases (maximum is {maximum})")]
+    TooManyAliases { index: usize, maximum: usize },
     #[error("expansion {index} replacement is too large ({length} bytes; maximum is {maximum})")]
     ReplacementTooLarge {
         index: usize,
@@ -147,6 +149,9 @@ impl ConfigError {
                 length,
                 maximum,
             } => format!("expansion {index} trigger is too long ({length}; maximum {maximum})"),
+            Self::TooManyAliases { index, maximum } => {
+                format!("expansion {index} has too many aliases (maximum {maximum})")
+            }
             Self::ReplacementTooLarge {
                 index,
                 length,

@@ -29,6 +29,7 @@ fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::Expansi
         command: None,
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     }
 }
 
@@ -62,6 +63,7 @@ fn import_merge_deduplicates_and_keeps_existing_trigger_conflicts() {
                 trigger: ":hello".into(),
                 replacement: "case variant wins".into(),
                 propagate_case: true,
+                aliases: Vec::new(),
                 ..import_expansion(":hello", "case variant wins")
             },
         ],
@@ -116,6 +118,8 @@ fn draft() -> Draft {
         command_pass_env: Vec::new(),
         pending_tag: String::new(),
         pending_app: String::new(),
+        aliases: Vec::new(),
+        pending_alias: String::new(),
     }
 }
 
@@ -202,6 +206,7 @@ fn command_editor_round_trips_managed_action_configuration() {
         }),
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     };
     let form = Draft::from_expansion(&source);
     assert!(form.command_action_mode);
@@ -223,6 +228,7 @@ fn command_editor_preserves_advanced_environment_settings() {
         command: None,
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     };
     source.command = Some(wayexpand_core::CommandConfig {
         action: None,
@@ -355,6 +361,7 @@ fn invalid_command_draft_is_not_mistaken_for_clean_none() {
         command: None,
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     };
     let mut form = Draft::from_expansion(&source);
     form.command_enabled = true;
@@ -376,6 +383,7 @@ fn editor_draft_preserves_tag_and_app_filter_tokens_verbatim() {
         command: None,
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     };
     let form = Draft::from_expansion(&source);
     assert_eq!(form.tags, source.tags);
@@ -453,6 +461,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             },
             ExpansionConfig {
                 id: ExpansionConfig::new_id(),
@@ -466,6 +475,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             },
         ],
         hotkey: Vec::new(),
@@ -507,6 +517,7 @@ fn gui_refuses_to_overwrite_an_external_config_change() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -551,6 +562,7 @@ fn failed_reload_leaves_the_loaded_editor_snapshot_untouched() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -623,6 +635,7 @@ fn reload_completion_cannot_overwrite_edits_made_while_loading() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -682,6 +695,7 @@ fn gui_core_revision_guard_catches_a_write_after_the_early_check() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -755,6 +769,7 @@ fn undo_history_is_bounded() {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -795,6 +810,7 @@ fn undo_history_respects_its_byte_budget() {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -826,6 +842,7 @@ fn saved_snippet_edit_can_be_undone_back_to_disk() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -867,6 +884,7 @@ fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -943,11 +961,13 @@ fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
         command: None,
         enabled: true,
         propagate_case: false,
+        aliases: Vec::new(),
     };
     let deleted = ExpansionConfig {
         id: "stable-b".into(),
         trigger: ":deleted".into(),
         replacement: "restore me".into(),
+        aliases: Vec::new(),
         ..existing.clone()
     };
     let mut modified = existing.clone();
@@ -956,6 +976,7 @@ fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
     let inserted = ExpansionConfig {
         id: "stable-c".into(),
         trigger: ":inserted".into(),
+        aliases: Vec::new(),
         ..existing.clone()
     };
     let previous = Config {
@@ -1115,6 +1136,7 @@ fn the_window_title_names_the_open_file_and_marks_unsaved_edits() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1177,6 +1199,7 @@ fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             },
             ExpansionConfig {
                 id: ExpansionConfig::new_id(),
@@ -1198,6 +1221,7 @@ fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
                 }),
                 enabled: false,
                 propagate_case: true,
+                aliases: Vec::new(),
             },
         ],
         hotkey: Vec::new(),
@@ -1442,6 +1466,7 @@ fn format_preserving_saves_keep_manual_comments() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),

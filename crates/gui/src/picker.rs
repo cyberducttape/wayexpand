@@ -139,7 +139,7 @@ impl PickerApp {
                 .expansion
                 .iter()
                 .map(|expansion| SearchEntry {
-                    trigger: expansion.trigger.to_lowercase(),
+                    trigger: crate::library::trigger_search_text(expansion),
                     description: expansion.description.to_lowercase(),
                 })
                 .collect(),

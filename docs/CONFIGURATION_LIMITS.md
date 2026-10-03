@@ -12,6 +12,7 @@ page and the associated tests together.
 | Hotkey entries | 1,024 |
 | Aggregate enabled trigger data | 256 KiB |
 | Trigger length | 128 Unicode scalar values |
+| Aliases per expansion | 32 (each follows the trigger length limit) |
 | Replacement size | 1 MiB |
 | Description length | 512 Unicode scalar values |
 | Tags per expansion | 32 |

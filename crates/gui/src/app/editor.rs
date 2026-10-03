@@ -44,6 +44,7 @@ impl GuiApp {
         };
         let expansion = &self.config.expansion[index];
         draft.trigger != expansion.trigger
+            || draft.committed_aliases() != expansion.aliases
             || draft.description != expansion.description
             || draft.category != expansion.category
             || draft.replacement != expansion.replacement
@@ -259,7 +260,7 @@ impl GuiApp {
                         !draft.trigger.is_empty()
                             && self.config.expansion.iter().enumerate().any(
                                 |(other_index, other)| {
-                                    other_index != index && other.trigger == draft.trigger
+                                    other_index != index && other.answers_to(&draft.trigger)
                                 },
                             )
                     });
@@ -284,6 +285,7 @@ impl GuiApp {
                 let body_font = egui::TextStyle::Body.resolve(ui.style());
                 let label_width = [
                     strings.trigger(),
+                    strings.aliases(),
                     strings.description(),
                     strings.tags(),
                     strings.category(),
@@ -329,6 +331,22 @@ impl GuiApp {
                                 .color(palette.muted),
                         );
                     }
+                });
+
+                form_row(ui, strings.aliases(), columns, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        theme::token_editor(
+                            ui,
+                            palette,
+                            &mut draft.aliases,
+                            &mut draft.pending_alias,
+                            theme::TokenEditorText {
+                                add_hint: strings.add_alias(),
+                                remove_hint: strings.remove_alias(),
+                            },
+                            160.0,
+                        );
+                    });
                 });
 
                 form_row(ui, strings.description(), columns, |ui| {

@@ -16,6 +16,7 @@ use std::{
 use thiserror::Error;
 
 const MAX_TRIGGER_CHARS: usize = 128;
+const MAX_ALIASES: usize = 32;
 const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
 const MAX_DESCRIPTION_CHARS: usize = 512;
 const MAX_TAGS: usize = 32;
@@ -241,6 +242,11 @@ pub struct ExpansionConfig {
     #[serde(default = "new_expansion_id")]
     pub id: String,
     pub trigger: String,
+    /// Additional triggers for the same replacement, e.g. `:addr` with
+    /// aliases `:address` and `:office`. Each alias follows the trigger's
+    /// rules and match mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     pub replacement: String,
     #[serde(default)]
     pub description: String,
@@ -270,6 +276,12 @@ pub struct ExpansionConfig {
 }
 
 impl ExpansionConfig {
+    /// Whether `trigger` is this snippet's trigger or one of its aliases,
+    /// exactly as configured (no case or normalization variants).
+    pub fn answers_to(&self, trigger: &str) -> bool {
+        self.trigger == trigger || self.aliases.iter().any(|alias| alias == trigger)
+    }
+
     /// Generate an RFC 4122 version-4 UUID for a new snippet.
     pub fn new_id() -> String {
         new_expansion_id()
@@ -290,14 +302,21 @@ impl ExpansionConfig {
     /// propagation is enabled. Useful to avoid merge-time collisions using
     /// the same semantics as runtime matching and configuration validation.
     pub fn effective_triggers(&self) -> Vec<String> {
-        let mut variants = vec![self.trigger.clone()];
+        let mut variants = Vec::with_capacity(1 + self.aliases.len());
+        for trigger in std::iter::once(&self.trigger).chain(&self.aliases) {
+            if !variants.contains(trigger) {
+                variants.push(trigger.clone());
+            }
+        }
         if self.propagate_case {
-            for variant in [
-                self.trigger.to_uppercase(),
-                capitalize_first_letter(&self.trigger),
-            ] {
-                if !variants.contains(&variant) {
-                    variants.push(variant);
+            for index in 0..variants.len() {
+                for variant in [
+                    variants[index].to_uppercase(),
+                    capitalize_first_letter(&variants[index]),
+                ] {
+                    if !variants.contains(&variant) {
+                        variants.push(variant);
+                    }
                 }
             }
         }
@@ -919,13 +938,39 @@ impl Config {
                     field: "replacement",
                 });
             }
-            let trigger_length = expansion.trigger.chars().count();
+            let mut trigger_length = expansion.trigger.chars().count();
             if trigger_length > MAX_TRIGGER_CHARS {
                 return Err(ConfigError::TriggerTooLong {
                     index,
                     length: trigger_length,
                     maximum: MAX_TRIGGER_CHARS,
                 });
+            }
+            if expansion.aliases.len() > MAX_ALIASES {
+                return Err(ConfigError::TooManyAliases {
+                    index,
+                    maximum: MAX_ALIASES,
+                });
+            }
+            for alias in &expansion.aliases {
+                if alias.is_empty() {
+                    return Err(ConfigError::EmptyTrigger { index });
+                }
+                if alias.contains('\0') {
+                    return Err(ConfigError::NulCharacter {
+                        index,
+                        field: "alias",
+                    });
+                }
+                let length = alias.chars().count();
+                if length > MAX_TRIGGER_CHARS {
+                    return Err(ConfigError::TriggerTooLong {
+                        index,
+                        length,
+                        maximum: MAX_TRIGGER_CHARS,
+                    });
+                }
+                trigger_length = trigger_length.saturating_add(length);
             }
             if expansion.replacement.len() > MAX_REPLACEMENT_BYTES {
                 return Err(ConfigError::ReplacementTooLarge {

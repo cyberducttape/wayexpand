@@ -73,6 +73,9 @@ replacement = """Best regards,
 Alex"""
 ```
 
+An Espanso match with a `triggers:` list imports as one snippet: the first
+trigger becomes `trigger` and the rest become `aliases`.
+
 Categories, tags, descriptions, enabled state, and case propagation have
 direct WayExpand representations. Dynamic matches, external filters, forms,
 extensions, and options with no direct equivalent are reported for manual

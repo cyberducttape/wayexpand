@@ -253,6 +253,16 @@ replacement = """Best,
 Your Name"""
 ```
 
+**One snippet, several triggers (aliases):**
+```toml
+[[expansion]]
+trigger = ";;addr"
+aliases = [";;address", ";;office"]
+replacement = "1 Main Street"
+```
+Every alias uses the snippet's match mode and options, and an alias may not
+collide with any other trigger.
+
 **Date (auto-generated):**
 ```toml
 [[expansion]]

@@ -1627,7 +1627,7 @@ impl ExpansionEngine {
             .expansion
             .iter()
             .enumerate()
-            .find(|(_, expansion)| expansion.enabled && expansion.trigger == trigger)
+            .find(|(_, expansion)| expansion.enabled && expansion.answers_to(trigger))
             .ok_or(InsertError::NotFound)?;
         if self.user_paused {
             return Err(InsertError::Paused);

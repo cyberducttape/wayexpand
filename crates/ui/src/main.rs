@@ -339,6 +339,7 @@ impl App {
                     command: None,
                     enabled: true,
                     propagate_case: false,
+                    aliases: Vec::new(),
                 });
                 if let Err(error) = self.save_current() {
                     self.config = previous;
