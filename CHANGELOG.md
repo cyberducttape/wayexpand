@@ -43,6 +43,9 @@ Changes not yet released.
 - **Output preflight:** injector capabilities are now enforced before any
   erase/insert operation. Unsupported replacement lengths, Unicode, and cursor
   placement fail closed before the target application is modified.
+- **Efficiency:** application-ID glob matching no longer allocates a character
+  vector per candidate, and bounded command stderr continues draining until
+  the pipe is empty after the retention cap is reached.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that

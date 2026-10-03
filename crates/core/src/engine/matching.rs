@@ -36,33 +36,37 @@ impl GlobPattern {
     }
 
     fn matches(&self, value: &str) -> bool {
-        // Match Unicode scalar values rather than UTF-8 bytes. In particular, `?`
-        // must consume one user-visible character such as `é`, `你`, or `Ж`, not
-        // one byte of its encoding.
-        let value = value.chars().collect::<Vec<_>>();
+        // Match Unicode scalar values rather than UTF-8 bytes. In particular,
+        // `?` consumes one Rust `char` (Unicode scalar value), not one byte or
+        // one grapheme cluster. `Chars` is clonable, so wildcard backtracking
+        // can retain a position without allocating a character vector.
+        let mut value = value.chars();
         let mut pattern_index = 0;
-        let mut value_index = 0;
         let mut star = None;
-        let mut star_value_index = 0;
+        let mut star_value = None;
 
-        while value_index < value.len() {
-            if pattern_index < self.tokens.len()
-                && matches!(self.tokens[pattern_index], GlobToken::Literal(character) if character == value[value_index])
-                || pattern_index < self.tokens.len()
-                    && matches!(self.tokens[pattern_index], GlobToken::Any)
-            {
+        while let Some(value_character) = value.clone().next() {
+            let consumed = match self.tokens.get(pattern_index) {
+                Some(GlobToken::Literal(character)) if *character == value_character => true,
+                Some(GlobToken::Any) => true,
+                Some(GlobToken::Star) => {
+                    star = Some(pattern_index);
+                    pattern_index += 1;
+                    star_value = Some(value.clone());
+                    false
+                }
+                _ => false,
+            };
+            if consumed {
                 pattern_index += 1;
-                value_index += 1;
-            } else if pattern_index < self.tokens.len()
-                && matches!(self.tokens[pattern_index], GlobToken::Star)
-            {
-                star = Some(pattern_index);
-                pattern_index += 1;
-                star_value_index = value_index;
+                value.next();
             } else if let Some(star_index) = star {
                 pattern_index = star_index + 1;
-                star_value_index += 1;
-                value_index = star_value_index;
+                let star_position = star_value
+                    .as_mut()
+                    .expect("glob star position must exist when backtracking");
+                star_position.next();
+                value = star_position.clone();
             } else {
                 return false;
             }
