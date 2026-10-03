@@ -216,6 +216,7 @@ struct GuiApp {
     try_live_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
     setup_task: Option<SetupTask>,
+    sync_task: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     pending_save: Option<PendingSave>,
     queued_save: Option<PendingSave>,
     next_save_id: u64,
@@ -378,6 +379,7 @@ impl GuiApp {
             playground: playground::Playground::default(),
             try_live_open: true,
             setup_task: None,
+            sync_task: None,
             pending_save: None,
             queued_save: None,
             next_save_id: 1,
@@ -392,6 +394,7 @@ impl eframe::App for GuiApp {
         self.poll_runtime(ctx);
         self.poll_command_preview(ctx);
         self.poll_setup(ctx);
+        self.poll_sync(ctx);
         self.reap_app_detection_without_editor(ctx);
         if self.theme_refresh_pending {
             theme::install_pack(ctx, self.colorpack, self.settings_font_scale);

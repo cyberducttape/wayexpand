@@ -5,13 +5,14 @@ mod commands;
 mod doctor;
 mod errors;
 mod setup;
+mod sync;
 
 use anyhow::{bail, Context, Error, Result};
 use backup::{create_backup, default_backup_destination};
 use commands::config::{
     backup_command, edit_command, fleet_command, import_command, list_command, pack_command,
     preview_command, search_command, set_enabled_command, set_mode_command, stats_command,
-    test_command, test_hotkey_command, validate_command,
+    sync_command, test_command, test_hotkey_command, validate_command,
 };
 use commands::daemon::{control_command, insert_command};
 use commands::system::{
@@ -113,6 +114,7 @@ fn run() -> Result<()> {
         Some("doctor") => doctor_command(args)?,
         Some("explain") => explain_command(args)?,
         Some("stats") => stats_command(args)?,
+        Some("sync") => sync_command(args)?,
         Some("certify") => certify_command(args)?,
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
@@ -161,6 +163,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "list [--json] [config]",
                 "List configured expansions and hotkeys",
+            ),
+            (
+                "sync [init [--remote URL]|status] [--json] [config]",
+                "Synchronize the snippet library with Git (optional)",
             ),
             (
                 "stats [--json] [--days N] [--clear] [config]",

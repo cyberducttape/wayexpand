@@ -170,6 +170,17 @@ impl GuiApp {
                     self.refresh_diagnostics(true);
                     ui.close();
                 }
+                if self.library_is_synchronized()
+                    && ui
+                        .add_enabled(
+                            self.sync_task.is_none(),
+                            egui::Button::new(self.strings.sync_library()),
+                        )
+                        .clicked()
+                {
+                    self.start_sync();
+                    ui.close();
+                }
                 if ui.button(self.strings.import_espanso()).clicked() {
                     self.import_open = true;
                     self.import_preview = None;

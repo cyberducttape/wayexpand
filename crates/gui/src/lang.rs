@@ -93,6 +93,29 @@ impl Strings {
         }
     }
 
+    pub fn sync_library(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Sync library",
+            Language::German => "Bibliothek synchronisieren",
+        }
+    }
+
+    pub fn sync_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Synchronizing the library with Git…",
+            Language::German => "Bibliothek wird mit Git synchronisiert…",
+        }
+    }
+
+    pub fn sync_save_first(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Save or discard the open edit before syncing",
+            Language::German => {
+                "Vor dem Synchronisieren die offene Änderung speichern oder verwerfen"
+            }
+        }
+    }
+
     pub fn import_espanso(&self) -> &'static str {
         match self.lang {
             Language::English => "Import Espanso",

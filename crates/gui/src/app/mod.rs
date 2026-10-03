@@ -12,6 +12,7 @@ mod settings;
 mod setup;
 mod snippets;
 mod status_bar;
+mod sync;
 mod toolbar;
 
 #[cfg(test)]

@@ -689,3 +689,84 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
     );
     Ok(())
 }
+
+/// `wayexpand sync`: optional Git synchronization of the library.
+pub(crate) fn sync_command(args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand sync [init [--remote URL]|status] [--json] [config]";
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let remote = take_option(&mut rest, "--remote")?;
+    let action = match rest.first().map(String::as_str) {
+        Some("init") | Some("status") => rest.remove(0),
+        _ => "now".to_owned(),
+    };
+    if rest.len() > 1 || (remote.is_some() && action != "init") {
+        usage_bail!("{USAGE}");
+    }
+    let path = rest
+        .into_iter()
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_config_path);
+    match action.as_str() {
+        "init" => {
+            let directory = crate::sync::init(&path, remote.as_deref())
+                .map_err(|error| config_error(format!("{error:#}")))?;
+            if requested_json {
+                println!("{}", serde_json::json!({ "initialized": directory }));
+            } else {
+                println!(
+                    "snippet library tracked with Git in {}",
+                    directory.display()
+                );
+            }
+        }
+        "status" => {
+            let status =
+                crate::sync::status(&path).map_err(|error| config_error(format!("{error:#}")))?;
+            if requested_json {
+                println!("{}", serde_json::json!({ "status": status }));
+            } else {
+                println!("{status}");
+            }
+        }
+        _ => {
+            let report =
+                crate::sync::sync(&path).map_err(|error| config_error(format!("{error:#}")))?;
+            // A running daemon picks up the merged library (it validates
+            // before switching, so a bad library never replaces a good one).
+            let _ = control_request("reload");
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "directory": report.directory,
+                        "committed": report.committed,
+                        "pulled": report.pulled,
+                        "pushed": report.pushed,
+                        "remote": report.remote,
+                    })
+                );
+            } else {
+                println!(
+                    "library synchronized: {}{}{}",
+                    if report.committed {
+                        "committed local changes; "
+                    } else {
+                        "no local changes; "
+                    },
+                    if report.pulled {
+                        "pulled remote changes; "
+                    } else {
+                        ""
+                    },
+                    match (&report.remote, report.pushed) {
+                        (Some(remote), true) => format!("pushed to {remote}"),
+                        _ => "no remote configured".to_owned(),
+                    }
+                );
+            }
+        }
+    }
+    Ok(())
+}
