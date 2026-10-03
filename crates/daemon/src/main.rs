@@ -110,6 +110,37 @@ impl EventError {
     }
 }
 
+/// State of the reactor loop: fixed deployment context followed by the
+/// runtime state each turn reads and updates.
+struct Daemon {
+    control: ControlServer,
+    policy: wayexpand_core::OrganizationPolicy,
+    path: PathBuf,
+    portal_token_path: Option<PathBuf>,
+    window_tracker: Option<backend_lifecycle::WindowTrackerHandle>,
+    active_source: &'static str,
+    active_backend: &'static str,
+    backend_name: &'static str,
+    managed: bool,
+    input_method_mode: bool,
+    evdev_mode: bool,
+    config: ReloadableConfig,
+    injector: Option<Box<dyn TextInjector>>,
+    input_method: Option<wayexpand_backend_input_method::InputMethodSource>,
+    evdev: Option<EvdevSource>,
+    receiver: Option<mpsc::Receiver<String>>,
+    status_publisher: StatusPublisher,
+    focus_state: FocusState,
+    connection_state: &'static str,
+    paused: bool,
+    reconnect_delay: Duration,
+    output_retry_at: Option<Instant>,
+    output_retry_delay: Duration,
+    output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
+    stdin_closed: bool,
+    logged_queue_rejections: u64,
+}
+
 fn main() -> Result<()> {
     // `fmt::init()` falls back to ERROR-only when RUST_LOG is unset, which
     // silently dropped every warning (policy violations, rejected reloads,
@@ -236,7 +267,7 @@ fn main() -> Result<()> {
         warn!("XDG_RUNTIME_DIR unavailable; control socket disabled");
     }
     let portal_token_path = portal_token_path();
-    let mut input_method = match source_name {
+    let input_method = match source_name {
         "input-method" => Some(connect_input_method_with_retry(
             &control,
             &path,
@@ -247,7 +278,7 @@ fn main() -> Result<()> {
         )?),
         _ => None,
     };
-    let mut evdev = match source_name {
+    let evdev = match source_name {
         "evdev" => Some(connect_evdev_with_retry(
             &control,
             &path,
@@ -271,11 +302,11 @@ fn main() -> Result<()> {
         );
     }
     let active_source = source_name;
-    let mut reconnect_delay = Duration::from_millis(250);
-    let mut output_retry_at: Option<Instant> = None;
-    let mut output_retry_delay = Duration::from_millis(250);
+    let reconnect_delay = Duration::from_millis(250);
+    let output_retry_at: Option<Instant> = None;
+    let output_retry_delay = Duration::from_millis(250);
     let mut output_failures = None;
-    let mut injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
+    let injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
         match backend_name {
@@ -330,12 +361,12 @@ fn main() -> Result<()> {
         .map(|_| "input-method-v2")
         .or_else(|| injector.as_ref().map(|backend| backend.name()))
         .unwrap_or("none");
-    let mut connection_state = if input_method_mode || evdev_mode {
+    let connection_state = if input_method_mode || evdev_mode {
         "connected"
     } else {
         "running"
     };
-    let mut paused = false;
+    let paused = false;
     let mut status_publisher = StatusPublisher::default();
     set_daemon_status(
         &mut status_publisher,
@@ -359,52 +390,81 @@ fn main() -> Result<()> {
     };
 
     let window_tracker = backend_lifecycle::spawn_window_tracker();
-    let mut focus_state = FocusState::new(config.engine.current_window().cloned());
+    let focus_state = FocusState::new(config.engine.current_window().cloned());
     publish_focus_snapshot(&control, &focus_state);
 
-    let mut stdin_closed = false;
-    let mut logged_queue_rejections = 0;
+    let stdin_closed = false;
+    let logged_queue_rejections = 0;
+    let mut daemon = Daemon {
+        control,
+        policy,
+        path,
+        portal_token_path,
+        window_tracker,
+        active_source,
+        active_backend,
+        backend_name,
+        managed,
+        input_method_mode,
+        evdev_mode,
+        config,
+        injector,
+        input_method,
+        evdev,
+        receiver,
+        status_publisher,
+        focus_state,
+        connection_state,
+        paused,
+        reconnect_delay,
+        output_retry_at,
+        output_retry_delay,
+        output_failures,
+        stdin_closed,
+        logged_queue_rejections,
+    };
     loop {
         drain_pending_window_events(
-            &window_tracker,
-            &mut config.engine,
-            &policy,
-            active_backend,
-            &control,
-            &mut focus_state,
+            &daemon.window_tracker,
+            &mut daemon.config.engine,
+            &daemon.policy,
+            daemon.active_backend,
+            &daemon.control,
+            &mut daemon.focus_state,
         )?;
         let transition = reactor::ReactorTransition::sample(
-            &control.stop_requested,
-            &control.pause_requested,
-            &control.reload_requested,
-            paused,
+            &daemon.control.stop_requested,
+            &daemon.control.pause_requested,
+            &daemon.control.reload_requested,
+            daemon.paused,
         );
         if let Some(requested_pause) = transition.pause_changed() {
             process_event(
-                &mut config.engine,
+                &mut daemon.config.engine,
                 InputEvent::PauseChanged(requested_pause),
                 None,
-                &policy,
-                active_backend,
+                &daemon.policy,
+                daemon.active_backend,
             )?;
-            paused = requested_pause;
-            info!(paused, "expansion processing policy changed");
+            daemon.paused = requested_pause;
+            info!(daemon.paused, "expansion processing policy changed");
         }
         if transition.reload_requested() {
-            config.reload_now();
+            daemon.config.reload_now();
         }
         if transition.should_stop() {
             break;
         }
-        config.reload_if_changed();
-        for (action, result) in config.engine.drain_completed_hotkeys() {
+        daemon.config.reload_if_changed();
+        for (action, result) in daemon.config.engine.drain_completed_hotkeys() {
             match result {
                 Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
                 Err(error) => warn!(chord = %action.chord, %error, "hotkey action failed"),
             }
         }
-        let metrics = config.engine.command_metrics();
-        let worker_failure = output_failures
+        let metrics = daemon.config.engine.command_metrics();
+        let worker_failure = daemon
+            .output_failures
             .as_ref()
             .and_then(|failures| failures.try_recv().ok());
         if let Some(failure) = worker_failure {
@@ -413,47 +473,47 @@ fn main() -> Result<()> {
                 error = %failure.message,
                 "serialized output worker failed"
             );
-            drop(injector.take());
+            drop(daemon.injector.take());
             process_event(
-                &mut config.engine,
+                &mut daemon.config.engine,
                 InputEvent::EndOfInput,
                 None,
-                &policy,
-                active_backend,
+                &daemon.policy,
+                daemon.active_backend,
             )?;
-            output_failures = None;
+            daemon.output_failures = None;
             if !failure.retryable {
                 return Err(anyhow::anyhow!(
                     "output backend failed permanently: {}",
                     failure.message
                 ));
             }
-            connection_state = "reconnecting";
-            output_retry_at = Some(Instant::now());
-            output_retry_delay = Duration::from_millis(250);
+            daemon.connection_state = "reconnecting";
+            daemon.output_retry_at = Some(Instant::now());
+            daemon.output_retry_delay = Duration::from_millis(250);
         }
-        if metrics.command_queue_rejected_total < logged_queue_rejections {
+        if metrics.command_queue_rejected_total < daemon.logged_queue_rejections {
             // A successful configuration reload creates a fresh engine and
             // therefore starts a fresh counter interval.
-            logged_queue_rejections = 0;
+            daemon.logged_queue_rejections = 0;
         }
-        if metrics.command_queue_rejected_total > logged_queue_rejections {
+        if metrics.command_queue_rejected_total > daemon.logged_queue_rejections {
             warn!(
                 command_queue_depth = metrics.command_queue_depth,
                 command_queue_rejected_total = metrics.command_queue_rejected_total,
                 "command action rejected because the command queue was full or unavailable"
             );
-            logged_queue_rejections = metrics.command_queue_rejected_total;
+            daemon.logged_queue_rejections = metrics.command_queue_rejected_total;
         }
         let poll_interval = input_poll_interval(metrics);
-        let completed_commands = config.engine.drain_completed_commands();
+        let completed_commands = daemon.config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
             // Apply evdev safety gating: ensure physical key-up was processed
             // and no competing input arrived during command execution.
             // This prevents the race condition where fast commands finish
             // before the trigger key's physical release event is processed.
-            let gating = if evdev_mode {
-                apply_evdev_gating(completed_commands, &mut evdev)
+            let gating = if daemon.evdev_mode {
+                apply_evdev_gating(completed_commands, &mut daemon.evdev)
             } else {
                 EvdevGatingOutcome {
                     results: completed_commands,
@@ -461,54 +521,54 @@ fn main() -> Result<()> {
                     abandoned: Vec::new(),
                 }
             };
-            restore_abandoned_results(&mut config.engine, gating.abandoned);
+            restore_abandoned_results(&mut daemon.config.engine, gating.abandoned);
 
             if !gating.results.is_empty() {
-                if input_method_mode {
-                    if let Some(source) = input_method.as_mut() {
+                if daemon.input_method_mode {
+                    if let Some(source) = daemon.input_method.as_mut() {
                         apply_results(
-                            &mut config.engine,
+                            &mut daemon.config.engine,
                             gating.results,
                             Some(source),
-                            &policy,
-                            active_backend,
+                            &daemon.policy,
+                            daemon.active_backend,
                         )?;
                     }
-                } else if let Some(mut backend) = injector.take() {
+                } else if let Some(mut backend) = daemon.injector.take() {
                     let result = apply_results(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         gating.results,
                         Some(backend.as_mut()),
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     );
-                    injector = Some(backend);
+                    daemon.injector = Some(backend);
                     result?;
                 } else {
                     apply_results(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         gating.results,
                         None,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     )?;
                 }
             }
             replay_evdev_follow_up(
-                &mut config.engine,
+                &mut daemon.config.engine,
                 gating.follow_up,
-                &policy,
-                active_backend,
+                &daemon.policy,
+                daemon.active_backend,
             )?;
         }
-        if let Some(request) = control.take_insert_request() {
+        if let Some(request) = daemon.control.take_insert_request() {
             // An explicit insert (quick-insert picker, `wayexpand insert`)
             // types a snippet at the cursor through the same injector and
             // evdev safety gate as a typed expansion. It is a user action,
             // so a refusal or injection failure is logged, never fatal.
             if let Some(expected_token) = request.focus_token.as_deref() {
-                let snapshot = control.focus_snapshot();
-                let current_token = config.engine.current_window().map(focus_token);
+                let snapshot = daemon.control.focus_snapshot();
+                let current_token = daemon.config.engine.current_window().map(focus_token);
                 if current_token.as_deref() != Some(expected_token)
                     || snapshot.token.as_deref() != Some(expected_token)
                     || snapshot.generation != request.focus_generation.unwrap_or_default()
@@ -521,10 +581,10 @@ fn main() -> Result<()> {
                     continue;
                 }
             }
-            match config.engine.prepare_insert(&request.trigger) {
+            match daemon.config.engine.prepare_insert(&request.trigger) {
                 Ok(result) => {
-                    let gating = if evdev_mode {
-                        apply_evdev_gating(vec![result], &mut evdev)
+                    let gating = if daemon.evdev_mode {
+                        apply_evdev_gating(vec![result], &mut daemon.evdev)
                     } else {
                         EvdevGatingOutcome {
                             results: vec![result],
@@ -537,14 +597,14 @@ fn main() -> Result<()> {
                     }
                     let outcome = if gating.results.is_empty() {
                         Ok(())
-                    } else if input_method_mode {
-                        match input_method.as_mut() {
+                    } else if daemon.input_method_mode {
+                        match daemon.input_method.as_mut() {
                             Some(source) => apply_results(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 gating.results,
                                 Some(source),
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             ),
                             None => {
                                 warn!(
@@ -553,15 +613,15 @@ fn main() -> Result<()> {
                                 Ok(())
                             }
                         }
-                    } else if let Some(mut backend) = injector.take() {
+                    } else if let Some(mut backend) = daemon.injector.take() {
                         let outcome = apply_results(
-                            &mut config.engine,
+                            &mut daemon.config.engine,
                             gating.results,
                             Some(backend.as_mut()),
-                            &policy,
-                            active_backend,
+                            &daemon.policy,
+                            daemon.active_backend,
                         );
-                        injector = Some(backend);
+                        daemon.injector = Some(backend);
                         outcome
                     } else {
                         warn!("requested snippet insert skipped: no injection backend");
@@ -571,118 +631,134 @@ fn main() -> Result<()> {
                         warn!(%error, "requested snippet insert failed");
                     }
                     replay_evdev_follow_up(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         gating.follow_up,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     )?;
                 }
                 Err(error) => warn!(%error, "requested snippet insert refused"),
             }
         }
         set_daemon_status_with_runtime_capabilities(
-            &mut status_publisher,
-            &control,
-            active_source,
-            active_backend,
-            connection_state,
-            &path,
-            config.healthy(),
+            &mut daemon.status_publisher,
+            &daemon.control,
+            daemon.active_source,
+            daemon.active_backend,
+            daemon.connection_state,
+            &daemon.path,
+            daemon.config.healthy(),
             metrics,
-            input_method
+            daemon
+                .input_method
                 .as_ref()
                 .map(TextInjector::status_detail)
-                .or_else(|| injector.as_ref().map(|backend| backend.status_detail()))
+                .or_else(|| {
+                    daemon
+                        .injector
+                        .as_ref()
+                        .map(|backend| backend.status_detail())
+                })
                 .filter(|detail| !detail.is_empty())
                 .unwrap_or("unknown"),
-            input_method
+            daemon
+                .input_method
                 .as_ref()
                 .map(InputSource::capabilities)
-                .or_else(|| evdev.as_ref().map(InputSource::capabilities))
+                .or_else(|| daemon.evdev.as_ref().map(InputSource::capabilities))
                 .unwrap_or_default(),
-            input_method
+            daemon
+                .input_method
                 .as_ref()
                 .map(TextInjector::capabilities)
-                .or_else(|| injector.as_ref().map(|backend| backend.capabilities()))
+                .or_else(|| {
+                    daemon
+                        .injector
+                        .as_ref()
+                        .map(|backend| backend.capabilities())
+                })
                 .unwrap_or_default(),
-            window_tracker
+            daemon
+                .window_tracker
                 .as_ref()
                 .is_some_and(backend_lifecycle::WindowTrackerHandle::is_connected),
         );
         // Output recovery is deliberately one attempt per reactor turn. A
         // portal or compositor outage must not park control, reload, status,
         // or shutdown handling inside an exponential-backoff sleep.
-        if injector.is_none()
-            && !input_method_mode
-            && backend_name != "none"
-            && output_retry_at.is_some_and(|deadline| Instant::now() >= deadline)
+        if daemon.injector.is_none()
+            && !daemon.input_method_mode
+            && daemon.backend_name != "none"
+            && daemon
+                .output_retry_at
+                .is_some_and(|deadline| Instant::now() >= deadline)
         {
             match connect_output_backend(
-                backend_name,
-                config.engine.libei_token_persistence(),
-                portal_token_path.as_deref(),
+                daemon.backend_name,
+                daemon.config.engine.libei_token_persistence(),
+                daemon.portal_token_path.as_deref(),
             ) {
                 Ok(backend) => {
-                    if evdev_mode && backend_name == "libei" {
+                    if daemon.evdev_mode && daemon.backend_name == "libei" {
                         let (backend, failures) = spawn_async_injector(backend);
-                        injector = Some(backend);
-                        output_failures = Some(failures);
+                        daemon.injector = Some(backend);
+                        daemon.output_failures = Some(failures);
                     } else {
-                        injector = Some(backend);
+                        daemon.injector = Some(backend);
                     }
-                    output_retry_at = None;
-                    output_retry_delay = Duration::from_millis(250);
-                    connection_state = "connected";
+                    daemon.output_retry_at = None;
+                    daemon.output_retry_delay = Duration::from_millis(250);
+                    daemon.connection_state = "connected";
                     set_daemon_status(
-                        &mut status_publisher,
-                        &control,
-                        active_source,
-                        backend_name,
-                        connection_state,
-                        &path,
-                        config.healthy(),
+                        &mut daemon.status_publisher,
+                        &daemon.control,
+                        daemon.active_source,
+                        daemon.backend_name,
+                        daemon.connection_state,
+                        &daemon.path,
+                        daemon.config.healthy(),
                     );
-                    info!(backend = backend_name, "output backend reconnected");
+                    info!(backend = daemon.backend_name, "output backend reconnected");
                 }
                 Err(error) if error.retryable => {
-                    output_retry_at = Some(Instant::now() + output_retry_delay);
-                    output_retry_delay = next_retry_delay(output_retry_delay);
-                    warn!(%error, backend = backend_name, "output backend unavailable; retry scheduled");
+                    daemon.output_retry_at = Some(Instant::now() + daemon.output_retry_delay);
+                    daemon.output_retry_delay = next_retry_delay(daemon.output_retry_delay);
+                    warn!(%error, backend = daemon.backend_name, "output backend unavailable; retry scheduled");
                 }
                 Err(error) => return Err(anyhow::Error::new(error)),
             }
         }
-        if input_method_mode {
-            if input_method.is_none() {
+        if daemon.input_method_mode {
+            if daemon.input_method.is_none() {
                 match connect_input_method_session(
-                    &control,
-                    &path,
-                    config.healthy(),
-                    config.engine.libei_token_persistence(),
-                    portal_token_path.as_deref(),
-                    &policy,
+                    &daemon.control,
+                    &daemon.path,
+                    daemon.config.healthy(),
+                    daemon.config.engine.libei_token_persistence(),
+                    daemon.portal_token_path.as_deref(),
+                    &daemon.policy,
                 ) {
                     Ok(source) => {
-                        input_method = Some(source);
-                        reconnect_delay = Duration::from_millis(250);
-                        connection_state = "connected";
+                        daemon.input_method = Some(source);
+                        daemon.reconnect_delay = Duration::from_millis(250);
+                        daemon.connection_state = "connected";
                         set_daemon_status(
-                            &mut status_publisher,
-                            &control,
-                            active_source,
-                            active_backend,
-                            connection_state,
-                            &path,
-                            config.healthy(),
+                            &mut daemon.status_publisher,
+                            &daemon.control,
+                            daemon.active_source,
+                            daemon.active_backend,
+                            daemon.connection_state,
+                            &daemon.path,
+                            daemon.config.healthy(),
                         );
                         info!("input-method source reconnected");
                     }
                     Err(error) if error.is_retryable() => {
                         warn!(%error, "input-method unavailable; retrying");
-                        if !wait_for_retry(&control.stop_requested, reconnect_delay) {
+                        if !wait_for_retry(&daemon.control.stop_requested, daemon.reconnect_delay) {
                             break;
                         }
-                        reconnect_delay = next_retry_delay(reconnect_delay);
+                        daemon.reconnect_delay = next_retry_delay(daemon.reconnect_delay);
                     }
                     Err(error) => {
                         return Err(anyhow::anyhow!(
@@ -692,27 +768,27 @@ fn main() -> Result<()> {
                 }
                 continue;
             }
-            let Some(source) = input_method.as_mut() else {
+            let Some(source) = daemon.input_method.as_mut() else {
                 return Err(anyhow::anyhow!("input-method mode lost its input source"));
             };
             let event_result = source.next_event_timeout(poll_interval);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
-                        &window_tracker,
-                        &mut config.engine,
-                        &policy,
-                        active_backend,
-                        &control,
-                        &mut focus_state,
+                        &daemon.window_tracker,
+                        &mut daemon.config.engine,
+                        &daemon.policy,
+                        daemon.active_backend,
+                        &daemon.control,
+                        &mut daemon.focus_state,
                     )?;
-                    let result = match input_method.as_mut() {
+                    let result = match daemon.input_method.as_mut() {
                         Some(source) => process_event(
-                            &mut config.engine,
+                            &mut daemon.config.engine,
                             event,
                             Some(source),
-                            &policy,
-                            active_backend,
+                            &daemon.policy,
+                            daemon.active_backend,
                         ),
                         None => {
                             return Err(anyhow::anyhow!(
@@ -721,7 +797,7 @@ fn main() -> Result<()> {
                         }
                     };
                     match result {
-                        Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Ok(()) => daemon.reconnect_delay = Duration::from_millis(250),
                         Err(error) if error.expansion_rejected() => {
                             warn!(
                                 error = %error,
@@ -729,7 +805,7 @@ fn main() -> Result<()> {
                                 insert_bytes = error.result.insert.len(),
                                 "input-method rejected expansion; continuing"
                             );
-                            reconnect_delay = Duration::from_millis(250);
+                            daemon.reconnect_delay = Duration::from_millis(250);
                         }
                         Err(error) if error.retryable() => {
                             warn!(
@@ -738,23 +814,23 @@ fn main() -> Result<()> {
                                 insert_bytes = error.result.insert.len(),
                                 "input-method output failed; current expansion is not replayed"
                             );
-                            input_method = None;
-                            connection_state = "reconnecting";
+                            daemon.input_method = None;
+                            daemon.connection_state = "reconnecting";
                             process_event(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 InputEvent::FocusChanged { sensitive: true },
                                 None,
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             )?;
                             set_daemon_status(
-                                &mut status_publisher,
-                                &control,
-                                active_source,
-                                active_backend,
-                                connection_state,
-                                &path,
-                                config.healthy(),
+                                &mut daemon.status_publisher,
+                                &daemon.control,
+                                daemon.active_source,
+                                daemon.active_backend,
+                                daemon.connection_state,
+                                &daemon.path,
+                                daemon.config.healthy(),
                             );
                         }
                         Err(error) => return Err(error.into()),
@@ -763,23 +839,23 @@ fn main() -> Result<()> {
                 Ok(None) => {}
                 Err(error) if error.retryable => {
                     warn!(%error, "input-method connection lost; reconnecting");
-                    input_method = None;
-                    connection_state = "reconnecting";
+                    daemon.input_method = None;
+                    daemon.connection_state = "reconnecting";
                     process_event(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         InputEvent::FocusChanged { sensitive: true },
                         None,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     )?;
                     set_daemon_status(
-                        &mut status_publisher,
-                        &control,
-                        active_source,
-                        active_backend,
-                        connection_state,
-                        &path,
-                        config.healthy(),
+                        &mut daemon.status_publisher,
+                        &daemon.control,
+                        daemon.active_source,
+                        daemon.active_backend,
+                        daemon.connection_state,
+                        &daemon.path,
+                        daemon.config.healthy(),
                     );
                 }
                 Err(error) => {
@@ -788,30 +864,30 @@ fn main() -> Result<()> {
             }
             continue;
         }
-        if evdev_mode {
-            if evdev.is_none() {
+        if daemon.evdev_mode {
+            if daemon.evdev.is_none() {
                 match EvdevSource::connect() {
                     Ok(source) => {
-                        evdev = Some(source);
-                        reconnect_delay = Duration::from_millis(250);
-                        connection_state = "connected";
+                        daemon.evdev = Some(source);
+                        daemon.reconnect_delay = Duration::from_millis(250);
+                        daemon.connection_state = "connected";
                         set_daemon_status(
-                            &mut status_publisher,
-                            &control,
-                            active_source,
-                            active_backend,
-                            connection_state,
-                            &path,
-                            config.healthy(),
+                            &mut daemon.status_publisher,
+                            &daemon.control,
+                            daemon.active_source,
+                            daemon.active_backend,
+                            daemon.connection_state,
+                            &daemon.path,
+                            daemon.config.healthy(),
                         );
                         info!("evdev source reconnected");
                     }
                     Err(error) if error.is_retryable() => {
                         warn!(%error, "evdev source unavailable; retrying");
-                        if !wait_for_retry(&control.stop_requested, reconnect_delay) {
+                        if !wait_for_retry(&daemon.control.stop_requested, daemon.reconnect_delay) {
                             break;
                         }
-                        reconnect_delay = next_retry_delay(reconnect_delay);
+                        daemon.reconnect_delay = next_retry_delay(daemon.reconnect_delay);
                     }
                     Err(error) => {
                         return Err(anyhow::anyhow!(
@@ -821,67 +897,76 @@ fn main() -> Result<()> {
                 }
                 continue;
             }
-            let Some(source) = evdev.as_mut() else {
+            let Some(source) = daemon.evdev.as_mut() else {
                 return Err(anyhow::anyhow!("evdev mode lost its input source"));
             };
             let event_result = source.next_event_timeout(poll_interval);
             match event_result {
                 Ok(Some(event)) => {
                     drain_pending_window_events(
-                        &window_tracker,
-                        &mut config.engine,
-                        &policy,
-                        active_backend,
-                        &control,
-                        &mut focus_state,
+                        &daemon.window_tracker,
+                        &mut daemon.config.engine,
+                        &daemon.policy,
+                        daemon.active_backend,
+                        &daemon.control,
+                        &mut daemon.focus_state,
                     )?;
-                    let result = if let Some(mut backend) = injector.take() {
+                    let result = if let Some(mut backend) = daemon.injector.take() {
                         // Match immediately. The release/quiet gates are only
                         // needed if the matcher actually produced text that
                         // will modify the focused application.
                         let result = if matches!(event, InputEvent::Key(_)) {
                             process_event(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 event,
                                 Some(backend.as_mut()),
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             )
                         } else {
-                            let pending = config.engine.process_deferred(event);
+                            let pending = daemon.config.engine.process_deferred(event);
                             let results = dispatch_pending_results(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 pending,
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             );
                             if results.is_empty() {
                                 Ok(())
                             } else {
-                                let gating = apply_evdev_gating(results, &mut evdev);
-                                restore_abandoned_results(&mut config.engine, gating.abandoned);
+                                let gating = apply_evdev_gating(results, &mut daemon.evdev);
+                                restore_abandoned_results(
+                                    &mut daemon.config.engine,
+                                    gating.abandoned,
+                                );
                                 apply_results(
-                                    &mut config.engine,
+                                    &mut daemon.config.engine,
                                     gating.results,
                                     Some(backend.as_mut()),
-                                    &policy,
-                                    active_backend,
+                                    &daemon.policy,
+                                    daemon.active_backend,
                                 )?;
                                 replay_evdev_follow_up(
-                                    &mut config.engine,
+                                    &mut daemon.config.engine,
                                     gating.follow_up,
-                                    &policy,
-                                    active_backend,
+                                    &daemon.policy,
+                                    daemon.active_backend,
                                 )
                             }
                         };
-                        injector = Some(backend);
+                        daemon.injector = Some(backend);
                         result
                     } else {
-                        process_event(&mut config.engine, event, None, &policy, active_backend)
+                        process_event(
+                            &mut daemon.config.engine,
+                            event,
+                            None,
+                            &daemon.policy,
+                            daemon.active_backend,
+                        )
                     };
                     match result {
-                        Ok(()) => reconnect_delay = Duration::from_millis(250),
+                        Ok(()) => daemon.reconnect_delay = Duration::from_millis(250),
                         Err(error) if error.expansion_rejected() => {
                             warn!(
                                 error = %error,
@@ -889,7 +974,7 @@ fn main() -> Result<()> {
                                 insert_bytes = error.result.insert.len(),
                                 "evdev rejected expansion; continuing"
                             );
-                            reconnect_delay = Duration::from_millis(250);
+                            daemon.reconnect_delay = Duration::from_millis(250);
                         }
                         Err(error) if error.retryable() => {
                             warn!(
@@ -898,26 +983,26 @@ fn main() -> Result<()> {
                                 insert_bytes = error.result.insert.len(),
                                 "evdev output failed; current expansion is not replayed"
                             );
-                            drop(injector.take());
+                            drop(daemon.injector.take());
                             process_event(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 InputEvent::EndOfInput,
                                 None,
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             )?;
-                            connection_state = "reconnecting";
+                            daemon.connection_state = "reconnecting";
                             set_daemon_status(
-                                &mut status_publisher,
-                                &control,
-                                active_source,
-                                active_backend,
-                                connection_state,
-                                &path,
-                                config.healthy(),
+                                &mut daemon.status_publisher,
+                                &daemon.control,
+                                daemon.active_source,
+                                daemon.active_backend,
+                                daemon.connection_state,
+                                &daemon.path,
+                                daemon.config.healthy(),
                             );
-                            output_retry_at = Some(Instant::now());
-                            output_retry_delay = Duration::from_millis(250);
+                            daemon.output_retry_at = Some(Instant::now());
+                            daemon.output_retry_delay = Duration::from_millis(250);
                         }
                         Err(error) => return Err(error.into()),
                     }
@@ -925,23 +1010,23 @@ fn main() -> Result<()> {
                 Ok(None) => {}
                 Err(error) if error.retryable => {
                     warn!(%error, "evdev connection lost; reconnecting");
-                    evdev = None;
-                    connection_state = "reconnecting";
+                    daemon.evdev = None;
+                    daemon.connection_state = "reconnecting";
                     let _ = process_event(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         InputEvent::EndOfInput,
                         None,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     );
                     set_daemon_status(
-                        &mut status_publisher,
-                        &control,
-                        active_source,
-                        active_backend,
-                        connection_state,
-                        &path,
-                        config.healthy(),
+                        &mut daemon.status_publisher,
+                        &daemon.control,
+                        daemon.active_source,
+                        daemon.active_backend,
+                        daemon.connection_state,
+                        &daemon.path,
+                        daemon.config.healthy(),
                     );
                 }
                 Err(error) => {
@@ -950,48 +1035,48 @@ fn main() -> Result<()> {
             }
             continue;
         }
-        if stdin_closed {
+        if daemon.stdin_closed {
             thread::sleep(poll_interval);
             continue;
         }
-        let Some(receiver) = receiver.as_ref() else {
+        let Some(lines) = daemon.receiver.as_ref() else {
             break;
         };
-        match receiver.recv_timeout(poll_interval) {
+        match lines.recv_timeout(poll_interval) {
             Ok(line) => {
                 drain_pending_window_events(
-                    &window_tracker,
-                    &mut config.engine,
-                    &policy,
-                    active_backend,
-                    &control,
-                    &mut focus_state,
+                    &daemon.window_tracker,
+                    &mut daemon.config.engine,
+                    &daemon.policy,
+                    daemon.active_backend,
+                    &daemon.control,
+                    &mut daemon.focus_state,
                 )?;
-                if injector.is_some() {
+                if daemon.injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
-                        let (result, backend) = if let Some(mut backend) = injector.take() {
+                        let (result, backend) = if let Some(mut backend) = daemon.injector.take() {
                             let result = process_event(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 event,
                                 Some(backend.as_mut()),
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             );
                             (result, Some(backend))
                         } else {
                             (
                                 process_event(
-                                    &mut config.engine,
+                                    &mut daemon.config.engine,
                                     event,
                                     None,
-                                    &policy,
-                                    active_backend,
+                                    &daemon.policy,
+                                    daemon.active_backend,
                                 ),
                                 None,
                             )
                         };
-                        injector = backend;
+                        daemon.injector = backend;
                         if let Err(error) = result {
                             if error.expansion_rejected() {
                                 warn!(
@@ -1011,58 +1096,58 @@ fn main() -> Result<()> {
                                 insert_bytes = error.result.insert.len(),
                                 "output session failed; current expansion is not replayed"
                             );
-                            drop(injector.take());
+                            drop(daemon.injector.take());
                             let _ = process_event(
-                                &mut config.engine,
+                                &mut daemon.config.engine,
                                 InputEvent::EndOfInput,
                                 None,
-                                &policy,
-                                active_backend,
+                                &daemon.policy,
+                                daemon.active_backend,
                             );
-                            connection_state = "reconnecting";
+                            daemon.connection_state = "reconnecting";
                             set_daemon_status(
-                                &mut status_publisher,
-                                &control,
-                                active_source,
-                                backend_name,
-                                connection_state,
-                                &path,
-                                config.healthy(),
+                                &mut daemon.status_publisher,
+                                &daemon.control,
+                                daemon.active_source,
+                                daemon.backend_name,
+                                daemon.connection_state,
+                                &daemon.path,
+                                daemon.config.healthy(),
                             );
-                            output_retry_at = Some(Instant::now());
-                            output_retry_delay = Duration::from_millis(250);
+                            daemon.output_retry_at = Some(Instant::now());
+                            daemon.output_retry_delay = Duration::from_millis(250);
                         }
                     }
-                    if let Some(backend) = injector.as_deref_mut() {
+                    if let Some(backend) = daemon.injector.as_deref_mut() {
                         process_event(
-                            &mut config.engine,
+                            &mut daemon.config.engine,
                             InputEvent::EndOfInput,
                             Some(backend),
-                            &policy,
-                            active_backend,
+                            &daemon.policy,
+                            daemon.active_backend,
                         )?;
                     }
                 } else {
                     process_event(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         InputEvent::Text(line),
                         None,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     )?;
                     process_event(
-                        &mut config.engine,
+                        &mut daemon.config.engine,
                         InputEvent::EndOfInput,
                         None,
-                        &policy,
-                        active_backend,
+                        &daemon.policy,
+                        daemon.active_backend,
                     )?;
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) if managed => {
+            Err(mpsc::RecvTimeoutError::Disconnected) if daemon.managed => {
                 warn!("stdin input source ended; daemon remains idle under control socket");
-                stdin_closed = true;
+                daemon.stdin_closed = true;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -1072,7 +1157,7 @@ fn main() -> Result<()> {
     // systemd stop independent from a broken portal implementation, while
     // still allowing libei to close its portal session and Tokio runtime
     // cleanly in the normal case.
-    if let Some(injector) = injector.take() {
+    if let Some(injector) = daemon.injector.take() {
         shutdown_injector(injector);
     }
     Ok(())
