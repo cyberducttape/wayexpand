@@ -70,9 +70,9 @@ jobs:
           if [ -n "$launchpad_main" ]; then
             timeout --signal=TERM --kill-after=30s 5m git push launchpad \
               --force-with-lease="refs/heads/main:$launchpad_main" \
-              refs/heads/main:refs/heads/main
+              HEAD:refs/heads/main
           else
-            timeout --signal=TERM --kill-after=30s 5m git push launchpad refs/heads/main:refs/heads/main
+            timeout --signal=TERM --kill-after=30s 5m git push launchpad HEAD:refs/heads/main
           fi
 
           # Read the complete remote tag set once.  Opening one SSH session
