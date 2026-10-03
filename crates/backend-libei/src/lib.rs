@@ -1496,9 +1496,23 @@ mod tests {
     }
 
     fn token_test_parent(name: &str) -> std::path::PathBuf {
+        // The token store rejects any group/other-writable ancestor, so the
+        // test base must live under a trusted chain. That depends on where
+        // the tests run (a sandbox temp directory, or a Debian build tree
+        // unpacked under a 0775 directory), so use the first candidate whose
+        // whole chain the real validation accepts.
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let workspace_dir = manifest_dir.parent().unwrap().parent().unwrap();
-        let base = workspace_dir.join("target").join("libei-token-tests");
+        let candidates = [std::env::temp_dir(), workspace_dir.join("target")];
+        let base = candidates
+            .iter()
+            .filter_map(|root| fs::canonicalize(root).ok())
+            .find(|root| super::validate_token_parent_chain(root).is_ok())
+            .expect("no trusted directory chain for portal token tests")
+            .join(format!(
+                "wayexpand-libei-token-tests-{}",
+                rustix::process::geteuid().as_raw()
+            ));
         fs::create_dir_all(&base).unwrap();
         fs::set_permissions(&base, fs::Permissions::from_mode(0o700)).unwrap();
         let parent = base.join(format!(
