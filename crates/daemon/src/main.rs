@@ -1,6 +1,8 @@
+mod args;
 mod backend_lifecycle;
 mod control;
 mod events;
+mod focus;
 mod input_loop;
 mod latency;
 mod output_loop;
@@ -11,11 +13,13 @@ mod status;
 mod status_publisher;
 
 use anyhow::Result;
+use args::parse_args;
 use control::{ControlServer, FocusSnapshot};
 use events::{
     apply_evdev_gating, apply_results, dispatch_pending_results, process_event,
     replay_evdev_follow_up, restore_abandoned_results, EvdevGatingOutcome,
 };
+use focus::{drain_pending_window_events, focus_token, publish_focus_snapshot, FocusState};
 use input_loop::{
     connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
     input_poll_interval, next_retry_delay, spawn_stdin_reader, wait_for_retry,
@@ -355,10 +359,7 @@ fn main() -> Result<()> {
     };
 
     let window_tracker = backend_lifecycle::spawn_window_tracker();
-    let mut focus_state = FocusState {
-        previous: config.engine.current_window().cloned(),
-        generation: 0,
-    };
+    let mut focus_state = FocusState::new(config.engine.current_window().cloned());
     publish_focus_snapshot(&control, &focus_state);
 
     let mut stdin_closed = false;
@@ -1077,58 +1078,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// The last published focused window and a counter bumped on every change,
-/// so the quick-insert picker can tell focus left and came back.
-struct FocusState {
-    previous: Option<WindowContext>,
-    generation: u64,
-}
-
-fn focus_token(window: &WindowContext) -> String {
-    let mut hasher = DefaultHasher::new();
-    window.app_id.hash(&mut hasher);
-    window.title.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
-fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
-    control.set_focus_snapshot(FocusSnapshot {
-        generation: state.generation,
-        token: state.previous.as_ref().map(focus_token),
-    });
-}
-
-/// Drain any pending window-change events from the tracker's receiver
-/// and apply them to the engine. This prevents app-filter races where a
-/// focus change arrives between input-event wait and processing.
-fn drain_pending_window_events(
-    window_tracker: &Option<backend_lifecycle::WindowTrackerHandle>,
-    engine: &mut ExpansionEngine,
-    policy: &wayexpand_core::OrganizationPolicy,
-    active_backend: &str,
-    control: &ControlServer,
-    focus_state: &mut FocusState,
-) -> Result<()> {
-    let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
-    if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(receiver) {
-        process_event(
-            engine,
-            InputEvent::WindowChanged(window_opt),
-            None,
-            policy,
-            active_backend,
-        )?;
-    }
-    // Runs on every loop iteration: compare by reference and publish only on
-    // an actual focus change.
-    if focus_state.previous.as_ref() != engine.current_window() {
-        focus_state.previous = engine.current_window().cloned();
-        focus_state.generation = focus_state.generation.wrapping_add(1);
-        publish_focus_snapshot(control, focus_state);
-    }
-    Ok(())
-}
-
 fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     let mut bytes = Vec::with_capacity(4096);
     let mut oversized = false;
@@ -1173,46 +1122,6 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     String::from_utf8(bytes)
         .map(Some)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
-type DaemonArgs = (PathBuf, Option<String>, Option<String>, bool, bool);
-
-fn parse_args() -> Result<DaemonArgs> {
-    let env_path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
-    let mut path = env_path.clone();
-    let mut explicit_path = env_path.is_some();
-    let mut backend = env::var("WAYEXPAND_BACKEND").ok();
-    let mut source = env::var("WAYEXPAND_SOURCE").ok();
-    let mut allow_evdev_sensitive_fields = false;
-    for argument in env::args().skip(1) {
-        if let Some(value) = argument.strip_prefix("--backend=") {
-            backend = Some(value.to_string());
-        } else if let Some(value) = argument.strip_prefix("--source=") {
-            source = Some(value.to_string());
-        } else if argument == "--allow-evdev-sensitive-fields" {
-            allow_evdev_sensitive_fields = true;
-        } else if matches!(argument.as_str(), "--help" | "-h") {
-            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [config]", env!("CARGO_PKG_VERSION"));
-            std::process::exit(0);
-        } else if matches!(argument.as_str(), "--version" | "-V") {
-            println!("wayexpand-daemon {}", env!("CARGO_PKG_VERSION"));
-            std::process::exit(0);
-        } else if argument.starts_with('-') {
-            anyhow::bail!("unknown option {argument:?}; try --help");
-        } else if path.is_some() {
-            anyhow::bail!("multiple configuration paths supplied");
-        } else {
-            path = Some(PathBuf::from(argument));
-            explicit_path = true;
-        }
-    }
-    Ok((
-        path.unwrap_or_else(default_config_path),
-        source,
-        backend,
-        allow_evdev_sensitive_fields,
-        !explicit_path,
-    ))
 }
 
 #[cfg(test)]
