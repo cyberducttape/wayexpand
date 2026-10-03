@@ -766,7 +766,7 @@ fn undo_history_is_bounded() {
         app.undo_bytes,
         app.undo
             .iter()
-            .map(|entry| entry.estimated_bytes)
+            .map(UndoEntry::estimated_bytes)
             .sum::<usize>()
     );
     fs::remove_file(path).unwrap();

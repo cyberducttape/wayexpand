@@ -9,5 +9,7 @@ mod settings;
 mod setup;
 mod toolbar;
 
+pub(crate) use saving::UndoEntry;
 pub(crate) use setup::onboarding_step;
+mod saving;
 mod snippets;
