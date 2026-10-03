@@ -6,6 +6,35 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Signed organization packs:** packs can be signed with OpenSSH keys
+  (`wayexpand pack sign`, `pack verify`); the signature covers a digest of
+  the manifest and every snippet file. Manifests can declare
+  `capabilities`, `allowed_actions`, and `min_wayexpand_version`, and packs
+  using undeclared capabilities are rejected. In safe mode,
+  `require_signed_packs` with a root-owned `pack_signers_file` gates
+  `pack import` and manifest packs in the fleet pack layer, which load as
+  managed snippets separate from the user's library.
+- **Library sync:** `wayexpand sync init` / `wayexpand sync` keep the
+  snippet library in Git with any remote, validating before commit and
+  after merge and never committing private files; GUI Library → Sync.
+- **Interactive form snippets:** `{{field:name}}`, `{{field:name=default}}`,
+  and `{{choice:A|B}}` open a form when the snippet fires; the filled text is
+  typed only if focus returns to the original application.
+- **Local usage statistics:** `wayexpand stats` reports expansions,
+  keystrokes avoided, most-used and unused snippets, and risky triggers from
+  a local, ID-only `usage-stats.json` (`settings.usage_stats = false` to
+  disable).
+- **Template variables:** `{{snippet:TRIGGER}}` includes, allowlisted
+  `{{env:NAME}}`, and opt-in `{{clipboard}}`, each policy-controllable; see
+  docs/TEMPLATES.md.
+- **`wayexpand explain`:** explains, check by check, why typed text would or
+  would not expand, using the daemon's live state.
+- **Trigger aliases:** `aliases = [...]` gives one snippet several triggers;
+  Espanso `triggers:` lists now import.
+- **Matching:** canonically equivalent (NFC/NFD) triggers match.
+- **Testing:** IBus failure-mode tests over real D-Bus dispatch, cargo-fuzz
+  targets for every untrusted-input parser (CI and nightly), a reload
+  concurrency test, and a daemon soak test.
 - **Daemon status after reconnects:** the control socket no longer keeps
   serving a capability-less "connected" status after an output reconnect;
   `doctor` and the GUI previously reported every capability as false and

@@ -361,16 +361,45 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn pack_command(mut args: Args) -> Result<()> {
-    let action = args
-        .next()
-        .ok_or_else(|| usage_error("usage: wayexpand pack inspect|import <directory>"))?;
-    let path = args
-        .next()
-        .ok_or_else(|| usage_error("usage: wayexpand pack inspect|import <directory>"))?;
-    if args.next().is_some() {
-        usage_bail!("usage: wayexpand pack inspect|import <directory>");
-    }
+pub(crate) fn pack_command(args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory> [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
+    let mut rest: Vec<String> = args.collect();
+    let key = take_option(&mut rest, "--key")?;
+    let signers_override = take_option(&mut rest, "--signers")?;
+    let [action, path] = rest.as_slice() else {
+        usage_bail!("{USAGE}");
+    };
+    let path = PathBuf::from(path);
+    let policy = load_policy()
+        .map_err(|error| config_error(format!("organization policy is invalid: {error}")))?;
+    // An explicit --signers file is the caller's own choice; the policy
+    // default must be root-owned to be trusted.
+    let policy_signers = signers_override.is_none();
+    let signers = signers_override
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&policy.pack_signers_file));
+    // Verify a signature when present; require one when policy says so.
+    let check_signature = || -> Result<Option<String>> {
+        let required = policy.safe_mode && policy.require_signed_packs;
+        let verified = if policy_signers {
+            wayexpand_core::trusted_signers_file(&signers)
+                .and_then(|()| wayexpand_core::verify_pack_signature(&path, &signers))
+        } else {
+            wayexpand_core::verify_pack_signature(&path, &signers)
+        };
+        match verified {
+            Ok(signer) => Ok(Some(signer)),
+            Err(wayexpand_core::PackError::Unsigned) if !required => Ok(None),
+            Err(error) if !required && !signers.exists() => {
+                eprintln!(
+                    "warning: pack signature not verified ({error}); no signers file at {}",
+                    signers.display()
+                );
+                Ok(None)
+            }
+            Err(error) => Err(config_error(format!("pack rejected: {error}"))),
+        }
+    };
     match action.as_str() {
         "inspect" => {
             let inspection = inspect_pack(&path)?;
@@ -383,6 +412,9 @@ pub(crate) fn pack_command(mut args: Args) -> Result<()> {
             if !inspection.manifest.description.is_empty() {
                 println!("description: {}", inspection.manifest.description);
             }
+            if let Some(version) = &inspection.manifest.min_wayexpand_version {
+                println!("requires WayExpand: {version} or newer");
+            }
             println!("snippet files: {}", inspection.snippet_files);
             println!("expansions: {}", inspection.expansion_count);
             println!("hotkeys: {}", inspection.hotkey_count);
@@ -390,16 +422,54 @@ pub(crate) fn pack_command(mut args: Args) -> Result<()> {
                 "commands: {} (disabled on import)",
                 inspection.command_count
             );
+            println!(
+                "capabilities used: {}",
+                if inspection.required_capabilities.is_empty() {
+                    "none".to_owned()
+                } else {
+                    inspection.required_capabilities.join(", ")
+                }
+            );
+            let signature = if !inspection.signed {
+                "unsigned".to_owned()
+            } else {
+                match wayexpand_core::verify_pack_signature(&path, &signers) {
+                    Ok(signer) => format!("valid, signed by {signer}"),
+                    Err(error) => format!("present but not verified: {error}"),
+                }
+            };
+            println!("signature: {signature}");
+        }
+        "verify" => {
+            let signer = wayexpand_core::verify_pack_signature(&path, &signers)
+                .map_err(|error| config_error(format!("pack signature: {error}")))?;
+            println!("pack signature is valid; signed by {signer}");
+        }
+        "sign" => {
+            let key =
+                key.ok_or_else(|| usage_error("pack sign needs --key FILE (an SSH private key)"))?;
+            wayexpand_core::sign_pack(&path, std::path::Path::new(&key))
+                .map_err(|error| config_error(format!("could not sign pack: {error}")))?;
+            println!(
+                "signed {}",
+                path.join(wayexpand_core::SIGNATURE_FILE).display()
+            );
         }
         "import" => {
+            let signer = check_signature()?;
             let (inspection, config, disabled_commands) = import_pack(&path)?;
             eprintln!(
-                "pack {} {} imported; {} command action(s) disabled by default",
-                inspection.manifest.name, inspection.manifest.version, disabled_commands
+                "pack {} {} imported{}; {} command action(s) disabled by default",
+                inspection.manifest.name,
+                inspection.manifest.version,
+                signer
+                    .map(|signer| format!(" (signed by {signer})"))
+                    .unwrap_or_default(),
+                disabled_commands
             );
             print!("{}", toml::to_string_pretty(&config)?);
         }
-        _ => usage_bail!("usage: wayexpand pack inspect|import <directory>"),
+        _ => usage_bail!("{USAGE}"),
     }
     Ok(())
 }

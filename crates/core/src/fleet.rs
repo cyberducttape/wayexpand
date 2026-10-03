@@ -166,6 +166,9 @@ pub struct FleetConfig {
     pub stats: MergeStats,
     /// Administrator policy violations discovered while merging pack sources.
     pub policy_violations: Vec<String>,
+    /// Directory each loaded pack came from, by pack name, so signatures are
+    /// checked against exactly what was loaded.
+    pub pack_directories: BTreeMap<String, PathBuf>,
 }
 
 /// Statistics about the merge operation.
@@ -186,11 +189,16 @@ impl FleetConfig {
     /// Falls back gracefully if layers don't exist.
     pub fn load_standard() -> Result<Self, FleetError> {
         let mut merger = ConfigMerger::new();
+        let mut pack_directories = BTreeMap::new();
         for (dir, layer_name) in standard_layer_dirs()? {
+            if let Some(name) = layer_name.strip_prefix("pack:") {
+                pack_directories.insert(name.to_owned(), dir.clone());
+            }
             merger.load_layer_named(dir, layer_name)?;
         }
-
-        merger.merge()
+        let mut fleet = merger.merge()?;
+        fleet.pack_directories = pack_directories;
+        Ok(fleet)
     }
 
     /// Return the configuration files resolved by the standard fleet loader.
@@ -258,6 +266,34 @@ impl FleetConfig {
         let mut config = base;
         config.organization = crate::OrganizationPolicy::default();
 
+        // Packs that must be signed but do not verify against a trusted,
+        // root-owned signers file.
+        let unsigned_packs: BTreeMap<String, String> = if policy.require_signed_packs {
+            let signers = Path::new(&policy.pack_signers_file);
+            fleet
+                .expansions_source
+                .values()
+                .chain(fleet.hotkeys_source.values())
+                .filter(|provenance| provenance.layer.starts_with("pack:"))
+                .map(|provenance| pack_name(provenance).to_owned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|name| {
+                    let Some(directory) = fleet.pack_directories.get(&name) else {
+                        return Some((name, "pack directory unknown".to_owned()));
+                    };
+                    crate::trusted_signers_file(signers)
+                        .and_then(|()| crate::verify_pack_signature(directory, signers))
+                        .err()
+                        .map(|error| (name, error.to_string()))
+                })
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
+        let pack_permitted =
+            |name: &str| policy.pack_allowed(name) && !unsigned_packs.contains_key(name);
+
         let disallowed_packs: BTreeSet<_> = fleet
             .expansions_source
             .values()
@@ -280,16 +316,19 @@ impl FleetConfig {
                     policy.allowed_packs
                 )
             })
+            .chain(unsigned_packs.iter().map(|(name, reason)| {
+                format!("pack '{name}' is not signed by a trusted signer: {reason}")
+            }))
             .collect();
 
         // Enforce the same audited decision only when safe mode is enabled.
-        if !policy.allowed_packs.is_empty() && policy.safe_mode {
+        if (!policy.allowed_packs.is_empty() || !unsigned_packs.is_empty()) && policy.safe_mode {
             fleet.config.expansion.retain(|expansion| {
                 if let Some(prov) = fleet.expansions_source.get(&expansion.trigger) {
                     // Keep organization and user layers, filter packs
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || (prov.layer.starts_with("pack:") && policy.pack_allowed(pack_name(prov)))
+                        || (prov.layer.starts_with("pack:") && pack_permitted(pack_name(prov)))
                 } else {
                     true
                 }
@@ -298,7 +337,7 @@ impl FleetConfig {
                 if let Some(prov) = fleet.hotkeys_source.get(&hotkey.chord) {
                     prov.layer == "organization"
                         || prov.layer == "user"
-                        || (prov.layer.starts_with("pack:") && policy.pack_allowed(pack_name(prov)))
+                        || (prov.layer.starts_with("pack:") && pack_permitted(pack_name(prov)))
                 } else {
                     true
                 }
@@ -549,6 +588,7 @@ impl ConfigMerger {
             settings_sources,
             stats: self.stats,
             policy_violations: Vec::new(),
+            pack_directories: BTreeMap::new(),
         })
     }
 }
@@ -583,6 +623,11 @@ fn discover_layer_dirs(dir: &Path, layer: Layer) -> Result<Vec<(PathBuf, String)
 fn discover_layer_files(dir: &Path, is_organization: bool) -> Result<Vec<PathBuf>, FleetError> {
     if !dir.is_dir() {
         return Ok(Vec::new());
+    }
+    // A manifest pack (`wayexpand pack` format) keeps its snippets in
+    // `snippets/`; its manifest and signature are not snippet files.
+    if !is_organization && dir.join("wayexpand-pack.toml").is_file() {
+        return discover_layer_files(&dir.join("snippets"), false);
     }
     if is_organization {
         let metadata = fs::symlink_metadata(dir).map_err(|source| {
@@ -1150,5 +1195,104 @@ replacement = "other"
             .unwrap()
             .config;
         assert!(safe.apply_administrator_policy(&safe_policy).is_err());
+    }
+
+    fn manifest_pack(root: &Path, name: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let pack = root.join(name);
+        fs::create_dir_all(pack.join("snippets")).unwrap();
+        for directory in [root.to_path_buf(), pack.clone(), pack.join("snippets")] {
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::write(
+            pack.join("wayexpand-pack.toml"),
+            "format_version = 1\nid = \"t\"\nversion = \"1\"\nname = \"T\"\npublisher = \"P\"\n",
+        )
+        .unwrap();
+        fs::write(
+            pack.join("snippets/main.toml"),
+            "[[expansion]]\ntrigger = \";;team\"\nreplacement = \"from the team pack\"\n",
+        )
+        .unwrap();
+        for file in [pack.join("wayexpand-pack.toml"), pack.join("snippets/main.toml")] {
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        pack
+    }
+
+    fn fleet_with_pack(root: &Path) -> FleetConfig {
+        let pack = manifest_pack(root, "team");
+        let mut merger = ConfigMerger::new();
+        merger
+            .load_layer_named(&pack, "pack:team".to_owned())
+            .unwrap();
+        let mut fleet = merger.merge().unwrap();
+        fleet.pack_directories.insert("team".into(), pack);
+        fleet
+    }
+
+    #[test]
+    fn manifest_packs_load_from_their_snippets_directory() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-fleet-manifest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let fleet = fleet_with_pack(&root);
+        assert!(fleet
+            .config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.trigger == ";;team"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unsigned_packs_are_excluded_when_policy_requires_signatures() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-fleet-signed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // A signers file the user can write is never trusted.
+        let signers = root.join("allowed_signers");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&signers, "").unwrap();
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_signed_packs: true,
+            pack_signers_file: signers.display().to_string(),
+            ..OrganizationPolicy::default()
+        };
+        let fleet = FleetConfig::apply_base_and_policy(
+            fleet_with_pack(&root),
+            Config::parse("").unwrap(),
+            &policy,
+        )
+        .unwrap();
+        assert!(!fleet
+            .config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.trigger == ";;team"));
+        assert!(fleet
+            .policy_violations
+            .iter()
+            .any(|violation| violation.contains("pack 'team' is not signed by a trusted signer")));
+
+        // Audit mode reports the same pack but keeps it.
+        let audit = OrganizationPolicy {
+            safe_mode: false,
+            ..policy
+        };
+        let fleet = FleetConfig::apply_base_and_policy(
+            fleet_with_pack(&root),
+            Config::parse("").unwrap(),
+            &audit,
+        )
+        .unwrap();
+        assert!(fleet
+            .config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.trigger == ";;team"));
+        assert!(!fleet.policy_violations.is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

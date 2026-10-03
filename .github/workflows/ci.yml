@@ -350,6 +350,8 @@ jobs:
         run: bash scripts/test-doctor.sh
       - name: Library Git sync test
         run: bash scripts/test-sync.sh
+      - name: Signed pack test
+        run: bash scripts/test-pack-signing.sh
       - name: Certification JSON contract
         run: |
           jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | length == 35)' tests/certification/compositor-matrix.json

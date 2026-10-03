@@ -9,6 +9,10 @@ use std::{
 use thiserror::Error;
 
 const MANIFEST_FILE: &str = "wayexpand-pack.toml";
+/// OpenSSH signature over [`pack_digest`], made with `wayexpand pack sign`.
+pub const SIGNATURE_FILE: &str = "wayexpand-pack.sig";
+/// `ssh-keygen -Y` namespace for pack signatures.
+const SIGNATURE_NAMESPACE: &str = "wayexpand-pack";
 const SNIPPETS_DIR: &str = "snippets";
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_SNIPPET_FILE_BYTES: usize = 1024 * 1024;
@@ -25,6 +29,17 @@ pub struct PackManifest {
     pub publisher: String,
     #[serde(default)]
     pub description: String,
+    /// Oldest WayExpand version that understands this pack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_wayexpand_version: Option<String>,
+    /// Capabilities the pack's snippets use: any of `commands`,
+    /// `broker_actions`, `clipboard`, `env`, and `forms`. When present, the
+    /// pack may use nothing it does not declare.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
+    /// Action Broker actions the pack may call (with `broker_actions`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +49,10 @@ pub struct PackInspection {
     pub expansion_count: usize,
     pub hotkey_count: usize,
     pub command_count: usize,
+    /// Capabilities the snippets actually use.
+    pub required_capabilities: Vec<String>,
+    /// Whether a signature file is present (not whether it verifies).
+    pub signed: bool,
 }
 
 #[derive(Debug, Error)]
@@ -73,6 +92,18 @@ pub enum PackError {
     },
     #[error("pack configuration is invalid: {0}")]
     InvalidConfig(String),
+    #[error("pack requires WayExpand {required} or newer")]
+    RequiresNewerVersion { required: String },
+    #[error("pack uses the `{0}` capability without declaring it")]
+    UndeclaredCapability(String),
+    #[error("pack calls Action Broker action `{0}` that is not in allowed_actions")]
+    UndeclaredAction(String),
+    #[error("pack is not signed")]
+    Unsigned,
+    #[error("pack signature is not valid for any trusted signer: {0}")]
+    BadSignature(String),
+    #[error("could not run ssh-keygen for pack signatures: {0}")]
+    SignatureTool(String),
 }
 
 fn read_bounded_text(path: &Path, maximum: usize) -> Result<String, PackError> {
@@ -133,7 +164,26 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
             return Err(PackError::EmptyField(field));
         }
     }
+    if let Some(required) = &manifest.min_wayexpand_version {
+        if version_is_newer(required, env!("CARGO_PKG_VERSION")) {
+            return Err(PackError::RequiresNewerVersion {
+                required: required.clone(),
+            });
+        }
+    }
     Ok(manifest)
+}
+
+/// Whether dotted version `required` is newer than `current`.
+fn version_is_newer(required: &str, current: &str) -> bool {
+    let parse = |version: &str| -> Vec<u64> {
+        version
+            .split(['.', '-', '+'])
+            .take(3)
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    };
+    parse(required) > parse(current)
 }
 
 fn read_snippet_configs(path: &Path) -> Result<(Vec<(PathBuf, Config)>, usize), PackError> {
@@ -224,7 +274,210 @@ fn load_pack(path: &Path) -> Result<(PackManifest, Vec<(PathBuf, Config)>), Pack
             maximum: MAX_PACK_BYTES,
         });
     }
+    check_declared_capabilities(&manifest, &configs)?;
     Ok((manifest, configs))
+}
+
+/// The capabilities a set of snippet files uses.
+fn required_capabilities(configs: &[(PathBuf, Config)]) -> std::collections::BTreeSet<String> {
+    let mut required = std::collections::BTreeSet::new();
+    for (_, config) in configs {
+        let commands = config
+            .expansion
+            .iter()
+            .filter_map(|expansion| expansion.command.as_ref())
+            .chain(config.hotkey.iter().map(|hotkey| &hotkey.command));
+        for command in commands {
+            required.insert(if command.action.is_some() {
+                "broker_actions".to_owned()
+            } else {
+                "commands".to_owned()
+            });
+        }
+        for expansion in &config.expansion {
+            for name in crate::template_variables(&expansion.replacement) {
+                if name == "clipboard" {
+                    required.insert("clipboard".to_owned());
+                } else if name.starts_with("env:") {
+                    required.insert("env".to_owned());
+                } else if ["field:", "prompt:", "choice:"]
+                    .iter()
+                    .any(|prefix| name.starts_with(prefix))
+                {
+                    required.insert("forms".to_owned());
+                }
+            }
+        }
+    }
+    required
+}
+
+fn check_declared_capabilities(
+    manifest: &PackManifest,
+    configs: &[(PathBuf, Config)],
+) -> Result<(), PackError> {
+    let Some(declared) = &manifest.capabilities else {
+        return Ok(());
+    };
+    for capability in required_capabilities(configs) {
+        if !declared.contains(&capability) {
+            return Err(PackError::UndeclaredCapability(capability));
+        }
+    }
+    for (_, config) in configs {
+        let actions = config
+            .expansion
+            .iter()
+            .filter_map(|expansion| expansion.command.as_ref())
+            .chain(config.hotkey.iter().map(|hotkey| &hotkey.command))
+            .filter_map(|command| command.action.as_ref());
+        for action in actions {
+            if !manifest.allowed_actions.contains(action) {
+                return Err(PackError::UndeclaredAction(action.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The canonical text a pack signature covers: the format tag, then the
+/// SHA-256 of the manifest and of every snippet file, sorted by path.
+/// Any change to any signed file changes the digest.
+pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
+    use sha2::{Digest, Sha256};
+    let path = path.as_ref();
+    let mut files = vec![MANIFEST_FILE.to_owned()];
+    let snippets = path.join(SNIPPETS_DIR);
+    let mut snippet_names: Vec<String> = fs::read_dir(&snippets)
+        .map_err(|source| PackError::Read {
+            path: snippets.clone(),
+            source,
+        })?
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".toml"))
+        .collect();
+    snippet_names.sort();
+    files.extend(
+        snippet_names
+            .into_iter()
+            .map(|name| format!("{SNIPPETS_DIR}/{name}")),
+    );
+    let mut digest = String::from("wayexpand-pack-digest-v1\n");
+    for file in files {
+        let text = read_bounded_text(&path.join(&file), MAX_SNIPPET_FILE_BYTES)?;
+        let hash = Sha256::digest(text.as_bytes());
+        let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        digest.push_str(&format!("{hex}  {file}\n"));
+    }
+    Ok(digest)
+}
+
+fn run_ssh_keygen(args: &[&str], input: &str) -> Result<std::process::Output, PackError> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("ssh-keygen")
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    }
+    child
+        .wait_with_output()
+        .map_err(|error| PackError::SignatureTool(error.to_string()))
+}
+
+/// Sign a pack with an SSH private key, writing [`SIGNATURE_FILE`].
+pub fn sign_pack(path: impl AsRef<Path>, key: &Path) -> Result<(), PackError> {
+    let path = path.as_ref();
+    load_pack(path)?;
+    let digest = pack_digest(path)?;
+    let key = key.to_string_lossy();
+    let output = run_ssh_keygen(
+        &["-Y", "sign", "-q", "-f", &key, "-n", SIGNATURE_NAMESPACE],
+        &digest,
+    )?;
+    if !output.status.success() {
+        return Err(PackError::SignatureTool(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+    let signature_path = path.join(SIGNATURE_FILE);
+    fs::write(&signature_path, &output.stdout).map_err(|source| PackError::Read {
+        path: signature_path,
+        source,
+    })
+}
+
+/// Check that an administrator signers file can be trusted: a regular file
+/// owned by root and not writable by group or others. Otherwise anyone able
+/// to edit it could make their own key trusted.
+pub fn trusted_signers_file(path: &Path) -> Result<(), PackError> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::symlink_metadata(path).map_err(|source| PackError::Read {
+        path: path.to_owned(),
+        source,
+    })?;
+    if !metadata.file_type().is_file() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+        return Err(PackError::BadSignature(format!(
+            "signers file {} must be a root-owned file not writable by others",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Verify a pack's signature against an OpenSSH `allowed_signers` file.
+/// Returns the signer identity (principal).
+pub fn verify_pack_signature(
+    path: impl AsRef<Path>,
+    allowed_signers: &Path,
+) -> Result<String, PackError> {
+    let path = path.as_ref();
+    let signature_path = path.join(SIGNATURE_FILE);
+    if !signature_path.is_file() {
+        return Err(PackError::Unsigned);
+    }
+    let digest = pack_digest(path)?;
+    let signature = signature_path.to_string_lossy();
+    let signers = allowed_signers.to_string_lossy();
+    let principals = run_ssh_keygen(
+        &["-Y", "find-principals", "-s", &signature, "-f", &signers],
+        "",
+    )?;
+    let principal = String::from_utf8_lossy(&principals.stdout)
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|principal| !principal.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| PackError::BadSignature("no trusted signer matches".into()))?;
+    let output = run_ssh_keygen(
+        &[
+            "-Y",
+            "verify",
+            "-f",
+            &signers,
+            "-I",
+            &principal,
+            "-n",
+            SIGNATURE_NAMESPACE,
+            "-s",
+            &signature,
+        ],
+        &digest,
+    )?;
+    if !output.status.success() {
+        return Err(PackError::BadSignature(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+    Ok(principal)
 }
 
 pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError> {
@@ -247,6 +500,8 @@ pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError>
         })
         .sum();
     Ok(PackInspection {
+        required_capabilities: required_capabilities(&configs).into_iter().collect(),
+        signed: path.join(SIGNATURE_FILE).is_file(),
         manifest,
         snippet_files: configs.len(),
         expansion_count,
@@ -262,6 +517,8 @@ pub fn import_pack(path: impl AsRef<Path>) -> Result<(PackInspection, Config, us
     let path = path.as_ref();
     let (manifest, configs) = load_pack(path)?;
     let inspection = PackInspection {
+        required_capabilities: required_capabilities(&configs).into_iter().collect(),
+        signed: path.join(SIGNATURE_FILE).is_file(),
         manifest,
         snippet_files: configs.len(),
         expansion_count: configs

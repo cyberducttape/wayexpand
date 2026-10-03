@@ -57,6 +57,13 @@ pub struct OrganizationPolicy {
     /// in ~/.local/share/wayexpand/packs/. Pack names must match directory names.
     pub allowed_packs: Vec<String>,
 
+    /// Accept only packs signed by a trusted signer (safe mode). Applies to
+    /// `wayexpand pack import` and to manifest packs in the fleet pack layer.
+    pub require_signed_packs: bool,
+
+    /// OpenSSH `allowed_signers` file listing trusted pack signers.
+    pub pack_signers_file: String,
+
     /// Disable the `{{clipboard}}` snippet variable.
     pub disable_clipboard: bool,
 
@@ -82,6 +89,8 @@ impl Default for OrganizationPolicy {
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
             allowed_packs: Vec::new(),
+            require_signed_packs: false,
+            pack_signers_file: "/etc/wayexpand/pack-signers".to_string(),
             disable_clipboard: false,
             disable_template_env: false,
             audit_prefix: "wayexpand-policy".to_string(),
@@ -113,6 +122,7 @@ impl OrganizationPolicy {
         effective.allowed_packs.clear();
         effective.disable_clipboard = false;
         effective.disable_template_env = false;
+        effective.require_signed_packs = false;
         effective
     }
 
@@ -131,6 +141,7 @@ impl OrganizationPolicy {
             || !self.allowed_packs.is_empty()
             || self.disable_clipboard
             || self.disable_template_env
+            || self.require_signed_packs
     }
 
     /// Check if policy allows a backend

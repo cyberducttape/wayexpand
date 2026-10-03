@@ -46,7 +46,10 @@ pub use migration::{
     import_espanso, EspansoImport, EspansoImportReport, EspansoImportWarning,
     EspansoUnsupportedMatch, MigrationError,
 };
-pub use pack::{import_pack, inspect_pack, PackError, PackInspection, PackManifest};
+pub use pack::{
+    import_pack, inspect_pack, pack_digest, sign_pack, trusted_signers_file, verify_pack_signature,
+    PackError, PackInspection, PackManifest, SIGNATURE_FILE,
+};
 pub use paths::default_config_path;
 pub use policy::{
     load_organization_policy, load_organization_policy_from_paths, parse_organization_policy,

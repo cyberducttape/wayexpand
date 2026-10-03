@@ -213,7 +213,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Convert an Espanso YAML file to TOML on stdout",
             ),
             (
-                "pack inspect|import <directory>",
+                "pack inspect|import|verify|sign <directory> [--signers F] [--key F]",
                 "Inspect or safely import a local snippet pack",
             ),
         ],

@@ -52,6 +52,10 @@ require_absolute_commands = false
 # Disable title-based fallback in app filtering (require app_id match only)
 disable_title_matching = false
 
+# Accept only packs signed by a trusted signer (see PACKS.md)
+require_signed_packs = false
+pack_signers_file = "/etc/wayexpand/pack-signers"
+
 # Disable the {{clipboard}} and {{env:NAME}} snippet variables (see TEMPLATES.md)
 disable_clipboard = false
 disable_template_env = false

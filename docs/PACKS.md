@@ -52,23 +52,69 @@ command-backed. Organization policy can prohibit commands globally with
 `disable_commands = true`, require absolute command paths, and restrict pack
 names through `allowed_packs`.
 
-## Trust model and current limits
+## Manifest capabilities and versions
 
-The current format is local and unsigned. The `publisher` field is descriptive
-metadata, not a cryptographic identity. Do not treat it as proof of provenance.
-Signature files, publisher keys, version pinning, updates, and a GUI trust
-review are intentionally not implemented yet.
+A manifest can declare what its snippets need, and the oldest WayExpand that
+understands it:
 
-Until signed distribution exists:
+```toml
+min_wayexpand_version = "1.3.0"
+capabilities = ["broker_actions", "forms"]
+allowed_actions = ["ticket-lookup"]
+```
 
-- inspect pack contents before import;
-- keep packs in a user-controlled directory;
-- do not enable commands from an unreviewed pack;
-- use organization policy for managed deployments;
-- retain the original pack when recording what was approved.
+`capabilities` lists any of `commands`, `broker_actions`, `clipboard`, `env`,
+and `forms`. When present, a pack that uses anything it does not declare is
+rejected, as is a broker action missing from `allowed_actions`. A pack whose
+`min_wayexpand_version` is newer than the running WayExpand is rejected.
+`wayexpand pack inspect` shows the capabilities a pack actually uses.
 
-This conservative boundary is preferable to presenting an unsigned public
-marketplace as trusted.
+## Signing packs
+
+Packs are signed with ordinary OpenSSH keys, so an organization can reuse the
+keys and `allowed_signers` files it already manages:
+
+```bash
+wayexpand pack sign ./support-team --key ~/.ssh/support_team_ed25519
+wayexpand pack verify ./support-team --signers ./allowed_signers
+```
+
+The signature (`wayexpand-pack.sig`) covers a SHA-256 digest of the manifest
+and every snippet file, so changing any of them invalidates it. Signers are
+listed in OpenSSH `allowed_signers` format with the `wayexpand-pack`
+namespace:
+
+```text
+support@example.com namespaces="wayexpand-pack" ssh-ed25519 AAAA...
+```
+
+`pack import` verifies a signature when one is present.
+
+## Managed packs (organization policy)
+
+In safe mode, `require_signed_packs = true` accepts only packs signed by a
+signer in `pack_signers_file` (default `/etc/wayexpand/pack-signers`), which
+must be root-owned and not writable by others. This applies to `pack import`
+and to the fleet pack layer: a pack directory under
+`~/.local/share/wayexpand/packs/` that contains a manifest is loaded from its
+`snippets/` directory as managed, read-only snippets, separate from the user's
+own library, and is excluded (and reported by `wayexpand fleet status`) unless
+it verifies. Packs without a manifest count as unsigned. In audit mode the same
+problems are reported but not enforced.
+
+The workflow for an organization:
+
+1. publish the pack and sign it with the team key;
+2. install `/etc/wayexpand/pack-signers` and a safe-mode policy with
+   `require_signed_packs = true`;
+3. place the pack in the users' pack layer; WayExpand verifies the signature
+   and the declared capabilities against policy before any snippet is used.
+
+## Trust model and limits
+
+The `publisher` field is descriptive; the signature is the identity. Commands
+are still removed by `pack import`. There is no update channel or GUI trust
+review yet; keep the original signed pack when recording what was approved.
 
 Pack loading treats pack contents as hostile input. The manifest is limited to
 64 KiB; each snippet file to 1 MiB; the snippets directory to 1,024 entries;
