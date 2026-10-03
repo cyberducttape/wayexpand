@@ -31,7 +31,7 @@ pub mod protocol;
 pub use audit::{policy_hash, AuditEvent, AuditHealth, AuditLogger, CallerIdentity};
 pub use config::{ActionConfig, BrokerConfig};
 pub use executor::ActionExecutor;
-pub use ipc::{BrokerClient, BrokerServer};
+pub use ipc::{BrokerClient, BrokerServer, IpcError};
 pub use protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse};
 
 #[cfg(test)]

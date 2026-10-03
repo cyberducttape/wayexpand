@@ -36,6 +36,10 @@ Changes not yet released.
   and undo state. Late libei/wlroots failures therefore reach the transaction
   caller instead of being mistaken for successful queue admission; regression
   tests cover delayed completion and backend failure propagation.
+- **Runtime safety:** configuration reloads now preserve active composition
+  state, preventing matching from resuming during dead-key, Compose, or IME
+  preedit. Action Broker IPC now observes the configured command deadline and
+  shutdown cancellation instead of relying on longer fixed socket timeouts.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that

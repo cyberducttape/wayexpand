@@ -117,6 +117,7 @@ fn run_broker_action(
     command: &CommandConfig,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
+    let deadline = Instant::now() + Duration::from_millis(command.timeout_ms);
     if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
         return Err(CommandError::StaleInput);
     }
@@ -132,6 +133,13 @@ fn run_broker_action(
     let mut client = action_broker::BrokerClient::connect(socket).map_err(|error| {
         CommandError::WaitFailed(format!("connecting to action broker: {error}"))
     })?;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(CommandError::Timeout);
+    }
+    client
+        .set_io_timeout(remaining)
+        .map_err(|error| broker_command_error("setting broker I/O deadline", error))?;
     let env_vars = command
         .pass_env
         .iter()
@@ -149,15 +157,24 @@ fn run_broker_action(
             env_vars,
             stdout_capture: true,
         })
-        .map_err(|error| CommandError::WaitFailed(format!("sending broker request: {error}")))?;
+        .map_err(|error| broker_command_error("sending broker request", error))?;
     match client
-        .recv_response()
-        .map_err(|error| CommandError::WaitFailed(format!("receiving broker response: {error}")))?
+        .recv_response_until(deadline, shutdown)
+        .map_err(|error| broker_command_error("receiving broker response", error))?
     {
         action_broker::ActionResponse::Success(output) => broker_output_text(output),
         action_broker::ActionResponse::Error(error) => {
             Err(CommandError::WaitFailed(error.to_string()))
         }
+    }
+}
+
+fn broker_command_error(context: &str, error: action_broker::IpcError) -> CommandError {
+    match error {
+        action_broker::IpcError::DeadlineExceeded => CommandError::Timeout,
+        action_broker::IpcError::Cancelled => CommandError::StaleInput,
+        other if other.is_timeout() => CommandError::Timeout,
+        other => CommandError::WaitFailed(format!("{context}: {other}")),
     }
 }
 
