@@ -55,9 +55,12 @@ impl StatusPublisher {
             injection_capabilities,
             window_tracker_connected,
         };
-        if self.last.as_ref() == Some(&snapshot) {
-            return;
-        }
+        // Always rebuild the body: other paths (output reconnect, input-method
+        // pass-through setup) publish directly through `crate::status`, so an
+        // unchanged snapshot does not mean the served status is unchanged.
+        // Skipping here once left a capability-less "connected" status in
+        // place after a reconnect. `ControlServer::set_status` already
+        // ignores a body identical to the one being served.
         control.set_status(status::daemon_status_body_with_runtime_capabilities(
             &snapshot.source,
             &snapshot.backend,
@@ -184,4 +187,52 @@ pub(crate) fn set_daemon_status_with_runtime_capabilities(
         injection_capabilities,
         window_tracker_connected,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn republishing_restores_status_overwritten_by_a_direct_update() {
+        let control = control::ControlServer::detached();
+        let mut publisher = StatusPublisher::default();
+        let capabilities = InjectorCapabilities {
+            atomic_replace: true,
+            ..InjectorCapabilities::default()
+        };
+        let publish = |publisher: &mut StatusPublisher| {
+            set_daemon_status_with_runtime_capabilities(
+                publisher,
+                &control,
+                "evdev",
+                "libei",
+                "connected",
+                Path::new("/tmp/config.toml"),
+                true,
+                CommandMetrics::default(),
+                "ei_text",
+                InputSourceCapabilities::default(),
+                capabilities,
+                false,
+            );
+        };
+        publish(&mut publisher);
+        let full = control.status_text();
+        assert!(full.contains("inject_atomic_replace=true"), "{full}");
+
+        // An output reconnect publishes directly, without capabilities.
+        status::set_daemon_status_direct(
+            &control,
+            "evdev",
+            "libei",
+            "connected",
+            Path::new("/tmp/config.toml"),
+            true,
+        );
+        assert_ne!(control.status_text(), full);
+
+        publish(&mut publisher);
+        assert_eq!(control.status_text(), full);
+    }
 }
