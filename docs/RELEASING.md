@@ -42,16 +42,25 @@ workflow pin deliberately when changing the release compiler.
    bash scripts/test-release.sh
    ```
 
-3. Review the support boundary in
+3. Run a 24-hour daemon soak on the release candidate (72 hours for a major
+   release). It drives the daemon with continuous typing, configuration
+   reloads, and control requests, and fails if memory or open descriptors keep
+   growing after warmup. CI runs the same script for 3 minutes.
+
+   ```sh
+   SOAK_SECONDS=86400 bash scripts/soak-daemon.sh
+   ```
+
+4. Review the support boundary in
    [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md).
-4. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
+5. Move completed `Unreleased` entries in `CHANGELOG.md` into a versioned
    section.
-5. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
+6. Run `./scripts/prepare-release.sh <version>`. It updates the workspace,
    changelogs, distro metadata, AppStream, and the IBus component, computes the
    source archive checksum from the staged release tree, and creates the
    complete maintainer-authored commit and tag. Review the generated release
    section before publishing; no post-tag metadata edits are expected.
-6. Regenerate `Cargo.lock` if dependency versions changed, then run the
+7. Regenerate `Cargo.lock` if dependency versions changed, then run the
    release checks again.
 
 ## Publish
