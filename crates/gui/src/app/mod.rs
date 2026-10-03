@@ -2,4 +2,5 @@
 //! block; `main.rs` keeps the shared state and composes the frame.
 
 mod diagnostics;
+mod import;
 mod settings;
