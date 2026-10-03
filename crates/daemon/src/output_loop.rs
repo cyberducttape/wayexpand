@@ -87,20 +87,29 @@ pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
 }
 
 enum OutputCommand {
-    Replace { trigger: String, text: String },
-    Erase(String),
-    Insert(String),
-    MoveCursor(usize),
-    Key(u32),
-    KeyWithModifiers(u32, Modifiers),
-    KeyEvent(u32, Modifiers, KeyEventState),
+    Replace {
+        trigger: String,
+        text: String,
+        completion: SyncSender<Result<(), InjectorError>>,
+    },
+    Erase(String, SyncSender<Result<(), InjectorError>>),
+    Insert(String, SyncSender<Result<(), InjectorError>>),
+    MoveCursor(usize, SyncSender<Result<(), InjectorError>>),
+    Key(u32, SyncSender<Result<(), InjectorError>>),
+    KeyWithModifiers(u32, Modifiers, SyncSender<Result<(), InjectorError>>),
+    KeyEvent(
+        u32,
+        Modifiers,
+        KeyEventState,
+        SyncSender<Result<(), InjectorError>>,
+    ),
     Shutdown,
 }
 
-/// A TextInjector facade that admits complete operations without waiting for
-/// the backend to perform them. The worker is deliberately serialized so
-/// physical input can keep reaching the matcher while a paced libei keysym
-/// fallback types a replacement.
+/// A serialized TextInjector actor. Each operation carries a completion
+/// acknowledgement: queue admission is never reported as injection success.
+/// This preserves the engine's transaction and undo invariants when a portal
+/// or backend fails after the command has been submitted.
 struct AsyncInjector {
     sender: SyncSender<OutputCommand>,
     failures: Option<thread::JoinHandle<()>>,
@@ -110,7 +119,21 @@ struct AsyncInjector {
     status_detail: &'static str,
 }
 
-fn enqueue(
+fn wait_for_completion(
+    sender: &SyncSender<OutputCommand>,
+    command: OutputCommand,
+    completion: Receiver<Result<(), InjectorError>>,
+    name: &'static str,
+) -> Result<(), InjectorError> {
+    enqueue_command(sender, command, name)?;
+    completion.recv().map_err(|_| InjectorError {
+        backend: name,
+        message: "serialized output worker stopped before acknowledging operation".into(),
+        retryable: true,
+    })?
+}
+
+fn enqueue_command(
     sender: &SyncSender<OutputCommand>,
     command: OutputCommand,
     name: &'static str,
@@ -145,25 +168,41 @@ pub fn spawn_async_injector(
                 if worker_cancel.load(Ordering::Acquire) {
                     break;
                 }
-                let result = match command {
-                    OutputCommand::Replace { trigger, text } => backend.replace(&trigger, &text),
-                    OutputCommand::Erase(text) => backend.erase(&text),
-                    OutputCommand::Insert(text) => backend.insert(&text),
-                    OutputCommand::MoveCursor(count) => backend.move_cursor_left(count),
-                    OutputCommand::Key(keycode) => backend.inject_key(keycode),
-                    OutputCommand::KeyWithModifiers(keycode, modifiers) => {
-                        backend.inject_key_with_modifiers(keycode, modifiers)
+                let (result, completion) = match command {
+                    OutputCommand::Replace {
+                        trigger,
+                        text,
+                        completion,
+                    } => (backend.replace(&trigger, &text), completion),
+                    OutputCommand::Erase(text, completion) => (backend.erase(&text), completion),
+                    OutputCommand::Insert(text, completion) => (backend.insert(&text), completion),
+                    OutputCommand::MoveCursor(count, completion) => {
+                        (backend.move_cursor_left(count), completion)
                     }
-                    OutputCommand::KeyEvent(keycode, modifiers, state) => {
-                        backend.inject_key_event(keycode, modifiers, state)
+                    OutputCommand::Key(keycode, completion) => {
+                        (backend.inject_key(keycode), completion)
                     }
+                    OutputCommand::KeyWithModifiers(keycode, modifiers, completion) => (
+                        backend.inject_key_with_modifiers(keycode, modifiers),
+                        completion,
+                    ),
+                    OutputCommand::KeyEvent(keycode, modifiers, state, completion) => (
+                        backend.inject_key_event(keycode, modifiers, state),
+                        completion,
+                    ),
                     OutputCommand::Shutdown => break,
                 };
-                if let Err(error) = result {
-                    let _ = failure_sender.send(OutputFailure {
-                        message: error.message,
+                let failed = if let Err(error) = &result {
+                    let _ = failure_sender.try_send(OutputFailure {
+                        message: error.message.clone(),
                         retryable: error.retryable,
                     });
+                    true
+                } else {
+                    false
+                };
+                let _ = completion.send(result);
+                if failed {
                     break;
                 }
             }
@@ -202,34 +241,57 @@ impl TextInjector for AsyncInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        enqueue(
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
             &self.sender,
-            OutputCommand::Erase(trigger.into()),
+            OutputCommand::Erase(trigger.into(), completion_sender),
+            completion_receiver,
             self.name,
         )
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
-        enqueue(&self.sender, OutputCommand::Insert(text.into()), self.name)
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
+            &self.sender,
+            OutputCommand::Insert(text.into(), completion_sender),
+            completion_receiver,
+            self.name,
+        )
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
-        enqueue(
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
             &self.sender,
             OutputCommand::Replace {
                 trigger: trigger.into(),
                 text: text.into(),
+                completion: completion_sender,
             },
+            completion_receiver,
             self.name,
         )
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        enqueue(&self.sender, OutputCommand::MoveCursor(count), self.name)
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
+            &self.sender,
+            OutputCommand::MoveCursor(count, completion_sender),
+            completion_receiver,
+            self.name,
+        )
     }
 
     fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
-        enqueue(&self.sender, OutputCommand::Key(keycode), self.name)
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
+            &self.sender,
+            OutputCommand::Key(keycode, completion_sender),
+            completion_receiver,
+            self.name,
+        )
     }
 
     fn inject_key_with_modifiers(
@@ -237,9 +299,11 @@ impl TextInjector for AsyncInjector {
         keycode: u32,
         modifiers: Modifiers,
     ) -> Result<(), InjectorError> {
-        enqueue(
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
             &self.sender,
-            OutputCommand::KeyWithModifiers(keycode, modifiers),
+            OutputCommand::KeyWithModifiers(keycode, modifiers, completion_sender),
+            completion_receiver,
             self.name,
         )
     }
@@ -250,9 +314,11 @@ impl TextInjector for AsyncInjector {
         modifiers: Modifiers,
         state: KeyEventState,
     ) -> Result<(), InjectorError> {
-        enqueue(
+        let (completion_sender, completion_receiver) = sync_channel(1);
+        wait_for_completion(
             &self.sender,
-            OutputCommand::KeyEvent(keycode, modifiers, state),
+            OutputCommand::KeyEvent(keycode, modifiers, state, completion_sender),
+            completion_receiver,
             self.name,
         )
     }
@@ -389,8 +455,32 @@ mod tests {
         }
     }
 
+    struct FailingInjector;
+
+    impl TextInjector for FailingInjector {
+        fn name(&self) -> &'static str {
+            "failing-test"
+        }
+
+        fn replace(&mut self, _: &str, _: &str) -> Result<(), InjectorError> {
+            Err(InjectorError {
+                backend: self.name(),
+                message: "simulated backend failure".into(),
+                retryable: true,
+            })
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
     #[test]
-    fn serialized_output_admits_work_without_waiting_for_injection() {
+    fn serialized_output_waits_for_backend_completion() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let backend = SlowInjector {
             calls: Arc::clone(&calls),
@@ -398,7 +488,7 @@ mod tests {
         let (mut injector, failures) = spawn_async_injector(Box::new(backend));
         let started = std::time::Instant::now();
         injector.replace(":a", "replacement").unwrap();
-        assert!(started.elapsed() < Duration::from_millis(50));
+        assert!(started.elapsed() >= Duration::from_millis(70));
         injector.replace(":b", "second").unwrap();
         injector.shutdown();
 
@@ -407,5 +497,20 @@ mod tests {
             *calls.lock().unwrap(),
             vec![":a->replacement", ":b->second"]
         );
+    }
+
+    #[test]
+    fn backend_failure_is_returned_to_the_transaction_caller() {
+        let (mut injector, failures) = spawn_async_injector(Box::new(FailingInjector));
+        let error = injector
+            .replace(":a", "replacement")
+            .expect_err("backend failure must not be reported as queue admission success");
+        assert_eq!(error.message, "simulated backend failure");
+
+        let failure = failures
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker failure should be reported");
+        assert_eq!(failure.message, "simulated backend failure");
+        assert!(failure.retryable);
     }
 }
