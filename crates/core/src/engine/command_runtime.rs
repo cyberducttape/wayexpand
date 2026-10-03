@@ -154,6 +154,12 @@ fn run_broker_action(
         .recv_response()
         .map_err(|error| CommandError::WaitFailed(format!("receiving broker response: {error}")))?
     {
+        action_broker::ActionResponse::Success(output) if output.stdout_truncated => {
+            // The broker deliberately keeps a successful protocol response
+            // when output is bounded, but a text expansion must never inject
+            // an incomplete stdout value as if it were complete.
+            Err(CommandError::OutputTooLarge)
+        }
         action_broker::ActionResponse::Success(output) => Ok(output.stdout),
         action_broker::ActionResponse::Error(error) => {
             Err(CommandError::WaitFailed(error.to_string()))
