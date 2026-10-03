@@ -140,6 +140,21 @@ mv "$metainfo_tmp" io.github.cyberducttape.WayExpand.metainfo.xml
 sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
     desktop/wayexpand-ibus.xml
 rm -f desktop/wayexpand-ibus.xml.bak
+sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9]/s//**Version:** $new_version/" \
+    docs/ACTION_BROKER_ARCHITECTURE.md
+rm -f docs/ACTION_BROKER_ARCHITECTURE.md.bak
+sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9]/s//**Version:** $new_version/" \
+    docs/CERTIFICATION_MATRIX.md
+sed -i.bak "0,/^- WayExpand: [0-9]/s//- WayExpand: $new_version/" \
+    docs/CERTIFICATION_MATRIX.md
+sed -i.bak "s/^### v[0-9][0-9.]* (Current)$/### v$new_version (Current)/" \
+    docs/CERTIFICATION_MATRIX.md
+sed -i.bak "s/^\\*\\*WayExpand [0-9][0-9.]* currently lists/**WayExpand $new_version currently lists/" \
+    docs/CERTIFICATION_MATRIX.md
+rm -f docs/CERTIFICATION_MATRIX.md.bak
+sed -i.bak "s/\\\"WayExpand [0-9][0-9.]*\\\"/\\\"WayExpand $new_version\\\"/" \
+    docs/wayexpand.1
+rm -f docs/wayexpand.1.bak
 spec_tmp=$(mktemp)
 awk -v version="$new_version" -v date="$release_date" '
     !inserted && /^%changelog$/ {
@@ -187,6 +202,7 @@ grep -q "^## \[$new_version\]" CHANGELOG.md
 printf '%s\n' "Creating deterministic source archive and PKGBUILD checksum..."
 git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
     io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
+    docs/ACTION_BROKER_ARCHITECTURE.md docs/CERTIFICATION_MATRIX.md docs/wayexpand.1 \
     .gitattributes
 release_tree=$(git write-tree)
 archive_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release.XXXXXX")
@@ -207,6 +223,7 @@ test "$(awk -F"'" '/^sha256sums=/ { print $2; exit }' PKGBUILD)" = "$checksum"
 printf '%s\n' "Committing version updates..."
 git add Cargo.toml Cargo.lock CHANGELOG.md debian/changelog PKGBUILD wayexpand.spec \
     io.github.cyberducttape.WayExpand.metainfo.xml desktop/wayexpand-ibus.xml \
+    docs/ACTION_BROKER_ARCHITECTURE.md docs/CERTIFICATION_MATRIX.md docs/wayexpand.1 \
     .gitattributes
 git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com' \
     commit -m "release: version $new_version"
