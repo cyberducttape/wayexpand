@@ -277,21 +277,8 @@ impl IbusEngineAdapter {
     fn check_capabilities(policy: &OrganizationPolicy) -> Option<String> {
         let violation = policy
             .capability_violation_for_source(injector_capabilities(), source_capabilities())?;
-        if policy.safe_mode {
-            error!(
-                audit_prefix = %policy.audit_prefix,
-                violation = %violation,
-                "IBus expansion disabled: organization policy requires guarantees this route lacks"
-            );
-            Some(violation)
-        } else {
-            warn!(
-                audit_prefix = %policy.audit_prefix,
-                violation = %violation,
-                "IBus route lacks a policy-required guarantee; audit mode permits it"
-            );
-            None
-        }
+        policy_blocks(policy, Some(violation.clone()), "route capability check")
+            .then_some(violation)
     }
 
     /// Why safe-mode policy has disabled expansion for this route, if it has.
@@ -396,25 +383,14 @@ impl IbusEngineAdapter {
                 self.engine.restore_deferred_match(&result.matched_text);
                 continue;
             }
-            if let Some(violation) = self.policy.expansion_policy_violation(
+            let violation = self.policy.expansion_policy_violation(
                 result.insert.len(),
                 result.command_backed,
                 IBUS_BACKEND_NAME,
-            ) {
-                if self.policy.safe_mode {
-                    self.engine.restore_deferred_match(&result.matched_text);
-                    error!(
-                        audit_prefix = %self.policy.audit_prefix,
-                        violation = %violation,
-                        "IBus completed expansion blocked by organization policy"
-                    );
-                    continue;
-                }
-                warn!(
-                    audit_prefix = %self.policy.audit_prefix,
-                    violation = %violation,
-                    "IBus completed expansion violates organization policy; audit mode permits it"
-                );
+            );
+            if policy_blocks(&self.policy, violation, "completed expansion") {
+                self.engine.restore_deferred_match(&result.matched_text);
+                continue;
             }
             // The key that queued the command was committed at queue time,
             // so the whole trigger (and any delimiter) is in the document.
@@ -513,20 +489,12 @@ impl IbusEngineAdapter {
 
         // Pre-flight policy check: prevents side effects (e.g., command execution)
         // before policy approval. Post-execution checks happen after engine.process().
-        if let Some(violation) = wayexpand_core::pre_flight_check(&self.policy) {
-            if self.policy.safe_mode {
-                error!(
-                    audit_prefix = %self.policy.audit_prefix,
-                    violation = %violation,
-                    "IBus blocked by pre-flight policy check (prevents execution)"
-                );
-                return IbusKeyResult::default();
-            }
-            warn!(
-                audit_prefix = %self.policy.audit_prefix,
-                violation = %violation,
-                "IBus pre-flight check violation in audit mode (execution allowed)"
-            );
+        if policy_blocks(
+            &self.policy,
+            wayexpand_core::pre_flight_check(&self.policy),
+            "pre-flight check",
+        ) {
+            return IbusKeyResult::default();
         }
         // When the core has disabled capture (password fields or an explicit
         // pause), do not consume or commit anything on the client's behalf.
@@ -579,50 +547,31 @@ impl IbusEngineAdapter {
             let has_command = pending_result.command.is_some();
 
             if let Some(command) = &pending_result.command {
-                if command.action.is_none() {
-                    if let Some(violation) = self.policy.command_path_violation(&command.program) {
-                        if self.policy.command_path_is_blocked(&command.program) {
-                            self.engine
-                                .restore_deferred_match(&pending_result.matched_text);
-                            error!(
-                                audit_prefix = %self.policy.audit_prefix,
-                                violation = %violation,
-                                "IBus command blocked by organization path policy"
-                            );
-                            policy_blocked = true;
-                            continue;
-                        }
-                        warn!(
-                            audit_prefix = %self.policy.audit_prefix,
-                            violation = %violation,
-                            "IBus command violates organization path policy; audit mode permits it"
-                        );
-                    }
+                if command.action.is_none()
+                    && policy_blocks(
+                        &self.policy,
+                        self.policy.command_path_violation(&command.program),
+                        "command path",
+                    )
+                {
+                    self.engine
+                        .restore_deferred_match(&pending_result.matched_text);
+                    policy_blocked = true;
+                    continue;
                 }
             }
 
             // Check policy BEFORE executing commands
-            if let Some(violation) = self.policy.expansion_policy_violation(
+            let violation = self.policy.expansion_policy_violation(
                 pending_result.template_text.len(),
                 has_command,
                 IBUS_BACKEND_NAME,
-            ) {
-                if self.policy.safe_mode {
-                    self.engine
-                        .restore_deferred_match(&pending_result.matched_text);
-                    error!(
-                        audit_prefix = %self.policy.audit_prefix,
-                        violation = %violation,
-                        "IBus expansion blocked by organization policy (pre-execution)"
-                    );
-                    policy_blocked = true;
-                    continue;
-                }
-                warn!(
-                    audit_prefix = %self.policy.audit_prefix,
-                    violation = %violation,
-                    "IBus expansion violates organization policy; audit mode permits it"
-                );
+            );
+            if policy_blocks(&self.policy, violation, "expansion (pre-execution)") {
+                self.engine
+                    .restore_deferred_match(&pending_result.matched_text);
+                policy_blocked = true;
+                continue;
             }
 
             // Policy-approved commands are queued so ProcessKeyEvent never
@@ -731,6 +680,30 @@ fn replacement_actions(result: &ExpansionResult, key_delivered: bool) -> (String
     }
     actions.push(IbusAction::CommitText(replacement));
     (delivered, actions)
+}
+
+/// Enforce an organization-policy violation: safe mode logs an error and
+/// blocks (returns true); audit mode logs a warning and lets the operation
+/// proceed. `what` names the checked operation in the log line.
+fn policy_blocks(policy: &OrganizationPolicy, violation: Option<String>, what: &str) -> bool {
+    let Some(violation) = violation else {
+        return false;
+    };
+    if policy.safe_mode {
+        error!(
+            audit_prefix = %policy.audit_prefix,
+            violation = %violation,
+            "IBus {what} blocked by organization policy"
+        );
+        true
+    } else {
+        warn!(
+            audit_prefix = %policy.audit_prefix,
+            violation = %violation,
+            "IBus {what} violates organization policy; audit mode permits it"
+        );
+        false
+    }
 }
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
