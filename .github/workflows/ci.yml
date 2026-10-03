@@ -147,11 +147,11 @@ jobs:
       - name: Clippy (locked, release)
         run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
       - name: CLI smoke test
-        run: bash scripts/test-release.sh
+        run: timeout --signal=TERM --kill-after=30s 15m bash scripts/test-release.sh
       - name: UI help output
-        run: cargo run --locked -q -p wayexpand-ui -- --help
+        run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-ui -- --help
       - name: GUI help output
-        run: cargo run --locked -q -p wayexpand-gui -- --help
+        run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-gui -- --help
 
   rust-concurrency:
     name: Concurrent Rust stress (${{ matrix.package }})
@@ -405,7 +405,7 @@ jobs:
           cp -a .cargo vendor "$source_dir/"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
-          rpmbuild -bb --nodeps \
+          timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nodeps \
             --define "_topdir $top/rpmbuild" \
             --define "_sourcedir $top/rpmbuild/SOURCES" \
             wayexpand.spec
