@@ -16,8 +16,8 @@ strict_env = true
 audit_path = "$test_root/action-audit.jsonl"
 
 [actions."integration-echo"]
-program = "/bin/printf"
-args = ["broker-e2e-pass"]
+program = "/bin/sh"
+args = ["-c", "sleep 0.2; printf broker-e2e-pass"]
 timeout_ms = 2000
 enabled = true
 EOF
@@ -27,9 +27,10 @@ chmod 0600 "$config"
     --config "$config" --socket "$socket" >"$test_root/broker.log" 2>&1 &
 broker_pid=$!
 
-SOCKET="$socket" python3 - <<'PY'
+SOCKET="$socket" BROKER_PID="$broker_pid" python3 - <<'PY'
 import json
 import os
+import signal
 import socket
 import time
 
@@ -53,13 +54,17 @@ request = {
     "stdout_capture": True,
 }
 client.sendall((json.dumps(request) + "\n").encode())
+# Exercise graceful shutdown while the connection task still owns the audit
+# logger and is waiting for the action subprocess. The broker must await that
+# task before dropping the logger and exiting.
+time.sleep(0.05)
+os.kill(int(os.environ["BROKER_PID"]), signal.SIGTERM)
 response = json.loads(client.makefile("rb").readline())
 client.close()
 assert response["Success"]["stdout"] == "broker-e2e-pass", response
 assert response["Success"]["exit_code"] == 0, response
 PY
 
-kill -TERM "$broker_pid"
 wait "$broker_pid"
 broker_pid=0
 
