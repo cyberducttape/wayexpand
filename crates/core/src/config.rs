@@ -301,6 +301,22 @@ impl ExpansionConfig {
                 }
             }
         }
+        // Canonically equivalent spellings must match too: a trigger saved
+        // decomposed (`e` + U+0301, common in files from macOS) would
+        // otherwise never fire for precomposed keyboard input, and vice
+        // versa. Matching still consumes exactly the scalars that were
+        // typed, so deletion counts stay correct.
+        use unicode_normalization::UnicodeNormalization;
+        for index in 0..variants.len() {
+            for form in [
+                variants[index].nfc().collect::<String>(),
+                variants[index].nfd().collect::<String>(),
+            ] {
+                if !variants.contains(&form) {
+                    variants.push(form);
+                }
+            }
+        }
         variants
     }
 }
