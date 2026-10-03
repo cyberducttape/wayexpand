@@ -6,4 +6,7 @@ mod dialogs;
 mod import;
 mod library;
 mod settings;
+mod setup;
 mod toolbar;
+
+pub(crate) use setup::onboarding_step;
