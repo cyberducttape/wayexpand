@@ -1,0 +1,71 @@
+name: Fuzz
+
+# Short runs on every change to the parsers and matcher; longer runs nightly.
+# Each target runs for a fixed time; any crash fails the job and the
+# reproducing input is uploaded as an artifact.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "crates/core/**"
+      - "crates/action-broker/**"
+      - "crates/backend-ibus/**"
+      - "fuzz/**"
+      - ".github/workflows/fuzz.yml"
+  pull_request:
+    paths:
+      - "crates/core/**"
+      - "crates/action-broker/**"
+      - "crates/backend-ibus/**"
+      - "fuzz/**"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - config_parse
+          - matcher
+          - broker_frame
+          - espanso_import
+          - pack_import
+          - app_filter
+          - ibus_keys
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: nightly
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run ${{ matrix.target }}
+        working-directory: fuzz
+        env:
+          FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '1200' || '60' }}
+        run: |
+          cargo +nightly fuzz run "${{ matrix.target }}" -- \
+            -max_total_time="${FUZZ_SECONDS}" -rss_limit_mb=2048
+      - name: Upload crash input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

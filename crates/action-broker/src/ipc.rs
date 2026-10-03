@@ -117,7 +117,7 @@ fn is_socket_timeout(error: &std::io::Error) -> bool {
 }
 
 /// Read a newline-terminated line with a size bound.
-fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result<String, IpcError> {
+fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> Result<String, IpcError> {
     // Accumulate bytes before decoding. A UTF-8 code point can straddle two
     // reads; decoding each fill_buf() chunk independently would reject valid
     // JSON whenever that happened at a buffer boundary.
@@ -154,6 +154,14 @@ fn read_bounded_line(reader: &mut BufReader<UnixStream>, limit: usize) -> Result
     }
 
     String::from_utf8(line).map_err(|_| IpcError::InvalidFormat)
+}
+
+/// Decode one request frame exactly as the server does: a newline-terminated,
+/// size-bounded, UTF-8 JSON line. Exposed for fuzzing.
+#[doc(hidden)]
+pub fn decode_request_frame<R: BufRead>(reader: &mut R) -> Result<ActionRequest, IpcError> {
+    let line = read_bounded_line(reader, MAX_MESSAGE_BYTES)?;
+    serde_json::from_str(line.trim()).map_err(IpcError::Json)
 }
 
 /// Broker server listening on a Unix socket.
@@ -353,8 +361,7 @@ impl ServerConnection {
 
     /// Read an action request from the client.
     pub fn read_request(&mut self) -> Result<ActionRequest, IpcError> {
-        let line = read_bounded_line(&mut self.reader, MAX_MESSAGE_BYTES)?;
-        serde_json::from_str(line.trim()).map_err(IpcError::Json)
+        decode_request_frame(&mut self.reader)
     }
 
     /// Send an action response to the client.
