@@ -66,12 +66,23 @@ pub struct RouteContract {
     pub capture: String,
     pub injection: String,
     pub sensitive_fields: bool,
+    pub sensitive_field_support: SensitiveFieldSupport,
     pub atomic_replace: bool,
     pub app_identity: String,
     pub focus_tracking: bool,
     pub status: String,
     pub setup_backend: String,
     pub setup_detail: String,
+}
+
+/// Separates an implemented safety mechanism from live compositor observation
+/// and reviewed certification evidence.
+#[derive(Debug, Deserialize)]
+pub struct SensitiveFieldSupport {
+    pub implemented: bool,
+    pub protocol_signal: String,
+    pub compositor_observation: String,
+    pub certified: bool,
 }
 
 impl RouteContract {

@@ -6,6 +6,11 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Certification claim integrity:** route contracts now distinguish sensitive-
+  field handling implemented by WayExpand, protocol signals, compositor
+  observations, and reviewed certification. Generated support/certification
+  tables expose those states separately, and GNOME input-method-v2 wording no
+  longer incorrectly claims that detection is absent.
 - **Production-readiness hardening:** Action Broker now drains and joins all
   in-flight connection tasks before shutdown so accepted audit events are
   flushed; systemd namespace ownership checks, audit sandbox coverage, and

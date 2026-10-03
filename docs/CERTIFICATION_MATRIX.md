@@ -12,6 +12,13 @@ manual test is not certification; the machine-readable artifact from
 
 > **Important:** "Certified" means thoroughly tested with published procedures. "Experimental" means limited testing or known limitations. "Unsupported" means no active support—may work, but not recommended for production.
 
+Security-sensitive route claims have four separate meanings: **implemented by
+WayExpand**, **advertised by the protocol**, **observed in the compositor
+session**, and **certified on that compositor**. The generated tables below
+keep those claims separate. An implemented content-purpose handler is not
+evidence that a particular compositor delivered a reliable signal, and neither
+is a certification claim.
+
 ## Quick Reference
 
 This target summary is generated from the same machine-readable contract used
@@ -19,21 +26,21 @@ by the certification tools. Declared test paths are not per-session
 availability claims, and no target is certified without reviewed evidence.
 
 <!-- generated:desktop-certification-matrix:start -->
-| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |
-| --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | **Not certified** |
-| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
-| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
+| --- | --- | --- | --- | --- | --- | --- |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Sensitive fields | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | yes | yes | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | no | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | no | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | yes | yes | none | experimental |
+| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | implemented | IBus content purpose | session-dependent | not certified | yes | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
 ## Detailed Certification Results
@@ -84,8 +91,11 @@ authoritative sensitive-field signal where available.
 **Known Limitations:**
 - **No keyboard capture:** Function keys, arrow keys, Escape cannot be expanded. Use text-based alternatives.
 - **No window tracking:** `app_filter`-scoped expansions fail closed; they are not applied globally.
-- **No sensitive field detection:** This route cannot make a password-field
-  protection guarantee.
+- **Sensitive fields:** WayExpand implements input-method-v2 content-purpose
+  handling, but GNOME/Mutter observation is compositor-dependent and has not
+  been certified here. Do not treat the protocol signal as a production
+  password-field protection guarantee until the GNOME password-field scenario
+  has reviewed evidence.
 
 **When to Use:**
 - You primarily type text and don't need special keys
