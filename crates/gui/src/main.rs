@@ -2010,6 +2010,9 @@ impl GuiApp {
         let ctx = ui.ctx().clone();
         let (daemon_label, daemon_color) = match self.daemon_reachable {
             Some(true) => (self.strings.daemon_running_status(), palette.success),
+            Some(false) if self.config.expansion.is_empty() => {
+                (self.strings.daemon_not_enabled_status(), palette.muted)
+            }
             Some(false) => (self.strings.daemon_unreachable_status(), palette.danger),
             None => (self.strings.daemon_unknown_status(), palette.muted),
         };
@@ -3399,6 +3402,13 @@ impl GuiApp {
                                         .small()
                                         .color(palette.muted),
                                     );
+                                    ui.collapsing(strings.app_filter_advanced(), |ui| {
+                                        ui.label(
+                                            RichText::new(strings.app_filter_advanced_help())
+                                                .small()
+                                                .color(palette.muted),
+                                        );
+                                    });
                                 });
 
                                 form_row(
