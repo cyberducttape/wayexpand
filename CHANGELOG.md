@@ -6,6 +6,22 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Daemon status after reconnects:** the control socket no longer keeps
+  serving a capability-less "connected" status after an output reconnect;
+  `doctor` and the GUI previously reported every capability as false and
+  `backend_mode=unknown` until something else changed.
+- **Event-driven daemon wakeups:** finished command expansions,
+  control-socket requests (pause, resume, reload, stop, insert), and
+  shutdown signals wake the evdev and input-method reactor immediately
+  through an eventfd. The 10 ms polling while commands ran is gone; the
+  250 ms idle tick remains for reload debounce, output retries, and focus
+  snapshots.
+- **Maintainability:** the GUI, CLI, and daemon entry points were split into
+  feature modules (GUI `main.rs` 6,168 → 549 lines, CLI 3,411 → 304, daemon
+  2,805 → 516), the daemon reactor loop is now a sequence of named steps, and
+  core configuration errors, organization policy, and secure storage live in
+  their own modules. A `config_edit` benchmark records the cost of a GUI edit
+  at library scale.
 - **IBus safety and correctness:** Action Broker results now reach IBus
   clients. Command workers wake a completion thread that emits each result
   and records it as applied only after emission; previously queued results
