@@ -55,6 +55,8 @@ systemd-run --user \
     --property=ProtectHome=read-only \
     --property=ProtectProc=invisible \
     --property=ProcSubset=pid \
+    --property=SystemCallFilter='~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @resources @swap' \
+    --property=IPAddressDeny=any \
     --property=RestrictAddressFamilies=AF_UNIX \
     --property=ReadWritePaths="$runtime_dir $test_root" \
     -- "$binary" --config "$config" --socket "$socket" \

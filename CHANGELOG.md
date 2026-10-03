@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Action Broker hardening:** the packaged broker now denies all IP address
+  traffic and high-risk syscall groups in addition to its AF_UNIX-only and
+  read-only-home sandbox.
+
 - **Signed organization packs:** packs can be signed with OpenSSH keys
   (`wayexpand pack sign`, `pack verify`); the signature covers a digest of
   the manifest and every snippet file. Manifests can declare
