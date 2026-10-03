@@ -621,6 +621,13 @@ Changes not yet released.
   output is applied only if no intervening input or focus-state change makes
   the original trigger location stale.
 
+## [1.3.1] - 2026-10-03
+
+Release v1.3.1. Move the unreleased entries above into this section before publishing.
+
+- Restrict the packaged Action Broker and its child actions to Unix-domain
+  sockets and document the required no-network service sandbox.
+
 ## [1.3.0] - 2026-10-03
 
 Release v1.3.0. Move the unreleased entries above into this section before publishing.
@@ -899,7 +906,8 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/cyberducttape/wayexpand/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/cyberducttape/wayexpand/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/cyberducttape/wayexpand/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/cyberducttape/wayexpand/compare/v1.1.1...v1.1.2

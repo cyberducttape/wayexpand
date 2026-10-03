@@ -140,12 +140,12 @@ mv "$metainfo_tmp" io.github.cyberducttape.WayExpand.metainfo.xml
 sed -i.bak "s#<version>[^<]*</version>#<version>$new_version</version>#" \
     desktop/wayexpand-ibus.xml
 rm -f desktop/wayexpand-ibus.xml.bak
-sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9]/s//**Version:** $new_version/" \
+sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9][0-9.]*/s//**Version:** $new_version/" \
     docs/ACTION_BROKER_ARCHITECTURE.md
 rm -f docs/ACTION_BROKER_ARCHITECTURE.md.bak
-sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9]/s//**Version:** $new_version/" \
+sed -i.bak "0,/^\\*\\*Version:\\*\\* [0-9][0-9.]*/s//**Version:** $new_version/" \
     docs/CERTIFICATION_MATRIX.md
-sed -i.bak "0,/^- WayExpand: [0-9]/s//- WayExpand: $new_version/" \
+sed -i.bak "0,/^- WayExpand: [0-9][0-9.]*/s//- WayExpand: $new_version/" \
     docs/CERTIFICATION_MATRIX.md
 sed -i.bak "s/^### v[0-9][0-9.]* (Current)$/### v$new_version (Current)/" \
     docs/CERTIFICATION_MATRIX.md
