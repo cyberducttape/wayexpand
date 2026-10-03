@@ -441,6 +441,13 @@ jobs:
     name: Systemd Unit Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # This lane builds without the workspace-wide vendor step. Hosted
+      # runners occasionally terminate sparse-index HTTP/2 streams while
+      # Cargo resolves the locked workspace; retries plus non-multiplexed HTTP
+      # make the release gate deterministic without weakening --locked.
+      CARGO_NET_RETRY: 10
+      CARGO_HTTP_MULTIPLEXING: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
