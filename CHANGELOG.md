@@ -6,6 +6,22 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Production-readiness hardening:** Action Broker now drains and joins all
+  in-flight connection tasks before shutdown so accepted audit events are
+  flushed; systemd namespace ownership checks, audit sandbox coverage, and
+  broker end-to-end shutdown tests were strengthened.
+- **Certification integrity:** compositor certification tooling now validates
+  client coverage by token boundary rather than loose substring matching, so
+  an identifier such as `notgtk` cannot satisfy the required GTK coverage.
+  Missing `jq` is reported before the certification contract is evaluated.
+- **Documentation accuracy:** input-method-v2 and IBus/Fcitx documentation
+  now consistently identify compositor certification and active IME/preedit
+  support as incomplete. Documentation contracts prevent unsupported
+  "fully tested" or universal-composition claims from returning.
+- **CI reliability:** release smoke tests, GUI/UI help checks, and RPM
+  packaging are bounded by explicit timeouts; the systemd lane uses resilient
+  Cargo network settings for hosted runners.
+
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that
   live backend limit.
