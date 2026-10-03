@@ -1,3 +1,4 @@
+use super::storage::{parent_mode_is_secure, root_managed_parent_owner_allowed};
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
