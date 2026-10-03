@@ -82,6 +82,11 @@
   <icon type="stock">wayexpand</icon>
 
   <releases>
+    <release version="1.3.3" date="2026-10-03">
+      <description>
+        <p>Release v1.3.3. See CHANGELOG.md for details.</p>
+      </description>
+    </release>
     <release version="1.3.2" date="2026-10-03">
       <description>
         <p>Release v1.3.2. See CHANGELOG.md for details.</p>

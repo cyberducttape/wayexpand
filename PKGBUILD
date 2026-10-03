@@ -1,6 +1,6 @@
 # Maintainer: Stephan Loesevitz <stephan.loesevitz at gmail dot com>
 pkgname=wayexpand
-pkgver=1.3.2
+pkgver=1.3.3
 pkgrel=1
 pkgdesc="A privacy-first, Wayland-native text expander for Linux"
 arch=('x86_64' 'aarch64')
@@ -20,8 +20,8 @@ optdepends=(
     'systemd: for user service support'
     'ibus: for native GNOME IBus input method integration'
 )
-source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.2/wayexpand-1.3.2.tar.gz")
-sha256sums=('c70de8bc1bfdd57325bd471c94148121558a405780481ced31ae039513314d47')
+source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.3/wayexpand-1.3.3.tar.gz")
+sha256sums=('6c240d77090e8c93c8137ae679aab13aaaaa6df80b48bec85cad6f459df19451')
 conflicts=('wayexpand-git')
 
 prepare() {

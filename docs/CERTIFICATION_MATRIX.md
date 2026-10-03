@@ -1,6 +1,6 @@
 # WayExpand Compositor Certification Matrix
 
-**Version:** 1.3.2  
+**Version:** 1.3.3  
 **Last Updated:** 2026-09-26  
 **Status:** Pre-release certification (manual testing phase)
 
@@ -50,7 +50,7 @@ availability claims, and no target is certified without reviewed evidence.
 **Test Date:** 2026-09-26  
 **Configuration:**
 - Desktop: KDE Plasma 6.6.x
-- WayExpand: 1.3.2
+- WayExpand: 1.3.3
 - Capture: evdev (active-seat logind/uaccess ACL)
 - Injection: libei
 - Window Tracking: KWin D-Bus
@@ -293,7 +293,7 @@ To report testing results for other compositors:
 
 ## Certification Roadmap
 
-### v1.3.2 (Current)
+### v1.3.3 (Current)
 - ⚠️ KDE Plasma 6.6.x heavily manually tested; not certified
 - ✅ Documentation records the evdev password-field limitation
 - Automated certification remains pending
@@ -326,7 +326,7 @@ To report testing results for other compositors:
 
 ### Version-Specific Support
 
-**WayExpand 1.3.2 currently lists these experimental paths:**
+**WayExpand 1.3.3 currently lists these experimental paths:**
 - ⚠️ KDE Plasma 6.6.x (heavily manually tested; not certified)
 - ⚠️ KDE Plasma 6.5.x, 6.7.x (expected to work, experimental)
 - ⚠️ GNOME 47.x, 46.x (input-method-v2 path, experimental)
