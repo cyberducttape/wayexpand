@@ -94,8 +94,12 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
       standalone binary; daemon routing is still disabled.
 - [x] Broker-side executable ownership, permission, working-directory, timeout,
       environment, output, and process-group checks are implemented.
-- [ ] Add an independent service/container sandbox with explicit network and
-      filesystem policy; the current broker is not a security boundary.
+- [x] The packaged broker service has an independent systemd sandbox with
+      explicit no-network (`AF_UNIX` only), read-only-home, and restricted
+      filesystem policy; its contract is tested in CI.
+- [ ] Add per-action OS sandbox profiles or a container boundary for stronger
+      isolation between configured actions; same-UID software and custom broker
+      launches remain outside the packaged unit's trust boundary.
 - [ ] Add a tested execution audit sink with privacy, rotation, failure, and
       integrity semantics.
 - [ ] Wire daemon policy routing with fail-closed behavior when the broker is
