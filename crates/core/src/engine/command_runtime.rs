@@ -392,25 +392,31 @@ fn read_available_stdout(
 }
 
 #[cfg(unix)]
+const STDERR_READS_PER_DRAIN: usize = 64;
+
+#[cfg(unix)]
 fn read_available_stderr(
     stderr: &mut ChildStderr,
     bytes: &mut Vec<u8>,
 ) -> Result<bool, CommandError> {
     let mut buffer = [0_u8; 4096];
-    loop {
+    // Once the diagnostic retention cap is reached, keep draining (discarding)
+    // so the child is never throttled by our bounded buffer. The per-call read
+    // budget returns control to the caller's deadline check even when a child
+    // writes stderr as fast as we can read it; poll reports the pipe ready
+    // again immediately, so this does not slow draining down.
+    for _ in 0..STDERR_READS_PER_DRAIN {
         match stderr.read(&mut buffer) {
             Ok(0) => return Ok(true),
             Ok(count) => {
                 let remaining = MAX_COMMAND_STDERR_BYTES.saturating_sub(bytes.len());
                 bytes.extend_from_slice(&buffer[..count.min(remaining)]);
-                // Once the diagnostic retention cap is reached, keep draining
-                // until WouldBlock. The child must never be throttled by our
-                // bounded diagnostic buffer and the outer poll interval.
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
             Err(_) => return Err(CommandError::OutputChannelLost),
         }
     }
+    Ok(false)
 }
 
 fn diagnostic_stderr(bytes: &[u8]) -> Option<String> {

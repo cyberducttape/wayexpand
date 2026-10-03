@@ -88,8 +88,8 @@ impl ExpansionEngine {
         result: &ExpansionResult,
     ) -> Result<(), InjectorError> {
         let capabilities = injector.capabilities();
-        let output_chars =
-            result.insert.chars().count() + result.reinsert_after.map_or(0, char::len_utf8);
+        let trailing_chars = usize::from(result.reinsert_after.is_some());
+        let output_chars = result.insert.chars().count() + trailing_chars;
         if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
             return Err(InjectorError {
                 backend: injector.name(),
@@ -116,7 +116,13 @@ impl ExpansionEngine {
                 retryable: false,
             });
         }
-        if result.cursor_offset.is_some() && !capabilities.cursor_reposition {
+        // Mirror apply(): an offset that resolves to zero never moves the
+        // cursor, so it must not be rejected on backends without that support.
+        let cursor_move = result
+            .cursor_offset
+            .map(|offset| offset.saturating_add(trailing_chars))
+            .is_some_and(|offset| offset > 0);
+        if cursor_move && !capabilities.cursor_reposition {
             return Err(InjectorError {
                 backend: injector.name(),
                 message: format!(

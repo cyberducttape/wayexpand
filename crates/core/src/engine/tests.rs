@@ -1117,6 +1117,53 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 }
 
 #[test]
+fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
+    // A multi-byte delimiter is still one character toward the limit.
+    let result = ExpansionResult {
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "x".repeat(249),
+        cursor_offset: None,
+        reinsert_after: Some('—'),
+        command_backed: false,
+        undoable: true,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "keysym fallback",
+            max_text_chars: 250,
+            full_unicode: true,
+            ..crate::InjectorCapabilities::default()
+        },
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+    assert!(outcome.is_applied(), "{outcome:?}");
+}
+
+#[test]
+fn apply_allows_zero_cursor_offset_without_cursor_support() {
+    let result = ExpansionResult {
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "x".into(),
+        cursor_offset: Some(0),
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "no cursor",
+            ..crate::InjectorCapabilities::default()
+        },
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+    assert!(outcome.is_applied(), "{outcome:?}");
+}
+
+#[test]
 fn apply_rejects_unrepresentable_unicode_before_output() {
     let result = ExpansionResult {
         trigger: ":x".into(),

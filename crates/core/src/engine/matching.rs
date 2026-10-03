@@ -46,29 +46,31 @@ impl GlobPattern {
         let mut star_value = None;
 
         while let Some(value_character) = value.clone().next() {
-            let consumed = match self.tokens.get(pattern_index) {
-                Some(GlobToken::Literal(character)) if *character == value_character => true,
-                Some(GlobToken::Any) => true,
+            match self.tokens.get(pattern_index) {
                 Some(GlobToken::Star) => {
+                    // Record the backtrack point without consuming input, so
+                    // `*` can match the empty string (`*foo` matches `foo`).
                     star = Some(pattern_index);
                     pattern_index += 1;
                     star_value = Some(value.clone());
-                    false
                 }
-                _ => false,
-            };
-            if consumed {
-                pattern_index += 1;
-                value.next();
-            } else if let Some(star_index) = star {
-                pattern_index = star_index + 1;
-                let star_position = star_value
-                    .as_mut()
-                    .expect("glob star position must exist when backtracking");
-                star_position.next();
-                value = star_position.clone();
-            } else {
-                return false;
+                Some(GlobToken::Literal(character)) if *character == value_character => {
+                    pattern_index += 1;
+                    value.next();
+                }
+                Some(GlobToken::Any) => {
+                    pattern_index += 1;
+                    value.next();
+                }
+                _ => {
+                    let (Some(star_index), Some(star_position)) = (star, star_value.as_mut())
+                    else {
+                        return false;
+                    };
+                    pattern_index = star_index + 1;
+                    star_position.next();
+                    value = star_position.clone();
+                }
             }
         }
 
@@ -255,5 +257,18 @@ mod tests {
         assert!(glob_matches("*你*", "prefix你suffix"));
         assert!(glob_matches("你*Ж", "你éöЖ"));
         assert!(!glob_matches("你*Ж", "你éöж"));
+    }
+
+    #[test]
+    fn star_matches_the_empty_string() {
+        assert!(glob_matches("*foo", "foo"));
+        assert!(glob_matches("a*b", "ab"));
+        assert!(glob_matches("org.*", "org."));
+        assert!(glob_matches("firefox*", "firefox"));
+        assert!(glob_matches("*", ""));
+        assert!(glob_matches("a**b", "ab"));
+        assert!(glob_matches("org.*.app", "org.kde.app"));
+        assert!(!glob_matches("a*b", "a"));
+        assert!(!glob_matches("*foo", "fo"));
     }
 }
