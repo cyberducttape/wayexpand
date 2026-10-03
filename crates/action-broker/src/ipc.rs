@@ -6,7 +6,7 @@
 use crate::config::is_user_or_root_owner;
 use crate::protocol::{ActionError, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES};
 use serde_json;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -103,8 +103,17 @@ pub enum IpcError {
 
 impl IpcError {
     pub fn is_timeout(&self) -> bool {
-        matches!(self, Self::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        // Unix socket timeouts surface as EAGAIN (WouldBlock); other
+        // platforms report TimedOut.
+        matches!(self, Self::Io(error) if is_socket_timeout(error))
     }
+}
+
+fn is_socket_timeout(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    )
 }
 
 /// Read a newline-terminated line with a size bound.
@@ -421,8 +430,15 @@ impl BrokerClient {
             }
             self.stream
                 .set_read_timeout(Some(remaining.min(DEADLINE_POLL_INTERVAL)))?;
-            match self.reader.read_until(b'\n', &mut frame) {
-                Ok(0) if frame.is_empty() => return Err(IpcError::ConnectionClosed),
+            // Bound each read so a peer streaming bytes without a newline
+            // cannot grow the frame past the message limit inside one call.
+            let budget = (MAX_MESSAGE_BYTES + 1).saturating_sub(frame.len()) as u64;
+            match (&mut self.reader)
+                .take(budget)
+                .read_until(b'\n', &mut frame)
+            {
+                // EOF, with or without a partial frame: the broker hung up.
+                Ok(0) => return Err(IpcError::ConnectionClosed),
                 Ok(_) => {
                     if frame.len() > MAX_MESSAGE_BYTES {
                         return Err(IpcError::MessageTooLarge(frame.len(), MAX_MESSAGE_BYTES));
@@ -437,7 +453,7 @@ impl BrokerClient {
                         return serde_json::from_str(line.trim()).map_err(IpcError::Json);
                     }
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(error) if is_socket_timeout(&error) => continue,
                 Err(error) => return Err(IpcError::Io(error)),
             }
         }
@@ -448,6 +464,56 @@ impl BrokerClient {
 mod bounded_frame_tests {
     use super::*;
     use std::io::Write;
+
+    fn client_pair() -> (BrokerClient, UnixStream) {
+        let (stream, peer) = UnixStream::pair().expect("socket pair");
+        let reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        (BrokerClient { stream, reader }, peer)
+    }
+
+    #[test]
+    fn deadline_receive_waits_past_the_poll_interval() {
+        // Unix socket read timeouts surface as WouldBlock; they must be
+        // treated as a poll tick, not a transport failure.
+        let (mut client, mut peer) = client_pair();
+        let writer_thread = std::thread::spawn(move || {
+            std::thread::sleep(DEADLINE_POLL_INTERVAL * 3);
+            let response = ActionResponse::Error(crate::protocol::ActionError::ActionNotFound {
+                action_id: "slow".into(),
+            });
+            write_frame(&mut peer, &encode_frame(&response).expect("encode"))
+                .expect("write response");
+            peer
+        });
+        let response = client
+            .recv_response_until(Instant::now() + Duration::from_secs(5), None)
+            .expect("slow broker response should arrive before the deadline");
+        assert!(matches!(response, ActionResponse::Error(_)));
+        drop(writer_thread.join().expect("writer thread"));
+    }
+
+    #[test]
+    fn deadline_receive_reports_hangup_mid_frame() {
+        let (mut client, mut peer) = client_pair();
+        peer.write_all(b"{\"partial\":")
+            .expect("write partial frame");
+        drop(peer);
+        let started = Instant::now();
+        assert!(matches!(
+            client.recv_response_until(Instant::now() + Duration::from_secs(5), None),
+            Err(IpcError::ConnectionClosed)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn deadline_receive_times_out() {
+        let (mut client, _peer) = client_pair();
+        assert!(matches!(
+            client.recv_response_until(Instant::now() + Duration::from_millis(150), None),
+            Err(IpcError::DeadlineExceeded)
+        ));
+    }
 
     #[test]
     fn bounded_reader_rejects_a_line_without_waiting_for_newline() {
