@@ -201,3 +201,106 @@ pub(crate) fn portal_command(mut args: Args) -> Result<()> {
     };
     Ok(())
 }
+
+/// `wayexpand explain`: ask the running daemon, which knows the focused
+/// application, field sensitivity, composition, pause state, and output
+/// route; without a daemon (or with `--offline`/`--app`), explain from the
+/// configuration and organization policy alone.
+pub(crate) fn explain_command(mut args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand explain <text> [--json] [--offline] [--app ID] [config]";
+    let text = args.next().ok_or_else(|| usage_error(USAGE))?;
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let offline_flag = rest.iter().position(|arg| arg == "--offline");
+    let offline = offline_flag.is_some();
+    if let Some(index) = offline_flag {
+        rest.remove(index);
+    }
+    let app = take_option(&mut rest, "--app")?;
+    if rest.len() > 1 {
+        usage_bail!("{USAGE}");
+    }
+    if text.is_empty() || text.chars().any(char::is_control) {
+        usage_bail!("the text to explain cannot be empty or contain control characters");
+    }
+    let config_path = rest.into_iter().next().map(PathBuf::from);
+
+    let mut daemon_unreachable = None;
+    if !offline && app.is_none() && config_path.is_none() {
+        let request = if requested_json {
+            format!("explain-json {text}")
+        } else {
+            format!("explain {text}")
+        };
+        match control_request(&request) {
+            Ok(response) if !response.starts_with("unknown command") => {
+                print!("{response}");
+                return Ok(());
+            }
+            Ok(_) => {
+                daemon_unreachable =
+                    Some("the running daemon is too old to explain matches".to_owned())
+            }
+            Err(error) => daemon_unreachable = Some(format!("not reachable ({error})")),
+        }
+    }
+
+    let path = config_path.unwrap_or_else(default_config_path);
+    let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+    let policy = load_policy()
+        .map_err(|error| config_error(format!("organization policy is invalid: {error}")))?;
+    let mut engine = ExpansionEngine::new(config).map_err(|error| {
+        config_error(format!("configuration invalid: {}", error.safe_summary()))
+    })?;
+    engine
+        .apply_administrator_policy(&policy)
+        .map_err(|error| {
+            config_error(format!("configuration invalid: {}", error.safe_summary()))
+        })?;
+    if let Some(app) = &app {
+        engine.process(InputEvent::WindowChanged(Some(
+            wayexpand_core::WindowContext {
+                app_id: Some(app.clone()),
+                title: None,
+            },
+        )));
+    }
+    let selection = wayexpand_backend_selection::auto_select(None, None).ok();
+    let backend = selection
+        .as_ref()
+        .map(|selection| {
+            wayexpand_core::policy_backend_name(selection.pair.source(), selection.pair.backend())
+        })
+        .unwrap_or("none");
+    let mut explanation = engine.explain(&text, backend);
+    match daemon_unreachable {
+        Some(reason) => explanation.push(
+            "daemon",
+            wayexpand_core::CheckStatus::Fail,
+            format!("{reason}; nothing expands until it runs"),
+        ),
+        None => explanation.push(
+            "daemon",
+            wayexpand_core::CheckStatus::Info,
+            "offline explanation from the configuration; live focus, field, and output state \
+             are not included",
+        ),
+    }
+    if requested_json {
+        let suppressed_by = explanation.suppressed_by().map(|check| check.name);
+        println!(
+            "{}",
+            serde_json::json!({
+                "would_expand": suppressed_by.is_none(),
+                "suppressed_by": suppressed_by,
+                "typed": explanation.typed,
+                "snippet": explanation.snippet,
+                "checks": explanation.checks,
+                "offline": true,
+            })
+        );
+    } else {
+        print!("{}", explanation.render_text());
+    }
+    Ok(())
+}

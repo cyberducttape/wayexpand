@@ -3913,3 +3913,136 @@ fn aliases_are_omitted_from_saved_toml_when_empty() {
     let text = toml::to_string(&config).unwrap();
     assert!(!text.contains("aliases"), "{text}");
 }
+
+fn explain_engine(config: &str) -> ExpansionEngine {
+    ExpansionEngine::new(Config::parse(config).unwrap()).unwrap()
+}
+
+#[test]
+fn explain_reports_an_app_filter_mismatch() {
+    let mut engine = explain_engine(
+        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Best\"\nmatch_mode = \"word-boundary\"\napp_filter = [\"com.slack.Slack\"]\n",
+    );
+    engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
+        app_id: Some("org.kde.konsole".into()),
+        title: None,
+    })));
+    let explanation = engine.explain(":sig", "libei");
+    let failed = explanation.suppressed_by().unwrap();
+    assert_eq!(failed.name, "app filter");
+    assert!(
+        failed.detail.contains("org.kde.konsole"),
+        "{}",
+        failed.detail
+    );
+    assert!(failed.detail.contains("com.slack.Slack"));
+    let text = explanation.render_text();
+    assert!(text.contains("✓ trigger: recognized as :sig"), "{text}");
+    assert!(text.contains("Result: suppressed by app filter."), "{text}");
+    // Replacement content never appears in an explanation.
+    assert!(!text.contains("Best"));
+}
+
+#[test]
+fn explain_reports_runtime_state_that_blocks_matching() {
+    let config = "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"x\"\n";
+    let mut engine = explain_engine(config);
+    assert!(engine.explain(":sig", "libei").would_expand());
+
+    engine.set_user_paused(true);
+    assert_eq!(
+        engine
+            .explain(":sig", "libei")
+            .suppressed_by()
+            .unwrap()
+            .name,
+        "paused"
+    );
+    engine.set_user_paused(false);
+
+    engine.process(InputEvent::FocusChanged { sensitive: true });
+    assert_eq!(
+        engine
+            .explain(":sig", "libei")
+            .suppressed_by()
+            .unwrap()
+            .name,
+        "sensitive field"
+    );
+    engine.process(InputEvent::FocusChanged { sensitive: false });
+
+    engine.process(InputEvent::CompositionChanged { active: true });
+    assert_eq!(
+        engine
+            .explain(":sig", "libei")
+            .suppressed_by()
+            .unwrap()
+            .name,
+        "composition"
+    );
+}
+
+#[test]
+fn explain_gives_hints_for_unrecognized_triggers() {
+    let engine = explain_engine(
+        "[[expansion]]\ntrigger = \":Sig\"\nreplacement = \"x\"\n\
+         [[expansion]]\ntrigger = \":address\"\nreplacement = \"y\"\n",
+    );
+    let case = engine.explain(":sig", "libei");
+    assert!(
+        case.checks[0].detail.contains("differs only in case"),
+        "{:?}",
+        case.checks
+    );
+    let prefix = engine.explain(":addr", "libei");
+    assert!(prefix.checks[0]
+        .detail
+        .contains("only the start of :address"));
+    let none = engine.explain(":nothing", "libei");
+    assert_eq!(none.suppressed_by().unwrap().name, "trigger");
+}
+
+#[test]
+fn explain_names_aliases_disabled_snippets_and_prefix_waits() {
+    let engine = explain_engine(
+        "[[expansion]]\ntrigger = \":addr\"\naliases = [\":office\"]\nreplacement = \"x\"\n\
+         [[expansion]]\ntrigger = \":address\"\nreplacement = \"y\"\n\
+         [[expansion]]\ntrigger = \":off\"\nreplacement = \"z\"\nenabled = false\n",
+    );
+    let alias = engine.explain(":office", "libei");
+    assert!(alias.checks[0].detail.contains("alias of :addr"));
+    assert!(alias.would_expand());
+    let waits = engine.explain(":addr", "libei");
+    assert!(
+        waits
+            .checks
+            .iter()
+            .any(|check| check.status == crate::CheckStatus::Warn
+                && check.detail.contains(":address"))
+    );
+    assert_eq!(
+        engine
+            .explain(":off", "libei")
+            .suppressed_by()
+            .unwrap()
+            .name,
+        "enabled"
+    );
+}
+
+#[test]
+fn explain_applies_safe_mode_backend_policy() {
+    let engine = explain_engine(
+        "[organization]\nsafe_mode = true\nallowed_backends = [\"input-method-v2\"]\n\
+         [[expansion]]\ntrigger = \":sig\"\nreplacement = \"x\"\n",
+    );
+    assert_eq!(
+        engine
+            .explain(":sig", "libei")
+            .suppressed_by()
+            .unwrap()
+            .name,
+        "policy"
+    );
+    assert!(engine.explain(":sig", "input-method-v2").would_expand());
+}

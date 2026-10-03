@@ -473,6 +473,25 @@ daemon engine and reset after a successful configuration reload.
 
 ---
 
+### `wayexpand explain <text>` and the `explain` control command
+
+`wayexpand explain <text> [--json]` reports, check by check, whether typed text
+would expand. With a running daemon it sends the control line `explain <text>`
+(or `explain-json <text>`) and the daemon answers from its live engine state;
+text must be 1–256 characters without control characters. Without a daemon, or
+with `--offline`, `--app ID`, or an explicit config path, the CLI explains from
+the configuration and organization policy and adds a `daemon` check.
+
+JSON fields: `would_expand` (bool), `suppressed_by` (name of the first failing
+check, or `null`), `typed`, `snippet` (configured trigger of the resolved
+snippet, or `null`), `checks` (array of `{name, status, detail}` with `status`
+one of `pass`, `fail`, `warn`, `info`), and `offline: true` for offline
+answers. **Stability:** 🧪 **Experimental** — check names and details may
+change; `would_expand` and `suppressed_by` are intended to stay. Replacement
+text is never included. The command exits 0 whether or not the text expands.
+
+---
+
 ### `wayexpand insert <trigger>` and the `insert` control command
 
 `wayexpand insert <trigger>` asks the running daemon to type the snippet with

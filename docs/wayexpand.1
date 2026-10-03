@@ -31,6 +31,12 @@ Show the active daemon status. The JSON form is stable for automation.
 .B doctor [--json] [CONFIG]
 Report available input and output backends and their compatibility.
 .TP
+.B explain TEXT [--json] [--offline] [--app ID] [CONFIG]
+Explain why TEXT would or would not expand. With a running daemon the answer
+uses its live state (focused application, sensitive field, composition, pause,
+output backend); otherwise, or with \-\-offline or \-\-app, it is computed
+from the configuration and organization policy. Replacement text is never shown.
+.TP
 .B certify [--json]
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.

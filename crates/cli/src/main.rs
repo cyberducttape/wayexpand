@@ -15,8 +15,8 @@ use commands::config::{
 };
 use commands::daemon::{control_command, insert_command};
 use commands::system::{
-    backend_command, certify_command, doctor_command, explain_backend_command, portal_command,
-    setup_command,
+    backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
+    portal_command, setup_command,
 };
 use doctor::backends::{
     print_backend_diagnostics, print_backend_selection_explain, session_description,
@@ -111,6 +111,7 @@ fn run() -> Result<()> {
         Some("edit") => edit_command(args)?,
         Some("setup") => setup_command(args)?,
         Some("doctor") => doctor_command(args)?,
+        Some("explain") => explain_command(args)?,
         Some("certify") => certify_command(args)?,
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
@@ -138,6 +139,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "doctor [--json] [config]",
                 "Diagnose configuration and backends",
+            ),
+            (
+                "explain <text> [--json] [--offline] [--app ID] [config]",
+                "Explain why typed text would or would not expand",
             ),
             ("edit [config]", "Open the graphical snippet editor"),
         ],

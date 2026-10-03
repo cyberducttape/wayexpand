@@ -1,7 +1,9 @@
 pub mod command_runtime;
 pub mod expansion;
+pub mod explain;
 pub mod matching;
 pub mod transaction;
+pub use explain::{CheckStatus, ExplainCheck, Explanation};
 pub use transaction::TransactionOutcome;
 
 use matching::GlobPattern;

@@ -30,6 +30,9 @@ pub struct ControlServer {
     /// user action and a stale queued one must never fire later.
     insert_requested: Arc<Mutex<Option<InsertRequest>>>,
     focus_snapshot: Arc<Mutex<FocusSnapshot>>,
+    /// A pending `explain` request, answered by the reactor from its live
+    /// engine state.
+    explain_requested: Arc<Mutex<Option<ExplainRequest>>>,
     status: Arc<Mutex<String>>,
     /// Wakes the reactor after a request that changes daemon state.
     waker: crate::waker::WakerSlot,
@@ -43,6 +46,17 @@ pub struct InsertRequest {
     pub focus_token: Option<String>,
     pub focus_generation: Option<u64>,
 }
+
+/// An `explain <text>` request waiting for the reactor.
+pub struct ExplainRequest {
+    pub text: String,
+    pub json: bool,
+    pub reply: std::sync::mpsc::SyncSender<String>,
+}
+
+/// How long a control client waits for the reactor to answer an explain
+/// request before being told the daemon is busy.
+const EXPLAIN_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FocusSnapshot {
@@ -60,6 +74,7 @@ impl ControlServer {
             pause_requested: Arc::new(AtomicBool::new(false)),
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
+            explain_requested: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("starting".into())),
             waker: Arc::default(),
             path: None,
@@ -128,6 +143,8 @@ impl ControlServer {
         let pause_requested = Arc::new(AtomicBool::new(false));
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
+        let explain_requested = Arc::new(Mutex::new(None));
+        let explain_slot = Arc::clone(&explain_requested);
         let status = Arc::new(Mutex::new("starting".into()));
         let waker: crate::waker::WakerSlot = Arc::default();
         let waker_slot = Arc::clone(&waker);
@@ -148,6 +165,7 @@ impl ControlServer {
                     pause: Arc::clone(&pause_flag),
                     insert: Arc::clone(&insert_slot),
                     focus: Arc::clone(&focus_slot),
+                    explain: Arc::clone(&explain_slot),
                     status: Arc::clone(&status_flag),
                     waker: Arc::clone(&waker_slot),
                 };
@@ -181,6 +199,7 @@ impl ControlServer {
             pause_requested,
             insert_requested,
             focus_snapshot,
+            explain_requested,
             status,
             waker,
             path: Some(path),
@@ -189,6 +208,14 @@ impl ControlServer {
     }
 
     /// Take the pending insert request, if any.
+    /// Take a pending explain request; the reactor answers it on `reply`.
+    pub fn take_explain_request(&self) -> Option<ExplainRequest> {
+        self.explain_requested
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+    }
+
     pub fn take_insert_request(&self) -> Option<InsertRequest> {
         self.insert_requested
             .lock()
@@ -403,6 +430,7 @@ struct Flags {
     pause: Arc<AtomicBool>,
     insert: Arc<Mutex<Option<InsertRequest>>>,
     focus: Arc<Mutex<FocusSnapshot>>,
+    explain: Arc<Mutex<Option<ExplainRequest>>>,
     status: Arc<Mutex<String>>,
     waker: crate::waker::WakerSlot,
 }
@@ -442,6 +470,41 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
     }))
 }
 
+/// Handle `explain <text>` / `explain-json <text>`: hand the text to the
+/// reactor and wait for its answer. Returns `None` for other commands.
+fn explain_request(
+    line: &str,
+    slot: &Mutex<Option<ExplainRequest>>,
+    waker: &crate::waker::WakerSlot,
+) -> Result<Option<String>> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let (text, json) = if let Some(text) = line.strip_prefix("explain-json ") {
+        (text, true)
+    } else if let Some(text) = line.strip_prefix("explain ") {
+        (text, false)
+    } else {
+        return Ok(None);
+    };
+    if !(1..=256).contains(&text.chars().count()) || text.chars().any(char::is_control) {
+        return Ok(Some("invalid text\n".into()));
+    }
+    let (reply, answer) = std::sync::mpsc::sync_channel(1);
+    *slot
+        .lock()
+        .map_err(|_| anyhow::anyhow!("explain lock poisoned"))? = Some(ExplainRequest {
+        text: text.to_owned(),
+        json,
+        reply,
+    });
+    crate::waker::wake_slot(waker);
+    Ok(Some(
+        answer
+            .recv_timeout(EXPLAIN_REPLY_TIMEOUT)
+            .unwrap_or_else(|_| "explain unavailable: the daemon did not answer in time\n".into()),
+    ))
+}
+
 fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     let Flags {
         reload,
@@ -449,6 +512,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         pause,
         insert,
         focus,
+        explain,
         status,
         waker,
     } = flags;
@@ -489,6 +553,10 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         stream.write_all(response.as_bytes())?;
         return Ok(());
     }
+    if let Some(response) = explain_request(&command, &explain, &waker)? {
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
     let response = match command.trim() {
         "status" => format!(
             "running\n{}\n",
@@ -526,7 +594,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             crate::waker::wake_slot(&waker);
             "resumed\n".to_string()
         }
-        _ => "unknown command; expected status, focus, reload, pause, resume, stop, or insert <trigger>\n"
+        _ => "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
             .to_string(),
     };
     stream.write_all(response.as_bytes())?;
@@ -569,6 +637,7 @@ mod tests {
                     pause: pause_worker,
                     insert,
                     focus,
+                    explain: Arc::new(Mutex::new(None)),
                     status: status_worker,
                     waker: Arc::default(),
                 },
@@ -628,6 +697,7 @@ mod tests {
             pause,
             insert: Arc::clone(&insert),
             focus: Arc::clone(&focus),
+            explain: Arc::new(Mutex::new(None)),
             status,
             waker: Arc::default(),
         };
@@ -686,7 +756,7 @@ mod tests {
         let status = Arc::new(Mutex::new("starting".into()));
         assert_eq!(
             request("bogus\n", &reload, &stop, &pause, &status),
-            "unknown command; expected status, focus, reload, pause, resume, stop, or insert <trigger>\n"
+            "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
@@ -701,7 +771,7 @@ mod tests {
         let command = format!("{}\n", "x".repeat(MAX_COMMAND_BYTES + 1024));
         assert_eq!(
             request(&command, &reload, &stop, &pause, &status),
-        "unknown command; expected status, focus, reload, pause, resume, stop, or insert <trigger>\n"
+        "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
@@ -805,6 +875,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::new(Mutex::new(None)),
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
+            explain: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: slot,
         };
