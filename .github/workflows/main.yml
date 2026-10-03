@@ -60,8 +60,19 @@ jobs:
         run: |
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
-          git push launchpad \
-            refs/heads/main:refs/heads/main
+          # GitHub is the canonical repository.  This explicit lease also
+          # repairs a deliberate GitHub history rewrite (for example, when
+          # commit identities are normalized) while refusing to overwrite a
+          # Launchpad update that races the read below.
+          launchpad_main="$(git ls-remote launchpad refs/heads/main \
+            | awk 'NR == 1 { print $1 }')"
+          if [ -n "$launchpad_main" ]; then
+            git push launchpad \
+              --force-with-lease="refs/heads/main:$launchpad_main" \
+              refs/heads/main:refs/heads/main
+          else
+            git push launchpad refs/heads/main:refs/heads/main
+          fi
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
             local_commit="$(git rev-list -1 "${tag}^{commit}")"
