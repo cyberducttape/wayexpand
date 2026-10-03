@@ -1,6 +1,6 @@
 # Action Broker Architecture
 
-**Version:** 1.3.1
+**Version:** 1.3.2
 **Status:** Integrated named-action execution; the packaged service applies a no-network/read-only-home sandbox
 **Next:** Per-action OS sandbox profiles and broader operational tooling
 
