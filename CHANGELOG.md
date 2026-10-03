@@ -18,6 +18,10 @@ Changes not yet released.
   now consistently identify compositor certification and active IME/preedit
   support as incomplete. Documentation contracts prevent unsupported
   "fully tested" or universal-composition claims from returning.
+- **Documentation accuracy:** first-run guidance now points users to a normal
+  text field and Desktop details instead of implying universal application
+  coverage; the capture trade-off guide no longer presents uncertified
+  input-method paths as covering a fixed percentage of users or "just working."
 - **CI reliability:** release smoke tests, GUI/UI help checks, and RPM
   packaging are bounded by explicit timeouts; the systemd lane uses resilient
   Cargo network settings for hosted runners.

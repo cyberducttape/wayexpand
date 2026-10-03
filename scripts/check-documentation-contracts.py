@@ -194,6 +194,12 @@ def main() -> int:
     if tradeoffs.count("no release certification published") < 3:
         errors.append("capture trade-off guide must mark each input-method compositor group uncertified")
 
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if "then in any app" in readme.lower():
+        errors.append("README first-run instructions must not promise universal application coverage")
+    if "80% of users" in tradeoffs or "just works" in tradeoffs.lower():
+        errors.append("capture trade-off guide must not turn an uncertified route into a universal promise")
+
     for document in active_documents():
         text = document.read_text(encoding="utf-8")
         relative = document.relative_to(ROOT)

@@ -82,7 +82,9 @@ accept portal consent for you.
 1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
    terminal.
 2. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
-3. **Try it** — type the trigger in *Matcher preview*, then in any app.
+3. **Try it** — type the trigger in *Matcher preview*, then in a normal text
+   field in an app you use. Check *Desktop details* for the capabilities and
+   certification status of the active integration.
 
 Set up the picker by adding a desktop shortcut (for example <kbd>Super</kbd> +
 <kbd>.</kbd>) that runs `wayexpand-gui --picker`. Scripts can do the same with
