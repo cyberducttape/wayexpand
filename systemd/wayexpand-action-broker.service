@@ -29,6 +29,7 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
 MemoryMax=256M
 TasksMax=32
 LimitNOFILE=64

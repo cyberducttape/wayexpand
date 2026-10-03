@@ -55,6 +55,7 @@ systemd-run --user \
     --property=ProtectHome=read-only \
     --property=ProtectProc=invisible \
     --property=ProcSubset=pid \
+    --property=RestrictAddressFamilies=AF_UNIX \
     --property=ReadWritePaths="$runtime_dir $test_root" \
     -- "$binary" --config "$config" --socket "$socket" \
     >"$state_dir/systemd-run.log" 2>&1 &

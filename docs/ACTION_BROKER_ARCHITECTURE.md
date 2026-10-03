@@ -1,7 +1,7 @@
 # Action Broker Architecture
 
 **Version:** 1.3.0
-**Status:** Integrated named-action execution; network/filesystem isolation remains a deployment responsibility
+**Status:** Integrated named-action execution; the packaged service applies a no-network/read-only-home sandbox
 **Next:** Per-action OS sandbox profiles and broader operational tooling
 
 ## Overview
@@ -151,6 +151,10 @@ To build the standalone broker from a checkout:
 
 The packaged user service uses `~/.config/wayexpand/broker.toml` and
 `$XDG_RUNTIME_DIR/wayexpand-broker.sock`; enable it after creating that policy.
+The packaged unit restricts the broker and its child actions to `AF_UNIX`, uses
+`ProtectSystem=strict`, and exposes only the configuration, runtime socket, and
+state directory as writable. Custom service launches must reproduce these
+restrictions before being used for production actions.
 
 ## Next: Enhanced Control (planned)
 
