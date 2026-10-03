@@ -49,18 +49,24 @@ pub struct FocusSnapshot {
 }
 
 impl ControlServer {
+    /// A control server with no socket: flags and status are kept in memory
+    /// only. Used when no runtime directory is available, and by tests.
+    pub fn detached() -> Self {
+        Self {
+            reload_requested: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            pause_requested: Arc::new(AtomicBool::new(false)),
+            insert_requested: Arc::new(Mutex::new(None)),
+            focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
+            status: Arc::new(Mutex::new("starting".into())),
+            path: None,
+            socket_identity: None,
+        }
+    }
+
     pub fn start() -> Result<Self> {
         let Some(requested_path) = socket_path() else {
-            return Ok(Self {
-                reload_requested: Arc::new(AtomicBool::new(false)),
-                stop_requested: Arc::new(AtomicBool::new(false)),
-                pause_requested: Arc::new(AtomicBool::new(false)),
-                insert_requested: Arc::new(Mutex::new(None)),
-                focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
-                status: Arc::new(Mutex::new("starting".into())),
-                path: None,
-                socket_identity: None,
-            });
+            return Ok(Self::detached());
         };
         let path = secure_socket_path(&requested_path)?;
         validate_socket_parent(&path)?;
@@ -208,6 +214,15 @@ impl ControlServer {
                 *current = status.into_string();
             }
         }
+    }
+
+    /// The status body currently served to clients.
+    #[cfg(test)]
+    pub fn status_text(&self) -> String {
+        self.status
+            .lock()
+            .map(|status| status.clone())
+            .unwrap_or_default()
     }
 }
 
