@@ -42,21 +42,21 @@ your session. E2E certification changes only after reviewed real-session
 evidence exists.
 
 <!-- generated:desktop-certification-matrix:start -->
-| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |
-| --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | **Not certified** |
-| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
-| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | **Not certified** |
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
+| --- | --- | --- | --- | --- | --- | --- |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Sensitive fields | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | yes | yes | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | no | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | no | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | yes | yes | none | experimental |
+| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | implemented | IBus content purpose | session-dependent | not certified | yes | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an

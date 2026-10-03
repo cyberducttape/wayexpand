@@ -87,6 +87,23 @@ def main() -> int:
     route_catalog = json.loads(
         (ROOT / "crates/backend-selection/routes.json").read_text(encoding="utf-8")
     )
+    route_sensitive_support = {
+        route["id"]: route.get("sensitive_field_support")
+        for route in route_catalog.get("routes", [])
+        if isinstance(route, dict) and "id" in route
+    }
+    if any(not isinstance(support, dict) for support in route_sensitive_support.values()):
+        errors.append("route catalog must define structured sensitive-field support metadata")
+    gnome_section = certification_doc.split("### ⚠️ GNOME", 1)
+    gnome_text = gnome_section[1].split("\n### ", 1)[0] if len(gnome_section) == 2 else ""
+    if "No sensitive field detection" in gnome_text:
+        errors.append("GNOME certification prose must not erase input-method implementation")
+    if (
+        "implements input-method-v2" not in gnome_text.lower()
+        or "compositor-dependent" not in gnome_text.lower()
+        or "certified here" not in gnome_text.lower()
+    ):
+        errors.append("GNOME certification prose must distinguish implementation from certification")
     recommended_description = route_catalog.get("recommended_description")
     if not isinstance(recommended_description, str) or not recommended_description:
         errors.append("backend route catalog is missing recommended_description")

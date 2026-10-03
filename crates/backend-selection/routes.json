@@ -8,6 +8,12 @@
       "capture": "ibus",
       "injection": "ibus",
       "sensitive_fields": true,
+      "sensitive_field_support": {
+        "implemented": true,
+        "protocol_signal": "IBus content purpose",
+        "compositor_observation": "session-dependent",
+        "certified": false
+      },
       "atomic_replace": true,
       "app_identity": "none",
       "focus_tracking": false,
@@ -23,6 +29,12 @@
       "capture": "evdev",
       "injection": "libei",
       "sensitive_fields": false,
+      "sensitive_field_support": {
+        "implemented": false,
+        "protocol_signal": "none",
+        "compositor_observation": "unavailable",
+        "certified": false
+      },
       "atomic_replace": false,
       "app_identity": "kwin",
       "focus_tracking": true,
@@ -38,6 +50,12 @@
       "capture": "evdev",
       "injection": "wlroots-virtual-keyboard",
       "sensitive_fields": false,
+      "sensitive_field_support": {
+        "implemented": false,
+        "protocol_signal": "none",
+        "compositor_observation": "unavailable",
+        "certified": false
+      },
       "atomic_replace": false,
       "app_identity": "none",
       "focus_tracking": false,
@@ -53,6 +71,12 @@
       "capture": "input-method-v2",
       "injection": "input-method-v2",
       "sensitive_fields": true,
+      "sensitive_field_support": {
+        "implemented": true,
+        "protocol_signal": "input-method-v2 content purpose",
+        "compositor_observation": "compositor-dependent",
+        "certified": false
+      },
       "atomic_replace": true,
       "app_identity": "none",
       "focus_tracking": false,

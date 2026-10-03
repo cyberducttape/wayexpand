@@ -17,6 +17,7 @@ END = "<!-- generated:desktop-certification-matrix:end -->"
 ROUTE_START = "<!-- generated:route-contract:start -->"
 ROUTE_END = "<!-- generated:route-contract:end -->"
 VALID_CERTIFICATION = {"not-certified", "certified"}
+VALID_SENSITIVE_OBSERVATION = {"not-observed", "observed", "unavailable"}
 
 
 def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
@@ -39,8 +40,8 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
         for target_id in targets_for_route:
             route_paths.setdefault(target_id, []).append(path)
     rows = [
-        "| Target | Desktop/session | Declared test paths | Window tracking | App filters | E2E certification |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     seen: set[str] = set()
     for target in targets:
@@ -53,6 +54,7 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
         tracker = target.get("window_tracker")
         app_filter = target.get("application_filter")
         certification = target.get("certification_status")
+        sensitive_observation = target.get("sensitive_field_observation")
         evidence_path = target.get("certification_evidence")
         if not isinstance(target_id, str) or not target_id or target_id in seen:
             raise ValueError("certification target IDs must be unique non-empty strings")
@@ -75,6 +77,8 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
             raise ValueError(f"{target_id}: invalid application_filter status")
         if certification not in VALID_CERTIFICATION:
             raise ValueError(f"{target_id}: invalid certification_status")
+        if sensitive_observation not in VALID_SENSITIVE_OBSERVATION:
+            raise ValueError(f"{target_id}: invalid sensitive_field_observation")
         if certification == "certified":
             if not isinstance(evidence_path, str) or not evidence_path:
                 raise ValueError(f"{target_id}: certified status requires certification_evidence")
@@ -93,10 +97,15 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
         elif evidence_path is not None:
             raise ValueError(f"{target_id}: not-certified targets must not claim an evidence artifact")
         app_label = "Available in declared path" if app_filter == "supported" else "Unavailable"
+        observation_label = {
+            "not-observed": "Not observed",
+            "observed": "Observed",
+            "unavailable": "Unavailable",
+        }[sensitive_observation]
         certification_label = "Certified" if certification == "certified" else "Not certified"
         rows.append(
             f"| `{target_id}` | {display} | {', '.join(paths)} | {tracker} | "
-            f"{app_label} | **{certification_label}** |"
+            f"{app_label} | {observation_label} | **{certification_label}** |"
         )
     return "\n".join([START, *rows, END])
 
@@ -110,15 +119,15 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         raise ValueError("certification matrix targets must be an array")
     target_ids = {target.get("id") for target in targets if isinstance(target, dict)}
     rows = [
-        "| Route | Capture | Injection | Sensitive fields | Atomic replace | App identity | Status |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     seen: set[str] = set()
     for route in routes:
         if not isinstance(route, dict):
             raise ValueError("route contract must be an object")
         required = (
-            "id", "label", "path", "capture", "injection", "sensitive_fields",
+            "id", "label", "path", "capture", "injection", "sensitive_fields", "sensitive_field_support",
             "atomic_replace", "app_identity", "focus_tracking", "status",
             "setup_backend", "setup_detail", "certification_targets",
         )
@@ -133,6 +142,21 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         for key in ("sensitive_fields", "atomic_replace", "focus_tracking"):
             if not isinstance(route[key], bool):
                 raise ValueError(f"{route_id}: {key} must be boolean")
+        support = route["sensitive_field_support"]
+        if not isinstance(support, dict):
+            raise ValueError(f"{route_id}: sensitive_field_support must be an object")
+        expected_support = {"implemented", "protocol_signal", "compositor_observation", "certified"}
+        if set(support) != expected_support:
+            raise ValueError(f"{route_id}: sensitive_field_support has unexpected fields")
+        if not isinstance(support["implemented"], bool) or not isinstance(support["certified"], bool):
+            raise ValueError(f"{route_id}: sensitive field implementation/certification must be boolean")
+        for key in ("protocol_signal", "compositor_observation"):
+            if not isinstance(support[key], str) or not support[key]:
+                raise ValueError(f"{route_id}: {key} must be a non-empty string")
+        if support["certified"] and route["status"] != "supported":
+            raise ValueError(f"{route_id}: certified sensitive-field support requires a supported route")
+        if support["implemented"] != route["sensitive_fields"]:
+            raise ValueError(f"{route_id}: sensitive_fields must mirror sensitive_field_support.implemented")
         seen.add(route_id)
         if not isinstance(route["certification_targets"], list) or not all(
             isinstance(target, str) and target in target_ids
@@ -141,7 +165,9 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
             raise ValueError(f"{route_id}: certification targets must name known targets")
         rows.append(
             f"| `{route_id}` ({route['label']}) | {route['capture']} | {route['injection']} | "
-            f"{'yes' if route['sensitive_fields'] else 'no'} | "
+            f"{'implemented' if support['implemented'] else 'not implemented'} | "
+            f"{support['protocol_signal']} | {support['compositor_observation']} | "
+            f"{'certified' if support['certified'] else 'not certified'} | "
             f"{'yes' if route['atomic_replace'] else 'no'} | {route['app_identity']} | "
             f"{route['status']} |"
         )
