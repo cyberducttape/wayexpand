@@ -4666,7 +4666,8 @@ mod tests {
         assert_eq!(route.capture_label, "ibus");
         assert_eq!(route.injection_label, "ibus");
         assert!(route.sensitive_fields);
-        assert!(route.atomic_replace);
+        // Delete and commit are separate IBus signals, so not atomic.
+        assert!(!route.atomic_replace);
 
         let capabilities = Capabilities {
             has_dev_input: true,

@@ -61,7 +61,9 @@ require_sensitive_focus = false
 # Maximum replacement text size in bytes (0 = unlimited)
 max_replacement_size = 65536
 
-# Allowed output backends (empty = all allowed)
+# Allowed output backends (empty = all allowed). Names: "libei", "wlroots",
+# "input-method-v2", "ibus". IBus is governed separately from
+# input-method-v2 and must be listed explicitly to be permitted.
 allowed_backends = ["libei", "input-method-v2"]
 
 # Allowed curated packs from ~/.local/share/wayexpand/packs/.

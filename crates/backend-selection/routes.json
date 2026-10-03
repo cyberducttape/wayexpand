@@ -14,13 +14,13 @@
         "compositor_observation": "session-dependent",
         "certified": false
       },
-      "atomic_replace": true,
+      "atomic_replace": false,
       "app_identity": "none",
       "focus_tracking": false,
       "status": "experimental",
       "setup_backend": "ibus",
       "certification_targets": ["kde", "gnome"],
-      "setup_detail": "toolkit-aware committed text with password/PIN purpose support; no raw keyboard access"
+      "setup_detail": "toolkit-aware committed text; capture stays off until the field reports a non-sensitive content type, and replacements require matching surrounding text; no raw keyboard access"
     },
     {
       "id": "kde-evdev-libei",

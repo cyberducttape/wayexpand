@@ -1248,7 +1248,19 @@ fn setup_backend_for_mode(
 
 fn setup_backend_allowed(policy: &OrganizationPolicy, backend: &str) -> bool {
     match backend {
-        "ibus" | "input-method" => policy.backend_allowed("input-method-v2"),
+        // IBus is governed under its own name and must also satisfy the
+        // policy's capability requirements, as the IBus service enforces.
+        "ibus" => {
+            let enforcement = policy.effective_enforcement_policy();
+            policy.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
+                && enforcement
+                    .capability_violation_for_source(
+                        wayexpand_backend_ibus::injector_capabilities(),
+                        wayexpand_backend_ibus::source_capabilities(),
+                    )
+                    .is_none()
+        }
+        "input-method" => policy.backend_allowed("input-method-v2"),
         // The packaged setup path enables wayexpand-evdev.service, whose
         // declared output is evdev + libei. Do not treat a wlroots-only
         // policy as permission to activate that different service.
@@ -1357,11 +1369,11 @@ fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
         allowed_backends: vec!["none".into()],
         ..OrganizationPolicy::default()
     });
-    let ibus_policy_allowed = policy.backend_allowed("input-method-v2");
+    let ibus_policy_allowed = setup_backend_allowed(&policy, "ibus");
     let ibus_installed = ibus_engine_available();
     if ibus_installed && ibus_policy_allowed {
         println!(
-            "IBus WayExpand engine: installed and ready to configure (password/PIN awareness)"
+            "IBus WayExpand engine: installed and ready to configure (sensitive-field aware, non-atomic replacement)"
         );
     } else if ibus_installed {
         println!("IBus WayExpand engine: installed but disallowed by organization policy");
@@ -3093,15 +3105,40 @@ mod tests {
             has_dev_input: true,
             ..Default::default()
         };
-        let ibus_only = OrganizationPolicy {
+        let input_method_only = OrganizationPolicy {
             allowed_backends: vec!["input-method-v2".into()],
             ..Default::default()
         };
         assert_eq!(
-            setup_backend_for_mode("experimental", &capabilities, &ibus_only).unwrap(),
+            setup_backend_for_mode("experimental", &capabilities, &input_method_only).unwrap(),
             "input-method"
         );
-        assert!(setup_backend_for_mode("maximum", &capabilities, &ibus_only).is_err());
+        assert!(setup_backend_for_mode("maximum", &capabilities, &input_method_only).is_err());
+
+        // Allowing input-method-v2 does not allow IBus; it must be named.
+        assert!(!setup_backend_allowed(&input_method_only, "ibus"));
+        let with_ibus = OrganizationPolicy {
+            allowed_backends: vec!["input-method-v2".into(), "ibus".into()],
+            ..Default::default()
+        };
+        assert!(setup_backend_allowed(&with_ibus, "ibus"));
+        // IBus replacement is not atomic, so a safe-mode atomic requirement
+        // rules it out; audit mode only reports the gap.
+        assert!(!setup_backend_allowed(
+            &OrganizationPolicy {
+                safe_mode: true,
+                require_atomic_replace: true,
+                ..Default::default()
+            },
+            "ibus"
+        ));
+        assert!(setup_backend_allowed(
+            &OrganizationPolicy {
+                require_atomic_replace: true,
+                ..Default::default()
+            },
+            "ibus"
+        ));
 
         let raw_only = OrganizationPolicy {
             allowed_backends: vec!["libei".into()],

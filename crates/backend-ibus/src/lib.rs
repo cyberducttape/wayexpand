@@ -17,14 +17,68 @@ use std::{
 
 use tracing::{error, warn};
 use wayexpand_core::{
-    Config, ExpansionEngine, ExpansionResult, InputEvent, OrganizationPolicy,
-    PendingExpansionDispatch,
+    CompletionNotifier, Config, ExpansionEngine, ExpansionResult, InjectorCapabilities, InputEvent,
+    InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch,
 };
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
 // crate is not used because it adds a mandatory libdbus system dependency.
 const IBUS_RELEASE_MASK: u32 = 1 << 30;
-const IBUS_BACKEND_NAME: &str = "input-method-v2";
+
+/// Organization-policy identity of this backend. IBus is governed separately
+/// from the native input-method-v2 route: their surrounding-text, sensitive-
+/// field, and replacement guarantees differ, so `allowed_backends` must name
+/// `ibus` explicitly to permit it.
+pub const IBUS_BACKEND_NAME: &str = "ibus";
+
+/// `IBUS_CAP_SURROUNDING_TEXT`: the client can report surrounding text and
+/// honour `DeleteSurroundingText`.
+pub const IBUS_CAP_SURROUNDING_TEXT: u32 = 1 << 5;
+
+// IBusInputPurpose / IBusInputHints values from ibustypes.h.
+const IBUS_INPUT_PURPOSE_PASSWORD: u32 = 8;
+const IBUS_INPUT_PURPOSE_PIN: u32 = 9;
+const IBUS_INPUT_PURPOSE_LAST_KNOWN: u32 = 13; // IBUS_INPUT_PURPOSE_DATETIME
+const IBUS_INPUT_HINT_PRIVATE: u32 = 1 << 11;
+const IBUS_INPUT_HINT_HIDDEN_TEXT: u32 = 1 << 12;
+
+/// Whether an IBus content type must disable capture. Password and PIN
+/// purposes, the private and hidden-text hints, and any purpose newer than
+/// this build knows are all treated as sensitive: unknown means sensitive.
+pub fn content_type_is_sensitive(purpose: u32, hints: u32) -> bool {
+    matches!(
+        purpose,
+        IBUS_INPUT_PURPOSE_PASSWORD | IBUS_INPUT_PURPOSE_PIN
+    ) || purpose > IBUS_INPUT_PURPOSE_LAST_KNOWN
+        || hints & (IBUS_INPUT_HINT_PRIVATE | IBUS_INPUT_HINT_HIDDEN_TEXT) != 0
+}
+
+/// Output guarantees of the IBus route. Delete and commit are two separate
+/// D-Bus signals with an observable failure boundary between them, so the
+/// replacement is not atomic.
+pub fn injector_capabilities() -> InjectorCapabilities {
+    InjectorCapabilities {
+        insertion_mode: "ibus commit-text",
+        max_text_chars: 0,
+        expected_throughput_chars_per_sec: None,
+        atomic_replace: false,
+        full_unicode: true,
+        cursor_reposition: false,
+        key_passthrough: true,
+    }
+}
+
+/// Capture guarantees of the IBus route. Sensitive-field focus is reported
+/// through IBus content types and fails closed until one is received.
+pub fn source_capabilities() -> InputSourceCapabilities {
+    InputSourceCapabilities {
+        sensitive_focus: true,
+        exclusive_capture: true,
+        reliable_key_state: false,
+        key_passthrough: true,
+        composition_aware: false,
+    }
+}
 
 /// Return whether the installed IBus component can be discovered by setup.
 /// This is intentionally an installation/provisioning probe, not an
@@ -127,25 +181,68 @@ pub struct IbusKeyResult {
     pub actions: Vec<IbusAction>,
 }
 
+/// The client's text around the cursor as last reported through
+/// `SetSurroundingText`, advanced locally by the edits this engine emits.
+/// Positions are in Unicode scalar values, as IBus reports them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SurroundingText {
+    text: Vec<char>,
+    cursor: usize,
+    anchor: usize,
+}
+
+impl SurroundingText {
+    /// Whether `expected` is exactly the text before a collapsed cursor.
+    fn ends_with_at_cursor(&self, expected: &str) -> bool {
+        if self.cursor != self.anchor || self.cursor > self.text.len() {
+            return false;
+        }
+        let expected: Vec<char> = expected.chars().collect();
+        self.text[..self.cursor].ends_with(&expected)
+    }
+
+    /// Apply an emitted action. Returns false when the model can no longer
+    /// describe the client, so the caller drops it.
+    fn apply(&mut self, action: &IbusAction) -> bool {
+        if self.cursor != self.anchor || self.cursor > self.text.len() {
+            return false;
+        }
+        match action {
+            IbusAction::DeleteSurroundingText { nchars } => {
+                let count = *nchars as usize;
+                let Some(start) = self.cursor.checked_sub(count) else {
+                    return false;
+                };
+                self.text.drain(start..self.cursor);
+                self.cursor = start;
+            }
+            IbusAction::CommitText(text) => {
+                let inserted: Vec<char> = text.chars().collect();
+                let count = inserted.len();
+                self.text.splice(self.cursor..self.cursor, inserted);
+                self.cursor += count;
+            }
+        }
+        self.anchor = self.cursor;
+        true
+    }
+}
+
 /// Core-backed IBus engine state.
 pub struct IbusEngineAdapter {
     engine: ExpansionEngine,
     enabled: bool,
     policy: OrganizationPolicy,
+    client_capabilities: u32,
+    surrounding: Option<SurroundingText>,
+    /// Set when safe-mode policy requires guarantees this route lacks
+    /// (for example `require_atomic_replace`). Expansion is then disabled.
+    capability_block: Option<String>,
 }
 
 impl IbusEngineAdapter {
-    pub fn new(mut engine: ExpansionEngine) -> Self {
-        let policy = OrganizationPolicy::default();
-        apply_policy_to_engine(&mut engine, &policy);
-        // Keep IBus key handling non-blocking for broker actions. Direct
-        // programs are still rejected by the backend-specific gate below.
-        let _ = engine.enable_async_commands();
-        Self {
-            engine,
-            enabled: true,
-            policy,
-        }
+    pub fn new(engine: ExpansionEngine) -> Self {
+        Self::build(engine, OrganizationPolicy::default())
     }
 
     pub fn with_policy(
@@ -153,13 +250,116 @@ impl IbusEngineAdapter {
         policy: OrganizationPolicy,
     ) -> Result<Self, wayexpand_core::ConfigError> {
         engine.apply_administrator_policy(&policy)?;
+        Ok(Self::build(engine, policy))
+    }
+
+    fn build(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
         apply_policy_to_engine(&mut engine, &policy);
+        // Keep IBus key handling non-blocking for broker actions. Direct
+        // programs are still rejected by the backend-specific gate below.
         let _ = engine.enable_async_commands();
-        Ok(Self {
+        // A new engine has no content type yet: capture stays off until the
+        // client reports a known non-sensitive field.
+        engine.process(InputEvent::FocusChanged { sensitive: true });
+        let capability_block = Self::check_capabilities(&policy);
+        Self {
             engine,
             enabled: true,
             policy,
-        })
+            client_capabilities: 0,
+            surrounding: None,
+            capability_block,
+        }
+    }
+
+    /// Verify policy requirements against the real IBus capability profile,
+    /// as the daemon does for its negotiated source and injector.
+    fn check_capabilities(policy: &OrganizationPolicy) -> Option<String> {
+        let violation = policy
+            .capability_violation_for_source(injector_capabilities(), source_capabilities())?;
+        if policy.safe_mode {
+            error!(
+                audit_prefix = %policy.audit_prefix,
+                violation = %violation,
+                "IBus expansion disabled: organization policy requires guarantees this route lacks"
+            );
+            Some(violation)
+        } else {
+            warn!(
+                audit_prefix = %policy.audit_prefix,
+                violation = %violation,
+                "IBus route lacks a policy-required guarantee; audit mode permits it"
+            );
+            None
+        }
+    }
+
+    /// Why safe-mode policy has disabled expansion for this route, if it has.
+    pub fn capability_block(&self) -> Option<&str> {
+        self.capability_block.as_deref()
+    }
+
+    /// Register a wakeup for asynchronous command completions; see
+    /// [`ExpansionEngine::set_completion_notifier`].
+    pub fn set_completion_notifier(&mut self, notifier: Option<CompletionNotifier>) {
+        self.engine.set_completion_notifier(notifier);
+    }
+
+    /// Apply an IBus `SetContentType`. This is the only way capture is
+    /// enabled for a field.
+    pub fn set_content_type(&mut self, purpose: u32, hints: u32) {
+        self.engine.process(InputEvent::FocusChanged {
+            sensitive: content_type_is_sensitive(purpose, hints),
+        });
+    }
+
+    /// Apply an IBus `SetCapabilities`.
+    pub fn set_capabilities(&mut self, capabilities: u32) {
+        self.client_capabilities = capabilities;
+        if capabilities & IBUS_CAP_SURROUNDING_TEXT == 0 {
+            self.surrounding = None;
+        }
+    }
+
+    /// Apply an IBus `SetSurroundingText`. `cursor` and `anchor` are in
+    /// Unicode scalar values.
+    pub fn set_surrounding_text(&mut self, text: &str, cursor: u32, anchor: u32) {
+        let text: Vec<char> = text.chars().collect();
+        let (cursor, anchor) = (cursor as usize, anchor as usize);
+        self.surrounding = (self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
+            && cursor <= text.len()
+            && anchor <= text.len())
+        .then_some(SurroundingText {
+            text,
+            cursor,
+            anchor,
+        });
+    }
+
+    /// Forget the surrounding-text model; replacements are refused until the
+    /// client reports its text again.
+    pub fn clear_surrounding_text(&mut self) {
+        self.surrounding = None;
+    }
+
+    /// Whether the client's reported text agrees that `delivered` sits
+    /// immediately before a collapsed cursor. Nothing destructive may be
+    /// emitted unless it does.
+    fn surrounding_confirms(&self, delivered: &str) -> bool {
+        self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
+            && self
+                .surrounding
+                .as_ref()
+                .is_some_and(|surrounding| surrounding.ends_with_at_cursor(delivered))
+    }
+
+    /// Advance the local surrounding-text model over emitted actions.
+    fn record_emitted(&mut self, actions: &[IbusAction]) {
+        if let Some(surrounding) = self.surrounding.as_mut() {
+            if !actions.iter().all(|action| surrounding.apply(action)) {
+                self.surrounding = None;
+            }
+        }
     }
 
     pub fn engine(&self) -> &ExpansionEngine {
@@ -170,40 +370,70 @@ impl IbusEngineAdapter {
         &mut self.engine
     }
 
+    /// Drain completed asynchronous commands and return their actions. Each
+    /// result is recorded as applied as soon as its actions are produced;
+    /// hosts that emit actions should use [`Self::drain_completed_commands_with`].
     pub fn drain_completed_commands(&mut self) -> Vec<IbusAction> {
-        self.engine
-            .drain_completed_commands()
-            .into_iter()
-            .filter_map(|result| {
-                if let Some(violation) = self.policy.expansion_policy_violation(
-                    result.insert.len(),
-                    result.command_backed,
-                    IBUS_BACKEND_NAME,
-                ) {
-                    if self.policy.safe_mode {
-                        self.engine.restore_deferred_match(&result.matched_text);
-                        error!(
-                            audit_prefix = %self.policy.audit_prefix,
-                            violation = %violation,
-                            "IBus completed expansion blocked by organization policy"
-                        );
-                        return None;
-                    }
-                    warn!(
+        let mut actions = Vec::new();
+        let _ = self.drain_completed_commands_with(|batch| {
+            actions.extend_from_slice(batch);
+            Ok::<(), std::convert::Infallible>(())
+        });
+        actions
+    }
+
+    /// Drain completed asynchronous commands, emitting each replacement
+    /// through `emit` and recording it as applied only after `emit`
+    /// succeeds. On an emit failure the engine is reset (the client may hold
+    /// a partial edit) and the error is returned.
+    pub fn drain_completed_commands_with<E>(
+        &mut self,
+        mut emit: impl FnMut(&[IbusAction]) -> Result<(), E>,
+    ) -> Result<usize, E> {
+        let mut emitted = 0;
+        for result in self.engine.drain_completed_commands() {
+            if !self.enabled || self.capability_block.is_some() {
+                self.engine.restore_deferred_match(&result.matched_text);
+                continue;
+            }
+            if let Some(violation) = self.policy.expansion_policy_violation(
+                result.insert.len(),
+                result.command_backed,
+                IBUS_BACKEND_NAME,
+            ) {
+                if self.policy.safe_mode {
+                    self.engine.restore_deferred_match(&result.matched_text);
+                    error!(
                         audit_prefix = %self.policy.audit_prefix,
                         violation = %violation,
-                        "IBus completed expansion violates organization policy; audit mode permits it"
+                        "IBus completed expansion blocked by organization policy"
                     );
+                    continue;
                 }
-                let actions = expansion_actions(&result, true);
-                // IBus has no injection acknowledgement. The protocol action
-                // batch is the adapter's commit point; the D-Bus service
-                // resets the engine if emitting it fails.
-                self.engine.commit_applied_expansion(&result);
-                Some(actions)
-            })
-            .flatten()
-            .collect()
+                warn!(
+                    audit_prefix = %self.policy.audit_prefix,
+                    violation = %violation,
+                    "IBus completed expansion violates organization policy; audit mode permits it"
+                );
+            }
+            // The key that queued the command was committed at queue time,
+            // so the whole trigger (and any delimiter) is in the document.
+            let (delivered, actions) = replacement_actions(&result, true);
+            if !self.surrounding_confirms(&delivered) {
+                warn!("IBus surrounding text no longer matches the trigger; replacement discarded");
+                self.engine.restore_deferred_match(&result.matched_text);
+                self.reset();
+                continue;
+            }
+            if let Err(error) = emit(&actions) {
+                self.reset();
+                return Err(error);
+            }
+            self.engine.commit_applied_expansion(&result);
+            self.record_emitted(&actions);
+            emitted += 1;
+        }
+        Ok(emitted)
     }
 
     pub fn replace_config(&mut self, config: Config) -> Result<(), wayexpand_core::ConfigError> {
@@ -216,6 +446,8 @@ impl IbusEngineAdapter {
         engine.set_direct_commands_disabled(self.engine.direct_commands_disabled());
         engine.set_title_matching_disabled(self.engine.title_matching_disabled());
         engine.set_reinsert_terminators(self.engine.reinserts_terminators());
+        engine.set_composition_active(self.engine.is_composition_active());
+        engine.set_completion_notifier(self.engine.completion_notifier());
         if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
@@ -226,23 +458,48 @@ impl IbusEngineAdapter {
         Ok(())
     }
 
+    /// A context gained focus. ibus-daemon follows FocusIn with Enable,
+    /// SetCapabilities and SetContentType, so capture stays off until that
+    /// content type arrives; a refocus never reuses an older field's type.
     pub fn focus_in(&mut self) {
         self.enabled = true;
-        self.engine.process(InputEvent::Reset);
+        self.surrounding = None;
+        self.engine
+            .process(InputEvent::FocusChanged { sensitive: true });
     }
 
     pub fn focus_out(&mut self) {
         self.enabled = false;
-        self.engine.process(InputEvent::Reset);
+        self.surrounding = None;
+        self.engine
+            .process(InputEvent::FocusChanged { sensitive: true });
     }
 
+    /// IBus `Reset`: the cursor may have moved, so the trigger buffer and the
+    /// surrounding-text model are dropped. The field's content type is
+    /// unchanged by a reset and is kept.
     pub fn reset(&mut self) {
+        self.surrounding = None;
         self.engine.process(InputEvent::Reset);
     }
 
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
     /// `org.freedesktop.IBus.Engine.ProcessKeyEvent`.
-    pub fn process_key_event(&mut self, keyval: u32, _keycode: u32, state: u32) -> IbusKeyResult {
+    pub fn process_key_event(&mut self, keyval: u32, keycode: u32, state: u32) -> IbusKeyResult {
+        let result = self.process_key_event_inner(keyval, keycode, state);
+        if state & IBUS_RELEASE_MASK == 0 {
+            if result.handled {
+                self.record_emitted(&result.actions);
+            } else {
+                // The client applies this key itself; the model cannot know
+                // its effect until the client reports surrounding text again.
+                self.surrounding = None;
+            }
+        }
+        result
+    }
+
+    fn process_key_event_inner(&mut self, keyval: u32, _keycode: u32, state: u32) -> IbusKeyResult {
         // IBus delivers both press and release events through this method.
         // Releases carry IBUS_RELEASE_MASK and must not be interpreted as a
         // second printable character or delimiter.
@@ -250,7 +507,7 @@ impl IbusEngineAdapter {
             return IbusKeyResult::default();
         }
 
-        if !self.enabled {
+        if !self.enabled || self.capability_block.is_some() {
             return IbusKeyResult::default();
         }
 
@@ -385,9 +642,22 @@ impl IbusEngineAdapter {
 
             match dispatch {
                 PendingExpansionDispatch::Ready(result) => {
-                    actions.extend(expansion_actions(&result, false));
-                    // The returned IBus actions are the successful output
-                    // transaction for this synchronous/static result.
+                    // The current key has not reached the client. Refuse the
+                    // replacement unless the client's own text confirms the
+                    // rest of the trigger sits right before the cursor.
+                    let (delivered, replacement) = replacement_actions(&result, false);
+                    if !self.surrounding_confirms(&delivered) {
+                        warn!(
+                            "IBus surrounding text does not confirm the trigger; replacement refused"
+                        );
+                        self.engine.restore_deferred_match(&result.matched_text);
+                        policy_blocked = true;
+                        continue;
+                    }
+                    actions.extend(replacement);
+                    // The returned IBus actions are the output transaction
+                    // for this synchronous/static result; the service resets
+                    // the engine if emitting them fails.
                     self.engine.commit_applied_expansion(&result);
                 }
                 PendingExpansionDispatch::Queued => {
@@ -430,29 +700,37 @@ impl IbusEngineAdapter {
     }
 }
 
-fn expansion_actions(
-    result: &ExpansionResult,
-    terminator_already_delivered: bool,
-) -> Vec<IbusAction> {
-    // Static boundary matches arrive before IBus delivers the delimiter, so
-    // the deletion covers only the trigger. Async command matches are drained
-    // later, after the delimiter was committed when the command was queued;
-    // include that already-delivered character in the same delete/commit
-    // transaction or the deletion removes the trigger's final character plus
-    // the delimiter and leaves a leading fragment behind.
-    let mut delete_chars = result.matched_text.chars().count();
-    if terminator_already_delivered && result.reinsert_after.is_some() {
-        delete_chars = delete_chars.saturating_add(1);
+/// Plan a replacement: the text already in the client document that must be
+/// deleted, and the delete/commit actions that replace it.
+///
+/// `key_delivered` says whether the key that completed the match has reached
+/// the client. A synchronous match consumes that key, so an immediate
+/// trigger's final character was never delivered and a boundary match's
+/// delimiter is carried by the replacement instead. An asynchronous match
+/// committed the key when the command was queued, so the whole trigger and
+/// any delimiter are in the document.
+fn replacement_actions(result: &ExpansionResult, key_delivered: bool) -> (String, Vec<IbusAction>) {
+    let mut delivered = result.matched_text.clone();
+    match (key_delivered, result.reinsert_after) {
+        (true, Some(delimiter)) => delivered.push(delimiter),
+        (false, None) => {
+            delivered.pop();
+        }
+        _ => {}
     }
-    let mut actions = vec![IbusAction::DeleteSurroundingText {
-        nchars: delete_chars as u32,
-    }];
+    let mut actions = Vec::with_capacity(2);
+    let delete_chars = delivered.chars().count();
+    if delete_chars > 0 {
+        actions.push(IbusAction::DeleteSurroundingText {
+            nchars: delete_chars as u32,
+        });
+    }
     let mut replacement = result.insert.clone();
     if let Some(character) = result.reinsert_after {
         replacement.push(character);
     }
     actions.push(IbusAction::CommitText(replacement));
-    actions
+    (delivered, actions)
 }
 
 fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
@@ -465,18 +743,19 @@ fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPol
     engine.set_title_matching_disabled(enforcement.disable_title_matching);
 }
 
-/// Convert the printable XKB keysyms that IBus supplies to Unicode.
-/// Keysyms in the Unicode range are intentionally handled without a keymap;
-/// layout/dead-key composition has already happened before IBus receives the
-/// event from the toolkit.
+/// Convert the XKB keysym that IBus supplies to the character it types.
+/// Layout, dead-key and Compose resolution has already happened before IBus
+/// receives the event. Conversion follows xkbcommon's `xkb_keysym_to_utf32`
+/// (via `xkeysym`), so legacy keysyms such as `Greek_alpha` or `Cyrillic_a`
+/// and keypad digits resolve like explicit Unicode keysyms. Control
+/// characters other than tab and newline are not text.
 fn keysym_to_char(keysym: u32) -> Option<char> {
     match keysym {
-        xkeysym::key::space => Some(' '),
-        xkeysym::key::Tab => Some('\t'),
+        xkeysym::key::Tab | xkeysym::key::KP_Tab => Some('\t'),
         xkeysym::key::Return | xkeysym::key::KP_Enter => Some('\n'),
-        0x0100_0000..=0x0110_ffff => char::from_u32(keysym - 0x0100_0000),
-        0x20..=0x7e | 0xa0..=0xff => char::from_u32(keysym),
-        _ => None,
+        _ => xkeysym::Keysym::new(keysym)
+            .key_char()
+            .filter(|character| !character.is_control()),
     }
 }
 
@@ -484,6 +763,78 @@ fn keysym_to_char(keysym: u32) -> Option<char> {
 mod tests {
     use super::*;
     use wayexpand_core::{Config, ExpansionEngine, OrganizationPolicy};
+
+    /// Put an adapter in the state ibus-daemon leaves it in for an ordinary
+    /// text field: focused, surrounding text supported, free-form content.
+    fn focused(mut adapter: IbusEngineAdapter) -> IbusEngineAdapter {
+        adapter.focus_in();
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        adapter
+    }
+
+    /// A minimal IBus client. Like ibus-gtk it reports surrounding text before
+    /// every key press, inserts keys the engine does not handle, and applies
+    /// the engine's delete/commit actions to its own document.
+    #[derive(Default)]
+    struct Client {
+        text: Vec<char>,
+        cursor: usize,
+    }
+
+    impl Client {
+        fn key(
+            &mut self,
+            adapter: &mut IbusEngineAdapter,
+            keyval: u32,
+            state: u32,
+        ) -> IbusKeyResult {
+            let text: String = self.text.iter().collect();
+            adapter.set_surrounding_text(&text, self.cursor as u32, self.cursor as u32);
+            let result = adapter.process_key_event(keyval, 0, state);
+            if state == 0 && !result.handled {
+                if keyval == xkeysym::key::BackSpace {
+                    if self.cursor > 0 {
+                        self.cursor -= 1;
+                        self.text.remove(self.cursor);
+                    }
+                } else if let Some(character) = keysym_to_char(keyval) {
+                    self.text.insert(self.cursor, character);
+                    self.cursor += 1;
+                }
+            }
+            self.apply(&result.actions);
+            result
+        }
+
+        fn type_text(&mut self, adapter: &mut IbusEngineAdapter, text: &str) -> Vec<IbusAction> {
+            text.chars()
+                .flat_map(|character| self.key(adapter, character as u32, 0).actions)
+                .collect()
+        }
+
+        fn apply(&mut self, actions: &[IbusAction]) {
+            for action in actions {
+                match action {
+                    IbusAction::DeleteSurroundingText { nchars } => {
+                        let start = self.cursor - *nchars as usize;
+                        self.text.drain(start..self.cursor);
+                        self.cursor = start;
+                    }
+                    IbusAction::CommitText(text) => {
+                        for character in text.chars() {
+                            self.text.insert(self.cursor, character);
+                            self.cursor += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        fn text(&self) -> String {
+            self.text.iter().collect()
+        }
+    }
 
     fn adapter() -> IbusEngineAdapter {
         let config: Config = toml::from_str(
@@ -493,7 +844,9 @@ replacement = "signature"
 "#,
         )
         .unwrap();
-        IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
+        focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ))
     }
 
     #[test]
@@ -524,7 +877,9 @@ match_mode = "word-boundary"
 "#,
         )
         .unwrap();
-        IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
+        focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ))
     }
 
     fn policy_adapter(policy: OrganizationPolicy) -> IbusEngineAdapter {
@@ -535,7 +890,9 @@ replacement = "signature"
 "#,
         )
         .unwrap();
-        IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap()
+        focused(
+            IbusEngineAdapter::with_policy(ExpansionEngine::new(config).unwrap(), policy).unwrap(),
+        )
     }
 
     #[test]
@@ -630,7 +987,9 @@ replacement = "signature"
             "#,
         )
         .unwrap();
-        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
         let started = Instant::now();
         let mut key_actions = Vec::new();
         for character in ":slow".chars() {
@@ -744,23 +1103,24 @@ replacement = "signature"
     #[test]
     fn trigger_is_deleted_and_replacement_committed() {
         let mut adapter = adapter();
-        for character in ":sig".chars() {
-            let result = adapter.process_key_event(character as u32, 0, 0);
-            if character == 'g' {
-                assert_eq!(
-                    result.actions,
-                    vec![
-                        IbusAction::DeleteSurroundingText { nchars: 4 },
-                        IbusAction::CommitText("signature".into())
-                    ]
-                );
-            }
-        }
+        let mut client = Client::default();
+        client.type_text(&mut adapter, "x");
+        let actions = client.type_text(&mut adapter, ":sig");
+        // The final `g` is consumed and never reaches the client, so only
+        // `:si` is deleted. Deleting four would also remove the user's `x`.
+        assert_eq!(
+            &actions[actions.len() - 2..],
+            &[
+                IbusAction::DeleteSurroundingText { nchars: 3 },
+                IbusAction::CommitText("signature".into())
+            ]
+        );
+        assert_eq!(client.text(), "xsignature");
     }
 
     #[test]
     fn unicode_keysym_forms_are_committed_without_loss() {
-        let mut adapter = IbusEngineAdapter::new(
+        let mut adapter = focused(IbusEngineAdapter::new(
             ExpansionEngine::new(
                 Config::parse(
                     r#"[[expansion]]
@@ -771,11 +1131,12 @@ replacement = "世界 🌍"
                 .unwrap(),
             )
             .unwrap(),
-        );
+        ));
 
         // IBus uses the X11 Unicode keysym form for code points outside the
         // legacy Latin-1 range: 0x01000000 + the scalar value.
         let unicode_keysym = |character: char| 0x0100_0000 + character as u32;
+        let mut client = Client::default();
         let mut actions = Vec::new();
         for character in ":東京😀".chars() {
             let keyval = if character.is_ascii() {
@@ -783,7 +1144,7 @@ replacement = "世界 🌍"
             } else {
                 unicode_keysym(character)
             };
-            actions.extend(adapter.process_key_event(keyval, 0, 0).actions);
+            actions.extend(client.key(&mut adapter, keyval, 0).actions);
         }
 
         assert_eq!(
@@ -791,10 +1152,11 @@ replacement = "世界 🌍"
             vec![
                 IbusAction::CommitText("東".into()),
                 IbusAction::CommitText("京".into()),
-                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::DeleteSurroundingText { nchars: 3 },
                 IbusAction::CommitText("世界 🌍".into()),
             ]
         );
+        assert_eq!(client.text(), "世界 🌍");
     }
 
     #[test]
@@ -817,10 +1179,10 @@ replacement = "世界 🌍"
             "#,
         )
         .unwrap();
-        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
-        for character in ":sig".chars() {
-            adapter.process_key_event(character as u32, 0, 0);
-        }
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        Client::default().type_text(&mut adapter, ":sig");
 
         let undo = adapter
             .engine()
@@ -831,20 +1193,18 @@ replacement = "世界 🌍"
     }
 
     #[test]
-    fn delimiter_is_reinserted_atomically() {
+    fn delimiter_is_reinserted_with_the_replacement() {
         let mut adapter = boundary_adapter();
-        for character in ":sig ".chars() {
-            let result = adapter.process_key_event(character as u32, 0, 0);
-            if character == ' ' {
-                assert_eq!(
-                    result.actions,
-                    vec![
-                        IbusAction::DeleteSurroundingText { nchars: 4 },
-                        IbusAction::CommitText("signature ".into())
-                    ]
-                );
-            }
-        }
+        let mut client = Client::default();
+        let actions = client.type_text(&mut adapter, ":sig ");
+        assert_eq!(
+            &actions[actions.len() - 2..],
+            &[
+                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::CommitText("signature ".into())
+            ]
+        );
+        assert_eq!(client.text(), "signature ");
         let undo = adapter
             .engine()
             .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
@@ -871,12 +1231,11 @@ timeout_ms = 1000
 "#,
         )
         .unwrap();
-        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
 
-        let mut typed_actions = Vec::new();
-        for character in ":sig ".chars() {
-            typed_actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
-        }
+        let typed_actions = Client::default().type_text(&mut adapter, ":sig ");
         assert!(!typed_actions
             .iter()
             .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
@@ -900,40 +1259,42 @@ timeout_ms = 1000
     #[test]
     fn trigger_key_release_does_not_advance_matcher() {
         let mut adapter = adapter();
+        let mut client = Client::default();
 
-        for character in ":si".chars() {
-            adapter.process_key_event(character as u32, 0, 0);
-        }
+        client.type_text(&mut adapter, ":si");
         assert_eq!(
-            adapter.process_key_event('i' as u32, 0, IBUS_RELEASE_MASK),
+            client.key(&mut adapter, 'i' as u32, IBUS_RELEASE_MASK),
             IbusKeyResult::default()
         );
 
-        let result = adapter.process_key_event('g' as u32, 0, 0);
+        let result = client.key(&mut adapter, 'g' as u32, 0);
         assert_eq!(
             result.actions,
             vec![
-                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::DeleteSurroundingText { nchars: 3 },
                 IbusAction::CommitText("signature".into())
             ]
         );
+        assert_eq!(client.text(), "signature");
     }
 
     #[test]
     fn modifier_key_release_does_not_reset_valid_buffer() {
         const CONTROL_MASK: u32 = 1 << 2;
         let mut adapter = adapter();
+        let mut client = Client::default();
 
-        for character in ":si".chars() {
-            adapter.process_key_event(character as u32, 0, 0);
-        }
+        client.type_text(&mut adapter, ":si");
         assert_eq!(
-            adapter
-                .process_key_event(xkeysym::key::Control_L, 0, CONTROL_MASK | IBUS_RELEASE_MASK,),
+            client.key(
+                &mut adapter,
+                xkeysym::key::Control_L,
+                CONTROL_MASK | IBUS_RELEASE_MASK
+            ),
             IbusKeyResult::default()
         );
 
-        let result = adapter.process_key_event('g' as u32, 0, 0);
+        let result = client.key(&mut adapter, 'g' as u32, 0);
         assert!(result
             .actions
             .contains(&IbusAction::CommitText("signature".into())));
@@ -973,12 +1334,11 @@ timeout_ms = 1000
         }
 
         let mut altgr_adapter = boundary_adapter();
-        for character in ":sig".chars() {
-            altgr_adapter.process_key_event(character as u32, 0, 0);
-        }
+        let mut client = Client::default();
+        client.type_text(&mut altgr_adapter, ":sig");
         assert_eq!(
-            altgr_adapter
-                .process_key_event(' ' as u32, 0, MOD5_MASK)
+            client
+                .key(&mut altgr_adapter, ' ' as u32, MOD5_MASK)
                 .actions,
             vec![
                 IbusAction::DeleteSurroundingText { nchars: 4 },
@@ -991,17 +1351,16 @@ timeout_ms = 1000
     fn engine_instances_do_not_share_matcher_state() {
         let mut first = adapter();
         let mut second = adapter();
+        let mut first_client = Client::default();
 
-        for character in ":si".chars() {
-            first.process_key_event(character as u32, 0, 0);
-        }
+        first_client.type_text(&mut first, ":si");
 
         // A second input context must not inherit the first context's partial
         // trigger. Its ordinary key is committed unchanged.
-        let isolated = second.process_key_event('g' as u32, 0, 0);
+        let isolated = Client::default().key(&mut second, 'g' as u32, 0);
         assert_eq!(isolated.actions, vec![IbusAction::CommitText("g".into())]);
 
-        let completed = first.process_key_event('g' as u32, 0, 0);
+        let completed = first_client.key(&mut first, 'g' as u32, 0);
         assert!(completed
             .actions
             .contains(&IbusAction::CommitText("signature".into())));
@@ -1014,12 +1373,10 @@ timeout_ms = 1000
             allowed_backends: vec!["libei".into()],
             ..Default::default()
         });
-        for character in ":sig".chars() {
-            let result = adapter.process_key_event(character as u32, 0, 0);
-            if character == 'g' {
-                assert_eq!(result.actions, vec![IbusAction::CommitText("g".into())]);
-            }
-        }
+        let mut client = Client::default();
+        let actions = client.type_text(&mut adapter, ":sig");
+        assert_eq!(actions.last(), Some(&IbusAction::CommitText("g".into())));
+        assert_eq!(client.text(), ":sig");
     }
 
     #[test]
@@ -1029,13 +1386,252 @@ timeout_ms = 1000
             allowed_backends: vec!["libei".into()],
             ..Default::default()
         });
-        for character in ":sig".chars() {
-            let result = adapter.process_key_event(character as u32, 0, 0);
-            if character == 'g' {
-                assert!(result
-                    .actions
-                    .contains(&IbusAction::CommitText("signature".into())));
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), "signature");
+    }
+
+    #[test]
+    fn input_method_v2_allowance_does_not_permit_ibus() {
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            allowed_backends: vec!["input-method-v2".into()],
+            ..Default::default()
+        });
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), ":sig");
+
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            allowed_backends: vec!["input-method-v2".into(), "ibus".into()],
+            ..Default::default()
+        });
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), "signature");
+    }
+
+    #[test]
+    fn safe_mode_atomic_replace_requirement_disables_ibus() {
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            require_atomic_replace: true,
+            ..Default::default()
+        });
+        assert!(adapter.capability_block().is_some());
+        let result = adapter.process_key_event('a' as u32, 0, 0);
+        assert_eq!(result, IbusKeyResult::default());
+
+        // Audit mode reports the gap but keeps the route usable.
+        let mut adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: false,
+            require_atomic_replace: true,
+            ..Default::default()
+        });
+        assert!(adapter.capability_block().is_none());
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), "signature");
+    }
+
+    #[test]
+    fn sensitive_focus_requirement_is_met_by_content_types() {
+        let adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            require_sensitive_focus: true,
+            ..Default::default()
+        });
+        assert!(adapter.capability_block().is_none());
+    }
+
+    #[test]
+    fn ibus_route_does_not_claim_atomic_replacement() {
+        assert!(!injector_capabilities().atomic_replace);
+    }
+
+    fn unfocused_adapter() -> IbusEngineAdapter {
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\n")
+                .unwrap();
+        IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap())
+    }
+
+    #[test]
+    fn capture_is_off_until_a_content_type_arrives() {
+        let mut adapter = unfocused_adapter();
+        assert!(adapter.engine().is_sensitive_focus());
+        adapter.focus_in();
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        // A key that arrives before SetContentType passes through untouched.
+        assert_eq!(
+            adapter.process_key_event('a' as u32, 0, 0),
+            IbusKeyResult::default()
+        );
+        adapter.set_content_type(0, 0);
+        assert!(!adapter.engine().is_sensitive_focus());
+        assert!(adapter.process_key_event('a' as u32, 0, 0).handled);
+    }
+
+    #[test]
+    fn sensitive_content_types_and_hints_disable_capture() {
+        const PASSWORD: u32 = 8;
+        const PIN: u32 = 9;
+        const TERMINAL: u32 = 10;
+        const DATETIME: u32 = 13;
+        const UNKNOWN: u32 = 14;
+        const PRIVATE: u32 = 1 << 11;
+        const HIDDEN_TEXT: u32 = 1 << 12;
+        for (purpose, hints, sensitive) in [
+            (0, 0, false),
+            (TERMINAL, 0, false),
+            (DATETIME, 0, false),
+            (PASSWORD, 0, true),
+            (PIN, 0, true),
+            (UNKNOWN, 0, true),
+            (u32::MAX, 0, true),
+            (0, PRIVATE, true),
+            (0, HIDDEN_TEXT, true),
+            (0, 1 << 0, false),
+        ] {
+            assert_eq!(
+                content_type_is_sensitive(purpose, hints),
+                sensitive,
+                "purpose {purpose} hints {hints:#x}"
+            );
+            let mut adapter = adapter();
+            adapter.set_content_type(purpose, hints);
+            assert_eq!(adapter.engine().is_sensitive_focus(), sensitive);
+            if sensitive {
+                assert_eq!(
+                    adapter.process_key_event('a' as u32, 0, 0),
+                    IbusKeyResult::default()
+                );
             }
         }
+    }
+
+    #[test]
+    fn refocus_without_a_new_content_type_stays_sensitive() {
+        let mut adapter = adapter();
+        assert!(!adapter.engine().is_sensitive_focus());
+        adapter.focus_out();
+        adapter.focus_in();
+        assert!(adapter.engine().is_sensitive_focus());
+        assert_eq!(
+            adapter.process_key_event('a' as u32, 0, 0),
+            IbusKeyResult::default()
+        );
+    }
+
+    #[test]
+    fn reset_keeps_the_field_content_type() {
+        let mut adapter = adapter();
+        adapter.set_content_type(8, 0);
+        adapter.reset();
+        assert!(adapter.engine().is_sensitive_focus());
+        adapter.set_content_type(0, 0);
+        adapter.reset();
+        assert!(!adapter.engine().is_sensitive_focus());
+    }
+
+    #[test]
+    fn moved_cursor_without_reset_refuses_replacement() {
+        let mut adapter = adapter();
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":s");
+        // The user clicks elsewhere; this client sends no Reset.
+        client.cursor = 0;
+        let actions = client.type_text(&mut adapter, "ig");
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })),
+            "{actions:?}"
+        );
+        assert_eq!(client.text(), "ig:s");
+    }
+
+    #[test]
+    fn active_selection_refuses_replacement() {
+        let mut adapter = adapter();
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":si");
+        let text = client.text();
+        adapter.set_surrounding_text(&text, 3, 1);
+        let result = adapter.process_key_event('g' as u32, 0, 0);
+        assert_eq!(result.actions, vec![IbusAction::CommitText("g".into())]);
+    }
+
+    #[test]
+    fn client_without_surrounding_text_gets_no_replacement() {
+        let mut adapter = adapter();
+        adapter.set_capabilities(0);
+        let mut client = Client::default();
+        let actions = client.type_text(&mut adapter, ":sig");
+        assert!(!actions
+            .iter()
+            .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
+        assert_eq!(client.text(), ":sig");
+    }
+
+    #[test]
+    fn stale_surrounding_text_refuses_replacement() {
+        let mut adapter = adapter();
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":si");
+        // The client reports text that no longer ends with the trigger.
+        adapter.set_surrounding_text("hello", 5, 5);
+        let result = adapter.process_key_event('g' as u32, 0, 0);
+        assert_eq!(result.actions, vec![IbusAction::CommitText("g".into())]);
+    }
+
+    #[test]
+    fn legacy_and_keypad_keysyms_convert_to_text() {
+        for (keysym, expected) in [
+            (0x07e1, Some('α')), // Greek_alpha
+            (0x06c1, Some('а')), // Cyrillic_a
+            (0x05c7, Some('ا')), // Arabic_alef
+            (0x0ce0, Some('א')), // hebrew_aleph
+            (xkeysym::key::KP_1, Some('1')),
+            (xkeysym::key::KP_Space, Some(' ')),
+            (xkeysym::key::Return, Some('\n')),
+            (xkeysym::key::Tab, Some('\t')),
+            (xkeysym::key::dead_acute, None),
+            (xkeysym::key::Multi_key, None),
+            (xkeysym::key::Escape, None),
+            (xkeysym::key::Delete, None),
+            (xkeysym::key::BackSpace, None),
+        ] {
+            assert_eq!(keysym_to_char(keysym), expected, "keysym {keysym:#x}");
+        }
+    }
+
+    #[test]
+    fn greek_trigger_typed_with_legacy_keysyms_expands() {
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \";αβ\"\nreplacement = \"alpha beta\"\n")
+                .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        let mut client = Client::default();
+        client.key(&mut adapter, ';' as u32, 0);
+        client.key(&mut adapter, 0x07e1, 0); // Greek_alpha
+        client.key(&mut adapter, 0x07e2, 0); // Greek_beta
+        assert_eq!(client.text(), "alpha beta");
+    }
+
+    #[test]
+    fn async_emit_failure_resets_without_recording_the_expansion() {
+        let mut adapter = adapter();
+        let mut calls = 0;
+        let result = adapter.drain_completed_commands_with(|_| {
+            calls += 1;
+            Err::<(), _>("unreachable")
+        });
+        // Nothing completed, so nothing is emitted.
+        assert_eq!(result, Ok(0));
+        assert_eq!(calls, 0);
     }
 }

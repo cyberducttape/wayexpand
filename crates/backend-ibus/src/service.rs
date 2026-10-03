@@ -42,7 +42,12 @@ struct Factory {
     policy: Arc<OrganizationPolicy>,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     next_id: AtomicU64,
+    /// Wakes the completion pump with the path of an engine whose
+    /// asynchronous command finished.
+    completions: mpsc::Sender<OwnedObjectPath>,
 }
+
+type Instances = Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>;
 
 struct EngineInstance {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
@@ -50,7 +55,11 @@ struct EngineInstance {
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
 impl Factory {
-    fn create_engine(&self, name: &str) -> zbus::fdo::Result<OwnedObjectPath> {
+    /// Async so the object is registered through the async object server.
+    /// Packaged builds share zbus with crates that enable its tokio backend,
+    /// where a blocking zbus call from inside a handler panics ("cannot start
+    /// a runtime from within a runtime") and the engine is never created.
+    async fn create_engine(&self, name: &str) -> zbus::fdo::Result<OwnedObjectPath> {
         if name != "wayexpand" && name != "WayExpand" {
             return Err(zbus::fdo::Error::InvalidArgs(format!(
                 "unsupported WayExpand engine name: {name}"
@@ -67,13 +76,18 @@ impl Factory {
         let engine = ExpansionEngine::new(config).map_err(|error| {
             zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
         })?;
-        let adapter = Arc::new(Mutex::new(
+        let mut adapter =
             IbusEngineAdapter::with_policy(engine, (*self.policy).clone()).map_err(|error| {
                 zbus::fdo::Error::Failed(format!(
                     "administrator policy rejects IBus config: {error}"
                 ))
-            })?,
-        ));
+            })?;
+        let completions = self.completions.clone();
+        let completed_path = path.clone();
+        adapter.set_completion_notifier(Some(Arc::new(move || {
+            let _ = completions.send(completed_path.clone());
+        })));
+        let adapter = Arc::new(Mutex::new(adapter));
         let engine = EngineObject {
             adapter: Arc::clone(&adapter),
             connection: Arc::clone(&self.connection),
@@ -87,8 +101,10 @@ impl Factory {
             .clone()
             .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
         connection
+            .inner()
             .object_server()
             .at(path.as_str(), engine)
+            .await
             .map_err(zbus::fdo::Error::ZBus)?;
         self.instances
             .lock()
@@ -111,64 +127,180 @@ struct EngineObject {
 }
 
 impl EngineObject {
-    fn emit_actions(&self, actions: &[IbusAction]) -> zbus::fdo::Result<()> {
-        let Ok(connection) = self.connection.lock() else {
-            return Err(zbus::fdo::Error::Failed(
-                "IBus connection lock poisoned".into(),
-            ));
-        };
-        let Some(connection) = connection.as_ref() else {
-            return Err(zbus::fdo::Error::Failed(
-                "IBus connection unavailable".into(),
-            ));
-        };
+    fn connection(&self) -> zbus::fdo::Result<zbus::Connection> {
+        Ok(self
+            .connection
+            .lock()
+            .map_err(|_| zbus::fdo::Error::Failed("IBus connection lock poisoned".into()))?
+            .clone()
+            .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?
+            .into_inner())
+    }
+
+    async fn emit_actions(&self, actions: &[IbusAction]) -> zbus::fdo::Result<()> {
+        if actions.is_empty() {
+            return Ok(());
+        }
+        let connection = self.connection()?;
         for action in actions {
             let result = match action {
-                IbusAction::DeleteSurroundingText { nchars } => connection.emit_signal(
-                    None::<&str>,
-                    self.path.as_str(),
-                    "org.freedesktop.IBus.Engine",
-                    "DeleteSurroundingText",
-                    &(-(*nchars as i32), *nchars),
-                ),
+                IbusAction::DeleteSurroundingText { nchars } => {
+                    connection
+                        .emit_signal(
+                            None::<&str>,
+                            self.path.as_str(),
+                            "org.freedesktop.IBus.Engine",
+                            "DeleteSurroundingText",
+                            &(-(*nchars as i32), *nchars),
+                        )
+                        .await
+                }
                 IbusAction::CommitText(text) => {
-                    let ibus_text = ibus_text_value(text);
-                    connection.emit_signal(
-                        None::<&str>,
-                        self.path.as_str(),
-                        "org.freedesktop.IBus.Engine",
-                        "CommitText",
-                        &(Value::from(ibus_text),),
-                    )
+                    connection
+                        .emit_signal(
+                            None::<&str>,
+                            self.path.as_str(),
+                            "org.freedesktop.IBus.Engine",
+                            "CommitText",
+                            &(Value::from(ibus_text_value(text)),),
+                        )
+                        .await
                 }
             };
             result.map_err(zbus::fdo::Error::ZBus)?;
         }
         Ok(())
     }
+
+    /// Ask the client to start reporting surrounding text. IBus clients only
+    /// send `SetSurroundingText` after an engine has requested it, and
+    /// replacements are refused without it.
+    async fn require_surrounding_text(&self) {
+        if let Ok(connection) = self.connection() {
+            let _ = connection
+                .emit_signal(
+                    None::<&str>,
+                    self.path.as_str(),
+                    "org.freedesktop.IBus.Engine",
+                    "RequireSurroundingText",
+                    &(),
+                )
+                .await;
+        }
+    }
 }
 
-#[interface(name = "org.freedesktop.IBus.Engine")]
-impl EngineObject {
-    fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> zbus::fdo::Result<bool> {
-        let Ok(mut adapter) = self.adapter.lock() else {
-            return Ok(false);
+/// Emit replacement actions as IBus engine signals from a plain thread (the
+/// completion pump). D-Bus handlers use [`EngineObject::emit_actions`].
+fn emit_actions(
+    connection: &Connection,
+    path: &OwnedObjectPath,
+    actions: &[IbusAction],
+) -> zbus::fdo::Result<()> {
+    for action in actions {
+        let result = match action {
+            IbusAction::DeleteSurroundingText { nchars } => connection.emit_signal(
+                None::<&str>,
+                path.as_str(),
+                "org.freedesktop.IBus.Engine",
+                "DeleteSurroundingText",
+                &(-(*nchars as i32), *nchars),
+            ),
+            IbusAction::CommitText(text) => connection.emit_signal(
+                None::<&str>,
+                path.as_str(),
+                "org.freedesktop.IBus.Engine",
+                "CommitText",
+                &(Value::from(ibus_text_value(text)),),
+            ),
         };
-        let result = adapter.process_key_event(keyval, keycode, state);
-        if let Err(_error) = self.emit_actions(&result.actions) {
+        result.map_err(zbus::fdo::Error::ZBus)?;
+    }
+    Ok(())
+}
+
+/// Deliver asynchronous command results. Expansion workers wake this loop
+/// with the owning engine's path; it blocks on the channel rather than
+/// polling. Each result is validated and emitted under the engine's adapter
+/// lock (the same lock `ProcessKeyEvent` holds), and recorded as applied only
+/// after its signals were emitted.
+fn run_completion_pump(
+    wakeups: mpsc::Receiver<OwnedObjectPath>,
+    instances: Instances,
+    connection: Arc<Mutex<Option<Connection>>>,
+) {
+    for path in wakeups {
+        let adapter = match instances.lock() {
+            Ok(instances) => instances
+                .get(&path)
+                .map(|instance| Arc::clone(&instance.adapter)),
+            Err(_) => return,
+        };
+        // A destroyed engine's late completion has nowhere to go.
+        let Some(adapter) = adapter else { continue };
+        let connection = connection.lock().ok().and_then(|slot| slot.clone());
+        let Ok(mut adapter) = adapter.lock() else {
+            continue;
+        };
+        let Some(connection) = connection else {
+            // Without a bus nothing can be emitted; drop the results so the
+            // engine does not later apply them at a moved cursor.
+            let _ = adapter.drain_completed_commands_with(|_| {
+                Err(zbus::fdo::Error::Failed(
+                    "IBus connection unavailable".into(),
+                ))
+            });
+            continue;
+        };
+        if let Err(error) = adapter
+            .drain_completed_commands_with(|actions| emit_actions(&connection, &path, actions))
+        {
+            warn!(error = %error, "IBus could not emit an asynchronous expansion; engine reset");
+        }
+    }
+}
+
+/// Extract the string from a serialized IBusText variant.
+fn ibus_text_string(value: &Value<'_>) -> Option<String> {
+    match value {
+        Value::Value(inner) => ibus_text_string(inner),
+        Value::Structure(structure) => match structure.fields() {
+            [Value::Str(name), _, Value::Str(text), ..] if name.as_str() == "IBusText" => {
+                Some(text.to_string())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `spawn = false` handles calls to engine objects one at a time, in arrival
+/// order, so key events and the signals they emit cannot be reordered. The
+/// adapter lock is never held across an `.await`.
+#[interface(name = "org.freedesktop.IBus.Engine", spawn = false)]
+impl EngineObject {
+    async fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> bool {
+        let result = match self.adapter.lock() {
+            Ok(mut adapter) => adapter.process_key_event(keyval, keycode, state),
+            Err(_) => return false,
+        };
+        if self.emit_actions(&result.actions).await.is_err() {
             // The engine has already consumed this event. Reset its matcher
             // before returning false so a client retry cannot combine with a
             // half-applied replacement or stale trigger buffer.
-            adapter.reset();
-            return Ok(false);
+            if let Ok(mut adapter) = self.adapter.lock() {
+                adapter.reset();
+            }
+            return false;
         }
-        Ok(result.handled)
+        result.handled
     }
 
-    fn focus_in(&self) {
+    async fn focus_in(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
             adapter.focus_in();
         }
+        self.require_surrounding_text().await;
     }
     fn focus_out(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
@@ -180,10 +312,11 @@ impl EngineObject {
             adapter.reset();
         }
     }
-    fn enable(&self) {
+    async fn enable(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
             adapter.focus_in();
         }
+        self.require_surrounding_text().await;
     }
     fn disable(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
@@ -222,18 +355,28 @@ impl EngineObject {
         Ok(())
     }
     fn set_cursor_location(&self, _x: i32, _y: i32, _w: i32, _h: i32) {}
-    fn set_capabilities(&self, _caps: u32) {}
-    /// IBus purpose values 8 and 9 are PASSWORD and PIN respectively. Both
-    /// hide user input and must disable expansion before the next key arrives.
-    fn set_content_type(&self, purpose: u32, _hints: u32) {
-        let sensitive = matches!(purpose, 8 | 9);
+    fn set_capabilities(&self, caps: u32) {
         if let Ok(mut adapter) = self.adapter.lock() {
-            adapter
-                .engine_mut()
-                .process(wayexpand_core::InputEvent::FocusChanged { sensitive });
+            adapter.set_capabilities(caps);
         }
     }
-    fn set_surrounding_text(&self, _text: OwnedValue, _cursor_pos: u32, _anchor_pos: u32) {}
+    /// Capture is enabled only by a known non-sensitive content type; see
+    /// [`crate::content_type_is_sensitive`].
+    fn set_content_type(&self, purpose: u32, hints: u32) {
+        if let Ok(mut adapter) = self.adapter.lock() {
+            adapter.set_content_type(purpose, hints);
+        }
+    }
+    fn set_surrounding_text(&self, text: OwnedValue, cursor_pos: u32, anchor_pos: u32) {
+        let Ok(mut adapter) = self.adapter.lock() else {
+            return;
+        };
+        match ibus_text_string(&text) {
+            Some(text) => adapter.set_surrounding_text(&text, cursor_pos, anchor_pos),
+            // Unreadable text must not leave an older model in place.
+            None => adapter.clear_surrounding_text(),
+        }
+    }
 }
 
 /// Build and run the IBus engine process. The process owns a private bus name,
@@ -255,15 +398,22 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
-    let instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+    let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         config: Arc::clone(&factory_config),
         policy,
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
+        completions: completion_sender,
     };
+    let pump_instances = Arc::clone(&instances);
+    let pump_connection = Arc::clone(&connection_slot);
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-completions".into())
+        .spawn(move || run_completion_pump(completion_receiver, pump_instances, pump_connection))
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     let reload_receiver = store.subscribe();
     let reload_store = Arc::clone(&store);
     let reload_config = Arc::clone(&factory_config);
@@ -431,9 +581,10 @@ mod tests {
             policy: Arc::new(OrganizationPolicy::default()),
             instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
+            completions: mpsc::channel().0,
         };
         assert!(matches!(
-            factory.create_engine("not-wayexpand"),
+            zbus::block_on(factory.create_engine("not-wayexpand")),
             Err(zbus::fdo::Error::InvalidArgs(_))
         ));
     }
@@ -483,8 +634,193 @@ mod tests {
             instances: Arc::new(Mutex::new(HashMap::new())),
         };
         engine.set_content_type(8, 0);
-        assert!(!engine.process_key_event('a' as u32, 0, 0).unwrap());
+        assert!(!zbus::block_on(engine.process_key_event('a' as u32, 0, 0)));
         engine.set_content_type(0, 0);
         assert!(!engine.adapter.lock().unwrap().engine().is_sensitive_focus());
+    }
+
+    /// Serve exactly one broker request on `socket`, answering with `stdout`
+    /// after `delay`. Returns the action id the engine asked for.
+    fn fake_broker(
+        socket: std::path::PathBuf,
+        stdout: &'static str,
+        delay: Duration,
+    ) -> std::thread::JoinHandle<String> {
+        use std::io::{BufRead, Write};
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            std::thread::sleep(delay);
+            let response = serde_json::json!({ "Success": {
+                "exit_code": 0, "stdout": stdout, "stderr": "",
+                "stdout_truncated": false, "stderr_truncated": false, "duration_ms": 1,
+            }});
+            let mut stream = stream;
+            writeln!(stream, "{response}").unwrap();
+            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+            request["action_id"].as_str().unwrap_or_default().to_owned()
+        })
+    }
+
+    #[test]
+    fn broker_result_reaches_the_ibus_client_through_the_completion_pump() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-ibus-broker-{}-{}",
+            std::process::id(),
+            ENGINE_PATH.len()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("broker.sock");
+        // Only this test runs a broker action in this crate.
+        std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", &socket);
+        let broker = fake_broker(socket, "from-broker", Duration::from_millis(150));
+
+        let config: Config = toml::from_str(
+            "[[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
+             [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n",
+        )
+        .unwrap();
+        let connection_slot = Arc::new(Mutex::new(None));
+        let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+        let (completion_sender, completion_receiver) = mpsc::channel();
+        let factory = Factory {
+            connection: Arc::clone(&connection_slot),
+            config: Arc::new(Mutex::new(config)),
+            policy: Arc::new(OrganizationPolicy::default()),
+            instances: Arc::clone(&instances),
+            next_id: AtomicU64::new(1),
+            completions: completion_sender,
+        };
+
+        let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
+        let server = std::thread::spawn(move || {
+            Builder::async_io_unix_stream(server_stream)
+                .server(zbus::Guid::generate())
+                .unwrap()
+                .p2p()
+                .serve_at(FACTORY_PATH, factory)
+                .unwrap()
+                .build()
+                .unwrap()
+        });
+        let client = Builder::async_io_unix_stream(client_stream)
+            .p2p()
+            .build()
+            .unwrap();
+        let server = server.join().unwrap();
+        *connection_slot.lock().unwrap() = Some(server.clone());
+        {
+            let instances = Arc::clone(&instances);
+            let connection = Arc::clone(&connection_slot);
+            std::thread::spawn(move || {
+                run_completion_pump(completion_receiver, instances, connection)
+            });
+        }
+
+        // Collect CommitText payloads the engine emits to the client.
+        let (commit_sender, commit_receiver) = mpsc::channel();
+        let messages = zbus::blocking::MessageIterator::from(&client);
+        std::thread::spawn(move || {
+            for message in messages.flatten() {
+                let header = message.header();
+                if header.member().map(|member| member.as_str()) == Some("CommitText") {
+                    let (text,): (OwnedValue,) = message.body().deserialize().unwrap();
+                    let _ = commit_sender.send(ibus_text_string(&text).unwrap());
+                }
+            }
+        });
+
+        let engine: OwnedObjectPath = client
+            .call_method(
+                None::<&str>,
+                FACTORY_PATH,
+                Some("org.freedesktop.IBus.Factory"),
+                "CreateEngine",
+                &("wayexpand",),
+            )
+            .unwrap()
+            .body()
+            .deserialize()
+            .unwrap();
+        let invoke = |method: &str| {
+            client
+                .call_method(
+                    None::<&str>,
+                    engine.as_str(),
+                    Some("org.freedesktop.IBus.Engine"),
+                    method,
+                    &(),
+                )
+                .unwrap();
+        };
+        invoke("FocusIn");
+        invoke("Enable");
+        client
+            .call_method(
+                None::<&str>,
+                engine.as_str(),
+                Some("org.freedesktop.IBus.Engine"),
+                "SetCapabilities",
+                &(crate::IBUS_CAP_SURROUNDING_TEXT,),
+            )
+            .unwrap();
+        client
+            .call_method(
+                None::<&str>,
+                engine.as_str(),
+                Some("org.freedesktop.IBus.Engine"),
+                "SetContentType",
+                &(0_u32, 0_u32),
+            )
+            .unwrap();
+
+        // `:` passes through to the client; `o` and `k` are committed by the
+        // engine, and `k` queues the broker action. The client reports its
+        // text before each key, as ibus-gtk does.
+        let mut handled = Vec::new();
+        for (key, before) in [(':', ""), ('o', ":"), ('k', ":o")] {
+            let cursor = before.chars().count() as u32;
+            client
+                .call_method(
+                    None::<&str>,
+                    engine.as_str(),
+                    Some("org.freedesktop.IBus.Engine"),
+                    "SetSurroundingText",
+                    &(Value::from(ibus_text_value(before)), cursor, cursor),
+                )
+                .unwrap();
+            let reply: bool = client
+                .call_method(
+                    None::<&str>,
+                    engine.as_str(),
+                    Some("org.freedesktop.IBus.Engine"),
+                    "ProcessKeyEvent",
+                    &(key as u32, 0_u32, 0_u32),
+                )
+                .unwrap()
+                .body()
+                .deserialize()
+                .unwrap();
+            handled.push(reply);
+        }
+        assert_eq!(handled, [false, true, true]);
+        assert_eq!(broker.join().unwrap(), "status");
+
+        let mut commits = Vec::new();
+        while let Ok(text) = commit_receiver.recv_timeout(Duration::from_secs(5)) {
+            let done = text == "from-broker";
+            commits.push(text);
+            if done {
+                break;
+            }
+        }
+        assert_eq!(commits, ["o", "k", "from-broker"]);
+        std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET");
+        let _ = std::fs::remove_dir_all(root);
     }
 }
