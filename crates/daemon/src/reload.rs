@@ -736,6 +736,64 @@ mod tests {
     }
 
     #[test]
+    fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
+        let slow = "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
+                    [expansion.command]\nprogram = \"/bin/sh\"\n\
+                    args = [\"-c\", \"sleep 0.3; printf command-output\"]\ntimeout_ms = 2000\n";
+        let path = temporary_config();
+        write_config(&path, &format!("{slow}{}", config_text("before")));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        assert!(config.engine.enable_async_commands());
+
+        assert!(config
+            .engine
+            .process(InputEvent::Text(":slow".into()))
+            .is_empty());
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while config.engine.command_metrics().command_in_flight == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "command did not start"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        // Reload a changed snippet while the command runs, and keep typing.
+        write_config(&path, &format!("{slow}{}", config_text("after")));
+        config.reload_now();
+        let typed = config.engine.process(InputEvent::Text(":x".into()));
+        assert_eq!(typed.len(), 1);
+        assert_eq!(typed[0].insert, "after");
+
+        // The old engine's command must never deliver into the new engine.
+        let quiet = std::time::Instant::now() + Duration::from_millis(600);
+        while std::time::Instant::now() < quiet {
+            assert!(config.engine.drain_completed_commands().is_empty());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // The reloaded engine still runs commands.
+        assert!(config
+            .engine
+            .process(InputEvent::Text(":slow".into()))
+            .is_empty());
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let completed = loop {
+            if let Some(result) = config.engine.drain_completed_commands().pop() {
+                break result;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reloaded command did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(completed.insert, "command-output");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn reload_preserves_runtime_safety_state() {
         // CRITICAL P0 SECURITY TEST: Verify that config reloads do NOT
         // lose sensitive_focus, user_paused, or composition state.
