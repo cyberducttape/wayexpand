@@ -6,7 +6,7 @@
 
 WayExpand must choose between two fundamentally different capture methods:
 
-### Input-Method-V2 (Recommended for most users)
+### Input-Method-V2 (Preferred security path; still experimental)
 - **What it captures:** Committed text and locally resolved keyboard text
 - **What it misses:** Raw keyboard input (Escape, arrow keys, function keys)
 - **IME limitation:** Active external preedit is not exposed to the current
@@ -33,9 +33,9 @@ WayExpand must choose between two fundamentally different capture methods:
 | **Arrow Keys** | ❌ Not captured | ✅ Full capture |
 | **Function Keys** | ❌ Not captured | ✅ Full capture |
 | **Escape/Ctrl+C** | ❌ Not captured | ✅ Full capture |
-| **Browser URLs** | ✅ Works | ✅ Works |
-| **IDE Code** | ✅ Works | ✅ Works |
-| **Office Docs** | ✅ Works | ✅ Works |
+| **Browser URLs** | Committed-text path; certify target client | ✅ Works |
+| **IDE Code** | Committed-text path; certify target client | ✅ Works |
+| **Office Docs** | Committed-text path; certify target client | ✅ Works |
 | **Setup difficulty** | ⭐ Simple (no permissions needed) | ⭐⭐⭐⭐ Complex (requires permissions) |
 | **Daemon permissions** | Minimal | Requires input group |
 | **Latency** | ~5-10ms (IPC + composition) | ~1-2ms (direct kernel) |
@@ -49,7 +49,8 @@ WayExpand must choose between two fundamentally different capture methods:
 - ✅ You want zero-configuration setup
 - ✅ You want minimal daemon permissions
 
-**This covers ~80% of users.**
+This is the preferred security model, but desktop and client compatibility
+remain uncertified until the required real-session scenarios pass.
 
 ### Use Evdev if:
 - ✅ You need arrow key expansion (e.g., `;u` → Up, `;d` → Down)
@@ -138,7 +139,8 @@ No password protection (evdev sees all input)
 ### Input-Method-V2 Security Model
 - ⚠️ Password fields: Suppressed when reliable content-purpose information is
   supplied; compositor/client behavior is not certified universally
-- ✅ Window focus: IME respects application security boundaries
+- ⚠️ Window focus: the protocol preserves focus boundaries, but client and
+  compositor behavior remains uncertified
 - ✅ Clipboard: No access to expansion output
 - ✅ Daemon compromise: Cannot steal passwords (doesn't see raw input)
 
@@ -215,7 +217,9 @@ safe_mode = true
 
 ## Conclusion
 
-**For 80% of users:** Use Input-Method-V2. It's simpler, safer, and "just works."
+**For privacy-sensitive deployments:** Prefer Input-Method-V2 after checking
+the certification matrix for the target compositor and clients. It is simpler
+and safer by design, but it is not a universal compatibility guarantee.
 
 **For advanced users:** Understand the tradeoff. Evdev is faster and captures more keys, but requires permission escalation and exposes password input.
 
