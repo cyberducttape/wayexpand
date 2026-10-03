@@ -288,7 +288,7 @@ jobs:
       - name: Reject legacy repository identity
         run: |
           legacy_identity=$(printf 'itchy%s' 'itchy123')
-          if rg -n --hidden --glob '!.git/**' --glob '!target/**' "$legacy_identity" .; then
+          if git grep -n "$legacy_identity" -- .; then
             echo "Legacy GitHub username found"
             exit 1
           fi
@@ -301,7 +301,9 @@ jobs:
           else
             base=''
           fi
-          if [ -n "$base" ]; then
+          if [ -n "$base" ] \
+            && [ "$base" != 0000000000000000000000000000000000000000 ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null; then
             bash scripts/check-commit-identity.sh "$base..HEAD"
           else
             bash scripts/check-commit-identity.sh HEAD
