@@ -228,7 +228,7 @@ fn open_socket_parent(path: &Path) -> Result<(fs::File, PathBuf)> {
         rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
     ) {
         Ok(directory) => (directory, true),
-        Err(error) if error.raw_os_error() == 38 => {
+        Err(error) if error == rustix::io::Errno::NOSYS => {
             // Some systemd user-service sandboxes expose the filesystem but
             // make openat2 unavailable. secure_socket_path() has already
             // canonicalized and validated every ancestor, so retain the

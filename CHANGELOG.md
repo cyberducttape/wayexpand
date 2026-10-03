@@ -6,6 +6,15 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Correctness fixes:** `app_id_glob:` filters once again let `*` match an
+  empty string (`*foo` matches `foo`); broker-routed commands no longer fail
+  when an action takes longer than 100 ms, and a broker hang-up mid-response
+  is reported immediately instead of spinning until the deadline; output
+  preflight counts a reinserted delimiter as one character and no longer
+  rejects zero-length cursor moves; the serialized output worker's
+  completion wait is bounded so a wedged backend triggers reconnect instead
+  of stalling the daemon; a command flooding stderr can no longer delay its
+  own timeout.
 - **Daemon lifecycle:** hardened control-socket startup now remains compatible
   with systemd user sandboxes where `openat2` is unavailable, and libei portal
   shutdown constructs its Tokio timer inside the runtime instead of panicking
