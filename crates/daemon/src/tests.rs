@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::{absorb_evdev_delimiter, evdev_release_is_safe};
 use crate::input_loop::libei_policy_blocks;
 use crate::output_loop::connect_output_backend;
 use std::io::{BufReader, Cursor};
