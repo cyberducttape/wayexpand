@@ -139,7 +139,8 @@ What's implemented:
 - Captured action output is limited to 128 KiB total (64 KiB per stream). A
   successful response remains successful when a stream reaches its limit and
   reports `stdout_truncated` or `stderr_truncated`; the 1 MiB IPC frame limit
-  is only a transport bound.
+  is only a transport bound. The daemon refuses to inject a truncated stdout
+  value, while truncated stderr remains diagnostic-only.
 
 To build the standalone broker from a checkout:
 
