@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::insert_at_char_range;
 use crate::status::StatusTone;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

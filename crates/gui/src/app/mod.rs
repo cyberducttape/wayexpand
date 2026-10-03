@@ -3,15 +3,17 @@
 
 mod diagnostics;
 mod dialogs;
+mod editor;
 mod import;
 mod library;
-mod settings;
-mod setup;
-mod toolbar;
-
-pub(crate) use saving::UndoEntry;
-pub(crate) use setup::onboarding_step;
 mod runtime_events;
 mod saving;
+mod settings;
+mod setup;
 mod snippets;
 mod status_bar;
+mod toolbar;
+
+#[cfg(test)]
+pub(crate) use editor::insert_at_char_range;
+pub(crate) use saving::UndoEntry;
