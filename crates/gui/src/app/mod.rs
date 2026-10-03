@@ -3,5 +3,6 @@
 
 mod diagnostics;
 mod import;
+mod library;
 mod settings;
 mod toolbar;
