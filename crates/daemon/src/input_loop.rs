@@ -23,7 +23,7 @@ use wayexpand_core::{CommandMetrics, OrganizationPolicy, TextInjector};
 /// Low-latency polling while command/hotkey work is queued or running.
 const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Idle maintenance cadence for reload/pause/stop checks.
-const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
+pub(crate) const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 
 pub use crate::output_loop::connect_output_backend;
 use crate::{control, status};

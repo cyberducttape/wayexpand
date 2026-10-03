@@ -939,6 +939,9 @@ pub struct InputMethodSource {
     event_queue: EventQueue<StateData>,
     state: StateData,
     key_pass_through: Option<Box<dyn TextInjector>>,
+    /// Optional non-blocking eventfd that ends an idle wait early; see
+    /// [`InputMethodSource::set_wake_fd`].
+    wake: Option<std::sync::Arc<std::os::fd::OwnedFd>>,
 }
 
 impl InputMethodSource {
@@ -1004,6 +1007,7 @@ impl InputMethodSource {
             event_queue,
             state,
             key_pass_through: None,
+            wake: None,
         })
     }
 
@@ -1031,6 +1035,13 @@ impl InputMethodSource {
     /// Poll for one event without indefinitely blocking lifecycle handling in
     /// a daemon. This is intentionally an additive API; `InputSource::next_event`
     /// remains the blocking interface for simple consumers.
+    /// Install a non-blocking eventfd that ends [`Self::next_event_timeout`]
+    /// early when another thread has work for the caller. The source drains
+    /// it when it fires.
+    pub fn set_wake_fd(&mut self, wake: Option<std::sync::Arc<std::os::fd::OwnedFd>>) {
+        self.wake = wake;
+    }
+
     pub fn next_event_timeout(
         &mut self,
         timeout: Duration,
@@ -1062,13 +1073,19 @@ impl InputMethodSource {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
             tv_nsec: timeout.subsec_nanos().into(),
         };
-        let mut fds = [rustix::event::PollFd::new(
+        let mut fds = vec![rustix::event::PollFd::new(
             &self.connection,
             rustix::event::PollFlags::IN
                 | rustix::event::PollFlags::ERR
                 | rustix::event::PollFlags::HUP
                 | rustix::event::PollFlags::NVAL,
         )];
+        if let Some(wake) = self.wake.as_deref() {
+            fds.push(rustix::event::PollFd::new(
+                wake,
+                rustix::event::PollFlags::IN,
+            ));
+        }
         if rustix::event::poll(&mut fds, Some(&timeout))
             .map_err(|error| source_error(InputMethodError::Transport(error.to_string())))?
             == 0
@@ -1076,6 +1093,20 @@ impl InputMethodSource {
             return Ok(None);
         }
         let revents = fds[0].revents();
+        let woken = fds
+            .get(1)
+            .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
+        drop(fds);
+        if woken {
+            if let Some(wake) = self.wake.as_deref() {
+                let mut buffer = [0_u8; 8];
+                let _ = rustix::io::read(wake, &mut buffer);
+            }
+            if revents.is_empty() {
+                // Only the wake descriptor fired: let the caller run.
+                return Ok(None);
+            }
+        }
         if connection_poll_failed(revents) {
             self.release_virtual_keys();
             return Err(source_error(InputMethodError::Transport(format!(

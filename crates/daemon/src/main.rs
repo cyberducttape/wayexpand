@@ -13,6 +13,7 @@ mod source_steps;
 mod status;
 mod status_publisher;
 mod turn;
+mod waker;
 
 use anyhow::Result;
 use args::parse_args;
@@ -44,7 +45,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{self, BufRead},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{mpsc, Arc},
     thread,
     time::{Duration, Instant},
 };
@@ -142,6 +143,7 @@ struct Daemon {
     output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
     stdin_closed: bool,
     logged_queue_rejections: u64,
+    waker: waker::Waker,
 }
 
 fn main() -> Result<()> {
@@ -255,12 +257,23 @@ fn main() -> Result<()> {
 
     let control = control::ControlServer::start()?;
     let managed = control.path().is_some();
+    // Work arriving from other threads wakes the reactor instead of waiting
+    // for its next poll timeout.
+    let waker = waker::Waker::new()
+        .map_err(|error| anyhow::anyhow!("could not create the reactor wakeup: {error}"))?;
+    control.set_waker(waker.clone());
+    let completion_waker = waker.clone();
+    config
+        .engine
+        .set_completion_notifier(Some(Arc::new(move || completion_waker.wake())));
     let signal_stop = control.stop_requested.clone();
+    let signal_waker = waker.clone();
     let mut signals = Signals::new([SIGINT, SIGTERM])
         .map_err(|error| anyhow::anyhow!("could not install signal handlers: {error}"))?;
     thread::spawn(move || {
         if signals.forever().next().is_some() {
             signal_stop.store(true, std::sync::atomic::Ordering::Release);
+            signal_waker.wake();
         }
     });
     info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
@@ -271,23 +284,27 @@ fn main() -> Result<()> {
     }
     let portal_token_path = portal_token_path();
     let input_method = match source_name {
-        "input-method" => Some(connect_input_method_with_retry(
-            &control,
-            &path,
-            config.healthy(),
-            config.engine.libei_token_persistence(),
-            portal_token_path.as_deref(),
-            &policy,
-        )?),
+        "input-method" => {
+            let mut source = connect_input_method_with_retry(
+                &control,
+                &path,
+                config.healthy(),
+                config.engine.libei_token_persistence(),
+                portal_token_path.as_deref(),
+                &policy,
+            )?;
+            source.set_wake_fd(Some(waker.fd()));
+            Some(source)
+        }
         _ => None,
     };
     let evdev = match source_name {
-        "evdev" => Some(connect_evdev_with_retry(
-            &control,
-            &path,
-            backend_name,
-            config.healthy(),
-        )?),
+        "evdev" => {
+            let mut source =
+                connect_evdev_with_retry(&control, &path, backend_name, config.healthy())?;
+            source.set_wake_fd(Some(waker.fd()));
+            Some(source)
+        }
         _ => None,
     };
     match source_name {
@@ -425,13 +442,20 @@ fn main() -> Result<()> {
         output_failures,
         stdin_closed,
         logged_queue_rejections,
+        waker,
     };
     loop {
         let metrics = match daemon.maintain()? {
             std::ops::ControlFlow::Continue(metrics) => metrics,
             std::ops::ControlFlow::Break(()) => break,
         };
-        let poll_interval = input_poll_interval(metrics);
+        // Capture sources are woken by the waker when commands finish; only
+        // the stdin stream (a channel, not a descriptor) still polls for them.
+        let poll_interval = if daemon.receiver.is_some() {
+            input_poll_interval(metrics)
+        } else {
+            input_loop::IDLE_MAINTENANCE_INTERVAL
+        };
         daemon.apply_completed_commands()?;
         if daemon.handle_insert_request()? {
             continue;
