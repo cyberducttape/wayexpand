@@ -46,6 +46,10 @@ Changes not yet released.
 - **Efficiency:** application-ID glob matching no longer allocates a character
   vector per candidate, and bounded command stderr continues draining until
   the pipe is empty after the retention cap is reached.
+- **GUI wording:** first-run daemon status now says “Not enabled” instead of
+  presenting the expected pre-setup state as a failure. Case propagation is
+  labeled by its actual behavior, and app-filter syntax is kept behind an
+  advanced disclosure.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that

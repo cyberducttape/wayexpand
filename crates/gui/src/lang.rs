@@ -142,6 +142,13 @@ impl Strings {
         }
     }
 
+    pub fn daemon_not_enabled_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "WayExpand: Not enabled",
+            Language::German => "WayExpand: Nicht aktiviert",
+        }
+    }
+
     pub fn daemon_unknown_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Daemon: Checking…",
@@ -1075,7 +1082,7 @@ impl Strings {
 
     pub fn propagate_case(&self) -> &'static str {
         match self.lang {
-            Language::English => "Match case",
+            Language::English => "Follow trigger capitalization",
             Language::German => "Groß-/Kleinschreibung anpassen",
         }
     }
@@ -2097,8 +2104,22 @@ impl Strings {
 
     pub fn app_filter_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Leave empty for every app. Bare values or app_id_exact:<id> match one normalized desktop app ID. Use app_id_glob:<pattern> or title_contains:<text> only when weaker matching is intentional. Filters currently work only with the KWin window tracker.",
-            Language::German => "Leer lassen für alle Apps. Einzelwerte oder app_id_exact:<id> gleichen eine normalisierte Desktop-App-ID exakt ab. app_id_glob:<Muster> oder title_contains:<Text> nur verwenden, wenn schwächeres Matching beabsichtigt ist. Filter funktionieren derzeit nur mit dem KWin-Fenster-Tracker.",
+            Language::English => "Leave empty for every app. Add an app to limit this snippet to that application.",
+            Language::German => "Leer lassen für alle Apps. Eine App hinzufügen, um dieses Snippet auf diese Anwendung zu begrenzen.",
+        }
+    }
+
+    pub fn app_filter_advanced_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Advanced syntax: bare values or app_id_exact:<id> match one normalized desktop app ID. app_id_glob:<pattern> and title_contains:<text> intentionally use weaker matching. Filters currently require the KWin window tracker.",
+            Language::German => "Erweiterte Syntax: Einzelwerte oder app_id_exact:<id> gleichen eine normalisierte Desktop-App-ID exakt ab. app_id_glob:<Muster> und title_contains:<Text> verwenden absichtlich schwächeres Matching. Filter benötigen derzeit den KWin-Fenster-Tracker.",
+        }
+    }
+
+    pub fn app_filter_advanced(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Advanced matching syntax",
+            Language::German => "Erweiterte Matching-Syntax",
         }
     }
 
