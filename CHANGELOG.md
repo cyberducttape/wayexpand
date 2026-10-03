@@ -6,6 +6,27 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **IBus safety and correctness:** Action Broker results now reach IBus
+  clients. Command workers wake a completion thread that emits each result
+  and records it as applied only after emission; previously queued results
+  were never delivered. Capture fails closed until a field reports a known
+  non-sensitive content type, and unknown purposes plus the `PRIVATE` and
+  `HIDDEN_TEXT` hints are treated as sensitive. Replacements are refused
+  unless the client's surrounding text confirms the trigger before a
+  collapsed cursor. Immediate triggers no longer delete one extra
+  character. The IBus route reports `atomic_replace = false`, is governed
+  as `ibus` rather than `input-method-v2` in `allowed_backends`, and is
+  checked against `require_atomic_replace`/`require_sensitive_focus`.
+  Legacy X11 keysyms (Greek, Cyrillic, Arabic, Hebrew, keypad) now match.
+  **Policy migration:** sites with a non-empty `allowed_backends` that rely
+  on IBus must add `"ibus"`.
+- **IBus service in packaged builds:** packages build the IBus service in
+  the same Cargo invocation as the daemon, which enables zbus's tokio
+  backend. In that mode `CreateEngine` made a blocking zbus call from inside
+  its handler and panicked, so no engine could be created. D-Bus handlers
+  now use the async API, and engine calls are handled serially in arrival
+  order. A peer-to-peer D-Bus test now exercises the real factory, key
+  events, and broker completion delivery.
 - **Correctness fixes:** `app_id_glob:` filters once again let `*` match an
   empty string (`*foo` matches `foo`); broker-routed commands no longer fail
   when an action takes longer than 100 ms, and a broker hang-up mid-response

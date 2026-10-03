@@ -245,7 +245,7 @@ pub struct OrganizationPolicy {
     pub max_replacement_size: usize,
 
     /// Allowed output backends. If non-empty, only these backends are allowed.
-    /// Examples: "libei", "input-method-v2", "wlroots", "none"
+    /// Examples: "libei", "input-method-v2", "ibus", "wlroots", "none"
     pub allowed_backends: Vec<String>,
 
     /// Allowed curated packs. If non-empty, only these packs are allowed
