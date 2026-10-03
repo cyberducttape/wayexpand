@@ -1165,6 +1165,12 @@ impl ExpansionEngine {
         self.composition_active
     }
 
+    /// Restores composition state from a previous engine instance. Critical
+    /// for config reloads so matching cannot resume during an active preedit.
+    pub fn set_composition_active(&mut self, active: bool) {
+        self.composition_active = active;
+    }
+
     /// Restores sensitive field focus state from a previous engine instance.
     /// Critical for config reloads to preserve password-field protection.
     pub fn set_sensitive_focus(&mut self, sensitive: bool) {

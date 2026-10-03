@@ -11,12 +11,14 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+const DEADLINE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 const MAX_STREAM_OUTPUT_BYTES: usize = MAX_OUTPUT_BYTES / 2;
 
@@ -91,6 +93,18 @@ pub enum IpcError {
 
     #[error("Message too large ({0} bytes, limit {1})")]
     MessageTooLarge(usize, usize),
+
+    #[error("IPC deadline exceeded")]
+    DeadlineExceeded,
+
+    #[error("IPC operation cancelled")]
+    Cancelled,
+}
+
+impl IpcError {
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+    }
 }
 
 /// Read a newline-terminated line with a size bound.
@@ -372,10 +386,61 @@ impl BrokerClient {
         write_frame(&mut self.stream, &json)
     }
 
+    /// Bound both directions of the client connection to the remaining
+    /// command deadline. The broker has its own action timeout, but the
+    /// client must not wait behind a wedged broker longer than WayExpand's
+    /// command contract permits.
+    pub fn set_io_timeout(&self, timeout: Duration) -> Result<(), IpcError> {
+        self.stream.set_read_timeout(Some(timeout))?;
+        self.stream.set_write_timeout(Some(timeout))?;
+        Ok(())
+    }
+
     /// Receive an action response from the broker.
     pub fn recv_response(&mut self) -> Result<ActionResponse, IpcError> {
         let line = read_bounded_line(&mut self.reader, MAX_MESSAGE_BYTES)?;
         serde_json::from_str(line.trim()).map_err(IpcError::Json)
+    }
+
+    /// Receive a response while checking a command deadline and cancellation
+    /// flag in short intervals. A stalled broker therefore cannot hold a
+    /// command worker past its configured timeout or shutdown.
+    pub fn recv_response_until(
+        &mut self,
+        deadline: Instant,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<ActionResponse, IpcError> {
+        let mut frame = Vec::new();
+        loop {
+            if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                return Err(IpcError::Cancelled);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(IpcError::DeadlineExceeded);
+            }
+            self.stream
+                .set_read_timeout(Some(remaining.min(DEADLINE_POLL_INTERVAL)))?;
+            match self.reader.read_until(b'\n', &mut frame) {
+                Ok(0) if frame.is_empty() => return Err(IpcError::ConnectionClosed),
+                Ok(_) => {
+                    if frame.len() > MAX_MESSAGE_BYTES {
+                        return Err(IpcError::MessageTooLarge(frame.len(), MAX_MESSAGE_BYTES));
+                    }
+                    if frame.last() == Some(&b'\n') {
+                        let line = std::str::from_utf8(&frame).map_err(|error| {
+                            IpcError::Io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                error,
+                            ))
+                        })?;
+                        return serde_json::from_str(line.trim()).map_err(IpcError::Json);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(error) => return Err(IpcError::Io(error)),
+            }
+        }
     }
 }
 

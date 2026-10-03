@@ -266,6 +266,7 @@ impl ReloadableConfig {
                         //   matching even though the control status still says paused.
                         engine.set_user_paused(self.engine.is_user_paused());
                         engine.set_sensitive_focus(self.engine.is_sensitive_focus());
+                        engine.set_composition_active(self.engine.is_composition_active());
                         self.engine = engine;
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;
@@ -735,7 +736,7 @@ mod tests {
     #[test]
     fn reload_preserves_runtime_safety_state() {
         // CRITICAL P0 SECURITY TEST: Verify that config reloads do NOT
-        // lose sensitive_focus and user_paused state.
+        // lose sensitive_focus, user_paused, or composition state.
         //
         // A fresh ExpansionEngine defaults both to false, meaning:
         // - If sensitive_focus was true (password field), a reload would
@@ -743,7 +744,8 @@ mod tests {
         // - If user_paused was true, a reload would appear to resume matching
         //   despite the control API still reporting pause.
         //
-        // Both are critical for maintaining password-field protection.
+        // Composition state is equally critical: matching during a dead-key,
+        // Compose, or IME preedit can corrupt the user's in-progress text.
         let path = temporary_config();
         write_config(&path, &config_text("initial"));
         let mut config =
@@ -752,8 +754,10 @@ mod tests {
         // Simulate entering a sensitive field and pausing the user.
         config.engine.set_sensitive_focus(true);
         config.engine.set_user_paused(true);
+        config.engine.set_composition_active(true);
         assert!(config.engine.is_sensitive_focus());
         assert!(config.engine.is_user_paused());
+        assert!(config.engine.is_composition_active());
 
         // Trigger a reload (e.g., from a GUI save).
         write_config(&path, &config_text("reloaded"));
@@ -769,6 +773,41 @@ mod tests {
             config.engine.is_user_paused(),
             "user_paused lost on reload - pause state lost!"
         );
+        assert!(
+            config.engine.is_composition_active(),
+            "composition_active lost on reload - matching resumed during preedit!"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn composition_state_survives_reload_until_preedit_ends() {
+        let path = temporary_config();
+        write_config(&path, &config_text("initial"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+
+        config
+            .engine
+            .process(InputEvent::CompositionChanged { active: true });
+        write_config(&path, &config_text("reloaded"));
+        config.reload_now();
+
+        assert!(config.engine.is_composition_active());
+        assert!(
+            config
+                .engine
+                .process(InputEvent::Text(":x".into()))
+                .is_empty(),
+            "reload must not resume matching during active composition"
+        );
+
+        config
+            .engine
+            .process(InputEvent::CompositionChanged { active: false });
+        let results = config.engine.process(InputEvent::Text(":x".into()));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].insert, "reloaded");
         let _ = fs::remove_file(path);
     }
 
