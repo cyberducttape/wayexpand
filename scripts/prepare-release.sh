@@ -231,7 +231,7 @@ git -c user.name='Stephan Loesevitz' -c user.email='stephan.loesevitz@gmail.com'
 # Verify the committed tree produces the exact checksum recorded in PKGBUILD.
 git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix="wayexpand-${new_version}/" \
-    HEAD^{tree} | gzip -n > "$archive_path"
+    "HEAD^{tree}" | gzip -n > "$archive_path"
 committed_checksum=$(sha256sum "$archive_path" | awk '{print $1}')
 test "$committed_checksum" = "$checksum"
 printf '%s\n' "✓ Final release archive checksum verified: $checksum"

@@ -155,7 +155,7 @@ jobs:
           # Clean source archive: lockfile included, no vendored source redirect.
           git archive --format=tar --mtime='1970-01-01 00:00:00' \
             --prefix="wayexpand-${version}/" \
-            HEAD^{tree} | gzip -n > "wayexpand-${version}.tar.gz"
+            "HEAD^{tree}" | gzip -n > "wayexpand-${version}.tar.gz"
           if tar -tzf "wayexpand-${version}.tar.gz" | grep -E '(^|/)\.git(/|$)' >/dev/null; then
             echo "source archive unexpectedly contains .git metadata" >&2
             exit 1
