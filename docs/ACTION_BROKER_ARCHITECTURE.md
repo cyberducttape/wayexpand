@@ -151,24 +151,16 @@ To build the standalone broker from a checkout:
 The packaged user service uses `~/.config/wayexpand/broker.toml` and
 `$XDG_RUNTIME_DIR/wayexpand-broker.sock`; enable it after creating that policy.
 
-## Next: Enhanced Control (v1.3.x) - PLANNED
+## Next: Enhanced Control (planned)
 
-What will be implemented:
-- **Policy Integration**
-  - Add richer policy controls around the already-integrated action route
-  - Fail closed when the broker is unavailable; never fall back to local daemon execution
-
-- **Per-Action Permissions**
-  - Environment variable filtering
-  - Working directory restrictions
-  - Network isolation through a concrete service/container sandbox (not a TOML boolean)
-  - Timeout enforcement per action
-
-- **Deployment hardening**
-  - Add per-action OS sandbox profiles or service-level containment
-  - Evaluate optional socket activation without changing the current default
-    socket lifecycle
-  - Improve upgrade diagnostics and policy-revision reporting
+The following are future improvements, not prerequisites for the currently
+shipped named-action path:
+- **Per-action OS containment** through service-level or platform sandbox
+  profiles. The broker's TOML policy is not a substitute for OS isolation.
+- **Optional socket activation** without changing the current default socket
+  lifecycle.
+- **Upgrade diagnostics** that make policy revisions and broker restarts more
+  visible to operators.
 
 ## Phase 3: Enterprise Features (v1.4+) - FUTURE
 
@@ -299,14 +291,14 @@ missing broker service from an unknown or disabled action.
 
 ## Benefits Over Current Approach
 
-| Aspect | Current (v1.2) | With Action Broker (v1.3+) |
+| Aspect | Direct `program` command | Named `action` through broker |
 |--------|-----------------|--------------------------|
-| Daemon network access | None | None |
-| Command execution | Direct `program` commands in daemon process | Named `action` commands in separate broker process |
-| Per-command control | Policy only (all or nothing) | Fine-grained per-action |
+| Execution process | Daemon command worker | Separate broker service |
+| Network access | Daemon service policy | Broker service policy; configure explicitly |
+| Per-command control | Direct command restrictions | Fine-grained action catalog |
 | Audit trail | Not available | Optional privacy-preserving execution events |
-| Security isolation | Moderate | Strong process/policy boundary; same-UID trust remains |
-| Flexibility | Limited | High |
+| Security boundary | Daemon sandbox | Broker policy/process boundary; same-UID trust remains |
+| Availability | Subject to daemon sandbox | Fails closed when broker is unavailable |
 
 ## Getting Help
 
