@@ -14,3 +14,4 @@ pub(crate) use setup::onboarding_step;
 mod runtime_events;
 mod saving;
 mod snippets;
+mod status_bar;
