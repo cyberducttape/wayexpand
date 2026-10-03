@@ -31,6 +31,11 @@ Show the active daemon status. The JSON form is stable for automation.
 .B doctor [--json] [CONFIG]
 Report available input and output backends and their compatibility.
 .TP
+.B stats [--json] [--days N] [--clear] [CONFIG]
+Show local usage statistics: recent expansions, keystrokes avoided, most-used
+and unused snippets, and risky triggers. Only snippet IDs, counts, and dates are
+stored, beside the configuration; \-\-clear deletes them.
+.TP
 .B explain TEXT [--json] [--offline] [--app ID] [CONFIG]
 Explain why TEXT would or would not expand. With a running daemon the answer
 uses its live state (focused application, sensitive field, composition, pause,

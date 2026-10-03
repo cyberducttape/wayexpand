@@ -284,6 +284,9 @@ pub struct ExpansionEngine {
     template_base: crate::TemplateContext,
     /// Supplied by the host when it can read the clipboard.
     clipboard: Option<crate::ClipboardReader>,
+    /// Applied expansions not yet collected by the host; see
+    /// [`ExpansionEngine::drain_usage_events`].
+    usage_events: VecDeque<crate::UsageEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -518,6 +521,7 @@ impl ExpansionEngine {
             reinsert_terminators: true,
             template_base,
             clipboard: None,
+            usage_events: VecDeque::new(),
         })
     }
 
@@ -1096,6 +1100,7 @@ impl ExpansionEngine {
     /// output checks have completed.
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
         self.release_deferred_match_for_result(result);
+        self.record_usage(result);
         if result.undoable && result.cursor_offset.is_none() {
             self.last_expansion = Some(transaction::transaction_texts(
                 &result.matched_text,
@@ -1103,6 +1108,38 @@ impl ExpansionEngine {
                 result.reinsert_after,
             ));
         }
+    }
+
+    /// Collect applied-expansion events for local usage statistics. Hosts
+    /// that never collect them lose only the oldest beyond a small bound.
+    pub fn drain_usage_events(&mut self) -> Vec<crate::UsageEvent> {
+        self.usage_events.drain(..).collect()
+    }
+
+    fn record_usage(&mut self, result: &ExpansionResult) {
+        const MAX_PENDING_USAGE_EVENTS: usize = 1024;
+        if !self.config.settings.usage_stats {
+            return;
+        }
+        let Some(expansion) = self
+            .config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.answers_to(&result.trigger))
+        else {
+            return;
+        };
+        if self.usage_events.len() >= MAX_PENDING_USAGE_EVENTS {
+            self.usage_events.pop_front();
+        }
+        self.usage_events.push_back(crate::UsageEvent {
+            snippet_id: expansion.id.clone(),
+            typed_chars: result.matched_text.chars().count(),
+            inserted_chars: result.insert.chars().count(),
+            unix_timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs()),
+        });
     }
 
     /// Restore a deferred trigger when its result will not be injected. The

@@ -595,3 +595,97 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
     };
     Ok(())
 }
+
+/// `wayexpand stats`: local usage statistics, never sent anywhere.
+pub(crate) fn stats_command(args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand stats [--json] [--days N] [--clear] [config]";
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let clear = match rest.iter().position(|arg| arg == "--clear") {
+        Some(index) => {
+            rest.remove(index);
+            true
+        }
+        None => false,
+    };
+    let days = match take_option(&mut rest, "--days")? {
+        Some(value) => value
+            .parse::<u64>()
+            .ok()
+            .filter(|days| (1..=3650).contains(days))
+            .ok_or_else(|| usage_error("--days must be a number from 1 to 3650"))?,
+        None => 30,
+    };
+    if rest.len() > 1 {
+        usage_bail!("{USAGE}");
+    }
+    let path = rest
+        .into_iter()
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_config_path);
+    let stats_path = wayexpand_core::usage_stats_path(&path);
+    if clear {
+        match std::fs::remove_file(&stats_path) {
+            Ok(()) => println!("local usage statistics cleared"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                println!("no local usage statistics to clear")
+            }
+            Err(error) => {
+                return Err(config_error(format!(
+                    "could not clear {}: {error}",
+                    stats_path.display()
+                )))
+            }
+        }
+        return Ok(());
+    }
+    let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let report = wayexpand_core::UsageStats::load(&stats_path).report(&config, now, days);
+    if requested_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "recording": config.settings.usage_stats,
+                "file": stats_path,
+                "report": report,
+            })
+        );
+        return Ok(());
+    }
+    if !config.settings.usage_stats {
+        println!("Usage recording is off (settings.usage_stats = false).");
+    }
+    println!("Last {days} days: {} expansions", report.expansions);
+    println!(
+        "Keystrokes avoided (all time): {}",
+        report.keystrokes_avoided
+    );
+    if !report.top.is_empty() {
+        println!("\nMost used:");
+        for line in &report.top {
+            println!("  {:<24} {}", line.trigger, line.count);
+        }
+    }
+    if !report.unused_90_days.is_empty() {
+        println!(
+            "\n{} snippet(s) not used in 90 days: {}",
+            report.unused_90_days.len(),
+            report.unused_90_days.join(", ")
+        );
+    }
+    if !report.trigger_risks.is_empty() {
+        println!("\n{} trigger warning(s):", report.trigger_risks.len());
+        for risk in &report.trigger_risks {
+            println!("  {} — {}", risk.trigger, risk.reason);
+        }
+    }
+    println!(
+        "\nStored locally in {}; nothing leaves this machine.",
+        stats_path.display()
+    );
+    Ok(())
+}

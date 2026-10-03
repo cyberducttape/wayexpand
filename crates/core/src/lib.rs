@@ -20,6 +20,7 @@ mod paths;
 mod policy;
 mod store;
 mod template;
+mod usage;
 
 pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorCapabilities,
@@ -57,4 +58,8 @@ pub use store::{ConfigStore, ConfigStoreStatus};
 pub use template::{
     render_template, render_template_with_cursor, template_variables, ClipboardReader,
     TemplateContext, TemplateError,
+};
+pub use usage::{
+    trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk, UsageEvent, UsageLine, UsageReport,
+    UsageStats,
 };

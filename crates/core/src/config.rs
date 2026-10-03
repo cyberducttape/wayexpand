@@ -154,6 +154,19 @@ pub struct Settings {
     /// passwords and other secrets. Organization policy can still block it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub allow_clipboard: bool,
+    /// Record local usage statistics (snippet IDs, counts, and dates; never
+    /// text) next to the configuration. On by default; nothing leaves the
+    /// machine.
+    #[serde(default = "default_usage_stats", skip_serializing_if = "is_true")]
+    pub usage_stats: bool,
+}
+
+fn default_usage_stats() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn default_libei_persistence() -> bool {
@@ -200,6 +213,7 @@ impl Default for Settings {
             libei_token_persistence: true,
             template_env: Vec::new(),
             allow_clipboard: false,
+            usage_stats: true,
         }
     }
 }

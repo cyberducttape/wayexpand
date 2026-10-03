@@ -319,7 +319,7 @@ fn format_time(timestamp: u64) -> String {
     )
 }
 
-fn format_date(timestamp: u64) -> String {
+pub(crate) fn format_date(timestamp: u64) -> String {
     let days = (timestamp / 86_400) as i64;
     let (year, month, day) = civil_from_days(days);
     format!("{year:04}-{month:02}-{day:02}")

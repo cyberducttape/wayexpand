@@ -263,6 +263,14 @@ replacement = "1 Main Street"
 Every alias uses the snippet's match mode and options, and an alias may not
 collide with any other trigger.
 
+**Local usage statistics:** `wayexpand stats` shows how many expansions you
+used recently, keystrokes avoided, your most-used snippets, snippets unused for
+90 days, and triggers likely to fire by accident (for example plain words in
+immediate mode). The daemon records only snippet IDs, counts, and dates, never
+text, in `usage-stats.json` next to your configuration; nothing leaves your
+machine. `wayexpand stats --clear` deletes it, and
+`[settings] usage_stats = false` stops recording.
+
 See [TEMPLATES.md](TEMPLATES.md) for every variable, including snippet
 includes, allowlisted environment variables, and the opt-in clipboard.
 

@@ -473,6 +473,17 @@ daemon engine and reset after a successful configuration reload.
 
 ---
 
+### `wayexpand stats`
+
+`wayexpand stats [--json] [--days N] [--clear] [config]` reports local usage
+from `usage-stats.json` beside the configuration. JSON fields: `recording`
+(bool), `file`, and `report` with `days`, `expansions`, `keystrokes_avoided`,
+`top` (`{trigger, count, last_used}`), `unused_90_days` (triggers), and
+`trigger_risks` (`{trigger, reason}`). **Stability:** 🧪 **Experimental**.
+The file stores snippet IDs, counts, character totals, and dates only.
+
+---
+
 ### `wayexpand explain <text>` and the `explain` control command
 
 `wayexpand explain <text> [--json]` reports, check by check, whether typed text
@@ -545,6 +556,11 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `ExpansionConfig::match_mode` — expansion matching mode ("immediate" or "word-boundary", default "immediate")
 
 **New fields** (1.0.1+ and later 1.x releases):
+- `Settings::usage_stats` (bool, default `true`, omitted when `true`) —
+  record local usage statistics; see `wayexpand stats`.
+- `Settings::template_env` and `Settings::allow_clipboard`, and
+  `OrganizationPolicy::disable_template_env` / `disable_clipboard` — see
+  [TEMPLATES.md](TEMPLATES.md).
 - `ExpansionConfig::aliases` (list of strings, default empty, omitted from
   saved TOML and JSON when empty) — additional triggers for the same
   replacement. Older readers that reject unknown fields will not load a

@@ -14,6 +14,7 @@ mod source_steps;
 mod status;
 mod status_publisher;
 mod turn;
+mod usage;
 mod waker;
 
 use anyhow::Result;
@@ -145,6 +146,7 @@ struct Daemon {
     stdin_closed: bool,
     logged_queue_rejections: u64,
     waker: waker::Waker,
+    usage: usage::UsageRecorder,
 }
 
 fn main() -> Result<()> {
@@ -419,6 +421,7 @@ fn main() -> Result<()> {
 
     let stdin_closed = false;
     let logged_queue_rejections = 0;
+    let usage = usage::UsageRecorder::new(wayexpand_core::usage_stats_path(&path));
     let mut daemon = Daemon {
         control,
         policy,
@@ -447,6 +450,7 @@ fn main() -> Result<()> {
         stdin_closed,
         logged_queue_rejections,
         waker,
+        usage,
     };
     loop {
         let metrics = match daemon.maintain()? {
@@ -485,6 +489,8 @@ fn main() -> Result<()> {
         }
     }
     warn!("input stream ended; daemon stopping");
+    daemon.usage.collect(&mut daemon.config.engine);
+    daemon.usage.flush();
     // Backends get an explicit teardown opportunity. The bounded wait keeps
     // systemd stop independent from a broken portal implementation, while
     // still allowing libei to close its portal session and Tokio runtime

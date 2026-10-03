@@ -4153,3 +4153,100 @@ fn clipboard_requires_opt_in_and_fails_closed() {
     // No reader (or an unreadable clipboard) means no expansion.
     assert!(render_first(enabled, ":c", None).is_empty());
 }
+
+#[test]
+fn applied_expansions_produce_usage_events_by_snippet_id() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":sig\"\naliases = [\":s\"]\nreplacement = \"Best regards\"\n",
+    )
+    .unwrap();
+    let id = config.expansion[0].id.clone();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut results = engine.process(InputEvent::Text(":sig".into()));
+    results.extend(engine.process(InputEvent::EndOfInput));
+    engine.commit_applied_expansion(&results[0]);
+    let events = engine.drain_usage_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].snippet_id, id);
+    assert_eq!(events[0].typed_chars, 4);
+    assert_eq!(events[0].inserted_chars, 12);
+    assert!(engine.drain_usage_events().is_empty());
+}
+
+#[test]
+fn usage_recording_can_be_turned_off() {
+    let config = Config::parse(
+        "[settings]\nusage_stats = false\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"x\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let results = engine.process(InputEvent::Text(":sig".into()));
+    engine.commit_applied_expansion(&results[0]);
+    assert!(engine.drain_usage_events().is_empty());
+}
+
+#[test]
+fn usage_report_counts_savings_unused_snippets_and_risky_triggers() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Best regards\"\n\
+         [[expansion]]\ntrigger = \":old\"\nreplacement = \"x\"\n\
+         [[expansion]]\ntrigger = \"btw\"\nreplacement = \"by the way\"\n",
+    )
+    .unwrap();
+    let now = 1_700_000_000;
+    let mut stats = crate::UsageStats::default();
+    for _ in 0..3 {
+        stats.record(&crate::UsageEvent {
+            snippet_id: config.expansion[0].id.clone(),
+            typed_chars: 4,
+            inserted_chars: 12,
+            unix_timestamp: now,
+        });
+    }
+    stats.record(&crate::UsageEvent {
+        snippet_id: config.expansion[1].id.clone(),
+        typed_chars: 4,
+        inserted_chars: 1,
+        unix_timestamp: now - 200 * 86_400,
+    });
+    let report = stats.report(&config, now, 30);
+    assert_eq!(report.expansions, 3);
+    // 3 × (12 − 4); the old snippet saved nothing.
+    assert_eq!(report.keystrokes_avoided, 24);
+    assert_eq!(report.top[0].trigger, ":sig");
+    assert_eq!(report.top[0].count, 3);
+    assert!(report.unused_90_days.contains(&":old".to_owned()));
+    assert!(report.unused_90_days.contains(&"btw".to_owned()));
+    assert!(report
+        .trigger_risks
+        .iter()
+        .any(|risk| risk.trigger == "btw" && risk.reason.contains("immediate mode")));
+    assert!(!report
+        .trigger_risks
+        .iter()
+        .any(|risk| risk.trigger == ":sig"));
+}
+
+#[test]
+fn usage_stats_round_trip_through_a_private_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = std::env::temp_dir().join(format!("wayexpand-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = crate::usage_stats_path(&directory.join("expansions.toml"));
+    let mut stats = crate::UsageStats::default();
+    stats.record(&crate::UsageEvent {
+        snippet_id: "id".into(),
+        typed_chars: 1,
+        inserted_chars: 2,
+        unix_timestamp: 86_400,
+    });
+    stats.save(&path).unwrap();
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(crate::UsageStats::load(&path), stats);
+    assert_eq!(stats.daily["1970-01-02"], 1);
+    let _ = std::fs::remove_dir_all(directory);
+}
