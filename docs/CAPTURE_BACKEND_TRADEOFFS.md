@@ -202,10 +202,10 @@ safe_mode = true
 ## Certification Status
 
 ### Input-Method-V2
-- ✅ **KDE Plasma:** Fully tested, recommended
-- ✅ **GNOME:** Fully tested, recommended
-- ✅ **Sway/Hyprland:** Works via IBus/Fcitx
-- ⚠️ **CJK (Chinese, Japanese, Korean):** Requires active composition support
+- ⚠️ **KDE Plasma:** Experimental; no release certification published
+- ⚠️ **GNOME:** Experimental; no release certification published
+- ⚠️ **Sway/Hyprland:** Experimental and compositor-dependent; no release certification published
+- ⚠️ **CJK (Chinese, Japanese, Korean):** Active composition support is not implemented
 
 ### Evdev
 - ✅ **KDE Plasma:** Works with input group

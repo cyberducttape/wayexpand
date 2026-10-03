@@ -189,6 +189,10 @@ def main() -> int:
         errors.append("capture trade-off guide must state the active external preedit limitation")
     if "Committed Unicode" not in tradeoffs:
         errors.append("capture trade-off guide must distinguish committed Unicode from active IME input")
+    if "Fully tested, recommended" in tradeoffs or "Works via IBus/Fcitx" in tradeoffs:
+        errors.append("capture trade-off guide must not claim uncertified compositor or IME coverage")
+    if tradeoffs.count("no release certification published") < 3:
+        errors.append("capture trade-off guide must mark each input-method compositor group uncertified")
 
     for document in active_documents():
         text = document.read_text(encoding="utf-8")
