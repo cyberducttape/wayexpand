@@ -31,7 +31,8 @@ This document is the short security map. For deeper details, see
 | Malicious trigger shell injection | Yes | Command snippets execute a program and argument vector directly; WayExpand does not use `sh -c`. |
 | Unbounded command output | Yes | Command stdout is UTF-8 checked and capped; stderr is discarded; stdin is null. |
 | Slow or stuck command | Mostly | Direct commands have timeouts and process-group cleanup. This is resource cleanup, not service/cgroup containment. |
-| Command snippet side effects | Partially | Commands run as the desktop user under the hardened systemd unit. Treat command-enabled config as executable content. The planned Action Broker is the stronger boundary. |
+| Direct command snippet side effects | Partially | Direct commands run as the desktop user under the hardened systemd unit. Treat command-enabled config as executable content; this is not a service/cgroup containment boundary. |
+| Named-action side effects | Partially | The integrated Action Broker restricts actions to an operator-owned executable, arguments, environment, cwd, timeout, and output policy. It is a same-UID policy boundary, not an OS sandbox; service hardening remains the deployment responsibility. |
 | PATH surprises in command snippets | Partially | Organization policy can require absolute command paths. Without that policy, relative program names resolve through the daemon's environment. |
 | Another local user controlling the daemon | Yes | The control socket is created under a validated runtime path, mode `0600`, and stale-socket cleanup checks owner and identity. |
 | Same-user process controlling or inspecting desktop state | Out of scope | A process with the same UID can generally inspect or interfere with the user's desktop session. Use OS sandboxing for mutually untrusted same-user apps. |
@@ -70,7 +71,10 @@ not a full automation broker:
 
 They still execute a trusted program as the desktop user. Commands that need
 network access, cloud credentials, broad filesystem writes, or auditable
-approval should wait for the planned Action Broker described in
+approval must use a deliberately configured named action through the
+integrated Action Broker, or a separately reviewed service. The broker's
+same-UID policy boundary and audit sink do not replace OS isolation or the
+authorization system that owns a credential. See
 [docs/ACTION_BROKER_ARCHITECTURE.md](docs/ACTION_BROKER_ARCHITECTURE.md).
 
 ## Practical deployment guidance

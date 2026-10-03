@@ -14,12 +14,13 @@ From a checkout, run:
 ./scripts/install-user.sh
 ```
 
-This installs release binaries under `~/.local/bin`, copies both user units to
-`~/.config/systemd/user`, installs an XDG desktop entry under
+This installs release binaries under `~/.local/bin`, copies the two backend
+units and the optional Action Broker unit to `~/.config/systemd/user`, installs
+an XDG desktop entry under
 `~/.local/share/applications`, and creates the example configuration only when the
 configuration path does not already exist. It does not overwrite an existing
 configuration or start a service. After installation, run `systemctl --user
-daemon-reload` and use `wayexpand doctor` before enabling one unit.
+daemon-reload` and use `wayexpand doctor` before enabling one backend unit.
 For a reviewed, supported session, `./scripts/install-user.sh --enable
 --service=wayexpand-input-method.service` performs the user-manager reload and
 activation explicitly. The installer refuses `sudo` execution because it must
@@ -27,7 +28,12 @@ install into the invoking user's home and user systemd manager.
 Each unit validates the active configuration in `ExecStartPre` before starting
 the daemon. Logs are sent to the journal with a stable identifier, so startup
 and reload failures can be queried with `journalctl --user -u
-wayexpand-input-method.service`.
+wayexpand-input-method.service`. The broker unit is not enabled by default:
+enable it only after reviewing and editing `~/.config/wayexpand/broker.toml`.
+The installer also creates the private `$XDG_STATE_HOME/wayexpand` directory
+and a broker service drop-in granting that resolved directory write access for
+the optional audit log. This keeps custom `XDG_STATE_HOME` deployments aligned
+with the systemd sandbox.
 
 The normal configuration path is:
 
@@ -146,7 +152,22 @@ There is no supported SRE command path in the current direct-command model.
 Named actions are routed through the Action Broker when configured with
 `action = "..."`. The broker provides policy-controlled execution and bounded
 output, but does not itself provide network isolation; harden its service unit
-for networked or credentialed workflows. See
+for networked or credentialed workflows. Enable it only after creating and
+reviewing the broker policy:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now wayexpand-action-broker.service
+wayexpand doctor
+```
+
+The optional audit sink uses `$XDG_STATE_HOME/wayexpand/action-audit.jsonl`,
+or `~/.local/state/wayexpand/action-audit.jsonl` when `XDG_STATE_HOME` is
+unset. The installer creates the directory and a matching systemd drop-in.
+Audit records contain action/request identity, caller metadata, policy hash,
+timing, status, timeout, and output size; they intentionally omit arguments,
+environment values, and command output. `wayexpand doctor` reports broker
+health, queue drops, and audit write failures. See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md).
 
 ⚠️ **Important:** The GUI's Preview button does NOT run commands under the daemon's

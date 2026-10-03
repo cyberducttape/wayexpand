@@ -70,6 +70,9 @@ def main() -> int:
     architecture = (ROOT / "docs/ACTION_BROKER_ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
+    threat_model = (ROOT / "THREAT_MODEL.md").read_text(encoding="utf-8")
+    operations = (ROOT / "docs/OPERATIONS.md").read_text(encoding="utf-8")
+    sysadmins = (ROOT / "docs/FOR_SYSADMINS.md").read_text(encoding="utf-8")
     tradeoffs = (ROOT / "docs/CAPTURE_BACKEND_TRADEOFFS.md").read_text(
         encoding="utf-8"
     )
@@ -178,6 +181,14 @@ def main() -> int:
         errors.append("core crate is missing the Action Broker runtime dependency")
     if "wayexpand-action-broker" not in architecture or "normal workspace builds" not in architecture:
         errors.append("Action Broker architecture does not describe the current integrated binary")
+    if "planned Action Broker" in threat_model or "wait for the planned Action Broker" in threat_model:
+        errors.append("threat model still describes the integrated Action Broker as planned")
+    if "copies both user units" in operations:
+        errors.append("operations guide still describes only two installed user units")
+    if "does not provide a complete snippet-usage or" in sysadmins:
+        errors.append("sysadmin guide still describes Action Broker auditing as unavailable")
+    if "queue drops" not in operations or "audit write failures" not in operations:
+        errors.append("operations guide must document Action Broker audit health")
 
     # Keep the deployment-facing capture guide aligned with the authoritative
     # composition boundary. A broad compatibility claim here would contradict
