@@ -31,6 +31,11 @@ Changes not yet released.
   directory handling, current audit-health behavior, and uncertified
   compositor/IME boundaries. Added contracts to prevent the old
   pre-integration claims from returning.
+- **Output correctness:** serialized desktop injection now waits for a
+  per-operation backend acknowledgement before the engine commits expansion
+  and undo state. Late libei/wlroots failures therefore reach the transaction
+  caller instead of being mistaken for successful queue admission; regression
+  tests cover delayed completion and backend failure propagation.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that
