@@ -239,8 +239,9 @@ impl EngineObject {
 /// Build and run the IBus engine process. The process owns a private bus name,
 /// registers a factory, and creates one isolated engine object per request
 /// while zbus dispatches method calls on its internal async-io executor.
-/// Command-backed expansions and their worker/completion machinery are
-/// intentionally disabled in this non-hardened session service.
+/// Direct executable expansions are disabled in this non-hardened session
+/// service. Managed Action Broker expansions remain available when the broker
+/// is configured and healthy; they fail closed when it is unavailable.
 pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusServiceError> {
     let path = config_path.unwrap_or_else(default_config_path);
     let store = ConfigStore::load(&path)?;
