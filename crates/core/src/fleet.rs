@@ -1214,7 +1214,10 @@ replacement = "other"
             "[[expansion]]\ntrigger = \";;team\"\nreplacement = \"from the team pack\"\n",
         )
         .unwrap();
-        for file in [pack.join("wayexpand-pack.toml"), pack.join("snippets/main.toml")] {
+        for file in [
+            pack.join("wayexpand-pack.toml"),
+            pack.join("snippets/main.toml"),
+        ] {
             fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
         }
         pack
