@@ -1,4 +1,11 @@
 use super::*;
+use crate::doctor::backends::{
+    automatic_selection_is_ready, capture_path_available, capture_readiness, display_session_flags,
+};
+use crate::doctor::certification::certification_selection_status;
+use crate::doctor::files::existing_control_socket_is_healthy;
+use crate::doctor::policy::{absolute_command_policy_diagnostic, print_policy_diagnostics_json};
+use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
