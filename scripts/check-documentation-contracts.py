@@ -70,6 +70,9 @@ def main() -> int:
     architecture = (ROOT / "docs/ACTION_BROKER_ARCHITECTURE.md").read_text(
         encoding="utf-8"
     )
+    tradeoffs = (ROOT / "docs/CAPTURE_BACKEND_TRADEOFFS.md").read_text(
+        encoding="utf-8"
+    )
     compositor_matrix = json.loads(
         (ROOT / "tests/certification/compositor-matrix.json").read_text(
             encoding="utf-8"
@@ -175,6 +178,17 @@ def main() -> int:
         errors.append("core crate is missing the Action Broker runtime dependency")
     if "wayexpand-action-broker" not in architecture or "normal workspace builds" not in architecture:
         errors.append("Action Broker architecture does not describe the current integrated binary")
+
+    # Keep the deployment-facing capture guide aligned with the authoritative
+    # composition boundary. A broad compatibility claim here would contradict
+    # SUPPORT_MATRIX.md and could cause an operator to deploy an unsupported
+    # CJK/Fcitx/IBus workflow.
+    if "Works universally across Wayland" in tradeoffs:
+        errors.append("capture trade-off guide still claims universal Wayland support")
+    if "Active external preedit" not in tradeoffs or "Not supported" not in tradeoffs:
+        errors.append("capture trade-off guide must state the active external preedit limitation")
+    if "Committed Unicode" not in tradeoffs:
+        errors.append("capture trade-off guide must distinguish committed Unicode from active IME input")
 
     for document in active_documents():
         text = document.read_text(encoding="utf-8")
