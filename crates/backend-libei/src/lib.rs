@@ -161,10 +161,12 @@ impl PortalKeepalive {
             _session: session,
             _runtime: runtime,
         } = self;
-        let _ = runtime.block_on(tokio::time::timeout(
-            Duration::from_secs(2),
-            session.close(),
-        ));
+        // Construct the timer inside the runtime context. Constructing
+        // tokio::time::timeout outside block_on() panics because no reactor
+        // is current on the daemon's shutdown worker thread.
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), session.close()).await
+        });
         drop(proxy);
         runtime.shutdown_timeout(Duration::from_secs(2));
     }
