@@ -45,8 +45,9 @@ pub fn readable_keyboard_available() -> bool {
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    os::fd::BorrowedFd,
+    os::fd::{AsFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -116,6 +117,9 @@ pub struct EvdevSource {
     /// evdev device; two keyboards may legitimately hold the same keycode.
     pressed: HashMap<PathBuf, HashSet<u32>>,
     last_device_refresh: Instant,
+    /// Optional non-blocking eventfd that ends an idle wait early; see
+    /// [`EvdevSource::set_wake_fd`].
+    wake: Option<Arc<OwnedFd>>,
 }
 
 impl EvdevSource {
@@ -149,6 +153,7 @@ impl EvdevSource {
             pending: VecDeque::new(),
             pressed,
             last_device_refresh: Instant::now(),
+            wake: None,
         })
     }
 
@@ -156,7 +161,14 @@ impl EvdevSource {
     /// without changing `self.pending`) if `timeout` elapses with nothing
     /// ready, so callers on the daemon's main loop can still service
     /// stop/pause/reload requests at a steady cadence even while idle.
-    fn poll_once(&mut self, timeout: Duration) -> Result<(), EvdevError> {
+    /// Install a non-blocking eventfd that ends [`Self::next_event_timeout`]
+    /// early when another thread has work for the caller. The source drains
+    /// it when it fires. Key-release and quiet-period safety waits ignore it.
+    pub fn set_wake_fd(&mut self, wake: Option<Arc<OwnedFd>>) {
+        self.wake = wake;
+    }
+
+    fn poll_once(&mut self, timeout: Duration, with_wake: bool) -> Result<(), EvdevError> {
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);
         }
@@ -181,8 +193,23 @@ impl EvdevSource {
                 )
             })
             .collect();
+        let wake = with_wake.then_some(self.wake.as_deref()).flatten();
+        if let Some(wake) = wake {
+            fds.push(rustix::event::PollFd::new(
+                wake,
+                rustix::event::PollFlags::IN,
+            ));
+        }
         rustix::event::poll(&mut fds, Some(&timeout))
             .map_err(|error| EvdevError::Poll(error.to_string()))?;
+        if let Some(wake) = wake {
+            let woken = fds
+                .pop()
+                .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
+            if woken {
+                drain_wake_fd(wake.as_fd());
+            }
+        }
         let mut ready = Vec::new();
         let mut lost = Vec::new();
         for (index, fd) in fds.iter().enumerate() {
@@ -419,7 +446,7 @@ impl EvdevSource {
             if remaining.is_zero() {
                 break;
             }
-            self.poll_once(remaining)
+            self.poll_once(remaining, false)
                 .map_err(|error| InputSourceError {
                     source: SOURCE_NAME,
                     retryable: error.is_retryable(),
@@ -457,7 +484,7 @@ impl EvdevSource {
                     message: EvdevError::KeyReleaseTimeout.to_string(),
                 });
             }
-            self.poll_once(remaining.min(POLL_TIMEOUT))
+            self.poll_once(remaining.min(POLL_TIMEOUT), false)
                 .map_err(|error| InputSourceError {
                     source: SOURCE_NAME,
                     retryable: error.is_retryable(),
@@ -498,11 +525,12 @@ impl EvdevSource {
             self.refresh_devices();
             self.last_device_refresh = Instant::now();
         }
-        self.poll_once(timeout).map_err(|error| InputSourceError {
-            source: SOURCE_NAME,
-            retryable: error.is_retryable(),
-            message: error.to_string(),
-        })?;
+        self.poll_once(timeout, true)
+            .map_err(|error| InputSourceError {
+                source: SOURCE_NAME,
+                retryable: error.is_retryable(),
+                message: error.to_string(),
+            })?;
         if self.devices.is_empty() {
             return Err(InputSourceError {
                 source: SOURCE_NAME,
@@ -532,6 +560,12 @@ impl InputSource for EvdevSource {
     }
 }
 
+/// Reset a non-blocking eventfd after it woke a poll.
+fn drain_wake_fd(fd: BorrowedFd<'_>) {
+    let mut buffer = [0_u8; 8];
+    let _ = rustix::io::read(fd, &mut buffer);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,6 +588,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         source.translate(event);
         *state = source.state;
@@ -595,6 +630,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         source.translate(event);
         assert_eq!(
@@ -614,6 +650,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), None);
@@ -628,6 +665,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         assert!(!source.keys_held());
 
@@ -651,6 +689,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         let keyboard_a = Path::new("/dev/input/event-a");
         let keyboard_b = Path::new("/dev/input/event-b");
@@ -694,6 +733,7 @@ mod tests {
                 pending: VecDeque::new(),
                 pressed: HashMap::new(),
                 last_device_refresh: Instant::now(),
+                wake: None,
             };
             source.translate_for_device(
                 keyboard_b,
@@ -751,6 +791,7 @@ mod tests {
             pending: VecDeque::from([InputEvent::Text("a".into())]),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
 
         assert!(!source
@@ -767,6 +808,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
         // Value 2 is kernel auto-repeat. It must not be mistaken for a release.
@@ -782,6 +824,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 29, 1));
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
@@ -810,6 +853,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::from([(PathBuf::from("__test__"), HashSet::from([30]))]),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         let error = source.wait_for_key_release(Duration::ZERO).unwrap_err();
         assert!(error.message.contains("timed out"));
@@ -823,9 +867,10 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
         assert!(matches!(
-            source.poll_once(Duration::ZERO),
+            source.poll_once(Duration::ZERO, false),
             Err(EvdevError::AllDevicesLost)
         ));
     }
@@ -838,6 +883,7 @@ mod tests {
             pending: VecDeque::new(),
             pressed: HashMap::new(),
             last_device_refresh: Instant::now(),
+            wake: None,
         };
 
         for _ in 0..=MAX_PENDING_EVENTS {

@@ -25,6 +25,8 @@ impl Daemon {
                 &self.policy,
             ) {
                 Ok(source) => {
+                    let mut source = source;
+                    source.set_wake_fd(Some(self.waker.fd()));
                     self.input_method = Some(source);
                     self.reconnect_delay = Duration::from_millis(250);
                     self.connection_state = "connected";
@@ -156,6 +158,8 @@ impl Daemon {
         if self.evdev.is_none() {
             match EvdevSource::connect() {
                 Ok(source) => {
+                    let mut source = source;
+                    source.set_wake_fd(Some(self.waker.fd()));
                     self.evdev = Some(source);
                     self.reconnect_delay = Duration::from_millis(250);
                     self.connection_state = "connected";

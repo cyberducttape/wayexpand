@@ -31,6 +31,8 @@ pub struct ControlServer {
     insert_requested: Arc<Mutex<Option<InsertRequest>>>,
     focus_snapshot: Arc<Mutex<FocusSnapshot>>,
     status: Arc<Mutex<String>>,
+    /// Wakes the reactor after a request that changes daemon state.
+    waker: crate::waker::WakerSlot,
     path: Option<PathBuf>,
     socket_identity: Option<(u64, u64)>,
 }
@@ -59,6 +61,7 @@ impl ControlServer {
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
             status: Arc::new(Mutex::new("starting".into())),
+            waker: Arc::default(),
             path: None,
             socket_identity: None,
         }
@@ -126,6 +129,8 @@ impl ControlServer {
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
         let status = Arc::new(Mutex::new("starting".into()));
+        let waker: crate::waker::WakerSlot = Arc::default();
+        let waker_slot = Arc::clone(&waker);
         let reload_flag = Arc::clone(&reload_requested);
         let stop_flag = Arc::clone(&stop_requested);
         let pause_flag = Arc::clone(&pause_requested);
@@ -144,6 +149,7 @@ impl ControlServer {
                     insert: Arc::clone(&insert_slot),
                     focus: Arc::clone(&focus_slot),
                     status: Arc::clone(&status_flag),
+                    waker: Arc::clone(&waker_slot),
                 };
                 let admitted = active_requests_for_listener.fetch_update(
                     Ordering::AcqRel,
@@ -176,6 +182,7 @@ impl ControlServer {
             insert_requested,
             focus_snapshot,
             status,
+            waker,
             path: Some(path),
             socket_identity,
         })
@@ -208,6 +215,12 @@ impl ControlServer {
     /// Publishes a status body. Taking `StatusBody` rather than any string
     /// keeps `crate::status`'s builder the single producer of the documented
     /// control-socket field set.
+    /// Install the reactor's waker; requests that change daemon state then
+    /// wake the loop immediately.
+    pub fn set_waker(&self, waker: crate::waker::Waker) {
+        let _ = self.waker.set(waker);
+    }
+
     pub fn set_status(&self, status: crate::status::StatusBody) {
         if let Ok(mut current) = self.status.lock() {
             if current.as_str() != status.as_str() {
@@ -391,6 +404,7 @@ struct Flags {
     insert: Arc<Mutex<Option<InsertRequest>>>,
     focus: Arc<Mutex<FocusSnapshot>>,
     status: Arc<Mutex<String>>,
+    waker: crate::waker::WakerSlot,
 }
 
 /// The trigger of an `insert <trigger>` request, taken verbatim: a
@@ -436,6 +450,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         insert,
         focus,
         status,
+        waker,
     } = flags;
     stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT))?;
     stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
@@ -466,6 +481,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
                 *insert
                     .lock()
                     .map_err(|_| anyhow::anyhow!("insert lock poisoned"))? = Some(request);
+                crate::waker::wake_slot(&waker);
                 "insert scheduled\n"
             }
             None => "invalid trigger\n",
@@ -492,18 +508,22 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         }
         "reload" => {
             reload.store(true, Ordering::Release);
+            crate::waker::wake_slot(&waker);
             "reload scheduled\n".to_string()
         }
         "stop" => {
             stop.store(true, Ordering::Release);
+            crate::waker::wake_slot(&waker);
             "stopping\n".to_string()
         }
         "pause" => {
             pause.store(true, Ordering::Release);
+            crate::waker::wake_slot(&waker);
             "paused\n".to_string()
         }
         "resume" => {
             pause.store(false, Ordering::Release);
+            crate::waker::wake_slot(&waker);
             "resumed\n".to_string()
         }
         _ => "unknown command; expected status, focus, reload, pause, resume, stop, or insert <trigger>\n"
@@ -550,6 +570,7 @@ mod tests {
                     insert,
                     focus,
                     status: status_worker,
+                    waker: Arc::default(),
                 },
             )
             .unwrap();
@@ -608,6 +629,7 @@ mod tests {
             insert: Arc::clone(&insert),
             focus: Arc::clone(&focus),
             status,
+            waker: Arc::default(),
         };
         let send = |command: &str| {
             let (mut client, server) = UnixStream::pair().unwrap();
@@ -770,5 +792,53 @@ mod tests {
             target.join("wayexpand.sock")
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn state_changing_requests_wake_the_reactor() {
+        let waker = crate::waker::Waker::new().unwrap();
+        let slot: crate::waker::WakerSlot = Arc::default();
+        slot.set(waker.clone()).ok().unwrap();
+        let flags = Flags {
+            reload: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            pause: Arc::new(AtomicBool::new(false)),
+            insert: Arc::new(Mutex::new(None)),
+            focus: Arc::new(Mutex::new(FocusSnapshot::default())),
+            status: Arc::new(Mutex::new(String::new())),
+            waker: slot,
+        };
+        let fd = waker.fd();
+        let woken = || {
+            let mut fds = [rustix::event::PollFd::new(
+                &*fd,
+                rustix::event::PollFlags::IN,
+            )];
+            let zero = rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            let ready = rustix::event::poll(&mut fds, Some(&zero)).unwrap() > 0;
+            if ready {
+                let mut buffer = [0_u8; 8];
+                rustix::io::read(&*fd, &mut buffer).unwrap();
+            }
+            ready
+        };
+        for (command, wakes) in [
+            ("status\n", false),
+            ("focus\n", false),
+            ("pause\n", true),
+            ("resume\n", true),
+            ("reload\n", true),
+            ("insert :x\n", true),
+            ("stop\n", true),
+        ] {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags.clone()).unwrap();
+            assert_eq!(woken(), wakes, "{command:?}");
+        }
     }
 }
