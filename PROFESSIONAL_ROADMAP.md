@@ -66,6 +66,21 @@ supported end state before broad adoption:
 - [ ] Verify no input loss, stale expansion, unsafe replacement, stuck key,
       or restart-loop behavior.
 - [ ] Publish representative soak duration and results.
+- [x] `scripts/soak-daemon.sh` checks memory and descriptor growth under
+      typing, reloads, and control requests (3 minutes in CI). Run the 24 h /
+      72 h release soak on real hardware and record the results; it does not
+      yet cover compositor restart, portal revocation, or suspend/resume.
+
+### 7. Testing gaps that need hardware or deeper tooling
+
+- [ ] Device lifecycle (two keyboards, hotplug, suspend) needs a fake-evdev
+      test seam or a hardware lab; evdev tests cannot create devices today.
+- [ ] The source-level wake path (evdev and input-method waiting on the
+      reactor eventfd) is not unit-tested for the same reason.
+- [ ] Loom-style modelling of the waker, output-completion, and completion
+      notifier paths would need `cfg(loom)` shims for std sync types.
+- [ ] Form snippets and the clipboard variable need validation with real
+      clients on each compositor (focus return after the form closes).
 
 ## Security and product gates
 
@@ -93,6 +108,24 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 - [ ] Publish only artifacts that pass the vendored offline-build checks.
 - [ ] Track package availability and certification status separately.
 - [ ] Add release/upgrade smoke tests for supported distributions.
+
+## Product roadmap
+
+Shipped in the current cycle: trigger aliases, `wayexpand explain`,
+capability-aware template variables (includes, allowlisted env, opt-in
+clipboard), interactive form snippets, local usage statistics and a trigger
+risk analyzer, Git library sync, and signed organization packs.
+
+Still open:
+
+- [ ] Better cross-desktop application identity (GNOME and wlroots window
+      tracking) so app-filtered snippets work beyond KWin.
+- [ ] Profiles/workspaces (personal, work, support) switchable at runtime.
+- [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
+- [ ] Form snippets through IBus (the route drops surrounding text when focus
+      moves to the form) and a GUI editor for form fields.
+- [ ] Pack update channel and a GUI trust review for signed packs.
+- [ ] Real external IME/preedit cooperation (see section 5).
 
 ## Maintenance principles
 
