@@ -651,10 +651,14 @@ No central server required.
 
 **Idempotency:** Many sysadmin tasks should be idempotent (safe to run multiple times). Test before deploying at scale.
 
-**Auditing:** WayExpand does not provide a complete snippet-usage or
-command-execution audit trail. If compliance logging is required, use an
-external, privacy-reviewed audit system and the policy-violation journal only
-for the events it actually records.
+**Auditing:** WayExpand does not provide a complete audit trail for every
+snippet expansion. Named actions executed through the optional Action Broker
+can write a bounded, privacy-preserving audit record containing action/request
+identity, caller metadata, policy hash, timing, status, timeout, and output
+size. The broker intentionally omits arguments, environment values, and
+output, and remains inside the same-UID trust boundary. Direct commands and
+ordinary text expansions are not covered. Use an external, privacy-reviewed
+audit system for compliance or credential-release workflows.
 
 **Backup before deploy:** Always test destructive operations in a test environment first.
 

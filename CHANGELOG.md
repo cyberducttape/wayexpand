@@ -25,6 +25,12 @@ Changes not yet released.
 - **CI reliability:** release smoke tests, GUI/UI help checks, and RPM
   packaging are bounded by explicit timeouts; the systemd lane uses resilient
   Cargo network settings for hosted runners.
+- **Documentation sprint:** refreshed the threat model, operations guide,
+  sysadmin audit guidance, backend caveats, documentation index, and
+  sensitive-field wording to match the integrated Action Broker, XDG state
+  directory handling, current audit-health behavior, and uncertified
+  compositor/IME boundaries. Added contracts to prevent the old
+  pre-integration claims from returning.
 
 - UX: the active injector now publishes its insertion mode, character limit,
   and paced throughput estimate; the GUI warns when a snippet exceeds that

@@ -96,6 +96,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
 | [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
+| [ACTION_BROKER_ARCHITECTURE.md](ACTION_BROKER_ARCHITECTURE.md) | SREs and security architects | Named-action policy, service lifecycle, audit sink, and same-UID trust boundary |
 
 ### Configuration & Customization
 
@@ -126,6 +127,8 @@ Then see [SECURITY.md](../SECURITY.md)
 | [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) | All users | What's tested vs experimental |
 | [BACKENDS.md](BACKENDS.md) | Advanced users | Backend architecture |
 | [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md) | Advanced users | Password field protection details |
+| [CAPTURE_BACKEND_TRADEOFFS.md](CAPTURE_BACKEND_TRADEOFFS.md) | Administrators | Security and compatibility trade-offs by capture route |
+| [IME_COMPOSITION_ROADMAP.md](IME_COMPOSITION_ROADMAP.md) | International-input users and contributors | Current committed-text boundary and external preedit roadmap |
 | [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) | Security-conscious administrators | Raw-input permission model and tighter-access investigation |
 | [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) | System integrators | Desktop/protocol combinations |
 | [CERTIFICATION.md](CERTIFICATION.md) | QA and system integrators | Machine-readable certification and compositor test requirements |

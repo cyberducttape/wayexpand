@@ -39,7 +39,7 @@ When using `--source=input-method`:
 This behavior is a source capability, not a compositor certification claim.
 The desktop must be validated empirically for each compositor and client in
 the [certification matrix](CERTIFICATION_MATRIX.md) before password-field
-protection is advertised as production-ready.
+protection is described as a deployment guarantee.
 
 **Tradeoff:** 
 - ⚠️ Password protection is automatic only when the compositor supplies the

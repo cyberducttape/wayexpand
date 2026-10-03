@@ -73,8 +73,9 @@ when the fast path isn't available.
 KWin 6.6. Treat that as a recorded compatibility observation, not a guarantee
 for every later KWin or portal build; use `wayexpand doctor` and compositor
 certification evidence for the session being deployed. As KDE Portal support
-matures, `ei_text` support should become universal and this fallback will
-become rare.
+matures, `ei_text` support may become more common and this fallback may become
+rarer; WayExpand makes no universal compositor claim until the relevant
+certification evidence exists.
 
 **Workaround:** If latency is intolerable:
 - Use input-method-v2 instead (if your compositor supports it)
