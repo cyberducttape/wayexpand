@@ -688,6 +688,16 @@ fn truncate(text: &str, max_chars: usize) -> String {
     truncated
 }
 
+/// Largest size a centered dialog may take while staying fully inside the
+/// app window, leaving room for the title bar and a small margin.
+pub(crate) fn dialog_max_size(ctx: &egui::Context, preferred_height: f32) -> egui::Vec2 {
+    let viewport = ctx.content_rect().size();
+    egui::vec2(
+        (viewport.x - 32.0).max(200.0),
+        (viewport.y - 80.0).clamp(160.0, preferred_height.max(160.0)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
