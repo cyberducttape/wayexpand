@@ -56,8 +56,9 @@ jobs:
 
       - name: Push GitHub main to Launchpad
         env:
-          GIT_SSH_COMMAND: ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key
+          GIT_SSH_COMMAND: ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -i ~/.ssh/launchpad_key
         run: |
+          set -euo pipefail
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
           # GitHub is the canonical repository.  This explicit lease also
@@ -67,19 +68,26 @@ jobs:
           launchpad_main="$(git ls-remote launchpad refs/heads/main \
             | awk 'NR == 1 { print $1 }')"
           if [ -n "$launchpad_main" ]; then
-            git push launchpad \
+            timeout --signal=TERM --kill-after=30s 5m git push launchpad \
               --force-with-lease="refs/heads/main:$launchpad_main" \
               refs/heads/main:refs/heads/main
           else
-            git push launchpad refs/heads/main:refs/heads/main
+            timeout --signal=TERM --kill-after=30s 5m git push launchpad refs/heads/main:refs/heads/main
           fi
+
+          # Read the complete remote tag set once.  Opening one SSH session
+          # per historical tag made this job unnecessarily slow and could
+          # leave a successful mirror looking hung on Launchpad.
+          remote_tags="$RUNNER_TEMP/wayexpand-launchpad-tags.txt"
+          git ls-remote --tags launchpad >"$remote_tags"
+          tag_pushes=()
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
             local_commit="$(git rev-list -1 "${tag}^{commit}")"
-            remote_commit="$(git ls-remote --tags launchpad "refs/tags/${tag}*" \
-              | awk -v ref="refs/tags/${tag}" '$2 == ref "^{}" { print $1 }')"
-            remote_commit="${remote_commit:-$(git ls-remote --refs launchpad "refs/tags/$tag" \
-              | awk 'NR == 1 { print $1 }')}"
+            remote_commit="$(awk -v ref="refs/tags/${tag}" \
+              '$2 == ref "^{}" { print $1; exit }' "$remote_tags")"
+            remote_commit="${remote_commit:-$(awk -v ref="refs/tags/${tag}" \
+              '$2 == ref { print $1; exit }' "$remote_tags")}"
             if [ -n "$remote_commit" ]; then
               if [ "$remote_commit" != "$local_commit" ]; then
                 echo "Launchpad tag $tag points to $remote_commit; GitHub points to $local_commit." >&2
@@ -88,6 +96,9 @@ jobs:
               fi
               echo "Launchpad tag $tag already matches; skipping."
             else
-              git push launchpad "refs/tags/$tag:refs/tags/$tag"
+              tag_pushes+=("refs/tags/$tag:refs/tags/$tag")
             fi
           done < <(git for-each-ref --format='%(refname:strip=2)' refs/tags)
+          if [ "${#tag_pushes[@]}" -gt 0 ]; then
+            timeout --signal=TERM --kill-after=30s 5m git push launchpad "${tag_pushes[@]}"
+          fi
