@@ -405,8 +405,17 @@ async fn main() -> Result<()> {
     );
 
     // Main service loop - accept connections and handle requests
+    let mut connection_tasks = tokio::task::JoinSet::new();
     let mut shutdown = Box::pin(wait_for_shutdown_signal());
     loop {
+        // Finished tasks still hold their captured Arcs until their join
+        // handle is reaped. Keep the set bounded over a long-running broker
+        // rather than retaining one handle per historical connection.
+        while let Some(result) = connection_tasks.try_join_next() {
+            if let Err(error) = result {
+                error!(error = %error, "broker connection task failed");
+            }
+        }
         let accept_server = Arc::clone(&server);
         let accepted = tokio::select! {
             _ = &mut shutdown => {
@@ -447,7 +456,7 @@ async fn main() -> Result<()> {
         let health_path = health_path.clone();
         let request_counter = Arc::clone(&request_counter);
         let action_slots = Arc::clone(&action_slots);
-        tokio::spawn(async move {
+        connection_tasks.spawn(async move {
             let _connection_permit = connection_permit;
             let (mut conn, request) = match tokio::task::spawn_blocking(move || {
                 let mut conn = conn;
@@ -544,6 +553,15 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Connection tasks may still be finishing an action or recording its
+    // audit event when the accept loop receives SIGTERM. Await them before
+    // dropping the last AuditLogger Arc; otherwise Tokio runtime teardown can
+    // discard accepted audit events.
+    while let Some(result) = connection_tasks.join_next().await {
+        if let Err(error) = result {
+            error!(error = %error, "broker connection task failed during shutdown");
+        }
+    }
     if let Err(error) = write_broker_health(&health_path, audit_logger.as_deref(), false) {
         warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
     }
