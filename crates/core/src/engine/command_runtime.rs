@@ -154,17 +154,21 @@ fn run_broker_action(
         .recv_response()
         .map_err(|error| CommandError::WaitFailed(format!("receiving broker response: {error}")))?
     {
-        action_broker::ActionResponse::Success(output) if output.stdout_truncated => {
-            // The broker deliberately keeps a successful protocol response
-            // when output is bounded, but a text expansion must never inject
-            // an incomplete stdout value as if it were complete.
-            Err(CommandError::OutputTooLarge)
-        }
-        action_broker::ActionResponse::Success(output) => Ok(output.stdout),
+        action_broker::ActionResponse::Success(output) => broker_output_text(output),
         action_broker::ActionResponse::Error(error) => {
             Err(CommandError::WaitFailed(error.to_string()))
         }
     }
+}
+
+fn broker_output_text(output: action_broker::ActionOutput) -> Result<String, CommandError> {
+    // The broker deliberately keeps a successful protocol response when
+    // output is bounded, but a text expansion must never inject an incomplete
+    // stdout value as if it were complete. Stderr is diagnostic-only.
+    if output.stdout_truncated {
+        return Err(CommandError::OutputTooLarge);
+    }
+    Ok(output.stdout)
 }
 
 #[cfg(unix)]
@@ -414,4 +418,36 @@ pub(super) fn configure_command_environment(process: &mut Command, command: &Com
         }
     }
     process.env("PATH", MINIMAL_COMMAND_PATH);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output(stdout_truncated: bool, stderr_truncated: bool) -> action_broker::ActionOutput {
+        action_broker::ActionOutput {
+            exit_code: 0,
+            stdout: "complete".into(),
+            stderr: String::new(),
+            stdout_truncated,
+            stderr_truncated,
+            duration_ms: 1,
+        }
+    }
+
+    #[test]
+    fn broker_truncated_stdout_is_not_injected() {
+        assert_eq!(
+            broker_output_text(output(true, false)),
+            Err(CommandError::OutputTooLarge)
+        );
+    }
+
+    #[test]
+    fn broker_truncated_stderr_does_not_discard_complete_stdout() {
+        assert_eq!(
+            broker_output_text(output(false, true)),
+            Ok("complete".into())
+        );
+    }
 }
