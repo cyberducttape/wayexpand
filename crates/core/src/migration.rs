@@ -16,7 +16,12 @@ struct EspansoDocument {
 
 #[derive(Debug, Deserialize)]
 struct EspansoMatch {
-    trigger: String,
+    /// Espanso accepts either one `trigger` or a `triggers` list; extra
+    /// triggers become aliases of a single WayExpand snippet.
+    #[serde(default)]
+    trigger: Option<String>,
+    #[serde(default)]
+    triggers: Vec<String>,
     replace: Option<String>,
     label: Option<String>,
     #[serde(default)]
@@ -139,10 +144,26 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
         });
     }
     for item in document.matches {
+        let mut triggers: Vec<String> = Vec::new();
+        for trigger in item.trigger.into_iter().chain(item.triggers) {
+            if !triggers.contains(&trigger) {
+                triggers.push(trigger);
+            }
+        }
+        if triggers.is_empty() {
+            report.unsupported += 1;
+            report.unsupported_matches.push(EspansoUnsupportedMatch {
+                trigger: "(none)".into(),
+                reason: "match has no `trigger` or `triggers` value".into(),
+            });
+            continue;
+        }
+        let trigger = triggers.remove(0);
+        let aliases = triggers;
         let Some(replacement) = item.replace else {
             report.unsupported += 1;
             report.unsupported_matches.push(EspansoUnsupportedMatch {
-                trigger: item.trigger,
+                trigger,
                 reason: "match has no static `replace` value (dynamic matches are unsupported)"
                     .into(),
             });
@@ -158,13 +179,13 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
         } else {
             report.migrated_with_warnings += 1;
             report.warnings.push(EspansoImportWarning {
-                trigger: item.trigger.clone(),
+                trigger: trigger.clone(),
                 details,
             });
         }
         expansion.push(ExpansionConfig {
             id: ExpansionConfig::new_id(),
-            trigger: item.trigger,
+            trigger,
             replacement,
             description: item.label.unwrap_or_default(),
             tags: vec!["imported".into()],
@@ -174,6 +195,7 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             command: None,
             enabled: true,
             propagate_case: item.propagate_case,
+            aliases,
         });
     }
     let config = Config {
@@ -278,5 +300,26 @@ mod tests {
             Err(MigrationError::TooLarge { .. })
         ));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn triggers_lists_become_one_snippet_with_aliases() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-espanso-triggers-{}.yml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "matches:\n  - triggers: [':addr', ':address', ':office']\n    replace: 1 Main St\n  - trigger: ':hi'\n    triggers: [':hi', ':hello']\n    replace: Hello\n",
+        )
+        .unwrap();
+        let import = import_espanso(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(import.config.expansion.len(), 2);
+        assert_eq!(import.config.expansion[0].trigger, ":addr");
+        assert_eq!(import.config.expansion[0].aliases, [":address", ":office"]);
+        assert_eq!(import.config.expansion[1].trigger, ":hi");
+        assert_eq!(import.config.expansion[1].aliases, [":hello"]);
+        assert_eq!(import.report.fully_migrated, 2);
     }
 }

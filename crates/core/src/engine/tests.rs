@@ -862,6 +862,7 @@ fn engine_rejects_manually_constructed_invalid_config() {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }],
         hotkey: Vec::new(),
         settings: crate::Settings::default(),
@@ -3837,4 +3838,78 @@ fn canonically_equivalent_triggers_in_two_snippets_are_duplicates() {
         config.and_then(|config| config.validate().map(|()| config)),
         Err(crate::ConfigError::DuplicateTrigger { .. })
     ));
+}
+
+const ALIAS_CONFIG: &str = "[[expansion]]\ntrigger = \":addr\"\naliases = [\":address\", \":office\"]\nreplacement = \"1 Main St\"\npropagate_case = true\n";
+
+#[test]
+fn every_alias_expands_to_the_shared_replacement() {
+    for typed in [":addr", ":address", ":office"] {
+        let mut engine = ExpansionEngine::new(Config::parse(ALIAS_CONFIG).unwrap()).unwrap();
+        let mut results = Vec::new();
+        for character in typed.chars() {
+            results.extend(engine.process(InputEvent::Text(character.to_string())));
+        }
+        // `:addr` is a prefix of `:address`, so it resolves when input ends.
+        results.extend(engine.process(InputEvent::EndOfInput));
+        assert_eq!(results.len(), 1, "{typed}");
+        assert_eq!(results[0].matched_text, typed);
+        assert_eq!(results[0].insert, "1 Main St");
+    }
+}
+
+#[test]
+fn aliases_follow_case_propagation() {
+    let mut engine = ExpansionEngine::new(Config::parse(ALIAS_CONFIG).unwrap()).unwrap();
+    let results = engine.process(InputEvent::Text(":OFFICE".into()));
+    assert_eq!(results.last().unwrap().insert, "1 MAIN ST");
+}
+
+#[test]
+fn an_alias_colliding_with_another_trigger_is_a_duplicate() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":a\"\naliases = [\":b\"]\nreplacement = \"x\"\n\
+         [[expansion]]\ntrigger = \":b\"\nreplacement = \"y\"\n",
+    );
+    assert!(matches!(
+        config,
+        Err(crate::ConfigError::DuplicateTrigger { .. })
+    ));
+}
+
+#[test]
+fn aliases_are_validated_like_triggers() {
+    let empty =
+        Config::parse("[[expansion]]\ntrigger = \":a\"\naliases = [\"\"]\nreplacement = \"x\"\n");
+    assert!(matches!(
+        empty,
+        Err(crate::ConfigError::EmptyTrigger { .. })
+    ));
+    let many = format!(
+        "[[expansion]]\ntrigger = \":a\"\naliases = [{}]\nreplacement = \"x\"\n",
+        (0..33)
+            .map(|index| format!("\":a{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert!(matches!(
+        Config::parse(&many),
+        Err(crate::ConfigError::TooManyAliases { .. })
+    ));
+}
+
+#[test]
+fn quick_insert_accepts_an_alias() {
+    let engine = ExpansionEngine::new(Config::parse(ALIAS_CONFIG).unwrap()).unwrap();
+    assert_eq!(
+        engine.prepare_insert(":office").unwrap().insert,
+        "1 Main St"
+    );
+}
+
+#[test]
+fn aliases_are_omitted_from_saved_toml_when_empty() {
+    let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
+    let text = toml::to_string(&config).unwrap();
+    assert!(!text.contains("aliases"), "{text}");
 }

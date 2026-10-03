@@ -16,6 +16,7 @@ const MAX_COMMAND_CACHE_MS: u64 = 60_000;
 #[derive(Clone)]
 pub(crate) struct Draft {
     pub(crate) trigger: String,
+    pub(crate) aliases: Vec<String>,
     pub(crate) description: String,
     pub(crate) tags: Vec<String>,
     pub(crate) category: String,
@@ -38,6 +39,8 @@ pub(crate) struct Draft {
     pub(crate) pending_tag: String,
     /// Same as `pending_tag`, for the "add app" input.
     pub(crate) pending_app: String,
+    /// Same as `pending_tag`, for the "add alias" input.
+    pub(crate) pending_alias: String,
 }
 
 impl Draft {
@@ -78,6 +81,7 @@ impl Draft {
         };
         Self {
             trigger: expansion.trigger.clone(),
+            aliases: expansion.aliases.clone(),
             description: expansion.description.clone(),
             tags: expansion.tags.clone(),
             category: expansion.category.clone(),
@@ -97,12 +101,18 @@ impl Draft {
             command_pass_env,
             pending_tag: String::new(),
             pending_app: String::new(),
+            pending_alias: String::new(),
         }
     }
 
     /// Tags as they will be saved: the confirmed chips plus any pending input.
     pub(crate) fn committed_tags(&self) -> Vec<String> {
         with_pending_token(&self.tags, &self.pending_tag)
+    }
+
+    /// Aliases as they will be saved, including any pending input.
+    pub(crate) fn committed_aliases(&self) -> Vec<String> {
+        with_pending_token(&self.aliases, &self.pending_alias)
     }
 
     /// App filters as they will be saved, including any pending input.

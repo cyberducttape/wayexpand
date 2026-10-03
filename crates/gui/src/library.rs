@@ -31,6 +31,16 @@ impl Default for SearchFields {
     }
 }
 
+/// Lowercased trigger and aliases, space-separated, for substring search.
+pub(crate) fn trigger_search_text(expansion: &wayexpand_core::ExpansionConfig) -> String {
+    let mut text = expansion.trigger.to_lowercase();
+    for alias in &expansion.aliases {
+        text.push(' ');
+        text.push_str(&alias.to_lowercase());
+    }
+    text
+}
+
 #[derive(Debug, Clone)]
 struct SearchEntry {
     trigger: String,
@@ -55,7 +65,8 @@ impl SearchIndex {
                 .expansion
                 .iter()
                 .map(|item| SearchEntry {
-                    trigger: item.trigger.to_lowercase(),
+                    // Aliases are searched as part of the trigger text.
+                    trigger: trigger_search_text(item),
                     description: item.description.to_lowercase(),
                     category: item.category.to_lowercase(),
                     tags: item.tags.iter().map(|tag| tag.to_lowercase()).collect(),
@@ -129,6 +140,10 @@ fn matches_query(expansion: &ExpansionConfig, query: &str) -> bool {
         return true;
     }
     field_matches(&expansion.trigger, query)
+        || expansion
+            .aliases
+            .iter()
+            .any(|alias| field_matches(alias, query))
         || field_matches(&expansion.description, query)
         || field_matches(&expansion.category, query)
         || expansion.tags.iter().any(|tag| field_matches(tag, query))
@@ -176,6 +191,7 @@ mod tests {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         }
     }
 
@@ -193,6 +209,21 @@ mod tests {
         // The replacement is deliberately not part of the search surface.
         assert!(!matches_query(&item, "never searched"));
         assert!(matches_query(&item, ""));
+    }
+
+    #[test]
+    fn aliases_are_searchable_in_the_library_and_index() {
+        let mut item = expansion(":addr", "Office address", "", &[]);
+        item.aliases = vec![":Office".into()];
+        assert!(matches_query(&item, ":office"));
+        assert_eq!(trigger_search_text(&item), ":addr :office");
+        let config = Config {
+            expansion: vec![item],
+            hotkey: Vec::new(),
+            settings: wayexpand_core::Settings::default(),
+            organization: wayexpand_core::OrganizationPolicy::default(),
+        };
+        assert_eq!(visible_indices(&config, ":office", None), [0]);
     }
 
     #[test]

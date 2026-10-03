@@ -41,6 +41,7 @@ pub(crate) fn render(
             },
             enabled: draft.enabled,
             propagate_case: draft.propagate_case,
+            aliases: Vec::new(),
         }),
         None => source.cloned(),
     };
@@ -92,6 +93,7 @@ mod tests {
                 command: None,
                 enabled: true,
                 propagate_case: false,
+                aliases: Vec::new(),
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -159,6 +161,7 @@ mod tests {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         };
         let mut draft = Draft::from_expansion(&expansion);
         draft.command_enabled = true;
@@ -189,6 +192,7 @@ mod tests {
             command: None,
             enabled: true,
             propagate_case: false,
+            aliases: Vec::new(),
         };
         let draft = Draft::from_expansion(&expansion);
         assert_eq!(
