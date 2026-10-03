@@ -21,7 +21,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc, Arc, Mutex, RwLock,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -268,6 +268,10 @@ pub struct ExpansionEngine {
     input_generation: u64,
     shared_input_generation: Arc<AtomicU64>,
     async_commands: Option<AsyncCommandRuntime>,
+    /// Called by expansion workers after each completion is queued, so a host
+    /// without its own event loop can drain results on wakeup instead of
+    /// polling. Shared with running workers so it can be set at any time.
+    completion_notifier: Arc<RwLock<Option<CompletionNotifier>>>,
     expansion_metrics: Arc<CommandMetricsState>,
     hotkey_metrics: Arc<CommandMetricsState>,
     /// Whether a terminating character should be included in the replacement
@@ -280,6 +284,21 @@ pub struct ExpansionEngine {
 struct CommandCacheEntry {
     expires_at: Instant,
     value: String,
+}
+
+/// Wakeup callback for asynchronous expansion completions. It runs on a
+/// worker thread and must only signal the host; draining happens on the host
+/// through [`ExpansionEngine::drain_completed_commands`].
+pub type CompletionNotifier = Arc<dyn Fn() + Send + Sync>;
+
+fn notify_completion(notifier: &RwLock<Option<CompletionNotifier>>) {
+    let notifier = match notifier.read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    if let Some(notifier) = notifier {
+        notifier();
+    }
 }
 
 struct AsyncCommandRuntime {
@@ -486,6 +505,7 @@ impl ExpansionEngine {
             input_generation: 0,
             shared_input_generation: Arc::new(AtomicU64::new(0)),
             async_commands: None,
+            completion_notifier: Arc::new(RwLock::new(None)),
             expansion_metrics: Arc::new(CommandMetricsState::new()),
             hotkey_metrics: Arc::new(CommandMetricsState::new()),
             reinsert_terminators: true,
@@ -511,6 +531,23 @@ impl ExpansionEngine {
 
     pub fn reinserts_terminators(&self) -> bool {
         self.reinsert_terminators
+    }
+
+    /// Register a wakeup for asynchronous expansion completions. Applies to
+    /// workers that are already running as well as ones started later.
+    pub fn set_completion_notifier(&mut self, notifier: Option<CompletionNotifier>) {
+        match self.completion_notifier.write() {
+            Ok(mut guard) => *guard = notifier,
+            Err(poisoned) => *poisoned.into_inner() = notifier,
+        }
+    }
+
+    /// The registered completion wakeup, for carrying it across a reload.
+    pub fn completion_notifier(&self) -> Option<CompletionNotifier> {
+        match self.completion_notifier.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 
     /// Run command-backed expansions and hotkey actions on separate bounded
@@ -541,6 +578,7 @@ impl ExpansionEngine {
             let worker_receiver = Arc::clone(&command_receiver);
             let worker_completion_sender = completion_sender.clone();
             let worker_input_generation = Arc::clone(&shared_input_generation);
+            let worker_notifier = Arc::clone(&self.completion_notifier);
             let command_worker = thread::Builder::new()
                 .name(format!("wayexpand-expansion-worker-{worker_index}"))
                 .spawn(move || {
@@ -600,6 +638,7 @@ impl ExpansionEngine {
                             ) {
                                 break;
                             }
+                            notify_completion(&worker_notifier);
                             continue;
                         }
                         worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
@@ -622,6 +661,7 @@ impl ExpansionEngine {
                         ) {
                             break;
                         }
+                        notify_completion(&worker_notifier);
                     }
                 });
             match command_worker {

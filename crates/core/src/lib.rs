@@ -33,9 +33,10 @@ pub use config::{
     OrganizationPolicy, Settings,
 };
 pub use engine::{
-    run_command, run_command_cancellable, CommandError, CommandMetrics, ExpansionEngine,
-    ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent, InsertError,
-    PendingExpansionDispatch, PendingExpansionResult, TransactionOutcome, WindowContext,
+    run_command, run_command_cancellable, CommandError, CommandMetrics, CompletionNotifier,
+    ExpansionEngine, ExpansionError, ExpansionResult, HotkeyError, HotkeyResult, InputEvent,
+    InsertError, PendingExpansionDispatch, PendingExpansionResult, TransactionOutcome,
+    WindowContext,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
