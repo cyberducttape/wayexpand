@@ -141,6 +141,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [PACKAGING.md](PACKAGING.md) | Package maintainers | Building for distros |
 | [RELEASING.md](RELEASING.md) | Maintainers | Release process |
 | [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
+| [FUZZING.md](FUZZING.md) | Contributors/QA | Fuzz targets for untrusted input |
 
 ### Current Technical and Release References
 

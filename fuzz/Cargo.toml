@@ -1,0 +1,64 @@
+[package]
+name = "wayexpand-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Kept out of the main workspace: fuzzing needs nightly and libFuzzer,
+# while the product builds on the pinned stable toolchain.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+wayexpand-core = { path = "../crates/core" }
+action-broker = { path = "../crates/action-broker" }
+wayexpand-backend-ibus = { path = "../crates/backend-ibus" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "config_parse"
+path = "fuzz_targets/config_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "matcher"
+path = "fuzz_targets/matcher.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "broker_frame"
+path = "fuzz_targets/broker_frame.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "espanso_import"
+path = "fuzz_targets/espanso_import.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pack_import"
+path = "fuzz_targets/pack_import.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "app_filter"
+path = "fuzz_targets/app_filter.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ibus_keys"
+path = "fuzz_targets/ibus_keys.rs"
+test = false
+doc = false
