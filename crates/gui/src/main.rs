@@ -4,6 +4,7 @@ mod diagnostics;
 mod dialogs;
 mod editor;
 mod fonts;
+mod form;
 mod import;
 mod lang;
 mod library;
@@ -486,9 +487,15 @@ fn expand_user_path_with_home(value: &str, home: Option<&std::ffi::OsStr>) -> Pa
 fn main() -> Result<()> {
     if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
         println!(
-            "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [CONFIG]\n\nNative Wayland settings editor for WayExpand.\n\n--picker  Quick-insert window: search your snippets and press Enter to type\n          one into the app you were using. Bind it to a desktop shortcut."
+            "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [CONFIG]\n       wayexpand-gui --form SPEC\n\nNative Wayland settings editor for WayExpand.\n\n--picker  Quick-insert window: search your snippets and press Enter to type\n          one into the app you were using. Bind it to a desktop shortcut.\n--form    Snippet form window; started by the daemon for snippets with fields."
         );
         return Ok(());
+    }
+    if env::args().nth(1).as_deref() == Some("--form") {
+        let spec = env::args()
+            .nth(2)
+            .ok_or_else(|| anyhow::anyhow!("--form needs a form specification"))?;
+        return form::run(&spec);
     }
     if env::args().nth(1).as_deref() == Some("--picker") {
         let path = env::args()

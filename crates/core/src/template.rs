@@ -41,6 +41,79 @@ pub struct TemplateContext {
     pub clipboard: Option<ClipboardReader>,
     /// Validation renders: the clipboard is never read and reports as empty.
     pub validating: bool,
+    /// Values the user entered in a snippet form, keyed by field key (see
+    /// [`FormField::key`]).
+    pub fields: Arc<HashMap<String, String>>,
+}
+
+/// A value the user fills in when a form snippet expands.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FormField {
+    /// Identifies the value; repeated markers with the same key share it.
+    pub key: String,
+    /// Shown next to the input.
+    pub label: String,
+    pub kind: FormFieldKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FormFieldKind {
+    Text { default: String },
+    Choice { options: Vec<String> },
+}
+
+/// Parse one form marker body (`field:name`, `field:name=default`,
+/// `prompt:name`, or `choice:A|B|C`). Returns `None` for other variables.
+fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
+    if let Some(spec) = name
+        .strip_prefix("field:")
+        .or_else(|| name.strip_prefix("prompt:"))
+    {
+        let (label, default) = spec.split_once('=').unwrap_or((spec, ""));
+        let label = label.trim();
+        if label.is_empty() || label.chars().count() > 64 {
+            return Some(Err(TemplateError::InvalidField));
+        }
+        return Some(Ok(FormField {
+            key: format!("field:{label}"),
+            label: label.to_owned(),
+            kind: FormFieldKind::Text {
+                default: default.to_owned(),
+            },
+        }));
+    }
+    let spec = name.strip_prefix("choice:")?;
+    let options: Vec<String> = spec
+        .split('|')
+        .map(|option| option.trim().to_owned())
+        .collect();
+    if options.len() < 2 || options.len() > 32 || options.iter().any(String::is_empty) {
+        return Some(Err(TemplateError::InvalidField));
+    }
+    Some(Ok(FormField {
+        key: format!("choice:{}", options.join("|")),
+        label: "Choice".to_owned(),
+        kind: FormFieldKind::Choice { options },
+    }))
+}
+
+/// The form fields a template asks for, in order of first appearance and
+/// without duplicates. An invalid marker is an error.
+pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
+    let mut fields: Vec<FormField> = Vec::new();
+    for name in template_variables(template) {
+        if let Some(field) = parse_form_field(name) {
+            let field = field?;
+            if !fields.iter().any(|existing| existing.key == field.key) {
+                fields.push(field);
+            }
+        }
+    }
+    if fields.len() > 32 {
+        return Err(TemplateError::InvalidField);
+    }
+    Ok(fields)
 }
 
 impl TemplateContext {
@@ -100,6 +173,10 @@ pub enum TemplateError {
     ClipboardDisabled,
     #[error("the clipboard could not be read")]
     ClipboardUnavailable,
+    #[error("a form field is malformed (field:name, field:name=default, or choice:A|B with 2-32 options)")]
+    InvalidField,
+    #[error("a form field has no value")]
+    FieldValueMissing,
 }
 
 /// Render built-in variables without invoking a shell or external process.
@@ -186,6 +263,18 @@ fn render_nested(
                 Some(_) if context.validating => String::new(),
                 Some(reader) => (reader.0)().ok_or(TemplateError::ClipboardUnavailable)?,
             },
+            other
+                if other.starts_with("field:")
+                    || other.starts_with("prompt:")
+                    || other.starts_with("choice:") =>
+            {
+                let field = parse_form_field(other).expect("prefix checked")?;
+                match context.fields.get(&field.key) {
+                    Some(value) => value.clone(),
+                    None if context.validating => String::new(),
+                    None => return Err(TemplateError::FieldValueMissing),
+                }
+            }
             other if other.starts_with("env:") => {
                 let name = other["env:".len()..].trim();
                 context

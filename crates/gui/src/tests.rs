@@ -1562,3 +1562,41 @@ fn gui_selection_tracks_the_snippet_id_when_config_order_changes() {
     );
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn the_snippet_form_renders_every_field_kind_and_submits_with_enter() {
+    let spec: crate::form::FormSpec = serde_json::from_str(
+        r#"{"title":":tk","fields":[
+            {"key":"field:name","label":"name","kind":{"text":{"default":"Ada"}}},
+            {"key":"choice:Open|Resolved","label":"Choice","kind":{"choice":{"options":["Open","Resolved"]}}}
+        ]}"#,
+    )
+    .unwrap();
+    let outcome = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut app = crate::form::FormApp::new(
+        spec,
+        Palette::for_pack(ColorPack::Default, false),
+        std::sync::Arc::clone(&outcome),
+    );
+    let ctx = egui::Context::default();
+    let _ = run_gui_test_frame(&ctx, egui::RawInput::default(), |ui| app.render(ui));
+    assert!(outcome.lock().unwrap().is_none());
+    let input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        ..Default::default()
+    };
+    let _ = run_gui_test_frame(&ctx, input, |ui| app.render(ui));
+    let values = outcome
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Enter submits the form");
+    assert_eq!(values["field:name"], "Ada");
+    assert_eq!(values["choice:Open|Resolved"], "Open");
+}

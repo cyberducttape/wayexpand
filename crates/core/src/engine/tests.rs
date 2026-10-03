@@ -4250,3 +4250,164 @@ fn usage_stats_round_trip_through_a_private_file() {
     assert_eq!(stats.daily["1970-01-02"], 1);
     let _ = std::fs::remove_dir_all(directory);
 }
+
+static FORM_HELPER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Point the engine at a fake form helper script for the life of the guard.
+struct FakeFormHelper {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    path: std::path::PathBuf,
+}
+
+impl FakeFormHelper {
+    fn new(name: &str, script: &str) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = FORM_HELPER_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-form-helper-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::env::set_var("WAYEXPAND_FORM_HELPER", &path);
+        Self {
+            _guard: guard,
+            path,
+        }
+    }
+}
+
+impl Drop for FakeFormHelper {
+    fn drop(&mut self) {
+        std::env::remove_var("WAYEXPAND_FORM_HELPER");
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+const FORM_CONFIG: &str = r#"
+[[expansion]]
+trigger = ":tk"
+replacement = "Hi {{field:name}}, ticket {{field:id=OPS-1}} is {{choice:Open|Resolved}}. {{field:name}}{{cursor}}!"
+"#;
+
+fn queue_form(engine: &mut ExpansionEngine) {
+    let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
+    assert_eq!(pending.len(), 1);
+    let dispatch = engine
+        .dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0)
+        .unwrap();
+    assert_eq!(dispatch, PendingExpansionDispatch::Queued);
+}
+
+fn wait_for_completion(engine: &mut ExpansionEngine) -> Vec<ExpansionResult> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while engine.is_form_open() {
+        let results = engine.drain_completed_commands();
+        if !results.is_empty() || !engine.is_form_open() {
+            return results;
+        }
+        assert!(Instant::now() < deadline, "form did not complete");
+        thread::sleep(Duration::from_millis(10));
+    }
+    Vec::new()
+}
+
+#[test]
+fn a_submitted_form_renders_its_values_and_suspends_capture_meanwhile() {
+    let _helper = FakeFormHelper::new(
+        "submit",
+        r#"sleep 0.2; printf '{"field:name":"Ada","field:id":"OPS-7","choice:Open|Resolved":"Resolved"}'"#,
+    );
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    queue_form(&mut engine);
+    assert!(engine.is_form_open());
+    // Typing in the form window must not expand anything.
+    assert!(engine.process(InputEvent::Text(":tk".into())).is_empty());
+    let results = wait_for_completion(&mut engine);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].insert, "Hi Ada, ticket OPS-7 is Resolved. Ada!");
+    assert_eq!(results[0].matched_text, ":tk");
+    assert_eq!(results[0].cursor_offset, Some(1));
+    assert!(!engine.is_form_open());
+}
+
+#[test]
+fn a_cancelled_form_leaves_the_trigger_alone() {
+    let _helper = FakeFormHelper::new("cancel", "exit 1");
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    queue_form(&mut engine);
+    assert!(wait_for_completion(&mut engine).is_empty());
+    assert!(!engine.is_form_open());
+}
+
+#[test]
+fn a_form_result_is_dropped_when_focus_moved_to_another_app() {
+    let _helper = FakeFormHelper::new(
+        "moved",
+        r#"sleep 0.2; printf '{"field:name":"Ada","field:id":"x","choice:Open|Resolved":"Open"}'"#,
+    );
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: None,
+    })));
+    queue_form(&mut engine);
+    engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
+        app_id: Some("org.example.Chat".into()),
+        title: None,
+    })));
+    assert!(wait_for_completion(&mut engine).is_empty());
+}
+
+#[test]
+fn form_values_outside_a_choice_are_rejected() {
+    let _helper = FakeFormHelper::new(
+        "bad-choice",
+        r#"printf '{"field:name":"Ada","field:id":"x","choice:Open|Resolved":"Deleted"}'"#,
+    );
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    queue_form(&mut engine);
+    assert!(wait_for_completion(&mut engine).is_empty());
+}
+
+#[test]
+fn form_fields_are_parsed_and_validated() {
+    let fields =
+        crate::form_fields("{{field:name}} {{prompt:name}} {{field:id=OPS-1}} {{choice:A|B}}")
+            .unwrap();
+    assert_eq!(fields.len(), 3, "{fields:?}");
+    assert!(matches!(
+        &fields[1].kind,
+        crate::FormFieldKind::Text { default } if default == "OPS-1"
+    ));
+    assert!(crate::form_fields("{{choice:only}}").is_err());
+    // A synchronous match never types raw field markers.
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.process(InputEvent::Text(":tk".into())).is_empty());
+    // Forms cannot be command-backed.
+    assert!(Config::parse(
+        "[[expansion]]\ntrigger = \":x\"\nreplacement = \"{{field:a}}\"\n[expansion.command]\nprogram = \"/bin/true\"\n"
+    )
+    .is_err());
+}
+
+#[test]
+fn explain_describes_form_snippets_instead_of_failing_to_render() {
+    let engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    let explanation = engine.explain(":tk", "libei");
+    assert!(explanation.would_expand(), "{}", explanation.render_text());
+    assert!(explanation
+        .checks
+        .iter()
+        .any(|check| check.detail.contains("opens a form for name, id, Choice")));
+    assert!(explanation
+        .checks
+        .iter()
+        .any(|check| check.name == "policy"));
+}

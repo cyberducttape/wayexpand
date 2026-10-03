@@ -190,6 +190,13 @@ impl ExpansionEngine {
                 "not a sensitive field",
             );
         }
+        if self.form_active {
+            explanation.push(
+                "form",
+                CheckStatus::Fail,
+                "another snippet form is open; capture resumes when it closes",
+            );
+        }
         if self.composition_active {
             explanation.push(
                 "composition",
@@ -254,6 +261,21 @@ impl ExpansionEngine {
                 if variables.iter().any(|name| name.starts_with("snippet:")) {
                     explanation.push("variables", CheckStatus::Info, "includes other snippets");
                 }
+                let fields = crate::form_fields(&expansion.replacement).unwrap_or_default();
+                if !fields.is_empty() {
+                    let labels: Vec<&str> =
+                        fields.iter().map(|field| field.label.as_str()).collect();
+                    explanation.push(
+                        "replacement",
+                        CheckStatus::Info,
+                        format!(
+                            "opens a form for {} before typing; the result is applied only if \
+                             focus returns to the same application",
+                            labels.join(", ")
+                        ),
+                    );
+                    return explanation_with_policy(self, explanation, expansion, backend);
+                }
                 match render_template_with_cursor(&expansion.replacement, &self.template_context())
                 {
                     Ok((rendered, _)) => explanation.push(
@@ -270,27 +292,7 @@ impl ExpansionEngine {
             }
         }
 
-        let size = expansion.replacement.len();
-        match self.config.organization.expansion_policy_violation(
-            size,
-            expansion.command.is_some(),
-            backend,
-        ) {
-            Some(violation) if self.config.organization.safe_mode => {
-                explanation.push("policy", CheckStatus::Fail, violation);
-            }
-            Some(violation) => explanation.push(
-                "policy",
-                CheckStatus::Warn,
-                format!("{violation} (audit mode: reported, not blocked)"),
-            ),
-            None => explanation.push(
-                "policy",
-                CheckStatus::Pass,
-                "allowed by organization policy",
-            ),
-        }
-        explanation
+        explanation_with_policy(self, explanation, expansion, backend)
     }
 
     fn explain_app_filter(&self, explanation: &mut Explanation, index: usize) {
@@ -359,4 +361,34 @@ impl ExpansionEngine {
             None => "no snippet uses this trigger".to_owned(),
         }
     }
+}
+
+/// Append the organization-policy check and return the explanation.
+fn explanation_with_policy(
+    engine: &ExpansionEngine,
+    mut explanation: Explanation,
+    expansion: &crate::ExpansionConfig,
+    backend: &str,
+) -> Explanation {
+    let size = expansion.replacement.len();
+    match engine.config.organization.expansion_policy_violation(
+        size,
+        expansion.command.is_some(),
+        backend,
+    ) {
+        Some(violation) if engine.config.organization.safe_mode => {
+            explanation.push("policy", CheckStatus::Fail, violation);
+        }
+        Some(violation) => explanation.push(
+            "policy",
+            CheckStatus::Warn,
+            format!("{violation} (audit mode: reported, not blocked)"),
+        ),
+        None => explanation.push(
+            "policy",
+            CheckStatus::Pass,
+            "allowed by organization policy",
+        ),
+    }
+    explanation
 }

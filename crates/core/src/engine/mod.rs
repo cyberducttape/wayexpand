@@ -136,6 +136,7 @@ pub struct PendingExpansionResult {
     undoable: bool,
     /// Command to execute (if any). Not yet executed; caller decides.
     pub command: Option<CommandConfig>,
+    form: Option<Arc<Vec<crate::FormField>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +172,8 @@ pub struct MatchPlan {
     pub replacement_text: String,
     pub command: Option<Arc<CommandConfig>>,
     pub propagate_case: bool,
+    /// Fields to collect in a form before this snippet can expand.
+    pub form: Option<Arc<Vec<crate::FormField>>>,
 }
 
 impl MatchPlan {
@@ -287,6 +290,8 @@ pub struct ExpansionEngine {
     /// Applied expansions not yet collected by the host; see
     /// [`ExpansionEngine::drain_usage_events`].
     usage_events: VecDeque<crate::UsageEvent>,
+    /// A snippet form is open; capture is suspended until it completes.
+    form_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -403,6 +408,23 @@ enum AsyncCommandJob {
         command: CommandConfig,
         result: ExpansionResult,
     },
+    Form {
+        config_index: usize,
+        additional_max_size: usize,
+        template: String,
+        fields: Arc<Vec<crate::FormField>>,
+        context: crate::TemplateContext,
+        title: String,
+        origin: FormOrigin,
+        result: ExpansionResult,
+    },
+}
+
+/// Where a form snippet was triggered, so its result is only applied after
+/// focus returns there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FormOrigin {
+    app_id: Option<String>,
 }
 
 struct AsyncCommandCompletion {
@@ -412,6 +434,8 @@ struct AsyncCommandCompletion {
     additional_max_size: usize,
     result: ExpansionResult,
     output: Result<String, CommandError>,
+    /// Set for form jobs, which are checked by origin instead of generation.
+    form: Option<FormOrigin>,
 }
 
 struct AsyncHotkeyCompletion {
@@ -522,6 +546,7 @@ impl ExpansionEngine {
             template_base,
             clipboard: None,
             usage_events: VecDeque::new(),
+            form_active: false,
         })
     }
 
@@ -649,13 +674,74 @@ impl ExpansionEngine {
                             break;
                         }
                         worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                        let AsyncCommandJob::Expansion {
-                            config_index,
-                            generation,
-                            additional_max_size,
-                            command,
-                            result,
-                        } = job;
+                        let (config_index, generation, additional_max_size, command, result) =
+                            match job {
+                                AsyncCommandJob::Expansion {
+                                    config_index,
+                                    generation,
+                                    additional_max_size,
+                                    command,
+                                    result,
+                                } => (
+                                    config_index,
+                                    generation,
+                                    additional_max_size,
+                                    command,
+                                    result,
+                                ),
+                                AsyncCommandJob::Form {
+                                    config_index,
+                                    additional_max_size,
+                                    template,
+                                    fields,
+                                    mut context,
+                                    title,
+                                    origin,
+                                    mut result,
+                                } => {
+                                    // Forms are not stale when the user types:
+                                    // that typing is the form. Capture stays
+                                    // suspended until the completion is drained.
+                                    worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+                                    let output = match command_runtime::run_form_helper(
+                                        &title,
+                                        &fields,
+                                        &command_shutdown,
+                                    ) {
+                                        Ok(values) => {
+                                            context.fields = Arc::new(values);
+                                            match crate::render_template_with_cursor(
+                                                &template, &context,
+                                            ) {
+                                                Ok((text, cursor_offset)) => {
+                                                    result.cursor_offset = cursor_offset;
+                                                    Ok(text)
+                                                }
+                                                Err(_) => Err(CommandError::IncompleteOutput),
+                                            }
+                                        }
+                                        Err(error) => Err(error),
+                                    };
+                                    worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                    if !send_completion_or_shutdown(
+                                        &worker_completion_sender,
+                                        AsyncCommandCompletion {
+                                            config_index,
+                                            generation: 0,
+                                            cache_ms: 0,
+                                            additional_max_size,
+                                            result,
+                                            output,
+                                            form: Some(origin),
+                                        },
+                                        &command_shutdown,
+                                    ) {
+                                        break;
+                                    }
+                                    notify_completion(&worker_notifier);
+                                    continue;
+                                }
+                            };
                         let cache_ms = command.cache_ms;
                         // Input can move while this job waits in the bounded
                         // queue. Reject it before spawning the child so stale
@@ -671,6 +757,7 @@ impl ExpansionEngine {
                                     additional_max_size,
                                     result,
                                     output: Err(CommandError::StaleInput),
+                                    form: None,
                                 },
                                 &command_shutdown,
                             ) {
@@ -694,6 +781,7 @@ impl ExpansionEngine {
                                 additional_max_size,
                                 result,
                                 output,
+                                form: None,
                             },
                             &command_shutdown,
                         ) {
@@ -903,6 +991,34 @@ impl ExpansionEngine {
         let completions: Vec<_> = runtime.receiver.try_iter().collect();
         let mut results = Vec::new();
         for completion in completions {
+            if let Some(origin) = &completion.form {
+                self.form_active = false;
+                let Ok(output) = completion.output else {
+                    self.restore_deferred_match(&completion.result.matched_text);
+                    continue;
+                };
+                // Apply only where the form was opened: focus must be back in
+                // that application, and not in a sensitive field or paused.
+                let current_app = self
+                    .normalized_window
+                    .as_ref()
+                    .and_then(|window| window.app_id.clone());
+                let limit = self.config.organization.max_replacement_size;
+                if self.sensitive_focus
+                    || self.user_paused
+                    || current_app != origin.app_id
+                    || (limit > 0 && output.len() > limit)
+                    || (completion.additional_max_size > 0
+                        && output.len() > completion.additional_max_size)
+                {
+                    self.restore_deferred_match(&completion.result.matched_text);
+                    continue;
+                }
+                let mut result = completion.result;
+                result.insert = output;
+                results.push(result);
+                continue;
+            }
             let output = match completion.output {
                 Ok(output) => output,
                 Err(_) => {
@@ -1037,6 +1153,9 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
         }
+        if let Some(fields) = pending.form.clone() {
+            return self.queue_form(pending, fields, additional_max_size);
+        }
         if pending
             .command
             .as_ref()
@@ -1092,6 +1211,55 @@ impl ExpansionEngine {
                 QueueSendError::Disconnected => CommandError::WorkerUnavailable,
             });
         }
+        Ok(PendingExpansionDispatch::Queued)
+    }
+
+    fn queue_form(
+        &mut self,
+        pending: PendingExpansionResult,
+        fields: Arc<Vec<crate::FormField>>,
+        additional_max_size: usize,
+    ) -> Result<PendingExpansionDispatch, CommandError> {
+        let matched_text = pending.matched_text.clone();
+        if self.form_active || pending.generation != self.input_generation {
+            self.restore_deferred_match(&matched_text);
+            return Err(CommandError::StaleInput);
+        }
+        let Some(runtime) = self.async_commands.as_ref() else {
+            self.restore_deferred_match(&matched_text);
+            return Err(CommandError::WorkerUnavailable);
+        };
+        let job = AsyncCommandJob::Form {
+            config_index: pending.config_index,
+            additional_max_size,
+            template: pending.template_text,
+            fields,
+            context: self.template_context(),
+            title: pending.trigger.clone(),
+            origin: FormOrigin {
+                app_id: self
+                    .normalized_window
+                    .as_ref()
+                    .and_then(|window| window.app_id.clone()),
+            },
+            result: ExpansionResult {
+                trigger: pending.trigger,
+                matched_text: pending.matched_text,
+                insert: String::new(),
+                cursor_offset: None,
+                reinsert_after: pending.reinsert_after,
+                command_backed: false,
+                undoable: pending.undoable,
+            },
+        };
+        if let Err(error) = runtime.try_send_command(job) {
+            self.restore_deferred_match(&matched_text);
+            return Err(match error {
+                QueueSendError::Full => CommandError::QueueFull,
+                QueueSendError::Disconnected => CommandError::WorkerUnavailable,
+            });
+        }
+        self.form_active = true;
         Ok(PendingExpansionDispatch::Queued)
     }
 
@@ -1291,7 +1459,12 @@ impl ExpansionEngine {
     /// Whether text expansion capture is currently enabled.
     /// Both user pause and sensitive field focus independently disable capture.
     fn is_capture_enabled(&self) -> bool {
-        !self.user_paused && !self.sensitive_focus && !self.composition_active
+        !self.user_paused && !self.sensitive_focus && !self.composition_active && !self.form_active
+    }
+
+    /// Whether a snippet form is open (capture is suspended meanwhile).
+    pub fn is_form_open(&self) -> bool {
+        self.form_active
     }
 
     /// Invalidate pending asynchronous expansions by incrementing the generation
@@ -1492,6 +1665,11 @@ impl ExpansionEngine {
     ) -> Option<ExpansionResult> {
         // Generate match plan with full context
         let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
+        // Forms need the deferred, asynchronous path; a synchronous match
+        // must never type the raw field markers.
+        if plan.form.is_some() {
+            return None;
+        }
 
         // Apply preflight policy
         if !self.preflight_allows(&plan) {
@@ -1613,6 +1791,7 @@ impl ExpansionEngine {
             }),
             undoable: true,
             command: plan.command.as_ref().map(|c| (**c).clone()),
+            form: plan.form.clone(),
         })
     }
 

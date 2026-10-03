@@ -152,7 +152,11 @@ impl ExpansionEngine {
             return None;
         }
         let expansion = &self.config.expansion[config_index];
-        let (replacement_text, cursor_offset) = if expansion.command.is_some() {
+        let form = crate::form_fields(&expansion.replacement)
+            .ok()
+            .filter(|fields| !fields.is_empty())
+            .map(Arc::new);
+        let (replacement_text, cursor_offset) = if expansion.command.is_some() || form.is_some() {
             (expansion.replacement.clone(), None)
         } else {
             let (rendered, cursor_offset) =
@@ -174,6 +178,7 @@ impl ExpansionEngine {
                 .as_ref()
                 .map(|command| Arc::new(command.clone())),
             propagate_case: expansion.propagate_case,
+            form,
         })
     }
 

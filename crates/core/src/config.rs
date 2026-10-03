@@ -494,11 +494,13 @@ impl Config {
     /// includable.
     pub fn includable_snippets(&self) -> std::sync::Arc<HashMap<String, String>> {
         let mut snippets = HashMap::new();
-        for expansion in self
-            .expansion
-            .iter()
-            .filter(|expansion| expansion.enabled && expansion.command.is_none())
-        {
+        for expansion in self.expansion.iter().filter(|expansion| {
+            // Form snippets are not includable: their fields could
+            // only be filled by the form of the snippet that owns them.
+            expansion.enabled
+                && expansion.command.is_none()
+                && crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
+        }) {
             for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
                 snippets.insert(trigger.clone(), expansion.replacement.clone());
             }
@@ -1149,6 +1151,14 @@ impl Config {
                 render_template_with_cursor(&expansion.replacement, &template_context)
             {
                 return Err(ConfigError::InvalidTemplate { index, source });
+            }
+            if expansion.command.is_some()
+                && crate::form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
+            {
+                return Err(ConfigError::InvalidTemplate {
+                    index,
+                    source: TemplateError::InvalidField,
+                });
             }
             if expansion.enabled {
                 total_trigger_chars = total_trigger_chars.saturating_add(trigger_length);

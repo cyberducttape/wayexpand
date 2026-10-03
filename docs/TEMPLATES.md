@@ -69,6 +69,42 @@ expanding a snippet that uses the variable, with a 500 ms limit, and never logs
 or caches the contents. If the clipboard cannot be read, the snippet does not
 expand. The IBus engine does not support the clipboard variable.
 
+## Form fields (interactive snippets)
+
+A snippet with fields opens a small form when it is triggered, so one snippet
+can produce a filled-in ticket reply, incident note, or email:
+
+```toml
+[[expansion]]
+trigger = ";;assign"
+replacement = """Hello {{field:name}},
+
+Your ticket {{field:ticket=OPS-}} has been assigned to {{field:agent}}.
+
+Current status: {{choice:Open|Waiting on customer|Resolved}}
+
+{{cursor}}"""
+```
+
+| Marker | Form input |
+| --- | --- |
+| `{{field:name}}` | A text box labelled *name*. Repeating the marker reuses the value. |
+| `{{field:name=default}}` | The same, prefilled. `{{prompt:name}}` is a synonym. |
+| `{{choice:A\|B\|C}}` | A drop-down with 2–32 options. |
+
+Tab moves between fields, Enter inserts, and Escape cancels, leaving the typed
+trigger in place. While the form is open, expansion is paused so typing in the
+form cannot trigger other snippets. After you press Enter, the trigger is erased
+and the filled text typed, but only if focus has returned to the application
+where you typed the trigger (where window tracking is available), and not into
+a password field.
+
+The form is the `wayexpand-gui --form` window; under systemd the daemon starts
+it with `systemd-run --user` so it runs outside the daemon's sandbox. Form
+snippets cannot run commands and cannot be included in other snippets. The IBus
+route drops its surrounding-text knowledge when focus moves to the form, so
+form snippets do not expand through IBus.
+
 ## Organization policy
 
 In safe mode, `disable_template_env = true` and `disable_clipboard = true`

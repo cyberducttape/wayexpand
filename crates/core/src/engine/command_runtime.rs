@@ -443,6 +443,118 @@ pub(super) fn configure_command_environment(process: &mut Command, command: &Com
     process.env("PATH", MINIMAL_COMMAND_PATH);
 }
 
+/// How long a snippet form may stay open before it is abandoned.
+const FORM_TIMEOUT: Duration = Duration::from_secs(600);
+const MAX_FORM_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_FORM_VALUE_BYTES: usize = 64 * 1024;
+
+/// The program that shows snippet forms. `WAYEXPAND_FORM_HELPER` overrides
+/// it (tests, custom installs). Under systemd the GUI is started through
+/// `systemd-run --user` so it runs outside the daemon's sandbox, whose
+/// memory, task, and W^X limits a graphical client cannot live with.
+fn form_helper_command() -> (String, Vec<String>) {
+    if let Some(program) = std::env::var_os("WAYEXPAND_FORM_HELPER") {
+        return (program.to_string_lossy().into_owned(), Vec::new());
+    }
+    if std::env::var_os("INVOCATION_ID").is_some() {
+        return (
+            "systemd-run".into(),
+            [
+                "--user",
+                "--quiet",
+                "--wait",
+                "--pipe",
+                "--collect",
+                "--",
+                "wayexpand-gui",
+            ]
+            .map(String::from)
+            .to_vec(),
+        );
+    }
+    ("wayexpand-gui".into(), Vec::new())
+}
+
+/// Show a form for `fields` and return the entered values by field key.
+/// The helper prints a JSON object and exits 0, or exits non-zero when the
+/// user cancels. Values are checked: every field present, choices limited to
+/// their options, no control characters other than tab and newline.
+pub(super) fn run_form_helper(
+    title: &str,
+    fields: &[crate::FormField],
+    shutdown: &AtomicBool,
+) -> Result<std::collections::HashMap<String, String>, CommandError> {
+    let spec = serde_json::json!({ "title": title, "fields": fields }).to_string();
+    let (program, mut args) = form_helper_command();
+    args.push("--form".into());
+    args.push(spec);
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| CommandError::SpawnFailed)?;
+    let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
+    // Drain stdout concurrently so a large answer cannot block the helper.
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout
+            .take(MAX_FORM_OUTPUT_BYTES as u64 + 1)
+            .read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + FORM_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| CommandError::WaitFailed(error.to_string()))?
+        {
+            break status;
+        }
+        if shutdown.load(Ordering::Acquire) || Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            return Err(if shutdown.load(Ordering::Acquire) {
+                CommandError::StaleInput
+            } else {
+                CommandError::Timeout
+            });
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let bytes = reader.join().map_err(|_| CommandError::OutputChannelLost)?;
+    if !status.success() {
+        // Cancelled: the trigger stays as typed.
+        return Err(CommandError::StaleInput);
+    }
+    if bytes.len() > MAX_FORM_OUTPUT_BYTES {
+        return Err(CommandError::OutputTooLarge);
+    }
+    let values: std::collections::HashMap<String, String> =
+        serde_json::from_slice(&bytes).map_err(|_| CommandError::IncompleteOutput)?;
+    let mut checked = std::collections::HashMap::with_capacity(fields.len());
+    for field in fields {
+        let value = values
+            .get(&field.key)
+            .ok_or(CommandError::IncompleteOutput)?;
+        let valid = value.len() <= MAX_FORM_VALUE_BYTES
+            && !value
+                .chars()
+                .any(|character| character.is_control() && character != '\n' && character != '\t')
+            && match &field.kind {
+                crate::FormFieldKind::Choice { options } => options.contains(value),
+                crate::FormFieldKind::Text { .. } => true,
+            };
+        if !valid {
+            return Err(CommandError::IncompleteOutput);
+        }
+        checked.insert(field.key.clone(), value.clone());
+    }
+    Ok(checked)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
