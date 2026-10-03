@@ -220,22 +220,46 @@ fn open_socket_parent(path: &Path) -> Result<(fs::File, PathBuf)> {
         rustix::fs::Mode::empty(),
     )?;
     let relative = parent.strip_prefix("/").unwrap_or(parent);
-    let directory = rustix::fs::openat2(
+    let (directory, use_proc_fd_path) = match rustix::fs::openat2(
         &root,
         relative,
         rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
         rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
-    )?;
+    ) {
+        Ok(directory) => (directory, true),
+        Err(error) if error.raw_os_error() == 38 => {
+            // Some systemd user-service sandboxes expose the filesystem but
+            // make openat2 unavailable. secure_socket_path() has already
+            // canonicalized and validated every ancestor, so retain the
+            // same ownership/mode checks and use the resolved path on those
+            // deployments instead of making the daemon impossible to start.
+            (
+                rustix::fs::open(
+                    parent,
+                    rustix::fs::OFlags::DIRECTORY
+                        | rustix::fs::OFlags::CLOEXEC
+                        | rustix::fs::OFlags::NOFOLLOW,
+                    rustix::fs::Mode::empty(),
+                )?,
+                false,
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
     let guard = fs::File::from(directory);
     let name = path
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("control socket path has no file name"))?;
-    let operation_path = PathBuf::from(format!(
-        "/proc/self/fd/{}/{}",
-        guard.as_raw_fd(),
-        name.to_string_lossy()
-    ));
+    let operation_path = if use_proc_fd_path {
+        PathBuf::from(format!(
+            "/proc/self/fd/{}/{}",
+            guard.as_raw_fd(),
+            name.to_string_lossy()
+        ))
+    } else {
+        path.to_path_buf()
+    };
     Ok((guard, operation_path))
 }
 

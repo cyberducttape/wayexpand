@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **Daemon lifecycle:** hardened control-socket startup now remains compatible
+  with systemd user sandboxes where `openat2` is unavailable, and libei portal
+  shutdown constructs its Tokio timer inside the runtime instead of panicking
+  during daemon exit.
 - **Certification claim integrity:** route contracts now distinguish sensitive-
   field handling implemented by WayExpand, protocol signals, compositor
   observations, and reviewed certification. Generated support/certification
