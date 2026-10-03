@@ -6,8 +6,10 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-sync.XXXXXX")
-trap 'rm -rf "$root"' EXIT INT TERM
+test_parent="$project_dir/.test-sync-tmp"
+mkdir -m 700 "$test_parent"
+root=$(mktemp -d "$test_parent/wayexpand-sync.XXXXXX")
+trap 'rm -rf "$root" "$test_parent"' EXIT INT TERM
 cli="$project_dir/target/debug/wayexpand"
 cargo build --locked -q -p wayexpand
 
