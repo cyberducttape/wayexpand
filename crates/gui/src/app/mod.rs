@@ -4,3 +4,4 @@
 mod diagnostics;
 mod import;
 mod settings;
+mod toolbar;
