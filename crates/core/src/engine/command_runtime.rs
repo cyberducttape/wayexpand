@@ -403,9 +403,9 @@ fn read_available_stderr(
             Ok(count) => {
                 let remaining = MAX_COMMAND_STDERR_BYTES.saturating_sub(bytes.len());
                 bytes.extend_from_slice(&buffer[..count.min(remaining)]);
-                if bytes.len() >= MAX_COMMAND_STDERR_BYTES {
-                    return Ok(false);
-                }
+                // Once the diagnostic retention cap is reached, keep draining
+                // until WouldBlock. The child must never be throttled by our
+                // bounded diagnostic buffer and the outer poll interval.
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
             Err(_) => return Err(CommandError::OutputChannelLost),
