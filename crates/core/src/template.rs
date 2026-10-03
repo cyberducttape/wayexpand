@@ -1,16 +1,46 @@
-use std::{env, fs, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, HashMap},
+    env, fs,
+    sync::{Arc, OnceLock},
+};
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_RENDERED_BYTES: usize = 1024 * 1024;
+/// How deeply `{{snippet:...}}` includes may nest.
+const MAX_INCLUDE_DEPTH: usize = 8;
 static SYSTEM_USERNAME: OnceLock<String> = OnceLock::new();
 static SYSTEM_HOSTNAME: OnceLock<String> = OnceLock::new();
 
+/// Reads the clipboard for `{{clipboard}}`. Called only while rendering a
+/// snippet that uses the variable; `None` means it could not be read.
+#[derive(Clone)]
+pub struct ClipboardReader(pub Arc<dyn Fn() -> Option<String> + Send + Sync>);
+
+impl std::fmt::Debug for ClipboardReader {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ClipboardReader")
+    }
+}
+
+/// Values a template may read. Variables have different trust levels: the
+/// built-ins are always available, `{{env:NAME}}` only reads names the user
+/// allowlisted, `{{snippet:...}}` only includes other static snippets, and
+/// `{{clipboard}}` only works when the user enabled it and policy allows it.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
     pub username: String,
     pub hostname: String,
     pub unix_timestamp: u64,
+    /// Allowlisted environment variables and their values (empty if unset).
+    pub env: Arc<BTreeMap<String, String>>,
+    /// Static snippet replacements available to `{{snippet:TRIGGER}}`,
+    /// keyed by trigger and alias.
+    pub snippets: Arc<HashMap<String, String>>,
+    /// Present only when the clipboard variable is enabled.
+    pub clipboard: Option<ClipboardReader>,
+    /// Validation renders: the clipboard is never read and reports as empty.
+    pub validating: bool,
 }
 
 impl TemplateContext {
@@ -35,6 +65,7 @@ impl TemplateContext {
             username,
             hostname,
             unix_timestamp,
+            ..Self::default()
         }
     }
 }
@@ -53,12 +84,44 @@ pub enum TemplateError {
     DateArithmeticOverflow { name: String },
     #[error("template has a second {{{{cursor}}}} marker at byte {offset}; only one is supported")]
     MultipleCursors { offset: usize },
+    #[error("environment variable {name:?} is not in settings.template_env")]
+    EnvNotAllowed { name: String },
+    #[error("{{{{snippet:...}}}} names no static snippet")]
+    UnknownSnippet,
+    #[error(
+        "{{{{snippet:...}}}} includes form a cycle or nest more than {MAX_INCLUDE_DEPTH} deep"
+    )]
+    IncludeTooDeep,
+    #[error("an included snippet cannot contain {{{{cursor}}}}")]
+    CursorInInclude,
+    #[error(
+        "the clipboard variable is disabled (settings.allow_clipboard, or organization policy)"
+    )]
+    ClipboardDisabled,
+    #[error("the clipboard could not be read")]
+    ClipboardUnavailable,
 }
 
 /// Render built-in variables without invoking a shell or external process.
 /// Unknown variables are errors so a typo can never silently reach an editor.
 pub fn render_template(template: &str, context: &TemplateContext) -> Result<String, TemplateError> {
     render(template, context, false).map(|(rendered, _)| rendered)
+}
+
+/// Every `{{...}}` variable name in a template, in order. Unclosed markers
+/// end the scan; rendering reports them as errors.
+pub fn template_variables(template: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    let mut cursor = 0;
+    while let Some(start) = template[cursor..].find("{{") {
+        let variable_start = cursor + start + 2;
+        let Some(end) = template[variable_start..].find("}}") else {
+            break;
+        };
+        names.push(template[variable_start..variable_start + end].trim());
+        cursor = variable_start + end + 2;
+    }
+    names
 }
 
 /// Shared renderer. With `allow_cursor`, a `{{cursor}}` variable renders to
@@ -68,6 +131,15 @@ fn render(
     template: &str,
     context: &TemplateContext,
     allow_cursor: bool,
+) -> Result<(String, Option<usize>), TemplateError> {
+    render_nested(template, context, allow_cursor, 0)
+}
+
+fn render_nested(
+    template: &str,
+    context: &TemplateContext,
+    allow_cursor: bool,
+    depth: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
     let mut rendered = String::with_capacity(template.len());
     let mut cursor_position = None;
@@ -109,6 +181,35 @@ fn render(
             "unix_timestamp" => context.unix_timestamp.to_string(),
             "newline" => "\n".to_owned(),
             "tab" => "\t".to_owned(),
+            "clipboard" => match &context.clipboard {
+                None => return Err(TemplateError::ClipboardDisabled),
+                Some(_) if context.validating => String::new(),
+                Some(reader) => (reader.0)().ok_or(TemplateError::ClipboardUnavailable)?,
+            },
+            other if other.starts_with("env:") => {
+                let name = other["env:".len()..].trim();
+                context
+                    .env
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| TemplateError::EnvNotAllowed {
+                        name: name.to_owned(),
+                    })?
+            }
+            other if other.starts_with("snippet:") => {
+                let trigger = other["snippet:".len()..].trim();
+                let included = context
+                    .snippets
+                    .get(trigger)
+                    .ok_or(TemplateError::UnknownSnippet)?;
+                if depth >= MAX_INCLUDE_DEPTH {
+                    return Err(TemplateError::IncludeTooDeep);
+                }
+                if template_variables(included).contains(&"cursor") {
+                    return Err(TemplateError::CursorInInclude);
+                }
+                render_nested(included, context, false, depth + 1)?.0
+            }
             other => match parse_offset_variable(other) {
                 Some((base, offset)) => {
                     let adjusted = context
@@ -250,6 +351,7 @@ mod tests {
             username: "ada".into(),
             hostname: "workstation".into(),
             unix_timestamp: 0,
+            ..TemplateContext::default()
         };
         assert_eq!(
             render_template(

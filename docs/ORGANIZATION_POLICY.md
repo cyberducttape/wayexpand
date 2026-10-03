@@ -52,6 +52,10 @@ require_absolute_commands = false
 # Disable title-based fallback in app filtering (require app_id match only)
 disable_title_matching = false
 
+# Disable the {{clipboard}} and {{env:NAME}} snippet variables (see TEMPLATES.md)
+disable_clipboard = false
+disable_template_env = false
+
 # Require a backend with a protocol-level atomic replacement transaction
 require_atomic_replace = false
 

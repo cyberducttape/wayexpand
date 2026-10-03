@@ -94,6 +94,9 @@ pub(crate) struct FocusTarget {
 
 pub(crate) struct PickerApp {
     config: Config,
+    /// Built once per configuration: includes and allowlisted environment
+    /// variables resolve the same way the daemon resolves them.
+    template_context: TemplateContext,
     config_revision: ConfigRevision,
     search_index: Vec<SearchEntry>,
     cached_query: Option<String>,
@@ -143,6 +146,7 @@ impl PickerApp {
                     description: expansion.description.to_lowercase(),
                 })
                 .collect(),
+            template_context: config.template_context(None),
             config,
             config_revision,
             cached_query: None,
@@ -195,7 +199,7 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
-        let text = render_template_with_cursor(&expansion.replacement, &TemplateContext::system())
+        let text = render_template_with_cursor(&expansion.replacement, &self.template_context)
             .map(|(text, _)| text)
             .unwrap_or_else(|_| expansion.replacement.clone());
         if self.daemon_available {
@@ -379,7 +383,13 @@ impl eframe::App for PickerApp {
                         for (index, expansion_index) in result_indices.iter().copied().enumerate() {
                             let expansion = &self.config.expansion[expansion_index];
                             let selected = index == self.selected;
-                            let response = picker_row(ui, &palette, expansion, selected);
+                            let response = picker_row(
+                                ui,
+                                &palette,
+                                &self.template_context,
+                                expansion,
+                                selected,
+                            );
                             if selected && (up || down) {
                                 response.scroll_to_me(None);
                             }
@@ -420,12 +430,13 @@ impl eframe::App for PickerApp {
 fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
+    template_context: &TemplateContext,
     expansion: &ExpansionConfig,
     selected: bool,
 ) -> egui::Response {
     // Show what will be typed, not template syntax: `{{date}}` becomes the
     // date and the `{{cursor}}` marker disappears.
-    let rendered = render_template_with_cursor(&expansion.replacement, &TemplateContext::system())
+    let rendered = render_template_with_cursor(&expansion.replacement, template_context)
         .map(|(text, _)| text)
         .unwrap_or_else(|_| expansion.replacement.clone());
     let first_line = rendered

@@ -1,5 +1,6 @@
 mod args;
 mod backend_lifecycle;
+mod clipboard;
 mod control;
 mod events;
 mod focus;
@@ -262,6 +263,9 @@ fn main() -> Result<()> {
     let waker = waker::Waker::new()
         .map_err(|error| anyhow::anyhow!("could not create the reactor wakeup: {error}"))?;
     control.set_waker(waker.clone());
+    config
+        .engine
+        .set_clipboard_reader(Some(clipboard::wl_paste_reader()));
     let completion_waker = waker.clone();
     config
         .engine

@@ -50,6 +50,8 @@ pub enum ConfigError {
         length: usize,
         maximum: usize,
     },
+    #[error("settings.template_env is invalid: {reason}")]
+    InvalidTemplateEnv { reason: &'static str },
     #[error("expansion {index} has too many aliases (maximum is {maximum})")]
     TooManyAliases { index: usize, maximum: usize },
     #[error("expansion {index} replacement is too large ({length} bytes; maximum is {maximum})")]
@@ -149,6 +151,9 @@ impl ConfigError {
                 length,
                 maximum,
             } => format!("expansion {index} trigger is too long ({length}; maximum {maximum})"),
+            Self::InvalidTemplateEnv { reason } => {
+                format!("settings.template_env is invalid: {reason}")
+            }
             Self::TooManyAliases { index, maximum } => {
                 format!("expansion {index} has too many aliases (maximum {maximum})")
             }

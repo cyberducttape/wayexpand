@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use super::ExpansionEngine;
-use crate::{render_template_with_cursor, AppFilter, MatchMode, TemplateContext};
+use crate::{render_template_with_cursor, AppFilter, MatchMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -230,21 +230,44 @@ impl ExpansionEngine {
                     );
                 }
             }
-            None => match render_template_with_cursor(
-                &expansion.replacement,
-                &TemplateContext::system(),
-            ) {
-                Ok((rendered, _)) => explanation.push(
-                    "replacement",
-                    CheckStatus::Pass,
-                    format!("renders to {} characters", rendered.chars().count()),
-                ),
-                Err(error) => explanation.push(
-                    "replacement",
-                    CheckStatus::Fail,
-                    format!("template cannot be rendered: {error}"),
-                ),
-            },
+            None => {
+                let variables = crate::template_variables(&expansion.replacement);
+                if variables.contains(&"clipboard") {
+                    explanation.push(
+                        "variables",
+                        CheckStatus::Info,
+                        "reads the clipboard (allowed by settings.allow_clipboard)",
+                    );
+                }
+                let env: Vec<&str> = variables
+                    .iter()
+                    .filter_map(|name| name.strip_prefix("env:"))
+                    .map(str::trim)
+                    .collect();
+                if !env.is_empty() {
+                    explanation.push(
+                        "variables",
+                        CheckStatus::Info,
+                        format!("reads environment variables {}", env.join(", ")),
+                    );
+                }
+                if variables.iter().any(|name| name.starts_with("snippet:")) {
+                    explanation.push("variables", CheckStatus::Info, "includes other snippets");
+                }
+                match render_template_with_cursor(&expansion.replacement, &self.template_context())
+                {
+                    Ok((rendered, _)) => explanation.push(
+                        "replacement",
+                        CheckStatus::Pass,
+                        format!("renders to {} characters", rendered.chars().count()),
+                    ),
+                    Err(error) => explanation.push(
+                        "replacement",
+                        CheckStatus::Fail,
+                        format!("template cannot be rendered: {error}"),
+                    ),
+                }
+            }
         }
 
         let size = expansion.replacement.len();

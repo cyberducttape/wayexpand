@@ -280,6 +280,10 @@ pub struct ExpansionEngine {
     /// operation. Exclusive input sources have not delivered the delimiter to
     /// the application yet; non-exclusive sources such as evdev have.
     reinsert_terminators: bool,
+    /// Environment and include values for templates, built once per config.
+    template_base: crate::TemplateContext,
+    /// Supplied by the host when it can read the clipboard.
+    clipboard: Option<crate::ClipboardReader>,
 }
 
 #[derive(Debug, Clone)]
@@ -464,6 +468,7 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
+        let template_base = config.template_context(None);
         let max_buffer_chars = config.settings.max_buffer_chars;
         // `validate()` above already confirmed this parses; a config that
         // fails to load is never used to construct an engine.
@@ -511,6 +516,8 @@ impl ExpansionEngine {
             expansion_metrics: Arc::new(CommandMetricsState::new()),
             hotkey_metrics: Arc::new(CommandMetricsState::new()),
             reinsert_terminators: true,
+            template_base,
+            clipboard: None,
         })
     }
 
@@ -533,6 +540,31 @@ impl ExpansionEngine {
 
     pub fn reinserts_terminators(&self) -> bool {
         self.reinsert_terminators
+    }
+
+    /// Supply the clipboard reader for `{{clipboard}}`. It is used only when
+    /// the configuration enables the variable and policy allows it.
+    pub fn set_clipboard_reader(&mut self, reader: Option<crate::ClipboardReader>) {
+        self.clipboard = reader;
+    }
+
+    /// The registered clipboard reader, for carrying it across a reload.
+    pub fn clipboard_reader(&self) -> Option<crate::ClipboardReader> {
+        self.clipboard.clone()
+    }
+
+    /// The context a snippet renders with right now.
+    pub(crate) fn template_context(&self) -> crate::TemplateContext {
+        let enforcement = self.config.organization.effective_enforcement_policy();
+        crate::TemplateContext {
+            env: std::sync::Arc::clone(&self.template_base.env),
+            snippets: std::sync::Arc::clone(&self.template_base.snippets),
+            clipboard: self
+                .clipboard
+                .clone()
+                .filter(|_| self.config.settings.allow_clipboard && !enforcement.disable_clipboard),
+            ..crate::TemplateContext::system()
+        }
     }
 
     /// Register a wakeup for asynchronous expansion completions. Applies to
@@ -1643,11 +1675,9 @@ impl ExpansionEngine {
         if !self.app_filter_allows(config_index, expansion) {
             return Err(InsertError::NotForThisApp);
         }
-        let (insert, cursor_offset) = crate::render_template_with_cursor(
-            &expansion.replacement,
-            &crate::TemplateContext::system(),
-        )
-        .map_err(|_| InsertError::Unrenderable)?;
+        let (insert, cursor_offset) =
+            crate::render_template_with_cursor(&expansion.replacement, &self.template_context())
+                .map_err(|_| InsertError::Unrenderable)?;
         let limit = self.config.organization.max_replacement_size;
         if limit > 0 && insert.len() > limit {
             return Err(InsertError::Unrenderable);

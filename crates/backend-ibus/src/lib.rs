@@ -424,6 +424,7 @@ impl IbusEngineAdapter {
         engine.set_reinsert_terminators(self.engine.reinserts_terminators());
         engine.set_composition_active(self.engine.is_composition_active());
         engine.set_completion_notifier(self.engine.completion_notifier());
+        engine.set_clipboard_reader(self.engine.clipboard_reader());
         if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"

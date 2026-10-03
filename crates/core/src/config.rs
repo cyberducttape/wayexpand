@@ -1,4 +1,6 @@
-use crate::{render_template_with_cursor, KeyChord, TemplateContext, TemplateError};
+use crate::{
+    render_template_with_cursor, ClipboardReader, KeyChord, TemplateContext, TemplateError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -17,6 +19,7 @@ use thiserror::Error;
 
 const MAX_TRIGGER_CHARS: usize = 128;
 const MAX_ALIASES: usize = 32;
+const MAX_TEMPLATE_ENV: usize = 32;
 const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
 const MAX_DESCRIPTION_CHARS: usize = 512;
 const MAX_TAGS: usize = 32;
@@ -143,6 +146,14 @@ pub struct Settings {
     /// absolute `WAYEXPAND_PORTAL_TOKEN_PATH` override explicitly.
     #[serde(default = "default_libei_persistence")]
     pub libei_token_persistence: bool,
+    /// Environment variables snippets may read with `{{env:NAME}}`. Only
+    /// names listed here are readable; any other name is a config error.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub template_env: Vec<String>,
+    /// Allow `{{clipboard}}`. Off by default: the clipboard often holds
+    /// passwords and other secrets. Organization policy can still block it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub allow_clipboard: bool,
 }
 
 fn default_libei_persistence() -> bool {
@@ -187,6 +198,8 @@ impl Default for Settings {
             undo_chord: None,
             font_scale: FontScale::Normal,
             libei_token_persistence: true,
+            template_env: Vec::new(),
+            allow_clipboard: false,
         }
     }
 }
@@ -462,6 +475,68 @@ fn default_enabled() -> bool {
 }
 
 impl Config {
+    /// Static snippet replacements by trigger and alias, for
+    /// `{{snippet:TRIGGER}}`. Command-backed and disabled snippets are not
+    /// includable.
+    pub fn includable_snippets(&self) -> std::sync::Arc<HashMap<String, String>> {
+        let mut snippets = HashMap::new();
+        for expansion in self
+            .expansion
+            .iter()
+            .filter(|expansion| expansion.enabled && expansion.command.is_none())
+        {
+            for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
+                snippets.insert(trigger.clone(), expansion.replacement.clone());
+            }
+        }
+        std::sync::Arc::new(snippets)
+    }
+
+    /// The context snippets render with: built-ins, allowlisted environment
+    /// variables, includable snippets, and the clipboard reader when the user
+    /// enabled `{{clipboard}}`. Organization policy (safe mode) can disable
+    /// the environment and clipboard variables.
+    pub fn template_context(&self, clipboard: Option<ClipboardReader>) -> TemplateContext {
+        let enforcement = self.organization.effective_enforcement_policy();
+        let env = if enforcement.disable_template_env {
+            std::collections::BTreeMap::new()
+        } else {
+            self.settings
+                .template_env
+                .iter()
+                .map(|name| (name.clone(), std::env::var(name).unwrap_or_default()))
+                .collect()
+        };
+        TemplateContext {
+            env: std::sync::Arc::new(env),
+            snippets: self.includable_snippets(),
+            clipboard: clipboard
+                .filter(|_| self.settings.allow_clipboard && !enforcement.disable_clipboard),
+            ..TemplateContext::system()
+        }
+    }
+
+    /// The context used to validate templates: the same variables are
+    /// allowed as at runtime, but nothing is read.
+    fn validation_template_context(&self) -> TemplateContext {
+        TemplateContext {
+            env: std::sync::Arc::new(
+                self.settings
+                    .template_env
+                    .iter()
+                    .map(|name| (name.clone(), String::new()))
+                    .collect(),
+            ),
+            snippets: self.includable_snippets(),
+            clipboard: self
+                .settings
+                .allow_clipboard
+                .then(|| ClipboardReader(std::sync::Arc::new(|| Some(String::new())))),
+            validating: true,
+            ..TemplateContext::default()
+        }
+    }
+
     /// Create the empty per-user configuration when it does not exist, then
     /// load it through the same secure path used for existing files.
     ///
@@ -911,6 +986,26 @@ impl Config {
                 });
             }
         }
+        if self.settings.template_env.len() > MAX_TEMPLATE_ENV {
+            return Err(ConfigError::InvalidTemplateEnv {
+                reason: "too many template_env names (maximum 32)",
+            });
+        }
+        for name in &self.settings.template_env {
+            let mut characters = name.chars();
+            let valid = name.len() <= 256
+                && characters
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                && characters
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_');
+            if !valid {
+                return Err(ConfigError::InvalidTemplateEnv {
+                    reason: "template_env names must be ASCII letters, digits, or _, not starting with a digit",
+                });
+            }
+        }
+        let template_context = self.validation_template_context();
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
@@ -1037,7 +1132,7 @@ impl Config {
                     });
                 }
             } else if let Err(source) =
-                render_template_with_cursor(&expansion.replacement, &TemplateContext::default())
+                render_template_with_cursor(&expansion.replacement, &template_context)
             {
                 return Err(ConfigError::InvalidTemplate { index, source });
             }

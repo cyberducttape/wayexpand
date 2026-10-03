@@ -57,6 +57,12 @@ pub struct OrganizationPolicy {
     /// in ~/.local/share/wayexpand/packs/. Pack names must match directory names.
     pub allowed_packs: Vec<String>,
 
+    /// Disable the `{{clipboard}}` snippet variable.
+    pub disable_clipboard: bool,
+
+    /// Disable the `{{env:NAME}}` snippet variable.
+    pub disable_template_env: bool,
+
     /// Policy violation audit log. When violations occur, they're logged
     /// to journald with this prefix for easy filtering.
     pub audit_prefix: String,
@@ -76,6 +82,8 @@ impl Default for OrganizationPolicy {
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
             allowed_packs: Vec::new(),
+            disable_clipboard: false,
+            disable_template_env: false,
             audit_prefix: "wayexpand-policy".to_string(),
         }
     }
@@ -103,6 +111,8 @@ impl OrganizationPolicy {
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
         effective.allowed_packs.clear();
+        effective.disable_clipboard = false;
+        effective.disable_template_env = false;
         effective
     }
 
@@ -119,6 +129,8 @@ impl OrganizationPolicy {
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
             || !self.allowed_packs.is_empty()
+            || self.disable_clipboard
+            || self.disable_template_env
     }
 
     /// Check if policy allows a backend
