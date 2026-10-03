@@ -7,11 +7,15 @@
 WayExpand must choose between two fundamentally different capture methods:
 
 ### Input-Method-V2 (Recommended for most users)
-- **What it captures:** Text composition events sent to applications
+- **What it captures:** Committed text and locally resolved keyboard text
 - **What it misses:** Raw keyboard input (Escape, arrow keys, function keys)
+- **IME limitation:** Active external preedit is not exposed to the current
+  backend; finish CJK, Fcitx, IBus, dead-key, or Compose composition before
+  typing a WayExpand trigger
 - **Security:** Fails closed until content-purpose information is available;
   password-field behavior remains compositor/client dependent and uncertified
-- **Compatibility:** Works universally across Wayland
+- **Compatibility:** Requires a compositor/input-method-v2 implementation;
+  availability and certification are compositor-dependent
 
 ### Evdev (Advanced use cases)
 - **What it captures:** Raw keyboard input (all keys)
@@ -23,7 +27,8 @@ WayExpand must choose between two fundamentally different capture methods:
 
 | Aspect | Input-Method-V2 | Evdev |
 |--------|-----------------|-------|
-| **Unicode/CJK** | ✅ Full support via composition | ❌ Not supported |
+| **Committed Unicode** | ✅ Supported | ⚠️ Layout-dependent |
+| **Active CJK/IME preedit** | ❌ Not supported | ❌ Not supported |
 | **Passwords** | ⚠️ Protected when reliably reported; not universally certified | ⚠️ Visible if input group granted |
 | **Arrow Keys** | ❌ Not captured | ✅ Full capture |
 | **Function Keys** | ❌ Not captured | ✅ Full capture |
@@ -38,7 +43,7 @@ WayExpand must choose between two fundamentally different capture methods:
 ## Decision Tree
 
 ### Use Input-Method-V2 if:
-- ✅ You type mostly English text
+- ✅ You type committed text, including Unicode after composition completes
 - ✅ You use text editors, terminals, browsers
 - ✅ Security/password protection matters
 - ✅ You want zero-configuration setup
@@ -72,9 +77,10 @@ enable_evdev_fallback = true
 ### Scenario 1: DevOps Engineer (Terminal-heavy)
 ```
 Need: `;kpods` → kubectl get pods
-Trade-off: Input-Method-V2 cannot capture `;`, but CAN capture the text afterward
-Solution: Use Input-Method-V2 (expansions trigger on full text boundary)
-Risk: None
+Trade-off: active external IME/preedit is not visible to the backend
+Solution: finish the IME composition, then type the trigger in the committed
+text stream
+Risk: the workflow is not supported while composition remains active
 ```
 
 ### Scenario 2: Developer (Code + Terminal)
@@ -101,19 +107,15 @@ This is the correct choice for security.
 
 ### Input-Method-V2 Flow (Secure by Design)
 ```
-User types text
+Compositor activates the input-method-v2 backend
     ↓
-Input Method (GNOME/KDE/IBus) intercepts
+Backend receives keyboard text and content-purpose state
     ↓
-If matches expansion trigger → start composition
+WayExpand matches only committed/local text
     ↓
-Call wayexpand via input-method-v2 protocol
+Replacement is committed through the negotiated input-method session
     ↓
-Return replacement text to IME
-    ↓
-IME applies to application
-    ↓
-All password protection still active (IME handles it)
+External IME preedit remains outside the current capture contract
 ```
 
 ### Evdev Flow (Direct but Risky)
