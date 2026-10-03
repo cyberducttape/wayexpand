@@ -759,6 +759,52 @@ replacement = "signature"
     }
 
     #[test]
+    fn unicode_keysym_forms_are_committed_without_loss() {
+        let mut adapter = IbusEngineAdapter::new(
+            ExpansionEngine::new(
+                Config::parse(
+                    r#"[[expansion]]
+trigger = ":東京😀"
+replacement = "世界 🌍"
+"#,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        );
+
+        // IBus uses the X11 Unicode keysym form for code points outside the
+        // legacy Latin-1 range: 0x01000000 + the scalar value.
+        let unicode_keysym = |character: char| 0x0100_0000 + character as u32;
+        let mut actions = Vec::new();
+        for character in ":東京😀".chars() {
+            let keyval = if character.is_ascii() {
+                character as u32
+            } else {
+                unicode_keysym(character)
+            };
+            actions.extend(adapter.process_key_event(keyval, 0, 0).actions);
+        }
+
+        assert_eq!(
+            actions,
+            vec![
+                IbusAction::CommitText("東".into()),
+                IbusAction::CommitText("京".into()),
+                IbusAction::DeleteSurroundingText { nchars: 4 },
+                IbusAction::CommitText("世界 🌍".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_unicode_keysym_is_not_committed() {
+        let mut adapter = adapter();
+        let result = adapter.process_key_event(0x0100_0000 + 0x11_0000, 0, 0);
+        assert_eq!(result, IbusKeyResult::default());
+    }
+
+    #[test]
     fn synchronous_ibus_expansion_commits_undo_after_actions_are_created() {
         let config: Config = toml::from_str(
             r#"

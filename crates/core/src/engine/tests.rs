@@ -375,14 +375,22 @@ fn sensitive_focus_and_pause_are_independent() {
 fn active_composition_suspends_matching_until_commit() {
     let mut engine = engine();
 
+    // A preedit must not be able to join with text typed before composition
+    // started. Composition transitions are a transaction boundary, so a
+    // partially typed trigger is discarded in both directions.
+    engine.process(InputEvent::Text(":hel".into()));
     engine.process(InputEvent::CompositionChanged { active: true });
     assert!(engine.is_composition_active());
     assert!(engine.process(InputEvent::Text(":hello".into())).is_empty());
 
     // A committed composition ends the guard. The trigger starts cleanly and
-    // cannot combine with preedit text that arrived while composition was on.
+    // cannot combine with either the old partial trigger or preedit text.
     engine.process(InputEvent::CompositionChanged { active: false });
     assert!(!engine.is_composition_active());
+    let mut results = engine.process(InputEvent::Text("llo".into()));
+    results.extend(engine.process(InputEvent::EndOfInput));
+    assert!(results.is_empty());
+
     let mut results = engine.process(InputEvent::Text(":hello".into()));
     results.extend(engine.process(InputEvent::EndOfInput));
     assert_eq!(results.pop().unwrap().insert, "Hello from Wayland!");
