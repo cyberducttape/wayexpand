@@ -55,6 +55,13 @@ unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
+case "$config_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
 case "$state_home" in
     /*) ;;
     *)

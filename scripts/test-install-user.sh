@@ -68,6 +68,17 @@ XDG_STATE_HOME="$custom_state_home" \
 grep -Fx "ReadWritePaths=\"$custom_state_home/wayexpand\"" \
     "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf"
 
+if HOME="$test_root/home" XDG_CONFIG_HOME=relative \
+    "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
+    echo "installer accepted a relative XDG_CONFIG_HOME" >&2
+    exit 1
+fi
+if HOME="$test_root/home" XDG_CONFIG_HOME=relative \
+    "$project_dir/scripts/uninstall-user.sh" >/dev/null 2>&1; then
+    echo "uninstaller accepted a relative XDG_CONFIG_HOME" >&2
+    exit 1
+fi
+
 config_path="$test_root/config/wayexpand/expansions.toml"
 custom_config=$(mktemp "$test_root/custom-config.XXXXXX")
 printf '%s\n' \

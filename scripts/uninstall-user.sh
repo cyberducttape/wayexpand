@@ -39,6 +39,21 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 evdev_rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evdev.rules}
 evdev_uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
 
+case "$config_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+case "$state_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_STATE_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+
 if command -v systemctl >/dev/null 2>&1; then
     for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
         if systemctl --user is-enabled "$service_name" >/dev/null 2>&1 \
