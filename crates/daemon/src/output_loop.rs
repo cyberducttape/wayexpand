@@ -11,7 +11,7 @@ use std::path::Path;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{sync_channel, Receiver, SyncSender, TrySendError},
+        mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError},
         Arc,
     },
     thread,
@@ -32,6 +32,23 @@ pub struct OutputConnectError {
 }
 
 const ASYNC_OUTPUT_QUEUE_CAPACITY: usize = 64;
+
+/// Fixed allowance for one backend operation to be acknowledged, on top of
+/// any paced typing time. The daemon reactor waits for the acknowledgement,
+/// so a wedged portal or compositor must not stall it indefinitely.
+const OUTPUT_COMPLETION_BASE: Duration = Duration::from_secs(5);
+
+/// How long to wait for one operation that types `chars` characters. Paced
+/// modes (libei keysym fallback) get twice their advertised typing time.
+fn completion_deadline(capabilities: &InjectorCapabilities, chars: usize) -> Duration {
+    let paced = capabilities
+        .expected_throughput_chars_per_sec
+        .filter(|rate| *rate > 0)
+        .map_or(Duration::ZERO, |rate| {
+            Duration::from_millis((chars as u64).saturating_mul(2_000) / u64::from(rate))
+        });
+    OUTPUT_COMPLETION_BASE.saturating_add(paced)
+}
 
 /// A failure reported by the serialized output actor after an operation was
 /// accepted into its queue. The daemon must reconnect rather than replay the
@@ -90,19 +107,14 @@ enum OutputCommand {
     Replace {
         trigger: String,
         text: String,
-        completion: SyncSender<Result<(), InjectorError>>,
+        completion: Completion,
     },
-    Erase(String, SyncSender<Result<(), InjectorError>>),
-    Insert(String, SyncSender<Result<(), InjectorError>>),
-    MoveCursor(usize, SyncSender<Result<(), InjectorError>>),
-    Key(u32, SyncSender<Result<(), InjectorError>>),
-    KeyWithModifiers(u32, Modifiers, SyncSender<Result<(), InjectorError>>),
-    KeyEvent(
-        u32,
-        Modifiers,
-        KeyEventState,
-        SyncSender<Result<(), InjectorError>>,
-    ),
+    Erase(String, Completion),
+    Insert(String, Completion),
+    MoveCursor(usize, Completion),
+    Key(u32, Completion),
+    KeyWithModifiers(u32, Modifiers, Completion),
+    KeyEvent(u32, Modifiers, KeyEventState, Completion),
     Shutdown,
 }
 
@@ -114,23 +126,54 @@ struct AsyncInjector {
     sender: SyncSender<OutputCommand>,
     failures: Option<thread::JoinHandle<()>>,
     cancel: Arc<AtomicBool>,
+    failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
     name: &'static str,
     status_detail: &'static str,
 }
 
-fn wait_for_completion(
-    sender: &SyncSender<OutputCommand>,
-    command: OutputCommand,
-    completion: Receiver<Result<(), InjectorError>>,
-    name: &'static str,
-) -> Result<(), InjectorError> {
-    enqueue_command(sender, command, name)?;
-    completion.recv().map_err(|_| InjectorError {
-        backend: name,
-        message: "serialized output worker stopped before acknowledging operation".into(),
-        retryable: true,
-    })?
+type Completion = SyncSender<Result<(), InjectorError>>;
+
+impl AsyncInjector {
+    /// Submit one operation and wait for the worker to acknowledge it.
+    /// `chars` is the number of characters the backend has to type, used to
+    /// size the deadline for paced modes.
+    fn submit(
+        &self,
+        chars: usize,
+        command: impl FnOnce(Completion) -> OutputCommand,
+    ) -> Result<(), InjectorError> {
+        let (completion_sender, completion) = sync_channel(1);
+        enqueue_command(&self.sender, command(completion_sender), self.name)?;
+        let deadline = completion_deadline(&self.capabilities, chars);
+        match completion.recv_timeout(deadline) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Disconnected) => Err(InjectorError {
+                backend: self.name,
+                message: "serialized output worker stopped before acknowledging operation".into(),
+                retryable: true,
+            }),
+            Err(RecvTimeoutError::Timeout) => {
+                // The operation may still complete later, so its outcome is
+                // unknown. Stop the worker from taking further work and route
+                // the daemon through normal reconnect recovery.
+                self.cancel.store(true, Ordering::Release);
+                let message = format!(
+                    "output backend did not acknowledge the operation within {}ms",
+                    deadline.as_millis()
+                );
+                let _ = self.failure_sender.try_send(OutputFailure {
+                    message: message.clone(),
+                    retryable: true,
+                });
+                Err(InjectorError {
+                    backend: self.name,
+                    message,
+                    retryable: true,
+                })
+            }
+        }
+    }
 }
 
 fn enqueue_command(
@@ -158,6 +201,7 @@ pub fn spawn_async_injector(
     let status_detail = backend.status_detail();
     let (sender, receiver) = sync_channel(ASYNC_OUTPUT_QUEUE_CAPACITY);
     let (failure_sender, failure_receiver) = sync_channel(1);
+    let worker_failure_sender = failure_sender.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
     let worker = thread::Builder::new()
@@ -193,7 +237,7 @@ pub fn spawn_async_injector(
                     OutputCommand::Shutdown => break,
                 };
                 let failed = if let Err(error) = &result {
-                    let _ = failure_sender.try_send(OutputFailure {
+                    let _ = worker_failure_sender.try_send(OutputFailure {
                         message: error.message.clone(),
                         retryable: error.retryable,
                     });
@@ -213,6 +257,7 @@ pub fn spawn_async_injector(
         sender,
         failures: Some(worker),
         cancel,
+        failure_sender,
         capabilities,
         name,
         status_detail,
@@ -241,57 +286,34 @@ impl TextInjector for AsyncInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::Erase(trigger.into(), completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(trigger.chars().count(), |completion| {
+            OutputCommand::Erase(trigger.into(), completion)
+        })
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::Insert(text.into(), completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(text.chars().count(), |completion| {
+            OutputCommand::Insert(text.into(), completion)
+        })
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::Replace {
-                trigger: trigger.into(),
-                text: text.into(),
-                completion: completion_sender,
-            },
-            completion_receiver,
-            self.name,
-        )
+        let chars = trigger.chars().count() + text.chars().count();
+        self.submit(chars, |completion| OutputCommand::Replace {
+            trigger: trigger.into(),
+            text: text.into(),
+            completion,
+        })
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::MoveCursor(count, completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(count, |completion| {
+            OutputCommand::MoveCursor(count, completion)
+        })
     }
 
     fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::Key(keycode, completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(1, |completion| OutputCommand::Key(keycode, completion))
     }
 
     fn inject_key_with_modifiers(
@@ -299,13 +321,9 @@ impl TextInjector for AsyncInjector {
         keycode: u32,
         modifiers: Modifiers,
     ) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::KeyWithModifiers(keycode, modifiers, completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(1, |completion| {
+            OutputCommand::KeyWithModifiers(keycode, modifiers, completion)
+        })
     }
 
     fn inject_key_event(
@@ -314,13 +332,9 @@ impl TextInjector for AsyncInjector {
         modifiers: Modifiers,
         state: KeyEventState,
     ) -> Result<(), InjectorError> {
-        let (completion_sender, completion_receiver) = sync_channel(1);
-        wait_for_completion(
-            &self.sender,
-            OutputCommand::KeyEvent(keycode, modifiers, state, completion_sender),
-            completion_receiver,
-            self.name,
-        )
+        self.submit(1, |completion| {
+            OutputCommand::KeyEvent(keycode, modifiers, state, completion)
+        })
     }
 }
 
@@ -497,6 +511,30 @@ mod tests {
             *calls.lock().unwrap(),
             vec![":a->replacement", ":b->second"]
         );
+    }
+
+    #[test]
+    fn completion_deadline_allows_paced_typing_time() {
+        let unpaced = InjectorCapabilities::default();
+        assert_eq!(
+            completion_deadline(&unpaced, 10_000),
+            OUTPUT_COMPLETION_BASE
+        );
+
+        let paced = InjectorCapabilities {
+            expected_throughput_chars_per_sec: Some(83),
+            ..InjectorCapabilities::default()
+        };
+        // 250 characters at 83/s is ~3s of typing; allow twice that.
+        let deadline = completion_deadline(&paced, 250);
+        assert!(deadline >= OUTPUT_COMPLETION_BASE + Duration::from_secs(6));
+        assert!(deadline <= OUTPUT_COMPLETION_BASE + Duration::from_secs(7));
+
+        let zero_rate = InjectorCapabilities {
+            expected_throughput_chars_per_sec: Some(0),
+            ..InjectorCapabilities::default()
+        };
+        assert_eq!(completion_deadline(&zero_rate, 250), OUTPUT_COMPLETION_BASE);
     }
 
     #[test]
