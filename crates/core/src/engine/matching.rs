@@ -167,6 +167,7 @@ impl ExpansionEngine {
         let start = self.buffer.len().saturating_sub(length);
         let matched_text: String = self.buffer.iter().skip(start).collect();
         Some(MatchPlan {
+            snippet_id: expansion.id.clone(),
             matched_text,
             terminating_char,
             cursor_offset,

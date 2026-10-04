@@ -89,6 +89,10 @@ struct NormalizedWindowContext {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpansionResult {
+    /// Stable configuration identity of the snippet that produced this result.
+    /// This is carried through deferred/async execution so usage attribution
+    /// never reconstructs provenance from editable trigger text.
+    pub snippet_id: String,
     pub trigger: String,
     /// The exact characters that were matched in the input. This can differ
     /// from `trigger` when case propagation registered a Unicode case variant
@@ -124,6 +128,7 @@ pub struct ExpansionResult {
 /// Commands are not executed until caller approves via policy check.
 #[derive(Debug, Clone)]
 pub struct PendingExpansionResult {
+    snippet_id: String,
     pub trigger: String,
     pub matched_text: String,
     pub template_text: String,
@@ -153,6 +158,8 @@ pub enum PendingExpansionDispatch {
 /// This structure has no side effects—it is read-only context for policy and execution.
 #[derive(Debug, Clone)]
 pub struct MatchPlan {
+    /// Stable configuration identity of the matched snippet.
+    pub snippet_id: String,
     // Matching result
     /// Exact matched text (may differ from trigger if case propagation registered variant)
     pub matched_text: String,
@@ -1130,6 +1137,7 @@ impl ExpansionEngine {
             output
         };
         Ok(ExpansionResult {
+            snippet_id: pending.snippet_id,
             trigger: pending.trigger,
             matched_text: pending.matched_text,
             insert,
@@ -1192,6 +1200,7 @@ impl ExpansionEngine {
             return Err(CommandError::WorkerUnavailable);
         };
         let result = ExpansionResult {
+            snippet_id: pending.snippet_id.clone(),
             trigger: pending.trigger,
             matched_text: pending.matched_text,
             insert: String::new(),
@@ -1246,6 +1255,7 @@ impl ExpansionEngine {
                     .and_then(|window| window.app_id.clone()),
             },
             result: ExpansionResult {
+                snippet_id: pending.snippet_id,
                 trigger: pending.trigger,
                 matched_text: pending.matched_text,
                 insert: String::new(),
@@ -1292,19 +1302,14 @@ impl ExpansionEngine {
         if !self.config.settings.usage_stats {
             return;
         }
-        let Some(expansion) = self
-            .config
-            .expansion
-            .iter()
-            .find(|expansion| expansion.answers_to(&result.trigger))
-        else {
+        if result.snippet_id.is_empty() {
             return;
-        };
+        }
         if self.usage_events.len() >= MAX_PENDING_USAGE_EVENTS {
             self.usage_events.pop_front();
         }
         self.usage_events.push_back(crate::UsageEvent {
-            snippet_id: expansion.id.clone(),
+            snippet_id: result.snippet_id.clone(),
             typed_chars: result.matched_text.chars().count(),
             inserted_chars: result.insert.chars().count(),
             unix_timestamp: std::time::SystemTime::now()
@@ -1525,6 +1530,7 @@ impl ExpansionEngine {
         }
         let (restore_text, erase_text) = self.last_expansion.as_ref()?;
         Some(ExpansionResult {
+            snippet_id: String::new(),
             trigger: String::new(),
             matched_text: erase_text.clone(),
             insert: restore_text.clone(),
@@ -1642,8 +1648,10 @@ impl ExpansionEngine {
             ));
         }
 
+        let command_backed = plan.is_command_backed();
         ExpansionResult {
-            command_backed: plan.is_command_backed(),
+            snippet_id: plan.snippet_id,
+            command_backed,
             trigger: plan.trigger_config,
             matched_text: plan.matched_text,
             insert: final_insert,
@@ -1705,6 +1713,7 @@ impl ExpansionEngine {
                     additional_max_size: 0,
                     command: command.clone(),
                     result: ExpansionResult {
+                        snippet_id: plan.snippet_id,
                         trigger: plan.trigger_config,
                         matched_text: plan.matched_text,
                         insert: String::new(),
@@ -1768,6 +1777,7 @@ impl ExpansionEngine {
         self.deferred_matches.push(plan.matched_text.clone());
 
         Some(PendingExpansionResult {
+            snippet_id: plan.snippet_id,
             trigger: plan.trigger_config,
             matched_text: plan.matched_text,
             template_text,
@@ -1895,6 +1905,7 @@ impl ExpansionEngine {
             return Err(InsertError::Unrenderable);
         }
         Ok(ExpansionResult {
+            snippet_id: expansion.id.clone(),
             trigger: expansion.trigger.clone(),
             matched_text: String::new(),
             insert,

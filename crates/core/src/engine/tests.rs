@@ -1098,6 +1098,7 @@ impl crate::TextInjector for CapabilityInjector {
 #[test]
 fn apply_preflights_backend_capabilities_before_destructive_output() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".repeat(251),
@@ -1127,6 +1128,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
     // A multi-byte delimiter is still one character toward the limit.
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".repeat(249),
@@ -1151,6 +1153,7 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
 #[test]
 fn apply_allows_zero_cursor_offset_without_cursor_support() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".into(),
@@ -1173,6 +1176,7 @@ fn apply_allows_zero_cursor_offset_without_cursor_support() {
 #[test]
 fn apply_rejects_unrepresentable_unicode_before_output() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "café".into(),
@@ -1200,6 +1204,7 @@ fn apply_rejects_unrepresentable_unicode_before_output() {
 #[test]
 fn apply_erases_before_inserting() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -1239,6 +1244,7 @@ impl crate::TextInjector for AtomicInjector {
 #[test]
 fn apply_uses_atomic_backend_operation_when_available() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -1255,6 +1261,7 @@ fn apply_uses_atomic_backend_operation_when_available() {
 #[test]
 fn apply_replaces_typed_trigger_and_commits_terminator() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":sig".into(),
         matched_text: ":SIG".into(),
         insert: "Best regards,".into(),
@@ -1306,6 +1313,7 @@ impl crate::TextInjector for CursorFailingInjector {
 #[test]
 fn cursor_failure_is_reported_after_replacement_is_applied() {
     let result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -3470,6 +3478,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
 
     for index in 0..ASYNC_COMMAND_WORKER_COUNT {
         let result = ExpansionResult {
+            snippet_id: String::new(),
             trigger: format!(":job{index}"),
             matched_text: format!(":job{index}"),
             insert: String::new(),
@@ -3504,6 +3513,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
     }
 
     let stale_result = ExpansionResult {
+        snippet_id: String::new(),
         trigger: ":stale".into(),
         matched_text: ":stale".into(),
         insert: String::new(),
@@ -4190,6 +4200,22 @@ fn applied_expansions_produce_usage_events_by_snippet_id() {
     assert_eq!(events[0].typed_chars, 4);
     assert_eq!(events[0].inserted_chars, 12);
     assert!(engine.drain_usage_events().is_empty());
+}
+
+#[test]
+fn usage_attribution_follows_the_matched_enabled_snippet() {
+    let config = Config::parse(
+        "[[expansion]]\nid = \"00000000-0000-4000-8000-00000000000a\"\ntrigger = \";test\"\nenabled = false\nreplacement = \"old\"\n\n[[expansion]]\nid = \"00000000-0000-4000-8000-00000000000b\"\ntrigger = \";test\"\nenabled = true\nreplacement = \"new\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let results = engine.process(InputEvent::Text(";test".into()));
+    assert_eq!(results.len(), 1);
+    engine.commit_applied_expansion(&results[0]);
+
+    let events = engine.drain_usage_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].snippet_id, "00000000-0000-4000-8000-00000000000b");
 }
 
 #[test]

@@ -373,6 +373,7 @@ fn evdev_follow_up_is_replayed_in_order_to_the_matcher() {
 fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
     let mut results = vec![
         ExpansionResult {
+            snippet_id: String::new(),
             trigger: ":a".into(),
             matched_text: ":a".into(),
             insert: "alpha".into(),
@@ -382,6 +383,7 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
             undoable: true,
         },
         ExpansionResult {
+            snippet_id: String::new(),
             trigger: ":b".into(),
             matched_text: ":b".into(),
             insert: "beta".into(),
