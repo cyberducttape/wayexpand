@@ -77,6 +77,9 @@ pub struct InputSourceCapabilities {
     pub key_passthrough: bool,
     /// The source is aware of active IME/preedit composition.
     pub composition_aware: bool,
+    /// The source tracks compositor/runtime keyboard layout changes rather
+    /// than relying on a startup-only local layout snapshot.
+    pub layout_aware: bool,
 }
 
 impl InputSourceCapabilities {
@@ -87,6 +90,7 @@ impl InputSourceCapabilities {
         reliable_key_state: true,
         key_passthrough: false,
         composition_aware: false,
+        layout_aware: false,
     };
 
     /// Capture profile for the currently shipped input-method-v2 source.
@@ -98,6 +102,7 @@ impl InputSourceCapabilities {
         // was explicitly attached to the live session.
         key_passthrough: false,
         composition_aware: false,
+        layout_aware: true,
     };
 }
 
@@ -602,23 +607,34 @@ mod tests {
             exclusive_capture: bool,
             key_passthrough: bool,
             composition_aware: bool,
+            layout_aware: bool,
         ) {
             assert_eq!(profile.sensitive_focus, sensitive_focus);
             assert_eq!(profile.exclusive_capture, exclusive_capture);
             assert_eq!(profile.key_passthrough, key_passthrough);
             assert_eq!(profile.composition_aware, composition_aware);
+            assert_eq!(profile.layout_aware, layout_aware);
         }
 
-        assert_profile(InputSourceCapabilities::EVDEV, false, false, false, false);
+        assert_profile(
+            InputSourceCapabilities::EVDEV,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
         assert_profile(
             InputSourceCapabilities::INPUT_METHOD_V2,
             true,
             true,
             false,
             false,
+            true,
         );
         assert_profile(
             InputSourceCapabilities::default(),
+            false,
             false,
             false,
             false,

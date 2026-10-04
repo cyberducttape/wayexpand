@@ -258,6 +258,7 @@ case "$backend" in
             .capture_sensitive_focus == true and
             .capture_key_passthrough == true and
             .capture_composition_aware == true and
+            .capture_layout_aware == true and
             .inject_atomic_replace == true and
             .inject_full_unicode == true and
             .inject_key_passthrough == true

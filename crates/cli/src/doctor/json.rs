@@ -118,6 +118,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "capabilities": {
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
                         "composition_awareness": snapshot.get("capture_composition_aware"),
+                        "layout_awareness": snapshot.get("capture_layout_aware"),
                         "key_passthrough": snapshot.get("capture_key_passthrough")
                             .and_then(|capture| {
                                 snapshot.get("inject_key_passthrough").map(|inject| {
@@ -235,6 +236,7 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
     for (name, label) in [
         ("sensitive_field_detection", "sensitive-field detection"),
         ("composition_awareness", "active composition awareness"),
+        ("layout_awareness", "runtime layout awareness"),
         ("key_passthrough", "key pass-through"),
         ("atomic_replacement", "atomic replacement"),
         ("full_unicode", "full Unicode injection"),

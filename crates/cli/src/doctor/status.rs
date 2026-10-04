@@ -90,6 +90,7 @@ pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> 
             "reliable_key_state": value("capture_reliable_key_state"),
             "key_passthrough": value("capture_key_passthrough"),
             "composition_aware": value("capture_composition_aware"),
+            "layout_aware": value("capture_layout_aware"),
         },
         "window_context": {
             "tracker_connected": value("window_tracker_connected"),

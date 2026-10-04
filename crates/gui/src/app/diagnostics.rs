@@ -68,6 +68,7 @@ impl GuiApp {
                 if capabilities.capture_sensitive_focus == Some(true)
                     && capabilities.capture_composition_aware == Some(true)
                     && capabilities.capture_key_passthrough == Some(true)
+                    && capabilities.capture_layout_aware == Some(true)
                     && capabilities.window_identity_exact == Some(true)
                     && capabilities.inject_atomic_replace == Some(true)
                     && capabilities.inject_full_unicode == Some(true)
@@ -104,6 +105,7 @@ impl GuiApp {
                     ("window_tracker", capabilities.window_tracker_connected),
                     ("sensitive_focus", capabilities.capture_sensitive_focus),
                     ("composition", capabilities.capture_composition_aware),
+                    ("layout", capabilities.capture_layout_aware),
                 ] {
                     self.render_capability_row(ui, palette, key, value);
                 }
@@ -184,6 +186,7 @@ impl GuiApp {
                 ),
                 ("capture_passthrough", capabilities.capture_key_passthrough),
                 ("composition", capabilities.capture_composition_aware),
+                ("layout", capabilities.capture_layout_aware),
             ] {
                 self.render_capability_row(ui, palette, key, value);
             }

@@ -37,7 +37,7 @@ cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
-    "status --json") printf '%s\\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
 EOF
@@ -109,7 +109,7 @@ cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$daemon_cli"
@@ -131,7 +131,7 @@ cat >"$mismatched_daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"older-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"older-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$mismatched_daemon_cli"
@@ -153,7 +153,7 @@ cat >"$explicit_route_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$explicit_route_cli"
@@ -175,7 +175,7 @@ cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$input_method_cli"
@@ -191,7 +191,7 @@ cat >"$unsafe_input_method_cli" <<'EOF'
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$unsafe_input_method_cli"
@@ -230,7 +230,7 @@ cat >"$wrong_desktop_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"GNOME","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$wrong_desktop_cli"
@@ -271,7 +271,7 @@ cat >"$unhealthy_probe" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":5,"daemon_commit":"test-commit"}' ;;
 esac
 EOF
 chmod 0755 "$unhealthy_probe"
