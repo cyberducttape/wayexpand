@@ -1,8 +1,8 @@
 # WayExpand Compositor Certification Matrix
 
-**Version:** 1.3.3  
-**Last Updated:** 2026-09-26  
-**Status:** Pre-release certification (manual testing phase)
+**Version:** 1.3.3
+**Last Updated:** 2026-10-04
+**Status:** No compositor route is production-certified
 
 ## Overview
 
@@ -10,7 +10,7 @@ This matrix records compatibility observations and certification evidence. A
 manual test is not certification; the machine-readable artifact from
 `wayexpand certify` is the single source of truth for production certification.
 
-> **Important:** "Certified" means thoroughly tested with published procedures. "Experimental" means limited testing or known limitations. "Unsupported" means no active support—may work, but not recommended for production.
+> **Important:** A route is certified only when a reviewed machine-readable artifact records real-session evidence and the live daemon satisfies the required capability contract. Manual observations and protocol availability do not certify a route.
 
 Security-sensitive route claims have four separate meanings: **implemented by
 WayExpand**, **advertised by the protocol**, **observed in the compositor
@@ -43,9 +43,20 @@ availability claims, and no target is certified without reviewed evidence.
 | `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
-## Detailed Certification Results
+## Current evidence
 
-### ⚠️ KDE Plasma 6.6.x - HISTORICAL MANUAL OBSERVATIONS, NOT CERTIFIED
+There are no reviewed compositor certification artifacts in this repository.
+The generated tables above are authoritative: every listed desktop and route
+remains uncertified. Historical manual observations below do not establish
+current compatibility because their session details and logs are not reviewed
+certification artifacts. See [CERTIFICATION.md](CERTIFICATION.md) for the
+evidence format and [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for current route
+limitations.
+
+## Historical manual observations (not certification evidence)
+
+The following notes are retained only as historical context. They are not a
+current support claim and must not be used to infer password-field protection.
 
 **Test Date:** 2026-09-26  
 **Configuration:**
@@ -184,88 +195,6 @@ in-scope scenario × layout × client cell is an observed `pass`, the doctor and
 daemon probes identify the requested KDE session and backend, and a reviewer
 checks the per-cell logs. `UNVERIFIED` is never a pass.
 
-### For KDE Plasma 6.6.x manual testing
-
-The following reproduces the manual compatibility observations. It is not a
-certification procedure: evdev cannot detect password fields, and only a
-machine-readable `wayexpand certify` artifact can establish certification.
-
-1. **Setup:**
-   ```bash
-   # Install WayExpand 1.3.3
-   sudo apt install wayexpand=1.3.3-*
-   
-   # Verify evdev access
-   groups $USER | grep input
-   # If not present: sudo usermod -aG input $USER && logout/login
-   ```
-
-2. **Create a temporary test configuration**
-   ```toml
-   # Save as ~/.config/wayexpand-certification-test.toml with mode 0600.
-   [[expansion]]
-   trigger = ";hello"
-   replacement = "Hello World"
-
-   [[expansion]]
-   trigger = ";a"
-   replacement = "AAA"
-
-   [[expansion]]
-   trigger = ";pw"
-   replacement = "MyPassword123"
-
-   [[expansion]]
-   trigger = ";konsole"
-   replacement = "KonsoleTest"
-   app_filter = ["app_id_exact:org.kde.konsole"]
-   ```
-   Validate it with:
-   ```bash
-   chmod 600 ~/.config/wayexpand-certification-test.toml
-   wayexpand validate ~/.config/wayexpand-certification-test.toml
-   ```
-
-3. **Test 1: Basic Expansion**
-   ```bash
-   wayexpand doctor "$HOME/.config/wayexpand-certification-test.toml"
-   # Open Kate or any text editor
-   # Type: ;hello
-   # Press: Space
-   # Expected: "Hello World" inserted
-   ```
-
-4. **Test 2: Fast Overlapping Keys**
-   ```bash
-   # In text editor, type rapidly: ;;h e l l o
-   # Expected: Only "Hello World" inserted once, not duplicated
-   ```
-
-5. **Test 3: Held Key**
-   ```bash
-   # Press and hold ; for 2 seconds, then type 'a' while held
-   # Expected: Exactly one "AAA" inserted, not repeated
-   ```
-
-6. **Test 4: Password Fields**
-   ```bash
-   # Open KDE Wallet or any password field
-   # Type: ;pw
-   # Press: Space
-   # Evdev limitation: do not expect blocking; expansion may be inserted.
-   ```
-
-7. **Test 5: App Filtering**
-   ```bash
-   # In Konsole: type ;konsole → Space
-   # Expected: "KonsoleTest" inserted
-   
-   # In Kate: type ;konsole → Space
-   # Expected: NOT inserted (blocked by app_filter)
-   ```
-
-7. **Test 6-8:** See full procedures in [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md)
-
 ## Adding Your Testing Results
 
 To report testing results for other compositors:
@@ -294,21 +223,10 @@ To report testing results for other compositors:
 
 ## Certification Roadmap
 
-### v1.3.3 (Current)
-- ⚠️ KDE Plasma 6.6.x heavily manually tested; not certified
-- ✅ Documentation records the evdev password-field limitation
-- Automated certification remains pending
-
-### v1.2.1+
-- [ ] Test and publish GNOME 47.x results (if time permits)
-- [ ] Gather community testing for Sway, Hyprland
-- [ ] Update matrix based on real-world feedback
-
-### v1.3.0+
-- [ ] Build CI automation for E2E testing
-- [ ] Auto-test against multiple compositor versions
-- [ ] Generate certification matrix from CI results
-- [ ] Add regression tests for discovered bugs
+The active release gate is defined in [CERTIFICATION.md](CERTIFICATION.md) and
+`tests/certification/compositor-matrix.json`. No desktop has reviewed evidence
+yet. Promote a route only after its required real-session scenario, layout, and
+client cells pass and reviewers approve the resulting artifact.
 
 ## Important Notes
 
@@ -319,20 +237,15 @@ To report testing results for other compositors:
 - ❌ Supported forever (newer versions may have issues)
 
 ### What "Certified" DOES Mean
-- ✅ Explicitly tested with published procedures
-- ✅ Results reproducible by others
-- ✅ Known limitations documented
-- ✅ Production-ready based on evidence
-- ✅ Professional quality assurance
+- Reviewed real-session evidence exists for every required matrix cell.
+- The live route reports every mandatory safety and injection capability.
+- The evidence identifies the compositor version, route, layouts, clients, and observed results.
 
 ### Version-Specific Support
 
-**WayExpand 1.3.3 currently lists these experimental paths:**
-- ⚠️ KDE Plasma 6.6.x (heavily manually tested; not certified)
-- ⚠️ KDE Plasma 6.5.x, 6.7.x (expected to work, experimental)
-- ⚠️ GNOME 47.x, 46.x (input-method-v2 path, experimental)
-- ⚠️ Sway, Hyprland, river (experimental, contributions welcome)
-- ❌ X11 (unsupported, use traditional text expansion tools)
+Use the generated Quick Reference table above for current desktop and route
+status. This document does not maintain separate version-specific support
+claims.
 
 ## Enterprise Deployment
 
