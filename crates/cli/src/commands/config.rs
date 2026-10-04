@@ -832,7 +832,7 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
                         ""
                     },
                     match (&report.remote, report.pushed) {
-                        (Some(remote), true) => format!("pushed to {remote}"),
+                        (Some(remote), true) => format!("pushed to origin ({remote})"),
                         _ => "no remote configured".to_owned(),
                     }
                 );
