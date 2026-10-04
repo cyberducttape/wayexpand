@@ -27,6 +27,16 @@ The daemon will reload automatically. No service restart required.
 
 ## Version-Specific Upgrade Notes
 
+### Upgrading to v1.3.3 from an earlier 1.x release
+
+**No breaking changes.** Existing configurations remain loadable. On first
+load, legacy expansions without stable IDs are migrated atomically so usage
+statistics remain attached to the same snippets across daemon and CLI loads.
+
+Review the active backend capabilities after upgrading. Raw evdev remains an
+explicit expert fallback without sensitive-field or compositor-layout signals;
+it is never selected automatically.
+
 ### Upgrading to v1.2.x from v1.0.x or v1.1.x
 
 **No breaking changes.** Your configuration is compatible.

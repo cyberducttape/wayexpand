@@ -14,10 +14,10 @@ This document defines the stability guarantees for WayExpand 1.x. Third-party to
 Every CLI build reports both its display version and the source commit:
 
 ```text
-wayexpand 1.2.0-dev+<short-sha> (commit <short-sha>)
+wayexpand 1.3.3-dev+<short-sha> (commit <short-sha>)
 ```
 
-An exact clean release tag reports the release version (`1.2.0`). A build from
+An exact clean release tag reports the release version (`1.3.3`). A build from
 an unreleased Git revision reports `-dev+<commit>` so bug reports can be tied to
 the exact source tree. `wayexpand doctor --json` exposes the same values as
 `wayexpand_version` and `wayexpand_commit`; certification evidence records them

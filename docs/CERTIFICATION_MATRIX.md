@@ -191,8 +191,8 @@ machine-readable `wayexpand certify` artifact can establish certification.
 
 1. **Setup:**
    ```bash
-   # Install WayExpand 1.2.0
-   sudo apt install wayexpand=1.2.0-*
+   # Install WayExpand 1.3.3
+   sudo apt install wayexpand=1.3.3-*
    
    # Verify evdev access
    groups $USER | grep input
