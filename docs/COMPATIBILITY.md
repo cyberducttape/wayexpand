@@ -386,6 +386,9 @@ parsed as JSON booleans and nonnegative integer values parsed as JSON numbers)
 rather than a purpose-built schema, so the fields
 below are exactly what that response currently carries -- nothing more.
 
+`daemon_commit` identifies the daemon binary that produced the response, so
+operators can distinguish a running process from newly installed binaries.
+
 **Output shape:**
 ```json
 {
@@ -393,7 +396,8 @@ below are exactly what that response currently carries -- nothing more.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 3,
+  "status_schema": 4,
+  "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",

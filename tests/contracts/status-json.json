@@ -1,11 +1,12 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
     "backend_mode": "string",
     "status_schema": "integer",
+    "daemon_commit": "string",
     "capture_sensitive_focus": "boolean",
     "capture_exclusive": "boolean",
     "capture_reliable_key_state": "boolean",

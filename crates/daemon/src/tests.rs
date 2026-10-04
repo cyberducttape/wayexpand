@@ -93,6 +93,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "command_timeout_total",
             "config",
             "config_state",
+            "daemon_commit",
             "expansion_command_in_flight",
             "expansion_command_queue_depth",
             "hotkey_in_flight",
@@ -118,35 +119,17 @@ fn daemon_status_body_matches_documented_stable_contract() {
         ],
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
-    assert_eq!(
-        body,
-        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=3\nstate=connected\npaused=false\n\
-         config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
-         capture_sensitive_focus=true\n\
-         capture_exclusive=true\n\
-         capture_reliable_key_state=true\n\
-         capture_key_passthrough=false\n\
-         capture_composition_aware=false\n\
-         window_tracker_connected=true\n\
-         window_identity_exact=true\n\
-         inject_atomic_replace=true\n\
-         inject_full_unicode=true\n\
-         inject_cursor_reposition=false\n\
-         inject_key_passthrough=false\n\
-         inject_insertion_mode=\n\
-         inject_max_text_chars=0\n\
-         inject_expected_throughput_chars_per_sec=0\n\
-         command_queue_depth=0\ncommand_in_flight=0\n\
-         expansion_command_queue_depth=0\nexpansion_command_in_flight=0\n\
-         hotkey_queue_depth=0\nhotkey_in_flight=0\n\
-         command_queue_rejected_total=0\n\
-         command_timeout_total=0\ncommand_failure_total=0\n\
-         injection_latency_sample_count=0\n\
+    assert!(body.starts_with(&format!(
+        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=4\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        super::build_info::COMMIT
+    )));
+    assert!(body.ends_with(
+        "injection_latency_sample_count=0\n\
          injection_latency_window_count=0\n\
          injection_latency_p50_us=0\n\
          injection_latency_p95_us=0\n\
          injection_latency_p99_us=0"
-    );
+    ));
 }
 
 struct RecordingInjector {

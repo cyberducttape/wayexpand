@@ -1,5 +1,6 @@
 mod args;
 mod backend_lifecycle;
+mod build_info;
 mod clipboard;
 mod control;
 mod events;
