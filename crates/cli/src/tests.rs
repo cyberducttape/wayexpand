@@ -207,6 +207,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "desktop",
             "config",
             "control_socket",
+            "daemon",
             "action_broker",
             "policy",
             "backends",

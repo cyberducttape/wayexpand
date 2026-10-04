@@ -9,6 +9,7 @@ use super::files::existing_control_socket_is_healthy;
 use super::policy::{
     load_policy, print_capabilities_diagnostics_json, print_policy_diagnostics_json,
 };
+use super::status::{read_daemon_status, status_as_json, status_schema_compatible};
 use crate::*;
 
 /// Stable, automation-friendly diagnostic output for service managers and
@@ -99,6 +100,37 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         .and_then(|policy| policy.get("valid"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let daemon = match read_daemon_status() {
+        Ok(response) => match status_as_json(&response) {
+            Ok(snapshot) => {
+                let daemon_commit = snapshot
+                    .get("daemon_commit")
+                    .and_then(serde_json::Value::as_str);
+                serde_json::json!({
+                    "available": true,
+                    "compatible": status_schema_compatible(&snapshot),
+                    "commit_matches": daemon_commit == Some(build_info::COMMIT),
+                    "daemon_commit": daemon_commit,
+                    "status_schema": snapshot.get("status_schema"),
+                    "state": snapshot.get("state"),
+                    "source": snapshot.get("source"),
+                    "backend": snapshot.get("backend"),
+                })
+            }
+            Err(error) => serde_json::json!({
+                "available": true,
+                "compatible": false,
+                "commit_matches": false,
+                "error": error.to_string(),
+            }),
+        },
+        Err(error) => serde_json::json!({
+            "available": false,
+            "compatible": false,
+            "commit_matches": false,
+            "error": error.to_string(),
+        }),
+    };
     let healthy = config_ok
         && policy_ok
         && display_session_available()
@@ -124,6 +156,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "exists": socket_exists,
                 "valid": socket_valid,
             },
+            "daemon": daemon,
             "action_broker": broker,
             "ibus": {
                 "installed": ibus_installed,
