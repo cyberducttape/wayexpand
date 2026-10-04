@@ -710,6 +710,8 @@ impl Strings {
             (Language::German, "composition") => "IME-Kompositionserkennung",
             (Language::English, "window_tracker") => "KWin window tracker",
             (Language::German, "window_tracker") => "KWin-Fensterverfolgung",
+            (Language::English, "exact_window_identity") => "Exact window identity",
+            (Language::German, "exact_window_identity") => "Exakte Fensteridentität",
             (Language::English, "atomic_replace") => "Atomic text replacement",
             (Language::German, "atomic_replace") => "Atomarer Textersatz",
             (Language::English, "unicode") => "Layout-independent Unicode",

@@ -1297,6 +1297,7 @@ fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
         capture_key_passthrough: Some(false),
         capture_composition_aware: Some(false),
         window_tracker_connected: Some(true),
+        window_identity_exact: Some(true),
         inject_atomic_replace: Some(false),
         inject_full_unicode: Some(true),
         inject_cursor_reposition: Some(true),

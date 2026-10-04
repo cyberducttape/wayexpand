@@ -168,6 +168,12 @@ impl GuiApp {
                 "window_tracker",
                 capabilities.window_tracker_connected,
             );
+            self.render_capability_row(
+                ui,
+                palette,
+                "exact_window_identity",
+                capabilities.window_identity_exact,
+            );
             theme::section_header(ui, "", self.strings.injection_guarantees());
             for (key, value) in [
                 ("atomic_replace", capabilities.inject_atomic_replace),

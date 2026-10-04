@@ -113,13 +113,14 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "source",
             "state",
             "status_schema",
+            "window_identity_exact",
             "window_tracker_connected",
         ],
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert_eq!(
         body,
-        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=2\nstate=connected\npaused=false\n\
+        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=3\nstate=connected\npaused=false\n\
          config=/home/user/.config/wayexpand/expansions.toml\nconfig_state=ok\n\
          capture_sensitive_focus=true\n\
          capture_exclusive=true\n\
@@ -127,6 +128,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
          capture_key_passthrough=false\n\
          capture_composition_aware=false\n\
          window_tracker_connected=true\n\
+         window_identity_exact=true\n\
          inject_atomic_replace=true\n\
          inject_full_unicode=true\n\
          inject_cursor_reposition=false\n\

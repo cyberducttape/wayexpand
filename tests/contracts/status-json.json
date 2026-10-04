@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "fields": {
     "response": "string",
     "source": "string",
@@ -12,6 +12,7 @@
     "capture_key_passthrough": "boolean",
     "capture_composition_aware": "boolean",
     "window_tracker_connected": "boolean",
+    "window_identity_exact": "boolean",
     "inject_atomic_replace": "boolean",
     "inject_full_unicode": "boolean",
     "inject_cursor_reposition": "boolean",

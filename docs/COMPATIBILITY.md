@@ -393,7 +393,7 @@ below are exactly what that response currently carries -- nothing more.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 2,
+  "status_schema": 3,
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
@@ -404,6 +404,7 @@ below are exactly what that response currently carries -- nothing more.
   "capture_key_passthrough": false,
   "capture_composition_aware": false,
   "window_tracker_connected": true,
+  "window_identity_exact": true,
   "inject_atomic_replace": true,
   "inject_full_unicode": true,
   "inject_cursor_reposition": false,
@@ -447,6 +448,7 @@ below are exactly what that response currently carries -- nothing more.
 - `config_state` (string): `"ok"` or `"reload-rejected"` (the daemon kept its previous configuration because the last reload was invalid)
 - `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware` (bool): Negotiated input-source guarantees. Conservative false values are published while the source is disconnected or unknown.
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
+- `window_identity_exact` (bool): Whether the active window-tracking route provides an ephemeral identity for the exact focused toplevel. This is required for safe Quick Picker typing; false means the picker is clipboard-only.
 - `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
 - inject_insertion_mode (string): Negotiated insertion protocol, such as ei_text or libei keysym fallback.
 - inject_max_text_chars (integer): Mode-specific maximum replacement length in Unicode scalar values; 0 means no mode-specific limit is advertised.
