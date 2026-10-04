@@ -9,8 +9,8 @@ pub use transaction::TransactionOutcome;
 use matching::GlobPattern;
 
 use command_runtime::{
-    configure_command_environment, configure_process_group, kill_process_group_by_pid,
-    run_command_with_shutdown, CommandMetricsState, QueueSendError,
+    configure_command_environment, configure_process_group, run_command_with_shutdown,
+    ChildSupervisor, CommandMetricsState, QueueSendError,
 };
 pub use command_runtime::{run_command, run_command_cancellable};
 
@@ -1579,37 +1579,30 @@ impl ExpansionEngine {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         configure_process_group(&mut command);
-        let mut child = command.spawn().map_err(HotkeyError::Spawn)?;
-        // Capture PID upfront to avoid use-after-reap issues. The child's PID is
-        // valid for the entire lifetime of this function, even after the process exits.
-        let pid = child.id();
+        let child = command.spawn().map_err(HotkeyError::Spawn)?;
+        // The supervisor observes exit with waitid(WNOWAIT) on Linux, so the
+        // leader stays a zombie and its PGID cannot be recycled until the
+        // group kill below has run. Dropping it kills and reaps the group on
+        // every early return.
+        let mut guard = ChildSupervisor::new(child);
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
-        let status = loop {
+        loop {
             if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-                kill_process_group_by_pid(pid);
-                let _ = child.wait();
                 return Err(HotkeyError::Timeout(result.command.timeout_ms));
             }
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-                Ok(None) => {
-                    kill_process_group_by_pid(pid);
-                    let _ = child.wait();
-                    return Err(HotkeyError::Timeout(result.command.timeout_ms));
-                }
-                Err(error) => {
-                    kill_process_group_by_pid(pid);
-                    let _ = child.wait();
-                    return Err(HotkeyError::Spawn(error));
-                }
+            match guard.has_exited() {
+                Ok(true) => break,
+                Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+                Ok(false) => return Err(HotkeyError::Timeout(result.command.timeout_ms)),
+                Err(error) => return Err(HotkeyError::Spawn(error)),
             }
-        };
+        }
 
         // The leader may exit successfully while ordinary descendants remain in
-        // its process group. Kill the group after reaping the leader as well;
+        // its process group. Kill the group before reaping the leader;
         // otherwise a successful hotkey can leave background work running.
-        kill_process_group_by_pid(pid);
+        guard.kill_group();
+        let status = guard.reap().map_err(HotkeyError::Spawn)?;
 
         if status.success() {
             Ok(())

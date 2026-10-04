@@ -16,9 +16,7 @@ use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 #[cfg(unix)]
-use wayexpand_process_supervisor::ChildSupervisor;
-#[cfg(unix)]
-pub(super) use wayexpand_process_supervisor::{configure_process_group, kill_process_group_by_pid};
+pub(super) use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 use super::{
     CommandConfig, CommandEnvironment, CommandError, MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
