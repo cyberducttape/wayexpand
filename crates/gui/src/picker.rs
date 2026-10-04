@@ -139,6 +139,7 @@ enum InsertState {
 }
 
 impl PickerApp {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         config: Config,
         config_revision: ConfigRevision,
