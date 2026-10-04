@@ -639,6 +639,36 @@ impl Strings {
         }
     }
 
+    pub fn production_readiness(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Production readiness",
+            Language::German => "Produktionsreife",
+        }
+    }
+
+    pub fn production_readiness_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unavailable · no compatible live route",
+            Language::German => "Nicht verfügbar · kein kompatibler aktiver Weg",
+        }
+    }
+
+    pub fn production_readiness_limited(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Limited · one or more safety guarantees are missing",
+            Language::German => "Eingeschränkt · eine oder mehrere Sicherheitsgarantien fehlen",
+        }
+    }
+
+    pub fn production_readiness_pending(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Certification pending · live compositor/client evidence required",
+            Language::German => {
+                "Zertifizierung ausstehend · Nachweise mit echtem Compositor/Client erforderlich"
+            }
+        }
+    }
+
     pub fn run_compatibility_test(&self) -> &'static str {
         match self.lang {
             Language::English => "Run compatibility checks",

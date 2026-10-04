@@ -59,6 +59,32 @@ impl GuiApp {
                 .small()
                 .color(palette.warning),
         );
+        let readiness = match self.daemon_capabilities {
+            None => (
+                self.strings.production_readiness_unavailable(),
+                palette.muted,
+            ),
+            Some(capabilities)
+                if capabilities.capture_sensitive_focus == Some(true)
+                    && capabilities.capture_composition_aware == Some(true)
+                    && capabilities.capture_key_passthrough == Some(true)
+                    && capabilities.window_identity_exact == Some(true)
+                    && capabilities.inject_atomic_replace == Some(true)
+                    && capabilities.inject_full_unicode == Some(true)
+                    && capabilities.inject_key_passthrough == Some(true) =>
+            {
+                (self.strings.production_readiness_pending(), palette.warning)
+            }
+            Some(_) => (self.strings.production_readiness_limited(), palette.warning),
+        };
+        theme::card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(self.strings.production_readiness());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.colored_label(readiness.1, readiness.0);
+                });
+            });
+        });
         if let Some(capabilities) = self.daemon_capabilities {
             theme::card(ui, palette, |ui| {
                 ui.label(self.strings.active_route());
