@@ -7,13 +7,17 @@
 function report(window) {
     var appId = window ? window.resourceClass : "";
     var title = window ? window.caption : "";
+    // internalId is a compositor-issued identity for this exact KWin window.
+    // It is intentionally kept separate from appId/title, which are not unique.
+    var instanceId = window && window.internalId ? String(window.internalId) : "";
     callDBus(
         "__WAYEXPAND_BUS_NAME__",
         "/WindowTracker",
         "org.wayexpand.WindowTracker1",
         "WindowChanged",
         appId,
-        title
+        title,
+        instanceId
     );
 }
 workspace.windowActivated.connect(report);

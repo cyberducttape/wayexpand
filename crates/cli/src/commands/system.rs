@@ -262,6 +262,7 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
             wayexpand_core::WindowContext {
                 app_id: Some(app.clone()),
                 title: None,
+                instance_id: None,
             },
         )));
     }

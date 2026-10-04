@@ -76,6 +76,9 @@ pub enum InputEvent {
 pub struct WindowContext {
     pub app_id: Option<String>,
     pub title: Option<String>,
+    /// Ephemeral compositor-provided identity for this exact toplevel.
+    /// Unlike app_id/title, this must never be used for app filtering.
+    pub instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

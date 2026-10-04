@@ -92,6 +92,13 @@ pub(crate) struct FocusTarget {
     token: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FocusInfo {
+    target: Option<FocusTarget>,
+    daemon_available: bool,
+    exact_identity_available: bool,
+}
+
 pub(crate) struct PickerApp {
     config: Config,
     /// Built once per configuration: includes and allowlisted environment
@@ -107,6 +114,7 @@ pub(crate) struct PickerApp {
     query: String,
     selected: usize,
     daemon_available: bool,
+    exact_identity_available: bool,
     copied: Option<String>,
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
@@ -135,6 +143,7 @@ impl PickerApp {
         colorpack: ColorPack,
         dark: bool,
         daemon_available: bool,
+        exact_identity_available: bool,
         target_focus: Option<FocusTarget>,
     ) -> Self {
         Self {
@@ -157,6 +166,7 @@ impl PickerApp {
             query: String::new(),
             selected: 0,
             daemon_available,
+            exact_identity_available,
             copied: None,
             focus_requested: false,
             target_focus,
@@ -413,7 +423,11 @@ impl eframe::App for PickerApp {
                             palette.muted,
                         ),
                         (None, false) => (
-                            self.strings.picker_footer_clipboard().to_owned(),
+                            if self.exact_identity_available {
+                                self.strings.picker_footer_clipboard().to_owned()
+                            } else {
+                                self.strings.picker_footer_identity_unavailable().to_owned()
+                            },
                             palette.warning,
                         ),
                     };
@@ -504,7 +518,7 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
         let current = crate::runtime::control_command("focus")
             .ok()
             .and_then(|response| focus_target_from_response(&response));
-        if let Some(current) = current {
+        if let Some(current) = current.and_then(|info| info.target) {
             if current.token == target_focus.token && current.generation > target_focus.generation {
                 let response = crate::runtime::control_command(&format!(
                     "insert-target {} {} {trigger}",
@@ -537,10 +551,15 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let config = loaded.config;
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
-    let target_focus = crate::runtime::control_command("focus")
+    let focus_info = crate::runtime::control_command("focus")
         .ok()
         .and_then(|response| focus_target_from_response(&response));
-    let daemon_available = target_focus.is_some();
+    let (target_focus, daemon_available, exact_identity_available) = focus_info
+        .map(|info| {
+            let daemon_available = info.daemon_available && info.target.is_some();
+            (info.target, daemon_available, info.exact_identity_available)
+        })
+        .unwrap_or((None, false, true));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -574,6 +593,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
                 prefs.colorpack,
                 dark,
                 daemon_available,
+                exact_identity_available,
                 target_focus,
             )))
         }),
@@ -582,7 +602,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn focus_target_from_response(response: &str) -> Option<FocusTarget> {
+fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
     let generation = response
         .lines()
         .find_map(|line| line.strip_prefix("focus_generation="))?
@@ -591,16 +611,22 @@ fn focus_target_from_response(response: &str) -> Option<FocusTarget> {
     let token = response
         .lines()
         .find_map(|line| line.strip_prefix("focus_token="))?;
-    if token.is_empty() {
-        return None;
-    }
+    let exact_identity_available = response
+        .lines()
+        .find_map(|line| line.strip_prefix("focus_identity="))
+        == Some("exact");
     let token = token.to_owned();
-    Some(FocusTarget { generation, token })
+    Some(FocusInfo {
+        target: (!token.is_empty() && exact_identity_available)
+            .then_some(FocusTarget { generation, token }),
+        daemon_available: true,
+        exact_identity_available,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_target_from_response, score, FocusTarget};
+    use super::{focus_target_from_response, score, FocusInfo, FocusTarget};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -619,15 +645,27 @@ mod tests {
     #[test]
     fn focus_target_parser_fails_closed_for_missing_or_empty_tokens() {
         assert_eq!(
-            focus_target_from_response("focus_generation=4\nfocus_token=abcd\n"),
-            Some(FocusTarget {
-                generation: 4,
-                token: "abcd".into()
+            focus_target_from_response(
+                "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n",
+            ),
+            Some(FocusInfo {
+                target: Some(FocusTarget {
+                    generation: 4,
+                    token: "abcd".into(),
+                }),
+                daemon_available: true,
+                exact_identity_available: true,
             })
         );
         assert_eq!(
-            focus_target_from_response("focus_generation=4\nfocus_token=\n"),
-            None
+            focus_target_from_response(
+                "focus_generation=4\nfocus_token=\nfocus_identity=unavailable\n",
+            ),
+            Some(FocusInfo {
+                target: None,
+                daemon_available: true,
+                exact_identity_available: false,
+            })
         );
         assert_eq!(focus_target_from_response("running\n"), None);
     }

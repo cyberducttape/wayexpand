@@ -62,6 +62,7 @@ const EXPLAIN_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 pub struct FocusSnapshot {
     pub generation: u64,
     pub token: Option<String>,
+    pub exact_window_identity: bool,
 }
 
 impl ControlServer {
@@ -569,9 +570,14 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("focus lock poisoned"))?;
             format!(
-                "focus_generation={}\nfocus_token={}\n",
+                "focus_generation={}\nfocus_token={}\nfocus_identity={}\n",
                 snapshot.generation,
-                snapshot.token.as_deref().unwrap_or_default()
+                snapshot.token.as_deref().unwrap_or_default(),
+                if snapshot.exact_window_identity {
+                    "exact"
+                } else {
+                    "unavailable"
+                }
             )
         }
         "reload" => {
@@ -729,8 +735,12 @@ mod tests {
         *focus.lock().unwrap() = FocusSnapshot {
             generation: 4,
             token: Some("abcd".into()),
+            exact_window_identity: true,
         };
-        assert_eq!(send("focus\n"), "focus_generation=4\nfocus_token=abcd\n");
+        assert_eq!(
+            send("focus\n"),
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n"
+        );
         assert_eq!(send("insert-target 4 abcd ;target\n"), "insert scheduled\n");
         assert_eq!(
             insert

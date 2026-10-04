@@ -113,6 +113,7 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
         engine.set_current_window(Some(wayexpand_core::WindowContext {
             app_id: Some(app_id),
             title: None,
+            instance_id: None,
         }));
     }
     let mut results = engine.process(InputEvent::Text(trigger));

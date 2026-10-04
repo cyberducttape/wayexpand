@@ -432,6 +432,7 @@ impl App {
             engine.set_current_window(Some(wayexpand_core::WindowContext {
                 app_id: Some(self.preview_app.trim().to_owned()),
                 title: None,
+                instance_id: None,
             }));
         }
         let mut results = engine.process(InputEvent::Text(trigger.clone()));

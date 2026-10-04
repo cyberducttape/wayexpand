@@ -468,6 +468,7 @@ mod tests {
         config.engine.set_current_window(Some(WindowContext {
             app_id: Some("org.kde.kate".into()),
             title: None,
+            instance_id: None,
         }));
 
         // Any reload -- including one an unrelated GUI edit would trigger --

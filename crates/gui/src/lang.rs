@@ -2425,6 +2425,17 @@ impl Strings {
         }
     }
 
+    pub fn picker_footer_identity_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Exact window identity: unavailable · Quick Picker typing: clipboard-only"
+            }
+            Language::German => {
+                "Exakte Fensteridentität: nicht verfügbar · Quick Picker-Eingabe: nur Zwischenablage"
+            }
+        }
+    }
+
     pub fn picker_copied(&self, trigger: &str) -> String {
         match self.lang {
             Language::English => format!("Copied {trigger} · paste it with Ctrl+V, then press Esc"),

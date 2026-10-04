@@ -269,6 +269,7 @@ mod tests {
         WindowContext {
             app_id: Some(app_id.into()),
             title: None,
+            instance_id: None,
         }
     }
 
@@ -380,12 +381,14 @@ mod tests {
             .send(Some(WindowContext {
                 app_id: Some("old.app".into()),
                 title: Some("old".into()),
+                instance_id: None,
             }))
             .unwrap();
         sender
             .send(Some(WindowContext {
                 app_id: Some("new.app".into()),
                 title: Some("new".into()),
+                instance_id: None,
             }))
             .unwrap();
 
@@ -395,6 +398,7 @@ mod tests {
             Some(Some(WindowContext {
                 app_id: Some("new.app".into()),
                 title: Some("new".into()),
+                instance_id: None,
             }))
         );
     }

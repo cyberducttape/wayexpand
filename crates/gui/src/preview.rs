@@ -64,6 +64,7 @@ pub(crate) fn render(
         engine.set_current_window(Some(WindowContext {
             app_id: Some(app.trim().to_owned()),
             title: None,
+            instance_id: None,
         }));
     }
     let mut results = engine.process(InputEvent::Text(input.to_owned()));

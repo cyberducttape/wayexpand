@@ -61,21 +61,26 @@ struct WindowTrackerService {
     sender: Mutex<mpsc::Sender<Option<WindowContext>>>,
 }
 
-fn window_context_from_signal(app_id: String, title: String) -> Option<WindowContext> {
-    if app_id.is_empty() && title.is_empty() {
+fn window_context_from_signal(
+    app_id: String,
+    title: String,
+    instance_id: String,
+) -> Option<WindowContext> {
+    if app_id.is_empty() && title.is_empty() && instance_id.is_empty() {
         None
     } else {
         Some(WindowContext {
             app_id: (!app_id.is_empty()).then_some(app_id),
             title: (!title.is_empty()).then_some(title),
+            instance_id: (!instance_id.is_empty()).then_some(instance_id),
         })
     }
 }
 
 #[interface(name = "org.wayexpand.WindowTracker1")]
 impl WindowTrackerService {
-    fn window_changed(&self, app_id: String, title: String) {
-        let context = window_context_from_signal(app_id, title);
+    fn window_changed(&self, app_id: String, title: String, instance_id: String) {
+        let context = window_context_from_signal(app_id, title, instance_id);
         // The receiver may already be gone if the tracker was dropped
         // between the script firing and this call landing; that is not an
         // error, there is simply nothing left to notify. A poisoned mutex
@@ -395,12 +400,13 @@ mod tests {
 
     #[test]
     fn empty_signal_represents_window_disappearance() {
-        assert!(window_context_from_signal(String::new(), String::new()).is_none());
+        assert!(window_context_from_signal(String::new(), String::new(), String::new()).is_none());
     }
 
     #[test]
     fn missing_app_id_fails_closed_but_preserves_title() {
-        let context = window_context_from_signal(String::new(), "Terminal".into()).unwrap();
+        let context =
+            window_context_from_signal(String::new(), "Terminal".into(), String::new()).unwrap();
         assert_eq!(context.app_id, None);
         assert_eq!(context.title.as_deref(), Some("Terminal"));
     }
@@ -408,17 +414,23 @@ mod tests {
     #[test]
     fn missing_title_preserves_app_id() {
         let context =
-            window_context_from_signal("org.example.Editor".into(), String::new()).unwrap();
+            window_context_from_signal("org.example.Editor".into(), String::new(), String::new())
+                .unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title, None);
     }
 
     #[test]
     fn both_fields_are_preserved() {
-        let context =
-            window_context_from_signal("org.example.Editor".into(), "Document".into()).unwrap();
+        let context = window_context_from_signal(
+            "org.example.Editor".into(),
+            "Document".into(),
+            "window-1".into(),
+        )
+        .unwrap();
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title.as_deref(), Some("Document"));
+        assert_eq!(context.instance_id.as_deref(), Some("window-1"));
     }
 
     #[test]

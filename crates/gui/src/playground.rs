@@ -59,6 +59,7 @@ impl Playground {
         let window = (!app.trim().is_empty()).then(|| WindowContext {
             app_id: Some(app.trim().to_owned()),
             title: None,
+            instance_id: None,
         });
         if engine.current_window() != window.as_ref() {
             engine.set_current_window(window);

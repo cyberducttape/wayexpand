@@ -172,6 +172,7 @@ fn app_filtered_expansion_matches_by_app_id_case_insensitively() {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.mozilla.thunderbird".into()),
         title: None,
+        instance_id: None,
     })));
     let mut results = engine.process(InputEvent::Text(":sig".into()));
     results.extend(engine.process(InputEvent::EndOfInput));
@@ -197,6 +198,7 @@ fn current_window_can_be_carried_across_a_replacement_engine() {
     old_engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.mozilla.thunderbird".into()),
         title: None,
+        instance_id: None,
     })));
 
     let mut new_engine = ExpansionEngine::new(config).unwrap();
@@ -223,6 +225,7 @@ fn app_filtered_expansion_ignores_other_windows() {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.kde.konsole".into()),
         title: Some("konsole".into()),
+        instance_id: None,
     })));
     let mut results = engine.process(InputEvent::Text(":sig".into()));
     results.extend(engine.process(InputEvent::EndOfInput));
@@ -248,6 +251,7 @@ fn window_changed_clears_buffer_to_prevent_cross_window_matches() {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.kde.kate".into()),
         title: None,
+        instance_id: None,
     })));
     let mut results = engine.process(InputEvent::Text("lo".into()));
     results.extend(engine.process(InputEvent::EndOfInput));
@@ -279,6 +283,7 @@ fn cross_window_trigger_does_not_delete_wrong_text() {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.kde.konsole".into()),
         title: None,
+        instance_id: None,
     })));
 
     // Complete what looks like the trigger in the new window
@@ -299,6 +304,7 @@ fn unfiltered_expansion_after_window_change() {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some("org.kde.kate".into()),
         title: None,
+        instance_id: None,
     })));
     let mut results = engine.process(InputEvent::Text(":hello".into()));
     results.extend(engine.process(InputEvent::EndOfInput));
@@ -1904,6 +1910,7 @@ fn app_filter_matches_on_app_id_when_available() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.mozilla.Thunderbird".into()),
         title: Some("Some Mail".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(results.len(), 1);
@@ -1920,6 +1927,7 @@ fn app_id_exact_does_not_match_a_similar_app_id() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.mozilla.thunderbird-helper".into()),
         title: Some("Thunderbird Mail".into()),
+        instance_id: None,
     }));
     assert!(engine.process(InputEvent::Text(":email".into())).is_empty());
 }
@@ -1934,6 +1942,7 @@ fn app_id_glob_is_explicit_and_title_contains_is_explicit() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.mozilla.thunderbird-helper".into()),
         title: None,
+        instance_id: None,
     }));
     assert_eq!(engine.process(InputEvent::Text(":glob".into())).len(), 1);
 }
@@ -1948,6 +1957,7 @@ fn app_filter_uses_title_only_when_app_id_unavailable() {
     engine.set_current_window(Some(WindowContext {
         app_id: None,
         title: Some("Thunderbird Mail Client".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(
@@ -1970,6 +1980,7 @@ fn app_filter_rejects_title_match_when_app_id_is_available_but_different() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.kde.konsole".into()),
         title: Some("Thunderbird troubleshooting".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(
@@ -2004,6 +2015,7 @@ fn app_filter_empty_matches_everywhere() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.example.AnyApp".into()),
         title: Some("Some Window".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(
@@ -2028,6 +2040,7 @@ fn disable_title_matching_policy_fails_closed_without_app_id() {
     engine.set_current_window(Some(WindowContext {
         app_id: None, // Only title available
         title: Some("Thunderbird Mail Client".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(
@@ -2050,6 +2063,7 @@ fn disable_title_matching_allows_app_id_match() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.thunderbird.Thunderbird".into()),
         title: Some("Some Email".into()),
+        instance_id: None,
     }));
     let results = engine.process(InputEvent::Text(":email".into()));
     assert_eq!(
@@ -2070,6 +2084,7 @@ fn runtime_title_matching_policy_is_applied() {
     engine.set_current_window(Some(WindowContext {
         app_id: None,
         title: Some("Thunderbird Mail Client".into()),
+        instance_id: None,
     }));
 
     assert!(engine.process(InputEvent::Text(":email".into())).is_empty());
@@ -2686,6 +2701,7 @@ fn app_filter_prevents_cross_window_expansion() {
     let slack_ctx = WindowContext {
         app_id: Some("slack".to_string()),
         title: None,
+        instance_id: None,
     };
     engine.process(InputEvent::WindowChanged(Some(slack_ctx.clone())));
 
@@ -2697,6 +2713,7 @@ fn app_filter_prevents_cross_window_expansion() {
     let firefox_ctx = WindowContext {
         app_id: Some("firefox".to_string()),
         title: None,
+        instance_id: None,
     };
     engine.process(InputEvent::WindowChanged(Some(firefox_ctx)));
 
@@ -3791,6 +3808,7 @@ fn explicit_insert_by_trigger_follows_the_typed_expansion_safety_rules() {
     engine.set_current_window(Some(WindowContext {
         app_id: Some("org.kde.konsole".into()),
         title: None,
+        instance_id: None,
     }));
     assert!(engine.prepare_insert(term).is_ok());
 
@@ -3926,6 +3944,7 @@ fn explain_reports_an_app_filter_mismatch() {
     engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
         app_id: Some("org.kde.konsole".into()),
         title: None,
+        instance_id: None,
     })));
     let explanation = engine.explain(":sig", "libei");
     let failed = explanation.suppressed_by().unwrap();
@@ -4355,11 +4374,13 @@ fn a_form_result_is_dropped_when_focus_moved_to_another_app() {
     engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
         app_id: Some("org.example.Mail".into()),
         title: None,
+        instance_id: None,
     })));
     queue_form(&mut engine);
     engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
         app_id: Some("org.example.Chat".into()),
         title: None,
+        instance_id: None,
     })));
     assert!(wait_for_completion(&mut engine).is_empty());
 }

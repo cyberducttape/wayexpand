@@ -21,15 +21,22 @@ impl FocusState {
 
 pub(crate) fn focus_token(window: &WindowContext) -> String {
     let mut hasher = DefaultHasher::new();
-    window.app_id.hash(&mut hasher);
-    window.title.hash(&mut hasher);
+    window.instance_id.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
 pub(crate) fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
     control.set_focus_snapshot(FocusSnapshot {
         generation: state.generation,
-        token: state.previous.as_ref().map(focus_token),
+        token: state
+            .previous
+            .as_ref()
+            .filter(|window| window.instance_id.is_some())
+            .map(focus_token),
+        exact_window_identity: state
+            .previous
+            .as_ref()
+            .is_some_and(|window| window.instance_id.is_some()),
     });
 }
 
@@ -62,4 +69,24 @@ pub(crate) fn drain_pending_window_events(
         publish_focus_snapshot(control, focus_state);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::focus_token;
+    use wayexpand_core::WindowContext;
+
+    #[test]
+    fn exact_window_tokens_differ_for_same_app_and_title() {
+        let first = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("bash".into()),
+            instance_id: Some("window-a".into()),
+        };
+        let second = WindowContext {
+            instance_id: Some("window-b".into()),
+            ..first.clone()
+        };
+        assert_ne!(focus_token(&first), focus_token(&second));
+    }
 }
