@@ -52,6 +52,12 @@ atomic replacement. The collector records this as
 functional cells as passing. This prevents a successful best-effort evdev run
 from being presented as a safe desktop certification.
 
+The same collector requires the live input-method route to report composition
+awareness, sensitive-field handling, key pass-through, atomic replacement, and
+full Unicode support. The currently shipped input-method-v2 implementation
+reports active preedit composition as unsupported, so it remains a candidate
+route rather than a certified production route until that capability changes.
+
 Matrix-cell outcomes are deliberately more expressive than pass/fail: `pass`
 means the scenario passed, `fail` means it was exercised and failed,
 `unsupported-by-design` records a documented capability that the selected
