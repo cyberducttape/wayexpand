@@ -28,7 +28,7 @@ the collector with `--format json` and a validated results file:
 
 ```sh
 scripts/certify-compositor.sh --format json --compositor kde \
-  --version 6.6.2 --backend evdev+libei \
+  --version 6.6.2 --backend input-method-v2 \
   --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
   --results kde-results.txt --output kde-certification.json

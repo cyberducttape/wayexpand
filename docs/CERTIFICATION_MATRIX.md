@@ -144,13 +144,14 @@ WayExpand requires Wayland and will not be actively supported on X11. Reasons:
 
 ## Testing Procedures
 
-### Golden route: KDE Plasma + evdev + libei
+### Candidate production route: KDE Plasma + input-method-v2
 
-The first production certification target is deliberately one narrow route:
-KDE Plasma/KWin, `evdev+libei`, KWin application tracking, and the required
-US, DE, FR, AltGr, and multi-layout profiles. This is a test target, not a
-certification claim; the checked-in matrix remains **Not certified** until a
-real session produces a reviewed artifact.
+The first production certification candidate is deliberately one narrow route:
+KDE Plasma/KWin, `input-method-v2`, and the required US, DE, FR, AltGr, and
+multi-layout profiles. This is a test target, not a certification claim; the
+checked-in matrix remains **Not certified** until a real session produces a
+reviewed artifact with sensitive-field, atomic-replacement, and full-Unicode
+capabilities verified by the live daemon status.
 
 Run the real client driver from a KDE session with GTK, Qt, a Chromium or
 Electron client, a terminal, a password field, and an editor available:
@@ -159,7 +160,7 @@ Electron client, a terminal, a password field, and an editor available:
 scripts/run-certification-driver.sh \
   --driver /absolute/path/to/kde-golden-driver \
   --compositor kde --version "$(plasmashell --version | head -n1)" \
-  --backend evdev+libei \
+  --backend input-method-v2 \
   --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk,qt,chromium,electron,terminal,password,editor \
   --output /tmp/wayexpand-kde-results.txt \
@@ -167,7 +168,7 @@ scripts/run-certification-driver.sh \
 
 scripts/certify-compositor.sh \
   --compositor kde --version "$(plasmashell --version | head -n1)" \
-  --backend evdev+libei \
+  --backend input-method-v2 \
   --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk,qt,chromium,electron,terminal,password,editor \
   --results /tmp/wayexpand-kde-results.txt \
