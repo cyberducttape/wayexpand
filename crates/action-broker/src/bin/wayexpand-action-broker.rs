@@ -337,10 +337,9 @@ fn validate_config_ancestors(path: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
-    }
+    // Initialize logging. Do not set RUST_LOG here: the Tokio runtime's
+    // worker threads already exist, and mutating the environment while
+    // other threads may read it is unsound.
     // `fmt::init()` falls back to ERROR-only when RUST_LOG is unset, which
     // silently dropped every warning (policy violations, rejected reloads,
     // reconnects) from the journal. Default to info; RUST_LOG still wins.

@@ -294,6 +294,9 @@ impl ActionExecutor {
             cmd.env(&key, value);
         }
 
+        // Actions are non-interactive. Never hand them the broker's stdin,
+        // which is a terminal when the broker is started by hand.
+        cmd.stdin(Stdio::null());
         let capture_stdout = request.stdout_capture;
         if capture_stdout {
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
