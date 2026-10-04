@@ -15,11 +15,22 @@ case "$architecture" in
     x86_64|aarch64) ;;
     *) printf '%s\n' "unsupported release architecture: $architecture" >&2; exit 2 ;;
 esac
+
+target_dir=$(cargo metadata --no-deps --format-version 1 \
+    | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+if [ -z "$target_dir" ]; then
+    printf '%s\n' 'unable to determine Cargo target directory' >&2
+    exit 1
+fi
+if [ -n "${CARGO_BUILD_TARGET:-}" ]; then
+    target_dir="$target_dir/$CARGO_BUILD_TARGET"
+fi
 host_triple=$(rustc -vV | sed -n 's/^host: //p')
-case "$host_triple" in
+build_triple=${CARGO_BUILD_TARGET:-$host_triple}
+case "$build_triple" in
     "${architecture}-"*) ;;
     *)
-        printf '%s\n' "requested archive architecture $architecture does not match Rust host $host_triple" >&2
+        printf '%s\n' "requested archive architecture $architecture does not match Rust build target $build_triple" >&2
         exit 1
         ;;
 esac
@@ -35,7 +46,7 @@ fi
 mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" \
     "$root/scripts" "$root/udev" "$root/ibus/component"
 for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
-install -m 0755 "$project_dir/target/release/$binary" "$root/bin/"
+install -m 0755 "$target_dir/release/$binary" "$root/bin/"
 done
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" \
     "$project_dir/systemd/wayexpand-evdev.service" \
