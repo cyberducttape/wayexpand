@@ -68,6 +68,22 @@ fn new_expansion_id() -> String {
     hex
 }
 
+fn source_has_legacy_expansion_ids(source: &str) -> bool {
+    let Ok(document) = toml::from_str::<toml::Value>(source) else {
+        return false;
+    };
+    document
+        .get("expansion")
+        .and_then(toml::Value::as_array)
+        .is_some_and(|expansions| {
+            expansions.iter().any(|expansion| {
+                expansion
+                    .as_table()
+                    .is_some_and(|table| !table.contains_key("id"))
+            })
+        })
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -264,8 +280,8 @@ impl AppFilter {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ExpansionConfig {
-    /// Stable identity independent of the editable trigger. Older configs
-    /// receive a UUID on load and persist it on their next save.
+    /// Stable identity independent of the editable trigger. Older configs are
+    /// migrated atomically on their first load and receive a persisted UUID.
     #[serde(default = "new_expansion_id")]
     pub id: String,
     pub trigger: String,
@@ -602,9 +618,33 @@ impl Config {
     }
 
     /// Load, validate, and retain the exact source document from one secure
-    /// descriptor read. Editors should keep the revision and use it for
-    /// conditional saves rather than re-reading the file independently.
+    /// descriptor read. Legacy snippet IDs are migrated atomically before
+    /// returning. The migration is serialized and rechecks the file under the
+    /// write lock, so concurrent readers converge on one ID set. Editors
+    /// should keep the revision and use it for conditional saves rather than
+    /// re-reading the file independently.
     pub fn load_versioned(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
+        let path = path.as_ref();
+        let loaded = Self::load_versioned_once(path)?;
+        if !source_has_legacy_expansion_ids(&loaded.source) {
+            return Ok(loaded);
+        }
+
+        let resolved = resolve_config_target(path)?;
+        validate_parent_directories(&resolved)?;
+        let _lock = ConfigWriteLock::acquire(&resolved)?;
+        let current = Self::load_versioned_once(&resolved)?;
+        if source_has_legacy_expansion_ids(&current.source) {
+            current.config.validate()?;
+            let serialized = toml::to_string_pretty(&current.config)?;
+            Self::save_atomic_serialized(&resolved, serialized.as_bytes())?;
+            Self::load_versioned_once(&resolved)
+        } else {
+            Ok(current)
+        }
+    }
+
+    fn load_versioned_once(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
         let path = path.as_ref();
         // Resolve symlinks before validating ancestors and opening the file.
         // Validating the link's parent alone would allow a link swap to point

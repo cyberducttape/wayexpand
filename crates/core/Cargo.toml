@@ -24,6 +24,7 @@ rustix = { workspace = true, features = ["fs"] }
 libc.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
+unicode-general-category.workspace = true
 getrandom.workspace = true
 
 [dev-dependencies]

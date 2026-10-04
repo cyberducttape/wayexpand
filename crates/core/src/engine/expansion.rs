@@ -120,7 +120,9 @@ impl ExpansionEngine {
             return None;
         }
         let match_mode = self.config.expansion[config_index].match_mode;
-        if match_mode == MatchMode::WordBoundary && matching::is_word_character(character) {
+        if match_mode == MatchMode::WordBoundary
+            && matching::continues_word_after(self.buffer.back().copied(), character)
+        {
             return None;
         }
         Some((config_index, length))

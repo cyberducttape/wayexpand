@@ -162,7 +162,13 @@ fn versioned_load_uses_one_source_snapshot_and_rejects_stale_save() {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
 
     let loaded = Config::load_versioned(&path).unwrap();
-    assert_eq!(loaded.source(), source);
+    assert_ne!(loaded.source(), source);
+    assert!(loaded.source().contains("id = "));
+    let reloaded = Config::load_versioned(&path).unwrap();
+    assert_eq!(
+        loaded.config.expansion[0].id,
+        reloaded.config.expansion[0].id
+    );
     let mut stale_candidate = loaded.config.clone();
     stale_candidate.expansion[0].replacement = "stale edit".into();
 

@@ -713,7 +713,9 @@ mod tests {
         config.reload_if_changed();
         assert_eq!(config.observed, Some(stamp));
         assert!(config.watch_check_after.is_none());
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&path);
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let _ = fs::remove_file(directory.join(format!(".{filename}.wayexpand.lock")));
         fs::remove_dir(directory).unwrap();
     }
 

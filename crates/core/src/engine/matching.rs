@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use unicode_general_category::{get_general_category, GeneralCategory};
+
 use super::{ExpansionEngine, MatchPlan};
 use crate::config::capitalize_first_letter;
 use crate::{render_template_with_cursor, AppFilter, ExpansionConfig, MatchMode};
@@ -89,7 +91,27 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 }
 
 pub(super) fn is_word_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
+    character.is_alphanumeric()
+        || character == '_'
+        || matches!(
+            get_general_category(character),
+            GeneralCategory::NonspacingMark
+                | GeneralCategory::SpacingMark
+                | GeneralCategory::EnclosingMark
+                | GeneralCategory::Format
+        )
+}
+
+fn is_apostrophe(character: char) -> bool {
+    matches!(character, '\'' | '\u{2019}' | '\u{02bc}')
+}
+
+/// Whether `character` continues a word at the edge of `preceding`.
+/// Combining/format characters are continuations even though they are not
+/// alphanumeric themselves; apostrophes continue a word only after one.
+pub(super) fn continues_word_after(preceding: Option<char>, character: char) -> bool {
+    is_word_character(character)
+        || (preceding.is_some_and(is_word_character) && is_apostrophe(character))
 }
 
 /// Recases a rendered replacement to match the casing pattern of the typed
@@ -192,7 +214,14 @@ impl ExpansionEngine {
             return true;
         }
         match self.buffer.iter().rev().nth(length) {
-            Some(character) => !is_word_character(*character),
+            Some(character) if is_word_character(*character) => false,
+            Some(character) if is_apostrophe(*character) => self
+                .buffer
+                .iter()
+                .rev()
+                .nth(length + 1)
+                .is_none_or(|before| !is_word_character(*before)),
+            Some(_) => true,
             None => !self.buffer_truncated,
         }
     }

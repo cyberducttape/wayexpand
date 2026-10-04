@@ -4226,6 +4226,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.21",
  "toml",
+ "unicode-general-category",
  "unicode-normalization",
  "unicode-segmentation",
  "wayexpand-process-supervisor",

@@ -1016,6 +1016,48 @@ fn word_boundary_mode_is_unicode_aware() {
 }
 
 #[test]
+fn word_boundary_mode_keeps_grapheme_continuations_together() {
+    let config = || {
+        Config::parse(
+            "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+        )
+        .unwrap()
+    };
+
+    // NFC, decomposed Latin, Indic marks, a ZWJ sequence, and a non-Latin
+    // script must all count as word continuations before the trigger.
+    for prefix in [
+        "é",
+        "e\u{301}",
+        "क\u{094d}",
+        "का",
+        "👩\u{200d}💻",
+        "مَرْحَبًا",
+        "rock’",
+    ] {
+        let mut engine = ExpansionEngine::new(config()).unwrap();
+        assert!(
+            engine
+                .process(InputEvent::Text(format!("{prefix}:sig")))
+                .is_empty(),
+            "word boundary incorrectly accepted after {prefix:?}"
+        );
+    }
+
+    // Combining marks and apostrophes also continue the word after a trigger,
+    // so they must not prematurely resolve a word-boundary match.
+    for suffix in ["\u{301}", "\u{094d}", "\u{200d}", "’"] {
+        let mut engine = ExpansionEngine::new(config()).unwrap();
+        assert!(
+            engine
+                .process(InputEvent::Text(format!(":sig{suffix}")))
+                .is_empty(),
+            "word boundary incorrectly resolved before suffix {suffix:?}"
+        );
+    }
+}
+
+#[test]
 fn word_boundary_mode_waits_for_a_trailing_boundary() {
     let config = Config::parse(
         "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
@@ -1467,6 +1509,7 @@ fn symlinked_configuration_validates_the_resolved_parent() {
     assert!(Config::load(&link).is_ok());
     std::fs::remove_file(link).unwrap();
     std::fs::remove_file(target).unwrap();
+    std::fs::remove_file(root.join(".target.toml.wayexpand.lock")).unwrap();
     std::fs::remove_dir(root).unwrap();
 }
 
