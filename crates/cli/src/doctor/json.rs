@@ -115,6 +115,20 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "state": snapshot.get("state"),
                     "source": snapshot.get("source"),
                     "backend": snapshot.get("backend"),
+                    "capabilities": {
+                        "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
+                        "composition_awareness": snapshot.get("capture_composition_aware"),
+                        "key_passthrough": snapshot.get("capture_key_passthrough")
+                            .and_then(|capture| {
+                                snapshot.get("inject_key_passthrough").map(|inject| {
+                                    capture.as_bool().unwrap_or(false)
+                                        && inject.as_bool().unwrap_or(false)
+                                })
+                            }),
+                        "exact_window_identity": snapshot.get("window_identity_exact"),
+                        "atomic_replacement": snapshot.get("inject_atomic_replace"),
+                        "full_unicode": snapshot.get("inject_full_unicode"),
+                    },
                 })
             }
             Err(error) => serde_json::json!({
@@ -131,6 +145,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "error": error.to_string(),
         }),
     };
+    let production_readiness = production_readiness(&daemon);
     let healthy = config_ok
         && policy_ok
         && display_session_available()
@@ -157,6 +172,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "valid": socket_valid,
             },
             "daemon": daemon,
+            "production_readiness": production_readiness,
             "action_broker": broker,
             "ibus": {
                 "installed": ibus_installed,
@@ -185,4 +201,65 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+/// Derive the production-safety summary from the daemon probe without
+/// treating connectivity or negotiated capabilities as certification.
+pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Value {
+    let daemon_capabilities = daemon
+        .get("capabilities")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let capability = |name: &str| {
+        daemon_capabilities
+            .get(name)
+            .and_then(serde_json::Value::as_bool)
+    };
+    let live_route = daemon
+        .get("available")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        && daemon
+            .get("compatible")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        && daemon
+            .get("commit_matches")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        && daemon.get("state").and_then(serde_json::Value::as_str) == Some("connected");
+    let mut readiness_blockers = Vec::new();
+    if !live_route {
+        readiness_blockers.push("no compatible, current, connected daemon route");
+    }
+    for (name, label) in [
+        ("sensitive_field_detection", "sensitive-field detection"),
+        ("composition_awareness", "active composition awareness"),
+        ("key_passthrough", "key pass-through"),
+        ("atomic_replacement", "atomic replacement"),
+        ("full_unicode", "full Unicode injection"),
+        ("exact_window_identity", "exact window identity"),
+    ] {
+        if capability(name) != Some(true) {
+            readiness_blockers.push(label);
+        }
+    }
+    // A live capability probe is never equivalent to reviewed real-client
+    // evidence. Keep this blocker even when a future route satisfies every
+    // negotiated capability above.
+    readiness_blockers.push("reviewed compositor/client certification evidence");
+    let readiness_status = if readiness_blockers.len() == 1 {
+        "uncertified"
+    } else if live_route {
+        "limited"
+    } else {
+        "unavailable"
+    };
+    serde_json::json!({
+        "status": readiness_status,
+        "certified": false,
+        "live_route": live_route,
+        "capabilities": daemon_capabilities,
+        "blockers": readiness_blockers,
+    })
 }

@@ -4,6 +4,7 @@ use crate::doctor::backends::{
 };
 use crate::doctor::certification::certification_selection_status;
 use crate::doctor::files::existing_control_socket_is_healthy;
+use crate::doctor::json::production_readiness;
 use crate::doctor::policy::{absolute_command_policy_diagnostic, print_policy_diagnostics_json};
 use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,6 +30,52 @@ fn doctor_policy_json_reports_absolute_command_requirement() {
         }),
         Some("Require absolute command paths: audit only")
     );
+}
+
+#[test]
+fn production_readiness_never_promotes_capabilities_to_certification() {
+    let report = production_readiness(&serde_json::json!({
+        "available": true,
+        "compatible": true,
+        "commit_matches": true,
+        "state": "connected",
+        "capabilities": {
+            "sensitive_field_detection": true,
+            "composition_awareness": true,
+            "key_passthrough": true,
+            "exact_window_identity": true,
+            "atomic_replacement": true,
+            "full_unicode": true
+        }
+    }));
+    assert_eq!(report["status"], "uncertified");
+    assert_eq!(report["certified"], false);
+    assert_eq!(report["live_route"], true);
+    assert_eq!(
+        report["blockers"],
+        serde_json::json!(["reviewed compositor/client certification evidence"])
+    );
+}
+
+#[test]
+fn production_readiness_reports_limited_live_capabilities() {
+    let report = production_readiness(&serde_json::json!({
+        "available": true,
+        "compatible": true,
+        "commit_matches": true,
+        "state": "connected",
+        "capabilities": {
+            "sensitive_field_detection": false,
+            "composition_awareness": false,
+            "key_passthrough": false,
+            "exact_window_identity": true,
+            "atomic_replacement": false,
+            "full_unicode": false
+        }
+    }));
+    assert_eq!(report["status"], "limited");
+    assert_eq!(report["certified"], false);
+    assert!(report["blockers"].as_array().unwrap().len() >= 5);
 }
 
 #[test]
@@ -208,6 +255,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "config",
             "control_socket",
             "daemon",
+            "production_readiness",
             "action_broker",
             "policy",
             "backends",
