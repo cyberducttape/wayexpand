@@ -188,8 +188,9 @@ impl GuiApp {
                 self.maybe_execute_pending_action();
             }
             SaveIntent::Undo => {
-                let entry = self.undo.pop().expect("undo entry remains pending");
-                self.undo_bytes = self.undo_bytes.saturating_sub(entry.estimated_bytes);
+                if let Some(entry) = self.undo.pop() {
+                    self.undo_bytes = self.undo_bytes.saturating_sub(entry.estimated_bytes);
+                }
                 self.config = candidate;
                 self.rebuild_search_index();
                 let restored_selection = self
@@ -341,7 +342,19 @@ impl GuiApp {
         self.status = Status::success(self.strings.status_config_reloaded());
     }
 
+    /// Undo restores against `self.config`, which only changes when a save
+    /// completes. While a save is pending or queued, both the config and the
+    /// top undo entry are about to change, so an undo computed now would pop
+    /// the wrong entry and could silently discard the in-flight change.
+    pub(crate) fn save_in_flight(&self) -> bool {
+        self.pending_save.is_some() || self.queued_save.is_some()
+    }
+
     pub(crate) fn undo(&mut self) {
+        if self.save_in_flight() {
+            self.status = Status::info(self.strings.status_saving());
+            return;
+        }
         let Some(entry) = self.undo.last() else {
             self.status = Status::warning(self.strings.status_nothing_to_undo());
             return;

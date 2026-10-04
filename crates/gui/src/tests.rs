@@ -865,6 +865,60 @@ fn saved_snippet_edit_can_be_undone_back_to_disk() {
 }
 
 #[test]
+fn undo_is_refused_while_a_save_is_in_flight() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-undo-in-flight-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let config = Config {
+        expansion: vec![ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":undo-flight".into(),
+            replacement: "before".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: Vec::new(),
+        }],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.config.expansion[0].replacement = "after".into();
+    let previous = Config::load(&path).unwrap();
+    app.remember_undo(previous);
+
+    // A second undo click while the first undo's save is still running must
+    // not queue another undo computed from the same entry; finishing that
+    // stale request used to pop an empty history and panic.
+    let mut candidate = app.config.clone();
+    candidate.expansion[0].replacement = "before".into();
+    app.pending_save = Some(PendingSave {
+        request_id: 7,
+        candidate: candidate.clone(),
+        preview_revision: app.preview_revision,
+        intent: SaveIntent::Undo,
+    });
+    app.undo();
+    assert!(app.queued_save.is_none());
+    assert_eq!(app.undo.len(), 1);
+
+    let completed = (app.config_revision.clone(), app.config_document.clone());
+    app.finish_save(7, Ok(completed));
+    assert!(app.undo.is_empty());
+    assert_eq!(app.config.expansion[0].replacement, "before");
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-save-race-{}.toml",

@@ -133,7 +133,7 @@ impl GuiApp {
                         self.request_action(PendingAction::Duplicate);
                     }
                     if ui
-                        .add_enabled_ui(!self.undo.is_empty(), |ui| {
+                        .add_enabled_ui(!self.undo.is_empty() && !self.save_in_flight(), |ui| {
                             theme::secondary_button(
                                 ui,
                                 palette,

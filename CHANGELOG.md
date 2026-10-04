@@ -6,6 +6,16 @@ All notable changes to WayExpand are documented here.
 
 Changes not yet released.
 
+- **GUI undo while saving:** pressing Undo again before the previous save
+  finished could crash the editor or silently discard an in-flight edit.
+  Undo is now disabled until pending saves complete.
+
+- **Hotkey process cleanup:** hotkey actions now kill their process group
+  before reaping the leader, like expansion commands, so a recycled PID can
+  never receive the cleanup signal.
+
+- **Action Broker:** actions no longer inherit the broker's stdin.
+
 - **Action Broker hardening:** the packaged broker now denies all IP address
   traffic and high-risk syscall groups in addition to its AF_UNIX-only and
   read-only-home sandbox.
