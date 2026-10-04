@@ -191,6 +191,70 @@ fn versioned_load_uses_one_source_snapshot_and_rejects_stale_save() {
 }
 
 #[test]
+fn concurrent_legacy_loaders_converge_on_persisted_ids() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-config-concurrent-legacy-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let filename = path.file_name().unwrap().to_string_lossy().into_owned();
+    let lock_path = path.with_file_name(format!(".{filename}.wayexpand.lock"));
+    let _ = fs::remove_file(&lock_path);
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \":first\"\nreplacement = \"one\"\n\
+         [[expansion]]\ntrigger = \":second\"\nreplacement = \"two\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let first_path = path.clone();
+    let first_barrier = barrier.clone();
+    let first = std::thread::spawn(move || {
+        first_barrier.wait();
+        Config::load_versioned(first_path).unwrap()
+    });
+    let second_path = path.clone();
+    let second_barrier = barrier;
+    let second = std::thread::spawn(move || {
+        second_barrier.wait();
+        Config::load_versioned(second_path).unwrap()
+    });
+
+    let first_ids: Vec<_> = first
+        .join()
+        .unwrap()
+        .config
+        .expansion
+        .into_iter()
+        .map(|expansion| expansion.id)
+        .collect();
+    let second_ids: Vec<_> = second
+        .join()
+        .unwrap()
+        .config
+        .expansion
+        .into_iter()
+        .map(|expansion| expansion.id)
+        .collect();
+    assert_eq!(first_ids, second_ids);
+    assert!(first_ids.iter().all(|id| is_uuid(id)));
+
+    let persisted = Config::load_versioned(&path).unwrap();
+    let persisted_ids: Vec<_> = persisted
+        .config
+        .expansion
+        .into_iter()
+        .map(|expansion| expansion.id)
+        .collect();
+    assert_eq!(first_ids, persisted_ids);
+
+    fs::remove_file(path).unwrap();
+    fs::remove_file(lock_path).unwrap();
+}
+
+#[test]
 fn concurrent_conditional_writers_allow_only_one_revision_winner() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-config-concurrent-revision-{}.toml",
