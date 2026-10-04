@@ -104,7 +104,15 @@ impl GuiApp {
                 (self.strings.route_paused_status(), palette.warning)
             }
             Some(runtime::RouteState::Connected) => {
-                (self.strings.route_connected_status(), palette.success)
+                let full_protection = self.daemon_capabilities.is_some_and(|capabilities| {
+                    capabilities.capture_sensitive_focus == Some(true)
+                        && capabilities.inject_atomic_replace == Some(true)
+                });
+                if full_protection {
+                    (self.strings.route_connected_status(), palette.success)
+                } else {
+                    (self.strings.route_limited_status(), palette.warning)
+                }
             }
             Some(runtime::RouteState::Reconnecting) => {
                 (self.strings.route_reconnecting_status(), palette.warning)

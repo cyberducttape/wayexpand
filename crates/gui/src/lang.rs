@@ -213,6 +213,12 @@ impl Strings {
     pub fn route_connected_status(&self) -> &'static str {
         "Typing integration: Ready"
     }
+    pub fn route_limited_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Typing integration: Limited protection",
+            Language::German => "Tastaturintegration: Eingeschränkter Schutz",
+        }
+    }
     pub fn route_paused_status(&self) -> &'static str {
         "Typing integration: Paused"
     }
