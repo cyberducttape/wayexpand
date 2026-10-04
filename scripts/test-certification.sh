@@ -114,11 +114,17 @@ esac
 EOF
 chmod 0755 "$daemon_cli"
 daemon_json="$test_root/daemon-certification.json"
-"$project_dir/scripts/certify-compositor.sh" --format json \
+if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend evdev+libei --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps "$target_apps" --results "$results" \
     --cli "$daemon_cli" --output "$daemon_json" >/dev/null
-jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
+then
+    printf '%s\n' 'certification accepted the evdev compatibility route' >&2
+    exit 1
+fi
+jq -e '.certified == false and .status_required == true and .backend_probe_valid == true and
+    .backend_certification_eligible == false and
+    (.backend_certification_block_reason | contains("sensitive-field"))' "$daemon_json" >/dev/null
 
 mismatched_daemon_cli="$test_root/mismatched-daemon-cli"
 cat >"$mismatched_daemon_cli" <<'EOF'
@@ -152,11 +158,16 @@ esac
 EOF
 chmod 0755 "$explicit_route_cli"
 explicit_route_json="$test_root/explicit-route-certification.json"
-"$project_dir/scripts/certify-compositor.sh" --format json \
+if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.6 --backend evdev+libei \
     --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
     --results "$results" --cli "$explicit_route_cli" --output "$explicit_route_json" >/dev/null
-jq -e '.certified == true and .doctor.healthy == false and .doctor_probe_valid == true and .backend_probe_valid == true' \
+then
+    printf '%s\n' 'certification accepted the unhealthy evdev compatibility route' >&2
+    exit 1
+fi
+jq -e '.certified == false and .doctor.healthy == false and .doctor_probe_valid == true and
+    .backend_probe_valid == true and .backend_certification_eligible == false' \
     "$explicit_route_json" >/dev/null
 
 input_method_cli="$test_root/input-method-cli"
@@ -164,7 +175,7 @@ cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"inject_atomic_replace":true,"inject_full_unicode":true}' ;;
 esac
 EOF
 chmod 0755 "$input_method_cli"
@@ -174,6 +185,26 @@ input_method_json="$test_root/input-method-certification.json"
     --target-apps "$target_apps" --results "$results" \
     --cli "$input_method_cli" --output "$input_method_json" >/dev/null
 jq -e '.certified == true and .backend_probe_valid == true' "$input_method_json" >/dev/null
+
+unsafe_input_method_cli="$test_root/unsafe-input-method-cli"
+cat >"$unsafe_input_method_cli" <<'EOF'
+#!/bin/sh
+case "\${1-} \${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"inject_atomic_replace":true,"inject_full_unicode":false}' ;;
+esac
+EOF
+chmod 0755 "$unsafe_input_method_cli"
+unsafe_input_method_json="$test_root/unsafe-input-method-certification.json"
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend input-method-v2 \
+    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
+    --results "$results" --cli "$unsafe_input_method_cli" --output "$unsafe_input_method_json" >/dev/null
+then
+    printf '%s\n' 'certification accepted an input-method route without full Unicode support' >&2
+    exit 1
+fi
+jq -e '.certified == false and .backend_probe_valid == false' "$unsafe_input_method_json" >/dev/null
 
 stale_daemon_cli="$test_root/stale-daemon-cli"
 cat >"$stale_daemon_cli" <<'EOF'

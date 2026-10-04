@@ -39,6 +39,11 @@ grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_TARGET_APPS' "$workflow" >/dev/null
+grep -F -- 'backend: input-method-v2' "$workflow" >/dev/null
+if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
+    printf '%s\n' 'certification workflow must not certify raw evdev' >&2
+    exit 1
+fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
 

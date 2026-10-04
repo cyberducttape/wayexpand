@@ -209,6 +209,8 @@ if ! printf '%s' "$status_json" | jq -e --argjson schema "$status_schema" \
 fi
 status_required=true
 backend_probe_valid=1
+backend_certification_eligible=true
+backend_certification_block_reason=''
 case "$backend" in
     ibus)
         status_required=false
@@ -218,6 +220,8 @@ case "$backend" in
         fi
         ;;
     evdev+libei)
+        backend_certification_eligible=false
+        backend_certification_block_reason='evdev capture has no sensitive-field signal and cannot provide atomic replacement'
         if ! printf '%s' "$doctor_json" | jq -e '
             .healthy == true or
             (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
@@ -229,6 +233,8 @@ case "$backend" in
         fi
         ;;
     evdev+wlroots)
+        backend_certification_eligible=false
+        backend_certification_block_reason='evdev capture has no sensitive-field signal and cannot provide atomic replacement'
         if ! printf '%s' "$doctor_json" | jq -e '
             .healthy == true or
             (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
@@ -246,7 +252,13 @@ case "$backend" in
         ' >/dev/null 2>&1; then
             doctor_probe_valid=0
         fi
-        if ! printf '%s' "$status_json" | jq -e '.source == "input-method" and .backend == "input-method-v2"' >/dev/null 2>&1; then
+        if ! printf '%s' "$status_json" | jq -e '
+            .source == "input-method" and
+            .backend == "input-method-v2" and
+            .capture_sensitive_focus == true and
+            .inject_atomic_replace == true and
+            .inject_full_unicode == true
+        ' >/dev/null 2>&1; then
             backend_probe_valid=0
         fi
         ;;
@@ -292,6 +304,7 @@ jq -Rsc '
 certified=false
 [ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] \
     && [ "$desktop_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
+    && [ "$backend_certification_eligible" = true ] \
     && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
 if [ "$status_required" = true ] && [ "$status_probe_valid" -ne 1 ]; then
@@ -337,6 +350,8 @@ if [ "$format" = json ]; then
         --argjson status_probe_valid "$status_probe_valid" \
         --argjson status_required "$status_required" \
         --argjson backend_probe_valid "$backend_probe_valid" \
+        --arg backend_certification_eligible "$backend_certification_eligible" \
+        --arg backend_certification_block_reason "$backend_certification_block_reason" \
         --arg certification_status "$certification_status" \
         '{schema: 2, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
@@ -358,6 +373,8 @@ if [ "$format" = json ]; then
           status_probe_valid: ($status_probe_valid == 1),
           status_required: $status_required,
           backend_probe_valid: ($backend_probe_valid == 1),
+          backend_certification_eligible: ($backend_certification_eligible == "true"),
+          backend_certification_block_reason: $backend_certification_block_reason,
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios[0]}' >"$output"
 else
 {
@@ -395,9 +412,11 @@ else
 fi
 printf '%s\n' "wrote $output"
 
-if [ "$complete" -eq 0 ]; then
+if [ "$certified" != true ]; then
     if [ "$failed" -eq 1 ]; then
         printf '%s\n' "certification failed: one or more scenarios were explicitly marked fail" >&2
+    elif [ "$backend_certification_eligible" != true ]; then
+        printf '%s\n' "certification remains incomplete: $backend_certification_block_reason" >&2
     elif [ "$doctor_probe_valid" -eq 0 ]; then
         printf '%s\n' "certification remains incomplete: doctor evidence is invalid or does not identify the requested compositor" >&2
     else

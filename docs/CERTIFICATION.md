@@ -45,6 +45,13 @@ current status schema, and the matching source/backend pair; IBus uses the
 doctor IBus-installation probe because it is not the daemon control socket
 path. Its stable `status` field is `certified`, `incomplete`, or `failed`.
 
+Raw evdev capture is a compatibility fallback and is never eligible for a
+production certification: it has no sensitive-field signal and cannot provide
+atomic replacement. The collector records this as
+`backend_certification_eligible: false` even when a driver reports all
+functional cells as passing. This prevents a successful best-effort evdev run
+from being presented as a safe desktop certification.
+
 Matrix-cell outcomes are deliberately more expressive than pass/fail: `pass`
 means the scenario passed, `fail` means it was exercised and failed,
 `unsupported-by-design` records a documented capability that the selected
