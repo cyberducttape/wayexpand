@@ -175,7 +175,7 @@ cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"inject_atomic_replace":true,"inject_full_unicode":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$input_method_cli"
@@ -191,7 +191,7 @@ cat >"$unsafe_input_method_cli" <<'EOF'
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"inject_atomic_replace":true,"inject_full_unicode":false}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$unsafe_input_method_cli"
