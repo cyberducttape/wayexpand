@@ -582,12 +582,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let focus_info = crate::runtime::control_command("focus")
         .ok()
         .and_then(|response| focus_target_from_response(&response));
-    let (target_focus, daemon_available, exact_identity_available) = focus_info
-        .map(|info| {
-            let daemon_available = info.daemon_available && info.target.is_some();
-            (info.target, daemon_available, info.exact_identity_available)
-        })
-        .unwrap_or((None, false, true));
+    let (target_focus, daemon_available, exact_identity_available) = picker_focus_state(focus_info);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -630,6 +625,18 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bool, bool) {
+    focus_info
+        .map(|info| {
+            let daemon_available = info.daemon_available && info.target.is_some();
+            (info.target, daemon_available, info.exact_identity_available)
+        })
+        // A missing or malformed focus response proves neither daemon
+        // availability nor exact window identity. Keep the picker honest in
+        // clipboard-only mode instead of presenting a false guarantee.
+        .unwrap_or((None, false, false))
+}
+
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
     let generation = response
         .lines()
@@ -654,7 +661,7 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_target_from_response, score, FocusInfo, FocusTarget};
+    use super::{focus_target_from_response, picker_focus_state, score, FocusInfo, FocusTarget};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -696,5 +703,10 @@ mod tests {
             })
         );
         assert_eq!(focus_target_from_response("running\n"), None);
+    }
+
+    #[test]
+    fn missing_focus_response_does_not_claim_exact_identity() {
+        assert_eq!(picker_focus_state(None), (None, false, false));
     }
 }
