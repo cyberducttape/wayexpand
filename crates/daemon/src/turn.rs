@@ -7,6 +7,19 @@ use std::ops::ControlFlow;
 use crate::*;
 use wayexpand_core::CheckStatus;
 
+fn input_method_injection_capabilities(
+    mut text: InjectorCapabilities,
+    key_pass_through: Option<InjectorCapabilities>,
+) -> InjectorCapabilities {
+    if let Some(key_pass_through) = key_pass_through {
+        // The input-method text protocol supplies atomic Unicode text while
+        // the separately attached keyboard injector supplies physical key
+        // pass-through. Publish the union of those two negotiated paths.
+        text.key_passthrough = key_pass_through.key_passthrough;
+    }
+    text
+}
+
 impl Daemon {
     /// Apply window, pause, reload, and stop transitions; report hotkey results and worker failures. Breaks when the daemon should stop.
     pub(crate) fn maintain(&mut self) -> Result<ControlFlow<(), CommandMetrics>> {
@@ -243,6 +256,43 @@ impl Daemon {
 
     /// Publish the current status, including runtime capabilities.
     pub(crate) fn publish_status(&mut self, metrics: CommandMetrics) {
+        let (backend_mode, capture_capabilities, mut injection_capabilities) =
+            if let Some(input_method) = self.input_method.as_ref() {
+                let capture_capabilities = InputSource::capabilities(input_method);
+                let backend_mode = input_method
+                    .key_pass_through_status_detail()
+                    .or_else(|| {
+                        let detail = input_method.status_detail();
+                        (!detail.is_empty()).then_some(detail)
+                    })
+                    .unwrap_or("unknown");
+                let injection_capabilities = TextInjector::capabilities(input_method);
+                (backend_mode, capture_capabilities, injection_capabilities)
+            } else {
+                let injection_capabilities = self
+                    .injector
+                    .as_ref()
+                    .map(|backend| backend.capabilities())
+                    .unwrap_or_default();
+                (
+                    self.injector
+                        .as_ref()
+                        .map(|backend| backend.status_detail())
+                        .filter(|detail| !detail.is_empty())
+                        .unwrap_or("unknown"),
+                    self.evdev
+                        .as_ref()
+                        .map(InputSource::capabilities)
+                        .unwrap_or_default(),
+                    injection_capabilities,
+                )
+            };
+        if let Some(input_method) = self.input_method.as_ref() {
+            injection_capabilities = input_method_injection_capabilities(
+                injection_capabilities,
+                input_method.key_pass_through_capabilities(),
+            );
+        }
         set_daemon_status_with_runtime_capabilities(
             &mut self.status_publisher,
             &self.control,
@@ -252,26 +302,9 @@ impl Daemon {
             &self.path,
             self.config.healthy(),
             metrics,
-            self.input_method
-                .as_ref()
-                .map(TextInjector::status_detail)
-                .or_else(|| {
-                    self.injector
-                        .as_ref()
-                        .map(|backend| backend.status_detail())
-                })
-                .filter(|detail| !detail.is_empty())
-                .unwrap_or("unknown"),
-            self.input_method
-                .as_ref()
-                .map(InputSource::capabilities)
-                .or_else(|| self.evdev.as_ref().map(InputSource::capabilities))
-                .unwrap_or_default(),
-            self.input_method
-                .as_ref()
-                .map(TextInjector::capabilities)
-                .or_else(|| self.injector.as_ref().map(|backend| backend.capabilities()))
-                .unwrap_or_default(),
+            backend_mode,
+            capture_capabilities,
+            injection_capabilities,
             self.window_tracker
                 .as_ref()
                 .is_some_and(backend_lifecycle::WindowTrackerHandle::is_connected),
@@ -380,5 +413,41 @@ impl Daemon {
             explanation.render_text()
         };
         let _ = request.reply.try_send(answer);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_method_status_combines_text_and_key_injector_capabilities() {
+        let text = InjectorCapabilities {
+            atomic_replace: true,
+            full_unicode: true,
+            key_passthrough: false,
+            ..InjectorCapabilities::default()
+        };
+        let key = InjectorCapabilities {
+            key_passthrough: true,
+            ..InjectorCapabilities::default()
+        };
+
+        let combined = input_method_injection_capabilities(text, Some(key));
+        assert!(combined.atomic_replace);
+        assert!(combined.full_unicode);
+        assert!(combined.key_passthrough);
+    }
+
+    #[test]
+    fn input_method_status_does_not_claim_key_injection_without_key_support() {
+        let text = InjectorCapabilities {
+            atomic_replace: true,
+            full_unicode: true,
+            ..InjectorCapabilities::default()
+        };
+        let key = InjectorCapabilities::default();
+
+        assert!(!input_method_injection_capabilities(text, Some(key)).key_passthrough);
     }
 }

@@ -1020,6 +1020,26 @@ impl InputMethodSource {
         self
     }
 
+    /// Report the separately attached keyboard injector. The input-method
+    /// text injector and the key pass-through injector are different protocol
+    /// paths; status consumers must not infer keyboard capabilities from the
+    /// former.
+    pub fn key_pass_through_capabilities(&self) -> Option<InjectorCapabilities> {
+        self.key_pass_through
+            .as_ref()
+            .map(|injector| injector.capabilities())
+    }
+
+    /// Return the negotiated mode of the separate keyboard injector for
+    /// diagnostics. An input-method session otherwise has no text-injector
+    /// mode to report because its text path is the Wayland protocol itself.
+    pub fn key_pass_through_status_detail(&self) -> Option<&'static str> {
+        self.key_pass_through
+            .as_ref()
+            .map(|injector| injector.status_detail())
+            .filter(|detail| !detail.is_empty())
+    }
+
     /// Best-effort cleanup for a lost input-method or pass-through transport.
     /// The input-method grab may disappear without delivering physical key-up
     /// events, so every key the virtual injector believes is held must be
