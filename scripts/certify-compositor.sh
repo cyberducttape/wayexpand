@@ -200,7 +200,10 @@ if ! printf '%s' "$doctor_json" | jq -e --arg desktop "$expected_desktop" \
 fi
 status_probe_valid=1
 if ! printf '%s' "$status_json" | jq -e --argjson schema "$status_schema" \
-    'type == "object" and .response == "running" and .status_schema == $schema' >/dev/null 2>&1; then
+    --arg expected_commit "$wayexpand_commit" \
+    'type == "object" and .response == "running" and .status_schema == $schema and
+     ($expected_commit != "unknown") and (.daemon_commit | type == "string") and
+     .daemon_commit == $expected_commit' >/dev/null 2>&1; then
     status_json=null
     status_probe_valid=0
 fi

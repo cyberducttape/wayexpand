@@ -36,7 +36,7 @@ certification_cli="$test_root/certification-cli"
 cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
-    "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"KDE Plasma","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
+    "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
     "status --json") printf '%s\\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
@@ -108,7 +108,7 @@ daemon_cli="$test_root/daemon-cli"
 cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -120,6 +120,25 @@ daemon_json="$test_root/daemon-certification.json"
     --cli "$daemon_cli" --output "$daemon_json" >/dev/null
 jq -e '.certified == true and .status_required == true and .backend_probe_valid == true' "$daemon_json" >/dev/null
 
+mismatched_daemon_cli="$test_root/mismatched-daemon-cli"
+cat >"$mismatched_daemon_cli" <<'EOF'
+#!/bin/sh
+case "${1-} ${2-}" in
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"older-commit","source":"evdev","backend":"libei"}' ;;
+esac
+EOF
+chmod 0755 "$mismatched_daemon_cli"
+mismatched_daemon_json="$test_root/mismatched-daemon-certification.json"
+if "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor kde --version 6.6.2 --backend evdev+libei --layout us,de,fr,altgr,multi-layout-switching \
+    --target-apps "$target_apps" --results "$results" \
+    --cli "$mismatched_daemon_cli" --output "$mismatched_daemon_json" >/dev/null; then
+    printf '%s\n' 'certification accepted a daemon built from a different commit' >&2
+    exit 1
+fi
+jq -e '.certified == false and .status_probe_valid == false' "$mismatched_daemon_json" >/dev/null
+
 # An explicitly selected, already-running daemon route can be healthy even if
 # automatic selection remains conservative. Require valid underlying doctor
 # checks plus a matching live route rather than the unrelated auto-select bit.
@@ -127,7 +146,7 @@ explicit_route_cli="$test_root/explicit-route-cli"
 cat >"$explicit_route_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -144,7 +163,7 @@ input_method_cli="$test_root/input-method-cli"
 cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2"}' ;;
 esac
 EOF
@@ -160,7 +179,7 @@ stale_daemon_cli="$test_root/stale-daemon-cli"
 cat >"$stale_daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma"}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":0,"source":"evdev","backend":"libei"}' ;;
 esac
 EOF
@@ -179,7 +198,7 @@ wrong_desktop_cli="$test_root/wrong-desktop-cli"
 cat >"$wrong_desktop_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"GNOME"}' ;;
+    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"GNOME","wayexpand_commit":"test-commit"}' ;;
     "status --json") printf '%s\n' '{"response":"running","status_schema":4,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
