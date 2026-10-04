@@ -2,6 +2,7 @@
 //!
 //! Defines the configuration schema for available actions and their permissions.
 
+use crate::protocol::MAX_ACTION_ID_BYTES;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -248,6 +249,9 @@ impl BrokerConfig {
             validate_audit_path(path)?;
         }
         for (id, action) in &self.actions {
+            if id.is_empty() || id.len() > MAX_ACTION_ID_BYTES {
+                return Err(format!("action id must be 1-{} bytes", MAX_ACTION_ID_BYTES));
+            }
             action
                 .validate()
                 .map_err(|e| format!("action '{}': {}", id, e))?;

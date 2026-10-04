@@ -15,6 +15,7 @@ pub(crate) fn run_command_preview(draft: &Draft) -> Result<String, String> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn render(
     source: Option<&ExpansionConfig>,
     settings: &Settings,
@@ -22,6 +23,18 @@ pub(crate) fn render(
     draft: Option<&Draft>,
     input: &str,
     app: &str,
+) -> String {
+    render_with_library(source, settings, organization, draft, input, app, None)
+}
+
+pub(crate) fn render_with_library(
+    source: Option<&ExpansionConfig>,
+    settings: &Settings,
+    organization: &OrganizationPolicy,
+    draft: Option<&Draft>,
+    input: &str,
+    app: &str,
+    library: Option<&Config>,
 ) -> String {
     let expansion = match draft {
         Some(draft) => Some(ExpansionConfig {
@@ -60,6 +73,9 @@ pub(crate) fn render(
     let Ok(mut engine) = ExpansionEngine::new(config) else {
         return "Configuration is invalid".into();
     };
+    if let Some(library) = library {
+        engine.set_template_context(library.template_context(None));
+    }
     if !app.trim().is_empty() {
         engine.set_current_window(Some(WindowContext {
             app_id: Some(app.trim().to_owned()),

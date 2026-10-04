@@ -560,6 +560,13 @@ impl ExpansionEngine {
         })
     }
 
+    /// Replace the library portion of template context without rebuilding the
+    /// trigger matcher. Editor previews use this to retain `{{snippet:name}}`
+    /// semantics while compiling only the draft trigger.
+    pub fn set_template_context(&mut self, context: crate::TemplateContext) {
+        self.template_base = context;
+    }
+
     /// Apply administrator-owned policy to an already constructed engine.
     /// This changes policy metadata only; matching state and runtime state are
     /// preserved.

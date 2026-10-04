@@ -96,6 +96,15 @@ pub enum ConfigError {
     UndoHotkeyCollision { chord: String, index: usize },
     #[error("enabled triggers contain {length} characters; maximum is {maximum}")]
     TriggerDataTooLarge { length: usize, maximum: usize },
+    #[error(
+        "effective triggers contain {scalars} scalars (maximum {maximum_scalars}) across {triggers} entries (maximum {maximum_triggers})"
+    )]
+    EffectiveTriggerDataTooLarge {
+        scalars: usize,
+        maximum_scalars: usize,
+        triggers: usize,
+        maximum_triggers: usize,
+    },
     #[error("configuration is too large ({length} bytes; maximum is {maximum})")]
     ConfigTooLarge { length: usize, maximum: usize },
     #[error("could not serialize configuration: {0}")]
@@ -200,6 +209,14 @@ impl ConfigError {
             Self::TriggerDataTooLarge { length, maximum } => {
                 format!("enabled trigger data is too large ({length}; maximum {maximum})")
             }
+            Self::EffectiveTriggerDataTooLarge {
+                scalars,
+                maximum_scalars,
+                triggers,
+                maximum_triggers,
+            } => format!(
+                "effective matcher data is too large ({scalars} scalars/{triggers} triggers; maximum {maximum_scalars}/{maximum_triggers})"
+            ),
             Self::ConfigTooLarge { length, maximum } => {
                 format!("configuration is too large ({length} bytes; maximum {maximum})")
             }

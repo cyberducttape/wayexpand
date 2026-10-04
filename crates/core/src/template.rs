@@ -182,7 +182,18 @@ pub enum TemplateError {
 /// Render built-in variables without invoking a shell or external process.
 /// Unknown variables are errors so a typo can never silently reach an editor.
 pub fn render_template(template: &str, context: &TemplateContext) -> Result<String, TemplateError> {
-    render(template, context, false).map(|(rendered, _)| rendered)
+    render(template, context, false, MAX_RENDERED_BYTES).map(|(rendered, _)| rendered)
+}
+
+/// Render a deliberately bounded preview. This is for interactive UIs only:
+/// a preview must not be able to spend a frame materializing a full-size
+/// replacement or included snippet.
+pub fn render_template_preview(
+    template: &str,
+    context: &TemplateContext,
+    maximum_bytes: usize,
+) -> Result<String, TemplateError> {
+    render(template, context, true, maximum_bytes).map(|(rendered, _)| rendered)
 }
 
 /// Every `{{...}}` variable name in a template, in order. Unclosed markers
@@ -208,8 +219,9 @@ fn render(
     template: &str,
     context: &TemplateContext,
     allow_cursor: bool,
+    maximum_bytes: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    render_nested(template, context, allow_cursor, 0)
+    render_nested(template, context, allow_cursor, 0, maximum_bytes)
 }
 
 fn render_nested(
@@ -217,17 +229,18 @@ fn render_nested(
     context: &TemplateContext,
     allow_cursor: bool,
     depth: usize,
+    maximum_bytes: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
     let mut rendered = String::with_capacity(template.len());
     let mut cursor_position = None;
     let mut cursor = 0;
     while cursor < template.len() {
         let Some(relative_start) = template[cursor..].find("{{") else {
-            push_bounded(&mut rendered, &template[cursor..])?;
+            push_bounded(&mut rendered, &template[cursor..], maximum_bytes)?;
             break;
         };
         let start = cursor + relative_start;
-        push_bounded(&mut rendered, &template[cursor..start])?;
+        push_bounded(&mut rendered, &template[cursor..start], maximum_bytes)?;
         let variable_start = start + 2;
         let Some(relative_end) = template[variable_start..].find("}}") else {
             return Err(TemplateError::Unclosed { offset: start });
@@ -297,7 +310,7 @@ fn render_nested(
                 if template_variables(included).contains(&"cursor") {
                     return Err(TemplateError::CursorInInclude);
                 }
-                render_nested(included, context, false, depth + 1)?.0
+                render_nested(included, context, false, depth + 1, maximum_bytes)?.0
             }
             other => match parse_offset_variable(other) {
                 Some((base, offset)) => {
@@ -327,7 +340,7 @@ fn render_nested(
                 }
             },
         };
-        push_bounded(&mut rendered, &value)?;
+        push_bounded(&mut rendered, &value, maximum_bytes)?;
         cursor = end + 2;
     }
     Ok((rendered, cursor_position))
@@ -383,15 +396,19 @@ pub fn render_template_with_cursor(
     template: &str,
     context: &TemplateContext,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    let (rendered, position) = render(template, context, true)?;
+    let (rendered, position) = render(template, context, true, MAX_RENDERED_BYTES)?;
     let cursor_offset = position.map(|position| rendered[position..].graphemes(true).count());
     Ok((rendered, cursor_offset))
 }
 
-fn push_bounded(output: &mut String, value: &str) -> Result<(), TemplateError> {
-    if output.len().saturating_add(value.len()) > MAX_RENDERED_BYTES {
+fn push_bounded(
+    output: &mut String,
+    value: &str,
+    maximum_bytes: usize,
+) -> Result<(), TemplateError> {
+    if output.len().saturating_add(value.len()) > maximum_bytes {
         return Err(TemplateError::RenderedTooLarge {
-            maximum: MAX_RENDERED_BYTES,
+            maximum: maximum_bytes,
         });
     }
     output.push_str(value);

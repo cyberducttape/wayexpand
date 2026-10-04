@@ -5,7 +5,9 @@
 //! portals, keyboard layouts, pass-through, sensitive fields, or real client
 //! insertion.
 
-use wayexpand_core::{Config, ExpansionEngine, ExpansionResult, InputEvent, WindowContext};
+use wayexpand_core::{
+    form_fields, Config, ExpansionEngine, ExpansionResult, InputEvent, WindowContext,
+};
 
 /// What the field should become after an edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +28,9 @@ pub(crate) struct Playground {
     /// Characters the user did not have to type (replacement minus trigger).
     pub keystrokes_saved: usize,
     pub last_trigger: Option<String>,
+    /// True when the current text ends with a form trigger. Forms need the
+    /// deferred form overlay and cannot be simulated by this text-only field.
+    pub form_detected: bool,
 }
 
 impl Playground {
@@ -37,6 +42,7 @@ impl Playground {
     pub fn clear(&mut self) {
         self.text.clear();
         self.seen.clear();
+        self.form_detected = false;
         if let Some(engine) = self.engine.as_mut() {
             engine.process(InputEvent::Reset);
         }
@@ -52,6 +58,13 @@ impl Playground {
         new_text: &str,
         caret_at_end: bool,
     ) -> Option<Rewrite> {
+        self.form_detected = config.expansion.iter().any(|expansion| {
+            expansion.enabled
+                && form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
+                && std::iter::once(&expansion.trigger)
+                    .chain(&expansion.aliases)
+                    .any(|trigger| new_text.ends_with(trigger))
+        });
         if self.engine.is_none() {
             self.engine = build_engine(config);
         }

@@ -79,13 +79,14 @@ impl GuiApp {
                 return cached_result.clone();
             }
         }
-        let result = preview::render(
+        let result = preview::render_with_library(
             source,
             &self.config.settings,
             &self.config.organization,
             self.draft.as_ref(),
             &self.preview_input,
             &self.preview_app,
+            Some(&self.config),
         );
         self.preview_cache = Some((
             self.preview_revision,
@@ -1279,6 +1280,15 @@ impl GuiApp {
                     return;
                 }
                 ui.add_space(4.0);
+                if self.playground.form_detected {
+                    ui.label(
+                        RichText::new(
+                            "Form snippet detected. Form expansion cannot be simulated in Try It Live yet.",
+                        )
+                        .small()
+                        .color(palette.warning),
+                    );
+                }
                 let id = egui::Id::new("try_live_field");
                 let output = TextEdit::multiline(&mut self.playground.text)
                     .id(id)

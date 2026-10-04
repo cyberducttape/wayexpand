@@ -4,7 +4,9 @@
 //! and debuggability (can inspect with netcat, socat, etc).
 
 use crate::config::is_user_or_root_owner;
-use crate::protocol::{ActionError, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES};
+use crate::protocol::{
+    ActionError, ActionRequest, ActionResponse, MAX_ACTION_ID_BYTES, MAX_OUTPUT_BYTES,
+};
 use serde_json;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
@@ -74,6 +76,25 @@ fn bounded_response(response: &ActionResponse) -> ActionResponse {
         _ => ActionResponse::Error(ActionError::OutputTruncated {
             limit_bytes: MAX_MESSAGE_BYTES,
         }),
+    }
+}
+
+fn encode_bounded_response(response: &ActionResponse) -> Vec<u8> {
+    let bounded = bounded_response(response);
+    match encode_frame(&bounded) {
+        Ok(json) => json,
+        Err(_) => {
+            // Never let attacker/configuration-controlled strings turn the
+            // error path into a panic. This response has no external data.
+            let fallback = ActionResponse::Error(ActionError::Internal {
+                reason: "response could not be serialized within the IPC limit".to_owned(),
+            });
+            encode_frame(&fallback).unwrap_or_else(|_| {
+                // The constant above is far below MAX_MESSAGE_BYTES; retain a
+                // final protocol-valid fallback even if serialization changes.
+                br#"{"Error":{"Internal":{"reason":"broker response unavailable"}}}"#.to_vec()
+            })
+        }
     }
 }
 
@@ -161,7 +182,11 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> Result<String,
 #[doc(hidden)]
 pub fn decode_request_frame<R: BufRead>(reader: &mut R) -> Result<ActionRequest, IpcError> {
     let line = read_bounded_line(reader, MAX_MESSAGE_BYTES)?;
-    serde_json::from_str(line.trim()).map_err(IpcError::Json)
+    let request: ActionRequest = serde_json::from_str(line.trim()).map_err(IpcError::Json)?;
+    if request.action_id.is_empty() || request.action_id.len() > MAX_ACTION_ID_BYTES {
+        return Err(IpcError::InvalidFormat);
+    }
+    Ok(request)
 }
 
 /// Broker server listening on a Unix socket.
@@ -371,8 +396,7 @@ impl ServerConnection {
             Err(IpcError::MessageTooLarge(_, _)) => {
                 // Keep a successful action successful when JSON escaping or
                 // an older/foreign client produces an oversized response.
-                let bounded = bounded_response(response);
-                let json = encode_frame(&bounded).expect("bounded response must fit IPC frame");
+                let json = encode_bounded_response(response);
                 write_frame(&mut self.stream, &json)
             }
             Err(error) => Err(error),

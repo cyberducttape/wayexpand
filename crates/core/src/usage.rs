@@ -211,6 +211,13 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
         .iter()
         .filter(|expansion| expansion.enabled)
         .collect();
+    let mut all_triggers: Vec<String> = enabled
+        .iter()
+        .flat_map(|expansion| {
+            std::iter::once(expansion.trigger.clone()).chain(expansion.aliases.clone())
+        })
+        .collect();
+    all_triggers.sort_unstable();
     let mut risks = Vec::new();
     for expansion in &enabled {
         for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
@@ -229,20 +236,21 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
                 });
             }
             if expansion.match_mode == MatchMode::Immediate {
-                for other in &enabled {
-                    if let Some(longer) = std::iter::once(&other.trigger)
-                        .chain(&other.aliases)
-                        .find(|longer| {
-                            longer.len() > trigger.len() && longer.starts_with(trigger.as_str())
-                        })
-                    {
-                        risks.push(TriggerRisk {
-                            trigger: trigger.clone(),
-                            reason: format!(
-                                "is the start of {longer}, so it waits for the next key before expanding"
-                            ),
-                        });
-                    }
+                // Prefixes form a contiguous range in sorted lexicographic
+                // order. The first entry after `trigger` is enough to detect
+                // whether that range contains a longer trigger, reducing
+                // this check from O(T²) to O(T log T).
+                let next_index = all_triggers
+                    .partition_point(|candidate| candidate.as_str() <= trigger.as_str());
+                if let Some(longer) = all_triggers.get(next_index).filter(|candidate| {
+                    candidate.len() > trigger.len() && candidate.starts_with(trigger.as_str())
+                }) {
+                    risks.push(TriggerRisk {
+                        trigger: trigger.clone(),
+                        reason: format!(
+                            "is the start of {longer}, so it waits for the next key before expanding"
+                        ),
+                    });
                 }
             }
         }

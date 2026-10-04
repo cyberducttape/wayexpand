@@ -9,6 +9,8 @@ use std::time::Duration;
 /// Total captured action output returned in a response, across stdout and
 /// stderr. Each stream receives half of this budget.
 pub const MAX_OUTPUT_BYTES: usize = 128 * 1024;
+/// Bound identifiers before they can be echoed in an error response.
+pub const MAX_ACTION_ID_BYTES: usize = 256;
 
 /// Action execution request from daemon to broker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

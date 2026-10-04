@@ -9,6 +9,7 @@
 //! typed trigger. Without a daemon, Enter copies the snippet instead.
 
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::mpsc::{self, Receiver, TryRecvError},
     thread,
@@ -17,7 +18,8 @@ use std::{
 
 use eframe::egui::{self, Color32, RichText, TextEdit};
 use wayexpand_core::{
-    render_template_with_cursor, Config, ConfigRevision, ExpansionConfig, TemplateContext,
+    form_fields, render_template_preview, render_template_with_cursor, Config, ConfigRevision,
+    ExpansionConfig, TemplateContext,
 };
 
 use crate::{
@@ -108,6 +110,7 @@ pub(crate) struct PickerApp {
     search_index: Vec<SearchEntry>,
     cached_query: Option<String>,
     cached_revision: Option<ConfigRevision>,
+    preview_cache: HashMap<String, String>,
     result_indices: Vec<usize>,
     strings: Strings,
     palette: Palette,
@@ -160,6 +163,7 @@ impl PickerApp {
             config_revision,
             cached_query: None,
             cached_revision: None,
+            preview_cache: HashMap::new(),
             result_indices: Vec::new(),
             strings: Strings::new(language),
             palette: Palette::for_pack(colorpack, dark),
@@ -183,12 +187,19 @@ impl PickerApp {
         {
             return;
         }
+        if self.cached_revision.as_ref() != Some(&self.config_revision) {
+            self.preview_cache.clear();
+        }
         let mut ranked: Vec<(i64, usize)> = self
             .config
             .expansion
             .iter()
             .enumerate()
-            .filter(|(_, expansion)| expansion.enabled && expansion.command.is_none())
+            .filter(|(_, expansion)| {
+                expansion.enabled
+                    && expansion.command.is_none()
+                    && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
+            })
             .filter_map(|(index, _)| {
                 score_normalized(
                     &query,
@@ -209,9 +220,21 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
-        let text = render_template_with_cursor(&expansion.replacement, &self.template_context)
-            .map(|(text, _)| text)
-            .unwrap_or_else(|_| expansion.replacement.clone());
+        // Preview context is intentionally separate from execution context.
+        // Refresh this at selection time so date/time and clipboard values do
+        // not reflect when the picker happened to open.
+        let context = self.config.template_context(None);
+        let text = match render_template_with_cursor(&expansion.replacement, &context) {
+            Ok((text, _)) => text,
+            Err(error) => {
+                self.insert_state = InsertState::Failed {
+                    trigger: expansion.trigger.clone(),
+                    text: String::new(),
+                    error: format!("Could not render this snippet: {error}"),
+                };
+                return;
+            }
+        };
         if self.daemon_available {
             let Some(target_focus) = self.target_focus.clone() else {
                 self.insert_state = InsertState::Failed {
@@ -241,6 +264,24 @@ impl PickerApp {
         // process that set it.
         ctx.copy_text(text);
         self.copied = Some(expansion.trigger.clone());
+    }
+
+    fn preview_for(&mut self, expansion: &ExpansionConfig) -> String {
+        if let Some(preview) = self.preview_cache.get(&expansion.id) {
+            return preview.clone();
+        }
+        let rendered = render_template_preview(&expansion.replacement, &self.template_context, 512)
+            .unwrap_or_else(|_| "(preview unavailable)".to_owned());
+        let preview = rendered
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(90)
+            .collect::<String>();
+        self.preview_cache
+            .insert(expansion.id.clone(), preview.clone());
+        preview
     }
 
     fn poll_insert(&mut self, ctx: &egui::Context) {
@@ -391,15 +432,10 @@ impl eframe::App for PickerApp {
                             });
                         }
                         for (index, expansion_index) in result_indices.iter().copied().enumerate() {
-                            let expansion = &self.config.expansion[expansion_index];
+                            let expansion = self.config.expansion[expansion_index].clone();
+                            let preview = self.preview_for(&expansion);
                             let selected = index == self.selected;
-                            let response = picker_row(
-                                ui,
-                                &palette,
-                                &self.template_context,
-                                expansion,
-                                selected,
-                            );
+                            let response = picker_row(ui, &palette, &preview, &expansion, selected);
                             if selected && (up || down) {
                                 response.scroll_to_me(None);
                             }
@@ -444,22 +480,13 @@ impl eframe::App for PickerApp {
 fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
-    template_context: &TemplateContext,
+    preview: &str,
     expansion: &ExpansionConfig,
     selected: bool,
 ) -> egui::Response {
     // Show what will be typed, not template syntax: `{{date}}` becomes the
     // date and the `{{cursor}}` marker disappears.
-    let rendered = render_template_with_cursor(&expansion.replacement, template_context)
-        .map(|(text, _)| text)
-        .unwrap_or_else(|_| expansion.replacement.clone());
-    let first_line = rendered
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .take(90)
-        .collect::<String>();
+    let first_line = preview;
     let fill = if selected {
         palette.accent_weak
     } else {

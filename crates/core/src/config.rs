@@ -41,6 +41,8 @@ const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
 pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const CONFIG_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
+pub(crate) const MAX_EFFECTIVE_TRIGGER_SCALARS: usize = 1_000_000;
+pub(crate) const MAX_EFFECTIVE_TRIGGERS: usize = 100_000;
 static EXPANSION_ID_FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn new_expansion_id() -> String {
@@ -1234,6 +1236,20 @@ impl Config {
                     .map(move |trigger| (index, trigger))
             })
             .collect();
+        let effective_scalars = enabled
+            .iter()
+            .map(|(_, trigger)| trigger.chars().count())
+            .sum::<usize>();
+        if effective_scalars > MAX_EFFECTIVE_TRIGGER_SCALARS
+            || enabled.len() > MAX_EFFECTIVE_TRIGGERS
+        {
+            return Err(ConfigError::EffectiveTriggerDataTooLarge {
+                scalars: effective_scalars,
+                maximum_scalars: MAX_EFFECTIVE_TRIGGER_SCALARS,
+                triggers: enabled.len(),
+                maximum_triggers: MAX_EFFECTIVE_TRIGGERS,
+            });
+        }
         enabled.sort_unstable_by(|left, right| {
             left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0))
         });

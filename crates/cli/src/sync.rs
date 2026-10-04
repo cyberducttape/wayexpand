@@ -65,8 +65,16 @@ fn validate_library(config_path: &Path) -> Result<()> {
 }
 
 fn remote(directory: &Path) -> Result<Option<String>> {
-    let remotes = git_ok(directory, &["remote"])?;
-    Ok(remotes.lines().next().map(str::to_owned))
+    // `origin` is the explicitly configured synchronization remote.  Picking
+    // the first entry from `git remote` makes a repository with a backup or
+    // mirror remote sync unpredictably.
+    let output = git(directory, &["remote", "get-url", "origin"])?;
+    if output.status.success() {
+        return Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        ));
+    }
+    Ok(None)
 }
 
 /// Make the configuration directory a library repository.
