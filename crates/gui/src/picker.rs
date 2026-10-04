@@ -18,8 +18,8 @@ use std::{
 
 use eframe::egui::{self, Color32, RichText, TextEdit};
 use wayexpand_core::{
-    form_fields, render_template_preview, render_template_with_cursor, Config, ConfigRevision,
-    ExpansionConfig, TemplateContext,
+    form_fields, render_template_preview, render_template_with_cursor, template_variables, Config,
+    ConfigRevision, ExpansionConfig, TemplateContext,
 };
 
 use crate::{
@@ -32,6 +32,7 @@ use crate::{
 /// unverified window after this deadline.
 const FOCUS_RETURN_TIMEOUT: Duration = Duration::from_secs(2);
 const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const PREVIEW_CONTEXT_REFRESH: Duration = Duration::from_secs(1);
 const MAX_RESULTS: usize = 60;
 
 /// Rank `entry` against `query` (both compared case-insensitively). A
@@ -111,6 +112,7 @@ pub(crate) struct PickerApp {
     cached_query: Option<String>,
     cached_revision: Option<ConfigRevision>,
     preview_cache: HashMap<String, String>,
+    last_preview_context_refresh: Instant,
     result_indices: Vec<usize>,
     strings: Strings,
     palette: Palette,
@@ -165,6 +167,7 @@ impl PickerApp {
             cached_query: None,
             cached_revision: None,
             preview_cache: HashMap::new(),
+            last_preview_context_refresh: Instant::now(),
             result_indices: Vec::new(),
             strings: Strings::new(language),
             palette: Palette::for_pack(colorpack, dark),
@@ -196,11 +199,7 @@ impl PickerApp {
             .expansion
             .iter()
             .enumerate()
-            .filter(|(_, expansion)| {
-                expansion.enabled
-                    && expansion.command.is_none()
-                    && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
-            })
+            .filter(|(_, expansion)| picker_expansion_is_eligible(expansion, self.daemon_available))
             .filter_map(|(index, _)| {
                 score_normalized(
                     &query,
@@ -272,6 +271,14 @@ impl PickerApp {
     }
 
     fn preview_for(&mut self, expansion: &ExpansionConfig) -> String {
+        if self.last_preview_context_refresh.elapsed() >= PREVIEW_CONTEXT_REFRESH {
+            let context = self.config.template_context(None);
+            if context.unix_timestamp != self.template_context.unix_timestamp {
+                self.template_context = context;
+                self.preview_cache.clear();
+            }
+            self.last_preview_context_refresh = Instant::now();
+        }
         if let Some(preview) = self.preview_cache.get(&expansion.id) {
             return preview.clone();
         }
@@ -643,6 +650,13 @@ fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bo
         .unwrap_or((None, false, false))
 }
 
+fn picker_expansion_is_eligible(expansion: &ExpansionConfig, daemon_available: bool) -> bool {
+    expansion.enabled
+        && expansion.command.is_none()
+        && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
+        && (daemon_available || !template_variables(&expansion.replacement).contains(&"clipboard"))
+}
+
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
     let generation = response
         .lines()
@@ -667,7 +681,11 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_target_from_response, picker_focus_state, score, FocusInfo, FocusTarget};
+    use super::{
+        focus_target_from_response, picker_expansion_is_eligible, picker_focus_state, score,
+        FocusInfo, FocusTarget,
+    };
+    use wayexpand_core::{ExpansionConfig, MatchMode};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -714,5 +732,25 @@ mod tests {
     #[test]
     fn missing_focus_response_does_not_claim_exact_identity() {
         assert_eq!(picker_focus_state(None), (None, false, false));
+    }
+
+    #[test]
+    fn clipboard_snippets_are_hidden_without_a_daemon_reader() {
+        let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":clip".into(),
+            replacement: "{{clipboard}}".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: Vec::new(),
+        };
+        assert!(!picker_expansion_is_eligible(&expansion, false));
+        assert!(picker_expansion_is_eligible(&expansion, true));
     }
 }
