@@ -222,3 +222,78 @@ pub(crate) fn status(config_path: &Path) -> Result<String> {
         if changes.is_empty() { "none" } else { "yes" }
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "wayexpand-sync-test-{}-{suffix}",
+            std::process::id()
+        ))
+    }
+
+    fn prepare_repository() -> (PathBuf, PathBuf) {
+        let directory = test_directory();
+        std::fs::create_dir_all(&directory).expect("create test repository directory");
+        std::fs::set_permissions(
+            &directory,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .expect("restrict test repository directory");
+        let config_path = directory.join("expansions.toml");
+        std::fs::write(
+            &config_path,
+            "[[expansion]]\ntrigger = \";test\"\nreplacement = \"ok\"\n",
+        )
+        .expect("write test configuration");
+        std::fs::set_permissions(
+            &config_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict test configuration");
+        git_ok(&directory, &["init", "--quiet"]).expect("initialize test repository");
+        git_ok(&directory, &["config", "user.name", "WayExpand Test"])
+            .expect("configure test Git user name");
+        git_ok(
+            &directory,
+            &["config", "user.email", "wayexpand-test@example.invalid"],
+        )
+        .expect("configure test Git user email");
+        (directory, config_path)
+    }
+
+    #[test]
+    fn init_adds_origin_when_another_remote_is_already_configured() {
+        let (directory, config_path) = prepare_repository();
+        git_ok(
+            &directory,
+            &[
+                "remote",
+                "add",
+                "backup",
+                "ssh://example.invalid/backup.git",
+            ],
+        )
+        .expect("configure backup remote");
+
+        init(&config_path, Some("ssh://example.invalid/origin.git"))
+            .expect("configure the synchronization remote");
+
+        assert_eq!(
+            remote(&directory).expect("read origin remote"),
+            Some("ssh://example.invalid/origin.git".into())
+        );
+        assert_eq!(
+            git_ok(&directory, &["remote", "get-url", "backup"]).expect("read backup remote"),
+            "ssh://example.invalid/backup.git"
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+}
