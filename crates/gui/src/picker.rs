@@ -221,26 +221,11 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
-        // Preview context is intentionally separate from execution context.
-        // Refresh this at selection time so date/time and clipboard values do
-        // not reflect when the picker happened to open.
-        let context = self.config.template_context(None);
-        let text = match render_template_with_cursor(&expansion.replacement, &context) {
-            Ok((text, _)) => text,
-            Err(error) => {
-                self.insert_state = InsertState::Failed {
-                    trigger: expansion.trigger.clone(),
-                    text: String::new(),
-                    error: format!("Could not render this snippet: {error}"),
-                };
-                return;
-            }
-        };
         if self.daemon_available {
             let Some(target_focus) = self.target_focus.clone() else {
                 self.insert_state = InsertState::Failed {
                     trigger: expansion.trigger.clone(),
-                    text,
+                    text: String::new(),
                     error: "Could not identify the original focused window; refusing to insert."
                         .to_owned(),
                 };
@@ -255,11 +240,30 @@ impl PickerApp {
             });
             self.insert_state = InsertState::Waiting {
                 trigger,
-                text,
+                // The daemon owns the execution context, including the
+                // current clipboard and dynamic values. Do not render a
+                // second, incomplete copy in the picker before delegating.
+                text: String::new(),
                 receiver,
             };
             return;
         }
+        // Preview context is intentionally separate from execution context.
+        // Refresh this at selection time so date/time values do not reflect
+        // when the picker happened to open. Clipboard fallback has no daemon
+        // reader, so it renders with the values available to this process.
+        let context = self.config.template_context(None);
+        let text = match render_template_with_cursor(&expansion.replacement, &context) {
+            Ok((text, _)) => text,
+            Err(error) => {
+                self.insert_state = InsertState::Failed {
+                    trigger: expansion.trigger.clone(),
+                    text: String::new(),
+                    error: format!("Could not render this snippet: {error}"),
+                };
+                return;
+            }
+        };
         // No daemon to type for us: offer the text on the clipboard. The
         // window stays open because a Wayland clipboard is served by the
         // process that set it.
@@ -403,7 +407,9 @@ impl eframe::App for PickerApp {
                             );
                             ui.label(error);
                             ui.horizontal(|ui| {
-                                if ui.button(self.strings.picker_copy_instead()).clicked() {
+                                if !text.is_empty()
+                                    && ui.button(self.strings.picker_copy_instead()).clicked()
+                                {
                                     ctx.copy_text(text.clone());
                                     self.copied = Some(trigger.clone());
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
