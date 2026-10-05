@@ -146,6 +146,16 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy (locked, release)
         run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
+      - name: Measure adversarial matcher construction (10k snippets)
+        run: |
+          cargo bench --locked -p wayexpand-core --bench matcher --no-run
+          bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
+            -name 'matcher-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+          test -n "$bench_binary"
+          test -x "$bench_binary"
+          timeout --signal=TERM --kill-after=10s 90s /usr/bin/time -v \
+            "$bench_binary" --bench matcher_construction_amplified/10000 \
+            --sample-size 10 --warm-up-time 1 --measurement-time 2
       - name: CLI smoke test
         run: timeout --signal=TERM --kill-after=30s 15m bash scripts/test-release.sh
       - name: UI help output
