@@ -27,13 +27,14 @@ These are machine-specific reference values, not a release performance
 guarantee. Compare like-for-like hardware and toolchain when investigating a
 regression; Criterion's full reports are written to `target/criterion`.
 
-### Amplified construction baseline: 2026-10-04
+### Previous amplified construction baseline: 2026-10-04 (one alias)
 
 Same machine and toolchain. The workload builds an `ExpansionEngine` from a
 pre-parsed, pre-cloned configuration containing aliases, case propagation,
-and decomposable Unicode triggers. At 1,000 snippets it uses eight aliases
-per snippet; at 5,000 and 10,000 it uses one alias per snippet to stay below
-the effective-trigger cap. This run used a 2 s warmup and 5 s measurement
+and decomposable Unicode triggers. At 1,000 snippets it used eight aliases
+per snippet; at 5,000 and 10,000 it used one alias per snippet. This is a
+historical, less-amplified workload; the current benchmark uses two aliases
+at 5,000 and 10,000 snippets. This run used a 2 s warmup and 5 s measurement
 with 20 samples:
 
 | Snippets | Estimate | 95% interval |
@@ -49,6 +50,26 @@ configuration, so it is process-level evidence rather than isolated matcher
 memory. Reproduce the RSS observation by building the benchmark, then running
 its executable directly with Criterion's `--bench` flag under `/usr/bin/time
 -v`; do not time `cargo bench` if you want to exclude compiler memory.
+
+### Current amplified construction baseline: 2026-10-05 (two aliases)
+
+Same machine and toolchain. The current 10,000-snippet workload has two aliases
+per snippet, case propagation enabled, and a decomposable Unicode trigger.
+The measured operation excludes TOML parsing and configuration cloning. With
+a 1 s warmup and 2 s measurement over 10 samples, matcher construction was
+160.66 ms (95% interval 159.24–162.11 ms); `/usr/bin/time -v` reported
+114,644 KiB maximum process RSS. This is not directly comparable to the
+one-alias 2026-10-04 measurement because the workload is more amplified.
+
+Reproduce the current 10,000-snippet measurement and process RSS with:
+
+```sh
+cargo bench --locked -p wayexpand-core --bench matcher --no-run
+bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
+  -name 'matcher-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+/usr/bin/time -v "$bench_binary" --bench matcher_construction_amplified/10000 \
+  --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
 
 ## Configuration editing
 
