@@ -239,8 +239,40 @@ fn render_nested(
     let mut cursor_position = None;
     let mut cursor = 0;
     while cursor < template.len() {
-        let Some(relative_start) = template[cursor..].find("{{") else {
-            let stopped = push_bounded(&mut rendered, &template[cursor..], maximum_bytes, preview)?;
+        if preview && rendered.len() >= maximum_bytes {
+            return Ok((rendered, cursor_position, true));
+        }
+        let remaining_template = &template[cursor..];
+        let remaining_output = maximum_bytes.saturating_sub(rendered.len());
+        let mut inspect_len = if preview {
+            remaining_template
+                .len()
+                .min(remaining_output.saturating_add(1))
+        } else {
+            remaining_template.len()
+        };
+        while !remaining_template.is_char_boundary(inspect_len) {
+            inspect_len -= 1;
+        }
+        let inspected = &remaining_template[..inspect_len];
+        let relative_start = inspected.find("{{");
+        let relative_newline = inspected.find('\n');
+
+        // A literal newline before any variable ends a preview immediately;
+        // do not search or parse the potentially enormous tail that follows.
+        if preview {
+            if let Some(newline) = relative_newline
+                .filter(|newline| relative_start.is_none_or(|variable| *newline < variable))
+            {
+                rendered.push_str(&remaining_template[..newline]);
+                return Ok((rendered, cursor_position, true));
+            }
+        }
+
+        let Some(relative_start) =
+            relative_start.filter(|start| !preview || *start < remaining_output)
+        else {
+            let stopped = push_bounded(&mut rendered, remaining_template, maximum_bytes, preview)?;
             if stopped {
                 return Ok((rendered, cursor_position, true));
             }
@@ -324,11 +356,16 @@ fn render_nested(
                 if depth >= MAX_INCLUDE_DEPTH {
                     return Err(TemplateError::IncludeTooDeep);
                 }
-                if template_variables(included).contains(&"cursor") {
+                if !preview && template_variables(included).contains(&"cursor") {
                     return Err(TemplateError::CursorInInclude);
                 }
+                let include_budget = if preview {
+                    maximum_bytes.saturating_sub(rendered.len())
+                } else {
+                    maximum_bytes
+                };
                 let (rendered, _, stopped) =
-                    render_nested(included, context, false, depth + 1, maximum_bytes, preview)?;
+                    render_nested(included, context, false, depth + 1, include_budget, preview)?;
                 included_stopped = stopped;
                 rendered
             }
@@ -517,7 +554,7 @@ mod tests {
         );
         assert_eq!(
             render_template_preview(
-                &format!("first line\n{}", "x".repeat(1024 * 1024)),
+                &format!("first line\n{}{{{{unknown}}}}", "x".repeat(1024 * 1024)),
                 &context,
                 512
             )
@@ -537,7 +574,7 @@ mod tests {
         let mut snippets = HashMap::new();
         snippets.insert(
             "signature".into(),
-            format!("included line\n{}", "x".repeat(1024 * 1024)),
+            format!("included line\n{{{{cursor}}}}{}", "x".repeat(1024 * 1024)),
         );
         let context = TemplateContext {
             snippets: Arc::new(snippets),
@@ -546,6 +583,14 @@ mod tests {
         assert_eq!(
             render_template_preview("{{snippet:signature}}", &context, 512).unwrap(),
             "included line"
+        );
+        assert!(matches!(
+            render_template("{{snippet:signature}}", &context),
+            Err(TemplateError::CursorInInclude)
+        ));
+        assert_eq!(
+            render_template("first line\nsecond line", &context).unwrap(),
+            "first line\nsecond line"
         );
     }
 
