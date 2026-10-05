@@ -231,7 +231,9 @@ fn render_nested(
     depth: usize,
     maximum_bytes: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    let mut rendered = String::with_capacity(template.len());
+    // Preview callers may pass an arbitrarily large valid template. Do not
+    // reserve its full size before the output limit has a chance to reject it.
+    let mut rendered = String::with_capacity(template.len().min(maximum_bytes));
     let mut cursor_position = None;
     let mut cursor = 0;
     while cursor < template.len() {
@@ -450,6 +452,19 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_renderer_stops_at_its_output_budget_for_large_templates() {
+        let context = TemplateContext::default();
+        assert!(matches!(
+            render_template_preview(&"x".repeat(1024 * 1024), &context, 512),
+            Err(TemplateError::RenderedTooLarge { maximum: 512 })
+        ));
+        assert_eq!(
+            render_template_preview("hello {{username}}", &context, 512).unwrap(),
+            format!("hello {}", context.username)
+        );
+    }
 
     #[test]
     fn renders_builtins_without_shelling_out() {
