@@ -143,13 +143,11 @@ impl DaemonCapabilities {
     }
 
     pub fn parse(response: &str) -> Option<Self> {
-        let status_schema = response.lines().find_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            (key == "status_schema")
-                .then(|| value.parse::<u32>().ok())
-                .flatten()
-        });
-        if status_schema != Some(CONTROL_STATUS_SCHEMA) {
+        let mut schemas = response
+            .lines()
+            .filter_map(|line| line.strip_prefix("status_schema="));
+        let schema = schemas.next()?;
+        if schemas.next().is_some() || schema.parse::<u32>().ok() != Some(CONTROL_STATUS_SCHEMA) {
             return None;
         }
 
@@ -501,6 +499,18 @@ mod tests {
         );
         assert_eq!(
             super::DaemonCapabilities::parse(&format!("status_schema=7\n{capabilities}")),
+            None
+        );
+        assert_eq!(
+            super::DaemonCapabilities::parse(&format!(
+                "status_schema=invalid\nstatus_schema=6\n{capabilities}"
+            )),
+            None
+        );
+        assert_eq!(
+            super::DaemonCapabilities::parse(&format!(
+                "status_schema=6\nstatus_schema=5\n{capabilities}"
+            )),
             None
         );
         assert_eq!(super::DaemonCapabilities::parse(capabilities), None);
