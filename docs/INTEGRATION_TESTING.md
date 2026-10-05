@@ -28,7 +28,11 @@ backend behavior.
 ## Matcher performance baseline
 
 The matcher benchmark exercises 100, 1,000, and 10,000 configured snippets
-while feeding a trigger one character at a time:
+while feeding a trigger one character at a time. It also measures engine
+construction for 1,000, 5,000, and 10,000 snippets using an amplified config
+with aliases, case propagation, and decomposable Unicode triggers. Config
+parsing and cloning are outside the construction timing; this is startup CPU
+cost, not a peak-memory/RSS measurement:
 
 ```sh
 cargo bench --locked -p wayexpand-core --bench matcher
