@@ -448,7 +448,7 @@ fn push_bounded(
             byte_end -= 1;
         }
         output.push_str(&value[..byte_end]);
-        return Ok(byte_end < value.len());
+        return Ok(byte_end < value.len() || output.len() >= maximum_bytes);
     }
     if output.len().saturating_add(value.len()) > maximum_bytes {
         return Err(TemplateError::RenderedTooLarge {
@@ -501,6 +501,15 @@ mod tests {
         assert_eq!(
             render_template_preview(&"x".repeat(1024 * 1024), &context, 512).unwrap(),
             "x".repeat(512)
+        );
+        assert_eq!(
+            render_template_preview(
+                &format!("{}{{{{unknown}}}}", "y".repeat(512)),
+                &context,
+                512
+            )
+            .unwrap(),
+            "y".repeat(512)
         );
         assert_eq!(
             render_template_preview("hello {{username}}", &context, 512).unwrap(),
