@@ -71,6 +71,17 @@ bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
   --sample-size 10 --warm-up-time 1 --measurement-time 2
 ```
 
+### Recheck: 2026-10-05, commit `1bd5ea9`
+
+On the same host and toolchain, rerunning the 10,000-snippet case produced a
+158.56 ms estimate (95% interval 157.24–160.08 ms). Two direct-process RSS
+observations were 132,592 and 133,636 KiB. Construction time is consistent
+with the earlier capture, but RSS is materially higher than its 114,644 KiB
+reading. Treat peak RSS as unresolved host/run variance until a controlled
+comparison identifies the cause; do not use the earlier single observation as
+a memory guarantee. The current run used Linux 7.0.0-34-generic and the exact
+source revision above.
+
 ## Configuration editing
 
 The GUI edits a copy of the whole configuration and the save path validates
