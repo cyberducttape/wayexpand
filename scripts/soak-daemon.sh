@@ -37,20 +37,70 @@ cli_stderr_path="$runtime_dir/cli.stderr"
 report_dir=${SOAK_REPORT_DIR:-}
 daemon_pid=
 feeder_pid=
-if [ -n "$report_dir" ] && [ -e "$report_dir" ]; then
-    printf '%s\n' "error: soak report directory already exists: $report_dir" >&2
-    exit 2
-fi
+report_created=0
+preserve_partial_report() {
+    failure_status=$1
+    [ -n "$report_dir" ] || return 0
+    if [ "$report_created" -eq 0 ]; then
+        mkdir -p "$(dirname -- "$report_dir")" || return 0
+        mkdir -m 0700 "$report_dir" || return 0
+        report_created=1
+    fi
+    copy_partial_artifact() {
+        if [ -f "$1" ]; then
+            cp "$1" "$report_dir/$2" || true
+        fi
+    }
+    copy_partial_artifact "$metrics_path" resource-samples.csv
+    copy_partial_artifact "$status_latency_path" status-latency-ms.txt
+    copy_partial_artifact "$explain_latency_path" explain-latency-ms.txt
+    copy_partial_artifact "$cli_stderr_path" cli.stderr
+    copy_partial_artifact "$runtime_dir/daemon.log" daemon.log
+    elapsed_seconds=0
+    if [ -n "${start:-}" ]; then
+        elapsed_seconds=$(( $(date +%s) - start ))
+    fi
+    if [ "$failure_status" -eq 130 ] || [ "$failure_status" -eq 143 ]; then
+        failure_result=interrupted
+    else
+        failure_result=failed
+    fi
+    {
+        echo "result=$failure_result"
+        echo "exit_status=$failure_status"
+        echo "started_utc=${started_utc:-unknown}"
+        echo "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "host=$(hostname)"
+        echo "kernel=$(uname -sr)"
+        echo "source_revision=$source_revision"
+        echo "source_worktree=$source_worktree"
+        echo "duration_seconds=$soak_seconds"
+        echo "elapsed_seconds=$elapsed_seconds"
+        echo "rounds=${round:-0}"
+    } >"$report_dir/summary.txt" || true
+}
+
 cleanup() {
+    cleanup_status=$?
+    trap - EXIT INT TERM
     for pid in "$feeder_pid" "$daemon_pid"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
         fi
     done
+    if [ "$cleanup_status" -ne 0 ]; then
+        preserve_partial_report "$cleanup_status"
+    fi
     rm -rf "$runtime_dir"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ -n "$report_dir" ] && [ -e "$report_dir" ]; then
+    printf '%s\n' "error: soak report directory already exists: $report_dir" >&2
+    exit 2
+fi
 
 # Keep the synthetic daemon out of the developer's desktop session. A private
 # XDG_RUNTIME_DIR alone is insufficient when D-Bus, Wayland, or X11 addresses
@@ -209,13 +259,16 @@ if [ -n "$report_dir" ]; then
         echo "refusing to overwrite existing soak report directory: $report_dir" >&2
         exit 2
     fi
+    report_created=1
     cp "$metrics_path" "$report_dir/resource-samples.csv"
     cp "$status_latency_path" "$report_dir/status-latency-ms.txt"
     cp "$explain_latency_path" "$report_dir/explain-latency-ms.txt"
     cp "$cli_stderr_path" "$report_dir/cli.stderr"
     cp "$runtime_dir/daemon.log" "$report_dir/daemon.log"
     {
+        echo "result=passed"
         echo "started_utc=$started_utc"
+        echo "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "host=$(hostname)"
         echo "kernel=$(uname -sr)"
         echo "source_revision=$source_revision"

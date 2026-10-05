@@ -70,7 +70,9 @@ preserve the CSV samples, raw latency samples, daemon log, and summary. The
 script refuses to reuse an existing report directory. Each summary records the
 exact Git revision and whether the worktree was clean when the soak began; CI
 uploads its short-run evidence as an artifact and verifies those fields against
-the checked-out commit.
+the checked-out commit. When a run fails or is interrupted, the script preserves
+partial samples, control latencies, and the daemon log with an explicit failure
+or interruption status before removing its private runtime directory.
 Synthetic input is rate-limited to one pair of lines per second by default;
 `SOAK_FEED_INTERVAL_SECONDS` can adjust that workload. Daemon logging is
 limited to warnings during the soak so a 24-hour run does not accumulate
