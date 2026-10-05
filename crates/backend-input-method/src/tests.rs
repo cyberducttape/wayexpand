@@ -24,6 +24,22 @@ fn keymap_state(layout: &str, variant: &str) -> Option<State> {
         .map(State::new)
 }
 
+fn keymap_state_with_options(layout: &str, variant: &str, options: &str) -> Option<State> {
+    let names = RuleNames::new("", "", layout, variant, options);
+    Keymap::new_from_names(Context::new(0).unwrap(), Some(names), 0)
+        .ok()
+        .map(State::new)
+}
+
+fn evdev_key_for_keysym(state: &State, expected: &str) -> Option<u32> {
+    (0_u32..=247).find(|key| {
+        key.checked_add(8)
+            .and_then(|keycode| state.key_get_one_sym(keycode))
+            .and_then(|keysym| keysym_get_name(&keysym))
+            .is_some_and(|name| name.eq_ignore_ascii_case(expected))
+    })
+}
+
 impl TextInjector for RecordingInjector {
     fn name(&self) -> &'static str {
         "recording"
@@ -266,6 +282,50 @@ fn altgr_text_is_not_treated_as_shortcut_alt_when_layout_supports_it() {
         // must not be classified as shortcut Alt by `active_modifiers`.
         assert!(!active_modifiers(&state).alt);
     }
+}
+
+#[test]
+fn dead_key_and_compose_key_are_recognized_as_local_composition_starts() {
+    let Some(dead_keymap) = keymap_state("us", "intl") else {
+        panic!("US international XKB keymap is required for composition tests");
+    };
+    let dead_acute = evdev_key_for_keysym(&dead_keymap, "dead_acute")
+        .expect("US international keymap must expose dead_acute");
+    assert!(key_is_composition(Some(&dead_keymap), dead_acute));
+
+    let Some(compose_keymap) = keymap_state_with_options("us", "", "compose:ralt") else {
+        panic!("XKB compose:ralt keymap is required for composition tests");
+    };
+    let multi_key = evdev_key_for_keysym(&compose_keymap, "Multi_key")
+        .expect("compose:ralt keymap must expose Multi_key");
+    assert!(key_is_composition(Some(&compose_keymap), multi_key));
+
+    let letter =
+        evdev_key_for_keysym(&compose_keymap, "a").expect("US keymap must expose the a key");
+    assert!(!key_is_composition(Some(&compose_keymap), letter));
+}
+
+#[test]
+fn local_composition_notifications_are_balanced_and_idempotent() {
+    let mut state = StateData::new();
+    begin_local_composition(&mut state);
+    begin_local_composition(&mut state);
+    assert!(state.composition_active);
+    assert_eq!(
+        state.events,
+        VecDeque::from([InputEvent::CompositionChanged { active: true }])
+    );
+
+    finish_local_composition(&mut state);
+    finish_local_composition(&mut state);
+    assert!(!state.composition_active);
+    assert_eq!(
+        state.events,
+        VecDeque::from([
+            InputEvent::CompositionChanged { active: true },
+            InputEvent::CompositionChanged { active: false },
+        ])
+    );
 }
 
 #[test]

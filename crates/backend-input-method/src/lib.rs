@@ -515,8 +515,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
             } => {
                 let composition_key = key_is_composition(state.keyboard_state.as_ref(), key);
                 if key_state == wl_keyboard::KeyState::Pressed && composition_key {
-                    state.composition_active = true;
-                    state.queue_event(InputEvent::CompositionChanged { active: true });
+                    begin_local_composition(state);
                 }
                 let is_modifier = state
                     .keyboard_state
@@ -624,6 +623,13 @@ fn finish_local_composition(state: &mut StateData) {
     if state.composition_active {
         state.composition_active = false;
         state.queue_event(InputEvent::CompositionChanged { active: false });
+    }
+}
+
+fn begin_local_composition(state: &mut StateData) {
+    if !state.composition_active {
+        state.composition_active = true;
+        state.queue_event(InputEvent::CompositionChanged { active: true });
     }
 }
 
