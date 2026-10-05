@@ -21,7 +21,7 @@ version="$1"
 project_dir=$(pwd -P)
 output_dir=$(pwd -P)
 timestamp=$(date -u +%s)
-tmpdir=$(mktemp -d "/tmp/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
 
 cleanup() {
     rm -rf "$tmpdir"
@@ -81,6 +81,16 @@ fi
 if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
     | grep -F "wayexpand-${version}/debian/rules" >/dev/null; then
     printf '%s\n' "ERROR: Debian packaging metadata missing from vendored tarball" >&2
+    exit 1
+fi
+if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
+    | grep -F "wayexpand-${version}/.cargo/config.toml" >/dev/null; then
+    printf '%s\n' "ERROR: Cargo source replacement config missing from vendored tarball" >&2
+    exit 1
+fi
+if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
+    | grep -E "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" >/dev/null; then
+    printf '%s\n' "ERROR: vendored crates missing from vendored tarball" >&2
     exit 1
 fi
 printf '%s\n' "  ✓ Verified .git not in vendored tarball"
