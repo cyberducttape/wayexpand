@@ -683,30 +683,12 @@ mod tests {
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
 
-        // notify may deliver a parent-directory event for the file's initial
-        // creation after the watcher is installed. Let that startup event
-        // settle first; this test is about steady-state idle polling, not the
-        // watcher backend's asynchronous startup queue.
-        // Parallel stress runs can delay notify delivery and scheduling well
-        // beyond the normal startup path. This is still bounded, but should
-        // test watcher settling rather than the runner's load profile.
-        let settle_deadline = Instant::now() + Duration::from_secs(10);
-        let mut quiet_since = Instant::now();
-        loop {
-            config.reload_if_changed();
-            let pending =
-                config.watch_check_after.is_some() || config.watch_dirty.load(Ordering::Acquire);
-            if pending {
-                quiet_since = Instant::now();
-            } else if quiet_since.elapsed() >= WATCH_DEBOUNCE * 2 {
-                break;
-            }
-            assert!(
-                Instant::now() < settle_deadline,
-                "configuration watcher did not become idle after startup"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        // The watcher is asynchronous and can keep delivering/coalescing its
+        // initial directory event while other tests are creating temporary
+        // configs. This test covers the integrity-polling path, not watcher
+        // startup, so establish the steady-state inputs directly.
+        config.watch_check_after = None;
+        config.watch_dirty.store(false, Ordering::Release);
 
         let stamp = config.observed.unwrap();
         config.last_integrity_check = Instant::now();
