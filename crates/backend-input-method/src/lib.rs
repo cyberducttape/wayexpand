@@ -419,11 +419,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard = Some(proxy.grab_keyboard(qh, ()));
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
-                if state.composition_active {
-                    state.queue_event(InputEvent::CompositionChanged { active: false });
-                }
-                state.composition_active = false;
-                state.local_compose = LocalCompose::new();
+                reset_local_composition(state);
                 // Do not capture until the compositor has delivered the
                 // current content purpose. This prevents an activation race
                 // from briefly treating a password field as ordinary text.
@@ -437,11 +433,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard_state = None;
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
-                if state.composition_active {
-                    state.queue_event(InputEvent::CompositionChanged { active: false });
-                }
-                state.composition_active = false;
-                state.local_compose = LocalCompose::new();
+                reset_local_composition(state);
                 // Deactivation can race with already-queued keyboard events.
                 // Keep the engine disabled until a new activation reports a
                 // non-sensitive content type.
@@ -500,11 +492,8 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 }
                 match decode_keymap(fd, size) {
                     Ok(keymap) => {
-                        if state.composition_active {
-                            finish_local_composition(state);
-                        }
+                        reset_local_composition(state);
                         state.keyboard_state = Some(State::new(keymap));
-                        state.local_compose = LocalCompose::new();
                     }
                     Err(error) => state.error = Some(error),
                 }
@@ -708,6 +697,14 @@ fn finish_local_composition(state: &mut StateData) {
         state.composition_active = false;
         state.queue_event(InputEvent::CompositionChanged { active: false });
     }
+}
+
+/// Drop an unfinished local dead-key/Compose sequence when its keyboard
+/// focus is invalidated. Its buffered literal fallback belongs to the old
+/// focus and must not be committed into whatever application focuses next.
+fn reset_local_composition(state: &mut StateData) {
+    state.local_compose = LocalCompose::new();
+    finish_local_composition(state);
 }
 
 fn begin_local_composition(state: &mut StateData) {

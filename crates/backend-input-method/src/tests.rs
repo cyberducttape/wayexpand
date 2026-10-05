@@ -371,6 +371,51 @@ fn multikey_sequence_keeps_the_engine_guarded_until_composed_text_commits() {
 }
 
 #[test]
+fn lifecycle_reset_clears_unfinished_compose_state() {
+    let mut state = StateData::new();
+    if state.local_compose.is_none() {
+        panic!("the test locale must provide an XKB Compose table");
+    }
+    for (keysym, fallback) in [
+        (xkeysym::key::Multi_key, None),
+        (xkeysym::key::o, Some("o")),
+    ] {
+        let update = state
+            .local_compose
+            .as_mut()
+            .expect("Compose state remains initialized")
+            .feed(keysym, fallback);
+        assert!(matches!(
+            apply_compose_update(&mut state, update),
+            ComposeUpdate::Pending
+        ));
+    }
+    assert!(state.composition_active);
+
+    reset_local_composition(&mut state);
+    assert!(!state.composition_active);
+    assert!(!state
+        .local_compose
+        .as_ref()
+        .is_some_and(LocalCompose::is_composing));
+    assert!(matches!(
+        state
+            .local_compose
+            .as_mut()
+            .expect("Compose state remains initialized")
+            .feed(xkeysym::key::c, Some("c")),
+        ComposeUpdate::Inactive
+    ));
+    assert_eq!(
+        state.events,
+        VecDeque::from([
+            InputEvent::CompositionChanged { active: true },
+            InputEvent::CompositionChanged { active: false },
+        ])
+    );
+}
+
+#[test]
 fn pending_pass_through_preserves_modifiers() {
     let mut pending = VecDeque::from([PendingKeyPassThrough {
         keycode: 105,
