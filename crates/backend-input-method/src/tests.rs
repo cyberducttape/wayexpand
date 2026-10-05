@@ -12,6 +12,7 @@ enum FakeWaylandEvent {
     CommitNormalContentType,
     Deactivate,
     FailDispatch,
+    FailFlush,
 }
 
 struct FakeWaylandTransport {
@@ -25,7 +26,13 @@ impl WaylandEventTransport for FakeWaylandTransport {
     }
 
     fn flush(&self) -> Result<(), InputMethodError> {
-        Ok(())
+        if matches!(self.events.front(), Some(FakeWaylandEvent::FailFlush)) {
+            Err(InputMethodError::Transport(
+                "synthetic flush failure".into(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     fn dispatch(&mut self, state: &mut StateData) -> Result<(), InputMethodError> {
@@ -49,6 +56,11 @@ impl WaylandEventTransport for FakeWaylandTransport {
             Some(FakeWaylandEvent::FailDispatch) => {
                 return Err(InputMethodError::Transport(
                     "synthetic dispatch failure".into(),
+                ));
+            }
+            Some(FakeWaylandEvent::FailFlush) => {
+                return Err(InputMethodError::Transport(
+                    "flush failure reached dispatch unexpectedly".into(),
                 ));
             }
             None => {
@@ -114,6 +126,17 @@ fn input_method_source_dispatch_failure_is_reported_as_retryable() {
         .unwrap_err();
     assert!(error.retryable);
     assert!(error.message.contains("synthetic dispatch failure"));
+}
+
+#[test]
+fn input_method_source_flush_failure_is_reported_as_retryable() {
+    let (mut source, _writer) = fake_input_method_source([FakeWaylandEvent::FailFlush]);
+
+    let error = source
+        .next_event_timeout(Duration::from_secs(1))
+        .unwrap_err();
+    assert!(error.retryable);
+    assert!(error.message.contains("synthetic flush failure"));
 }
 
 #[test]

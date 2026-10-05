@@ -84,8 +84,8 @@ supported end state before broad adoption:
       covered with synthetic descriptors, without connecting to a compositor.
 - [x] An injectable input-method event-transport seam exercises readiness,
       activation, safe content-type `done`, deactivation, dispatch failure, and
-      disconnect through `InputMethodSource`; live Wayland/compositor behavior
-      remains a separate certification requirement.
+      flush failure, and disconnect through `InputMethodSource`; live
+      Wayland/compositor behavior remains a separate certification requirement.
 - [ ] Loom-style modelling of the waker, output-completion, and completion
       notifier paths would need `cfg(loom)` shims for std sync types.
 - [ ] Form snippets and the clipboard variable need validation with real
