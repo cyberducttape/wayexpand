@@ -49,32 +49,41 @@ fuzz_target!(|data: &[u8]| {
             _ => {
                 let pick = bytes.next().unwrap_or(0);
                 let alphabet = [
-                    ':', 's', 'i', 'g', 'b', 't', 'w', ';', 'a', 'd', 'r', 'A', 'D', 'R', 'c',
-                    'f', 'e', '\u{e9}', '\u{301}', '東', '京',
+                    ':', 's', 'i', 'g', 'b', 't', 'w', ';', 'a', 'd', 'r', 'A', 'D', 'R', 'c', 'f',
+                    'e', '\u{e9}', '\u{301}', '東', '京',
                 ];
                 InputEvent::Text(alphabet[usize::from(pick) % alphabet.len()].to_string())
             }
         };
+        let clears_after_processing = matches!(
+            &event,
+            InputEvent::EndOfInput
+                | InputEvent::Reset
+                | InputEvent::FocusChanged { .. }
+                | InputEvent::CompositionChanged { .. }
+                | InputEvent::PauseChanged(_)
+        );
         match &event {
             InputEvent::Text(text) => typed.push_str(text),
             InputEvent::Delimiter(character) => typed.push(*character),
             InputEvent::Backspace => {
                 typed.pop();
             }
-            _ => typed.clear(),
+            _ => {}
         }
         for result in engine.process(event) {
             assert!(!result.matched_text.is_empty());
             assert!(
                 typed.ends_with(&result.matched_text)
-                    || result
-                        .reinsert_after
-                        .is_some_and(|delimiter| typed
-                            .strip_suffix(delimiter)
-                            .is_some_and(|before| before.ends_with(&result.matched_text))),
+                    || result.reinsert_after.is_some_and(|delimiter| typed
+                        .strip_suffix(delimiter)
+                        .is_some_and(|before| before.ends_with(&result.matched_text))),
                 "match {:?} erases text that was not typed ({typed:?})",
                 result.matched_text
             );
+            typed.clear();
+        }
+        if clears_after_processing {
             typed.clear();
         }
     }
