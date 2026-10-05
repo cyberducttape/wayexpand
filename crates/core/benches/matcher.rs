@@ -20,9 +20,10 @@ fn adversarial_config(count: usize) -> Config {
         text.push_str(&format!(
             "[[expansion]]\ntrigger = \":{index:05}é\"\naliases = ["
         ));
-        // Keep the generated effective-trigger count within the production
-        // cap at 10k snippets while still exercising a denser alias profile.
-        let alias_count = if count <= 1_000 { 8 } else { 1 };
+        // Exercise the largest alias profile that remains under the effective
+        // trigger cap at the documented 10k-snippet scale. With this trigger,
+        // case propagation and NFC/NFD variants each amplify aliases further.
+        let alias_count = if count <= 1_000 { 8 } else { 2 };
         for alias in 0..alias_count {
             if alias > 0 {
                 text.push_str(", ");
