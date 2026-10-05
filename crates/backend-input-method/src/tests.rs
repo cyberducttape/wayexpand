@@ -1,6 +1,132 @@
 use super::*;
-use std::os::fd::AsFd;
+use std::{
+    collections::VecDeque,
+    io::{Read, Write},
+    os::fd::AsFd,
+    os::unix::net::UnixStream,
+};
 use xkbcommon_rs::xkb_keymap::RuleNames;
+
+enum FakeWaylandEvent {
+    Activate,
+    CommitNormalContentType,
+    Deactivate,
+    FailDispatch,
+}
+
+struct FakeWaylandTransport {
+    reader: UnixStream,
+    events: VecDeque<FakeWaylandEvent>,
+}
+
+impl WaylandEventTransport for FakeWaylandTransport {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.reader.as_fd()
+    }
+
+    fn flush(&self) -> Result<(), InputMethodError> {
+        Ok(())
+    }
+
+    fn dispatch(&mut self, state: &mut StateData) -> Result<(), InputMethodError> {
+        let mut readiness = [0_u8; 1];
+        self.reader
+            .read_exact(&mut readiness)
+            .map_err(|error| InputMethodError::Transport(error.to_string()))?;
+        match self.events.pop_front() {
+            Some(FakeWaylandEvent::Activate) => state.activate(),
+            Some(FakeWaylandEvent::CommitNormalContentType) => {
+                use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
+                    ContentHint, ContentPurpose,
+                };
+                state.set_content_type(
+                    WEnum::Value(ContentHint::None),
+                    WEnum::Value(ContentPurpose::Normal),
+                );
+                state.finish_protocol_batch();
+            }
+            Some(FakeWaylandEvent::Deactivate) => state.deactivate(),
+            Some(FakeWaylandEvent::FailDispatch) => {
+                return Err(InputMethodError::Transport(
+                    "synthetic dispatch failure".into(),
+                ));
+            }
+            None => {
+                return Err(InputMethodError::Transport(
+                    "no synthetic event queued".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn fake_input_method_source(
+    events: impl IntoIterator<Item = FakeWaylandEvent>,
+) -> (InputMethodSource, UnixStream) {
+    let (reader, writer) = UnixStream::pair().unwrap();
+    reader.set_nonblocking(true).unwrap();
+    (
+        InputMethodSource {
+            transport: Box::new(FakeWaylandTransport {
+                reader,
+                events: events.into_iter().collect(),
+            }),
+            state: StateData::new(),
+            key_pass_through: None,
+            wake: None,
+        },
+        writer,
+    )
+}
+
+#[test]
+fn input_method_source_dispatches_lifecycle_events_through_its_transport() {
+    let (mut source, mut writer) = fake_input_method_source([
+        FakeWaylandEvent::Activate,
+        FakeWaylandEvent::CommitNormalContentType,
+        FakeWaylandEvent::Deactivate,
+    ]);
+    writer.write_all(b"abc").unwrap();
+
+    assert_eq!(
+        source.next_event_timeout(Duration::from_secs(1)).unwrap(),
+        Some(InputEvent::FocusChanged { sensitive: true })
+    );
+    assert_eq!(
+        source.next_event_timeout(Duration::from_secs(1)).unwrap(),
+        Some(InputEvent::FocusChanged { sensitive: false })
+    );
+    assert_eq!(
+        source.next_event_timeout(Duration::from_secs(1)).unwrap(),
+        Some(InputEvent::FocusChanged { sensitive: true })
+    );
+    assert_eq!(source.next_event_timeout(Duration::ZERO).unwrap(), None);
+}
+
+#[test]
+fn input_method_source_dispatch_failure_is_reported_as_retryable() {
+    let (mut source, mut writer) = fake_input_method_source([FakeWaylandEvent::FailDispatch]);
+    writer.write_all(b"x").unwrap();
+
+    let error = source
+        .next_event_timeout(Duration::from_secs(1))
+        .unwrap_err();
+    assert!(error.retryable);
+    assert!(error.message.contains("synthetic dispatch failure"));
+}
+
+#[test]
+fn input_method_source_disconnect_is_reported_as_retryable() {
+    let (mut source, writer) = fake_input_method_source([]);
+    drop(writer);
+
+    let error = source
+        .next_event_timeout(Duration::from_secs(1))
+        .unwrap_err();
+    assert!(error.retryable);
+    assert!(error.message.contains("connection became unavailable"));
+}
 
 #[test]
 fn reactor_eventfd_wakes_the_wayland_poll_and_is_drained() {

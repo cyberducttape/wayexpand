@@ -82,8 +82,10 @@ supported end state before broad adoption:
       by a synthetic test without opening a kernel device.
 - [x] The input-method poll helper's eventfd readiness and drain behavior is
       covered with synthetic descriptors, without connecting to a compositor.
-- [ ] The input-method event-dispatch lifecycle itself still lacks an
-      injectable Wayland dispatcher for broader deterministic state-machine tests.
+- [x] An injectable input-method event-transport seam exercises readiness,
+      activation, safe content-type `done`, deactivation, dispatch failure, and
+      disconnect through `InputMethodSource`; live Wayland/compositor behavior
+      remains a separate certification requirement.
 - [ ] Loom-style modelling of the waker, output-completion, and completion
       notifier paths would need `cfg(loom)` shims for std sync types.
 - [ ] Form snippets and the clipboard variable need validation with real

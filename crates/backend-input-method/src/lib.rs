@@ -1094,9 +1094,38 @@ fn decode_keymap(fd: std::os::fd::OwnedFd, size: u32) -> Result<Keymap, InputMet
     .map_err(|error| InputMethodError::Keymap(error.to_string()))
 }
 
-pub struct InputMethodSource {
+trait WaylandEventTransport: Send {
+    fn as_fd(&self) -> BorrowedFd<'_>;
+    fn flush(&self) -> Result<(), InputMethodError>;
+    fn dispatch(&mut self, state: &mut StateData) -> Result<(), InputMethodError>;
+}
+
+struct ConnectedWaylandTransport {
     connection: Connection,
     event_queue: EventQueue<StateData>,
+}
+
+impl WaylandEventTransport for ConnectedWaylandTransport {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.connection.as_fd()
+    }
+
+    fn flush(&self) -> Result<(), InputMethodError> {
+        self.connection
+            .flush()
+            .map_err(|error| InputMethodError::Transport(error.to_string()))
+    }
+
+    fn dispatch(&mut self, state: &mut StateData) -> Result<(), InputMethodError> {
+        self.event_queue
+            .blocking_dispatch(state)
+            .map(|_| ())
+            .map_err(InputMethodError::Dispatch)
+    }
+}
+
+pub struct InputMethodSource {
+    transport: Box<dyn WaylandEventTransport>,
     state: StateData,
     key_pass_through: Option<Box<dyn TextInjector>>,
     /// Optional non-blocking eventfd that ends an idle wait early; see
@@ -1163,8 +1192,10 @@ impl InputMethodSource {
             .flush()
             .map_err(|error| InputMethodError::Protocol(error.to_string()))?;
         Ok(Self {
-            connection,
-            event_queue,
+            transport: Box::new(ConnectedWaylandTransport {
+                connection,
+                event_queue,
+            }),
             state,
             key_pass_through: None,
             wake: None,
@@ -1245,12 +1276,12 @@ impl InputMethodSource {
             }
             return Ok(Some(event));
         }
-        if let Err(error) = self.connection.flush() {
+        if let Err(error) = self.transport.flush() {
             self.release_virtual_keys();
-            return Err(source_error(InputMethodError::Transport(error.to_string())));
+            return Err(source_error(error));
         }
         let Some((revents, woken)) = poll_connection_with_wake(
-            self.connection.as_fd(),
+            self.transport.as_fd(),
             self.wake.as_deref().map(AsFd::as_fd),
             timeout,
         )
@@ -1268,12 +1299,10 @@ impl InputMethodSource {
                 "Wayland connection became unavailable ({revents:?})"
             ))));
         }
-        self.event_queue
-            .blocking_dispatch(&mut self.state)
-            .map_err(|error| {
-                self.release_virtual_keys();
-                source_error(InputMethodError::Dispatch(error))
-            })?;
+        if let Err(error) = self.transport.dispatch(&mut self.state) {
+            self.release_virtual_keys();
+            return Err(source_error(error));
+        }
         if let Some(error) = self.state.error.take() {
             self.release_virtual_keys();
             return Err(source_error(error));
@@ -1401,7 +1430,7 @@ impl TextInjector for InputMethodSource {
         };
         input_method.delete_surrounding_text(bytes, 0);
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
+        self.transport.flush().map_err(|error| InjectorError {
             backend: SOURCE_NAME,
             message: error.to_string(),
             retryable: true,
@@ -1423,7 +1452,7 @@ impl TextInjector for InputMethodSource {
         };
         input_method.commit_string(text.to_owned());
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
+        self.transport.flush().map_err(|error| InjectorError {
             backend: SOURCE_NAME,
             message: error.to_string(),
             retryable: true,
@@ -1447,7 +1476,7 @@ impl TextInjector for InputMethodSource {
             input_method.commit_string(text.to_owned());
         }
         input_method.commit(self.state.commit_serial);
-        self.connection.flush().map_err(|error| InjectorError {
+        self.transport.flush().map_err(|error| InjectorError {
             backend: SOURCE_NAME,
             message: error.to_string(),
             retryable: true,
@@ -1622,9 +1651,9 @@ impl InputSource for InputMethodSource {
                 }
                 return Ok(event);
             }
-            if let Err(error) = self.event_queue.blocking_dispatch(&mut self.state) {
+            if let Err(error) = self.transport.dispatch(&mut self.state) {
                 self.release_virtual_keys();
-                return Err(source_error(InputMethodError::Dispatch(error)));
+                return Err(source_error(error));
             }
         }
     }
