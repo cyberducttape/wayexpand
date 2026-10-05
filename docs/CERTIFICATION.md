@@ -85,7 +85,7 @@ reviewed artifacts pass, every desktop remains uncertified.
 
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
-CI validates that all four required desktop targets and all thirty-five scenarios
+CI validates that all four required desktop targets and all thirty-six scenarios
 remain present, rejects evidence that pairs a compositor with a backend
 outside its declared certification paths, and requires the layout profiles
 `us`, `de`, `fr`, `altgr`, and `multi-layout-switching` from certification
@@ -101,8 +101,11 @@ the actual keymap and observed behavior.
 
 Each environment must cover printable press/release, auto-repeat, modifiers,
 Unicode and combining text, multiline replacement, password fields, focus
-transitions, cross-window isolation, configuration reload, daemon restart,
-compositor restart, and failed insertion. Unsupported capabilities remain
+transitions, cross-window isolation, and picker handoff between two windows
+with the same application ID and title. The picker scenario passes only when
+selection after focusing the other window cannot insert into that wrong
+window. Also cover configuration reload, daemon restart, compositor restart,
+and failed insertion. Unsupported capabilities remain
 explicit in the report; the harness must not convert an untested feature into
 a pass. On backends marked “application filters unavailable”, configured app
 filters must remain visibly unavailable rather than being inferred from

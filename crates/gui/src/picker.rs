@@ -560,7 +560,7 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
             .ok()
             .and_then(|response| focus_target_from_response(&response));
         if let Some(current) = current.and_then(|info| info.target) {
-            if current.token == target_focus.token && current.generation > target_focus.generation {
+            if focus_returned_to_target(&target_focus, &current) {
                 let response = crate::runtime::control_command(&format!(
                     "insert-target {} {} {trigger}",
                     current.generation, current.token
@@ -582,6 +582,10 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
         }
         thread::sleep(FOCUS_POLL_INTERVAL);
     }
+}
+
+fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool {
+    current.token == target.token && current.generation > target.generation
 }
 
 /// Run the picker. Insertion remains inside the picker until the guarded
@@ -682,8 +686,8 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
 #[cfg(test)]
 mod tests {
     use super::{
-        focus_target_from_response, picker_expansion_is_eligible, picker_focus_state, score,
-        FocusInfo, FocusTarget,
+        focus_returned_to_target, focus_target_from_response, picker_expansion_is_eligible,
+        picker_focus_state, score, FocusInfo, FocusTarget,
     };
     use wayexpand_core::{ExpansionConfig, MatchMode};
 
@@ -732,6 +736,30 @@ mod tests {
     #[test]
     fn missing_focus_response_does_not_claim_exact_identity() {
         assert_eq!(picker_focus_state(None), (None, false, false));
+    }
+
+    #[test]
+    fn picker_handoff_rejects_a_different_window_with_the_same_app_and_title() {
+        // The app/title metadata is intentionally identical; the focus token
+        // represents the backend's stronger per-window identity.
+        let target = FocusTarget {
+            generation: 4,
+            token: "window-a".into(),
+        };
+        let same_app_and_title_other_window = FocusTarget {
+            generation: 5,
+            token: "window-b".into(),
+        };
+        let original_window_regained = FocusTarget {
+            generation: 6,
+            token: "window-a".into(),
+        };
+
+        assert!(!focus_returned_to_target(
+            &target,
+            &same_app_and_title_other_window
+        ));
+        assert!(focus_returned_to_target(&target, &original_window_regained));
     }
 
     #[test]

@@ -88,6 +88,7 @@
     "multiline-rapid",
     "password-field",
     "focus-cross-window",
+    "picker-same-app-title-focus-isolation",
     "config-reload",
     "daemon-restart",
     "daemon-restart-during-typing",
