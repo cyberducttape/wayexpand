@@ -172,6 +172,8 @@ jobs:
             | grep -F "wayexpand-${version}/.cargo/config.toml" >/dev/null
           tar -tzf "wayexpand-${version}-vendored.tar.gz" \
             | grep -E "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" >/dev/null
+      - name: Build unsigned Launchpad source package
+        run: bash scripts/build-launchpad-source.sh "${RELEASE_REF_NAME#v}"
       - name: Generate SBOM (Software Bill of Materials)
         shell: bash
         run: |
@@ -233,6 +235,11 @@ jobs:
           files: |
             wayexpand-*.tar.gz
             wayexpand-*.sha256
+            wayexpand_*.dsc
+            wayexpand_*.orig.tar.gz
+            wayexpand_*.debian.tar.xz
+            wayexpand_*_source.changes
+            wayexpand_*_source.buildinfo
             wayexpand-*.cargo-metadata.json
             wayexpand-*.sbom.spdx.json
             wayexpand-*.sbom.cyclonedx.json

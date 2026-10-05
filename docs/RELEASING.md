@@ -80,7 +80,12 @@ requires the real compositor certification workflow to certify all four
 desktop targets at the exact release ref. Missing self-hosted drivers,
 incomplete backend capabilities, or unverified scenario cells block packaging
 and publishing. It then builds the Linux x86_64 binaries with the locked
-dependency graph and publishes:
+dependency graph and publishes the end-user packages and source archives.
+It also produces an unsigned Debian source package from the vendored archive
+for Launchpad. That source package is not automatically uploaded: the
+maintainer must sign its `.changes` file and upload it only to Ubuntu series
+whose builders satisfy the Rust MSRV. See [PACKAGING.md](PACKAGING.md) for the
+current Launchpad restrictions and signing commands.
 
 To republish artifacts for an existing tag, use the workflow's manual
 dispatch and enter that tag in the `release_ref` field (for example,
@@ -131,6 +136,11 @@ fi
   - Includes dependencies for offline builds; archive size varies with the locked dependency graph
   - `CARGO_NET_OFFLINE=true` builds work without internet
   - SHA256: `wayexpand-<version>-vendored.tar.gz.sha256`
+
+- Debian source package (`wayexpand_<version>-<revision>_source.changes` and
+  companion `.dsc`, `.orig.tar.gz`, `.debian.tar.xz`, and `.buildinfo` files)
+  - Generated from the vendored archive and included in the GitHub release
+  - Unsigned until the maintainer signs it with the Launchpad upload key
 
 The Launchpad recipe must build from the vendored source archive (or an
 equivalent source upload containing both `vendor/` and `.cargo/config.toml`).

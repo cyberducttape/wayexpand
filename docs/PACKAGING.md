@@ -16,7 +16,7 @@ packagers and source-build users need a compatible toolchain.
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 and aarch64 PKGBUILD |
-| Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Official (cyberducttape/ppa) |
+| Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Source uploads require maintainer signing; check current series build status below |
 | Debian | `.deb` release asset | Per-release x86_64 package on new tags; no APT repository | Ubuntu PPA remains Ubuntu-only |
 | Fedora/RHEL | `.rpm` release asset | Per-release x86_64 package on new tags; no DNF repository | RPM spec and CI build are maintained; Copr publication pending |
 | aarch64 | `wayexpand` | Native release archive on new tagged releases | Existing releases may be x86_64-only |
@@ -155,20 +155,26 @@ git push
 
 ### Ubuntu PPA
 
-**First Time:**
-1. Create Launchpad account at https://launchpad.net
-2. Create PPA: Settings → Personal Package Archives → Create new PPA
-3. Generate GPG key if needed: `gpg --gen-key`
-4. Upload source package via `dput`
+GitHub releases include an unsigned Debian source package built from the
+vendored archive. This is the Launchpad input; the clean Git recipe does not
+contain `vendor/` and must not be used for offline PPA builds. Download the
+`.dsc`, `.orig.tar.gz`, `.debian.tar.xz`, `_source.changes`, and
+`_source.buildinfo` files into one directory, then sign and upload the changes
+file with the Launchpad-upload GPG key:
 
-**Updates:**
 ```bash
-# Build source package
-debuild -S -sa
-
-# Upload to PPA (replace ${VERSION} with current version)
-dput ppa:cyberducttape/ppa ../wayexpand_${VERSION}-1_source.changes
+source_version=1.3.3-1 # use the version shown in the .dsc filename
+debsign "wayexpand_${source_version}_source.changes"
+dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 ```
+
+Launchpad builds from source, so only submit to Ubuntu series whose build
+archive provides both `rustc` and `cargo` at or above the project MSRV (1.95).
+Ubuntu 26.04 Resolute currently provides Rust 1.93 and cannot satisfy this
+package's build dependencies. The configured `main-daily` recipe also tracks
+clean `main` rather than the vendored release source; it is not a supported
+automatic PPA publishing path. Check each Launchpad build result before
+advertising a series as installable.
 
 **Note:** See [RELEASING.md](RELEASING.md) for the authoritative release version workflow
 (it is the single source of truth for version numbers across all distributions).
