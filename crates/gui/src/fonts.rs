@@ -17,12 +17,13 @@ struct FallbackGroup {
 
 fn fallback_groups() -> Vec<FallbackGroup> {
     #[cfg(target_os = "windows")]
-    let (symbols, cjk): (&[&str], &[&str]) = (
+    let (symbols, cjk, arabic): (&[&str], &[&str], &[&str]) = (
         &["seguisym.ttf", "segoeui.ttf"],
         &["msyh.ttc", "YuGothM.ttc", "meiryo.ttc", "malgun.ttf"],
+        &["arial.ttf", "segoeui.ttf"],
     );
     #[cfg(target_os = "macos")]
-    let (symbols, cjk): (&[&str], &[&str]) = (
+    let (symbols, cjk, arabic): (&[&str], &[&str], &[&str]) = (
         &[
             "/System/Library/Fonts/Apple Symbols.ttf",
             "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -32,9 +33,13 @@ fn fallback_groups() -> Vec<FallbackGroup> {
             "/System/Library/Fonts/Hiragino Sans GB.ttc",
             "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         ],
+        &[
+            "/System/Library/Fonts/GeezaPro.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        ],
     );
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let (symbols, cjk): (&[&str], &[&str]) = (
+    let (symbols, cjk, arabic): (&[&str], &[&str], &[&str]) = (
         &[
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -50,6 +55,12 @@ fn fallback_groups() -> Vec<FallbackGroup> {
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
             "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
         ],
+        &[
+            "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ],
     );
 
     let resolve = |path: &&str| (platform_font_path(path), 0);
@@ -61,6 +72,10 @@ fn fallback_groups() -> Vec<FallbackGroup> {
         FallbackGroup {
             name: "wayexpand-system-cjk",
             candidates: cjk.iter().map(resolve).collect(),
+        },
+        FallbackGroup {
+            name: "wayexpand-system-arabic",
+            candidates: arabic.iter().map(resolve).collect(),
         },
     ]
 }

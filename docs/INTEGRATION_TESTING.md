@@ -196,8 +196,12 @@ Verify each item in a normal text editor, terminal, browser, and a native
 toolkit application where available:
 
 1. ASCII expansion replaces the complete trigger.
-2. UTF-8 replacement works for accented text, CJK, emoji, and punctuation.
-3. Backspace removes one Unicode scalar and selections are handled correctly.
+2. UTF-8 replacement works for accented text, Arabic (including combining
+   diacritics), committed Chinese/CJK text, emoji, and punctuation. Verify Arabic
+   shaping and direction in the target application; this does not certify active
+   IME preedit or candidate selection.
+3. Backspace removes one extended grapheme cluster and selections are handled
+   correctly.
 4. Return and Tab clear the pending trigger buffer.
 5. Password and hidden-text fields do not capture or expand.
 6. Unsupported non-text keys are not interpreted as text, clear the pending

@@ -138,6 +138,42 @@ fn expands_unicode_replacement() {
 }
 
 #[test]
+fn expands_arabic_and_chinese_committed_text_without_corruption() {
+    for (trigger, replacement) in [("مَرْحَبًا", "أهلًا وسهلًا"), ("；中", "你好，世界")]
+    {
+        let config = Config::parse(&format!(
+            "[[expansion]]\ntrigger = '{trigger}'\nreplacement = '{replacement}'"
+        ))
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let results = engine.process(InputEvent::Text(trigger.to_owned()));
+        assert_eq!(results.len(), 1, "trigger {trigger:?}");
+        assert_eq!(results[0].matched_text, trigger);
+        assert_eq!(results[0].insert, replacement);
+    }
+}
+
+#[test]
+fn arabic_combining_marks_and_han_characters_continue_words() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \";sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+    )
+    .unwrap();
+
+    // Arabic vowel marks are combining marks, while Han ideographs are
+    // letters. Neither should be mistaken for a boundary before a trigger.
+    for prefix in ["مَرْحَبًا", "中文"] {
+        let mut engine = ExpansionEngine::new(config.clone()).unwrap();
+        assert!(
+            engine
+                .process(InputEvent::Text(format!("{prefix};sig ")))
+                .is_empty(),
+            "word boundary incorrectly accepted after {prefix:?}"
+        );
+    }
+}
+
+#[test]
 fn app_filtered_expansion_fails_closed_without_window_tracking() {
     let config = Config::parse(
         r#"

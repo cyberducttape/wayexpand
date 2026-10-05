@@ -17,6 +17,15 @@ after their committed Unicode text arrives. This is a scope boundary, not a clai
 that any desktop is currently production-certified; certification applies only
 to the tested backend, compositor, client, and layout combinations.
 
+Arabic and Chinese characters are accepted in triggers and replacement text
+when the selected route reports full-Unicode support. Arabic diacritics are
+kept with their grapheme for matching/deletion, and replacement text is passed
+to the target application unchanged (which handles its own shaping and text
+direction). Chinese entered through an IME is supported only after the IME
+commits the text; active preedit/candidate composition remains unsupported.
+The GUI's font and bidirectional text presentation are not certified as a
+complete right-to-left editing experience.
+
 | Area | Current status | Evidence required for promotion |
 | --- | --- | --- |
 | Core matching and config validation | Supported | Workspace unit tests and Clippy |
