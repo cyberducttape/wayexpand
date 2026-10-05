@@ -321,7 +321,7 @@ jobs:
             bash scripts/check-commit-identity.sh HEAD
           fi
       - name: Install metadata validators
-        run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils libwayland-dev libxkbcommon-dev pkg-config
       - name: Validate desktop metadata
         run: |
           appstreamcli validate --no-net io.github.cyberducttape.WayExpand.metainfo.xml
