@@ -495,13 +495,24 @@ pub(super) fn run_form_helper(
         .map_err(|_| CommandError::SpawnFailed)?;
     let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
     // Drain stdout concurrently so a large answer cannot block the helper.
-    let reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout
-            .take(MAX_FORM_OUTPUT_BYTES as u64 + 1)
-            .read_to_end(&mut bytes);
-        bytes
-    });
+    let reader = match thread::Builder::new()
+        .name("wayexpand-form-output".into())
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout
+                .take(MAX_FORM_OUTPUT_BYTES as u64 + 1)
+                .read_to_end(&mut bytes);
+            bytes
+        }) {
+        Ok(reader) => reader,
+        Err(_) => {
+            // Without a drain worker the helper could block forever on a full
+            // pipe. Terminate it before returning a recoverable worker error.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CommandError::WorkerUnavailable);
+        }
+    };
     let deadline = Instant::now() + FORM_TIMEOUT;
     let status = loop {
         if let Some(status) = child
