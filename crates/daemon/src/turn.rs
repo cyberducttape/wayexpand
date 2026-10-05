@@ -191,7 +191,7 @@ impl Daemon {
             // evdev safety gate as a typed expansion. It is a user action,
             // so a refusal or injection failure is logged, never fatal.
             let snapshot = self.control.focus_snapshot();
-            let current_token = self.config.engine.current_window().map(focus_token);
+            let current_token = self.config.engine.current_window().and_then(focus_token);
             if !insert_target_matches_current_focus(&request, current_token.as_deref(), &snapshot) {
                 warn!(
                     expected = ?request.focus_token,
@@ -454,13 +454,13 @@ mod tests {
             instance_id: Some("window-b".into()),
             ..first.clone()
         };
-        let expected_token = focus_token(&first);
+        let expected_token = focus_token(&first).unwrap();
         let request = InsertRequest {
             trigger: ";sig".into(),
             focus_token: Some(expected_token.clone()),
             focus_generation: Some(4),
         };
-        let current_token = focus_token(&second);
+        let current_token = focus_token(&second).unwrap();
         let changed_snapshot = FocusSnapshot {
             generation: 5,
             token: Some(current_token.clone()),

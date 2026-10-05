@@ -43,9 +43,7 @@ use status_publisher::{
     set_daemon_status, set_daemon_status_with_runtime_capabilities, StatusPublisher,
 };
 use std::{
-    collections::hash_map::DefaultHasher,
     env,
-    hash::{Hash, Hasher},
     io::{self, BufRead},
     path::{Path, PathBuf},
     sync::{mpsc, Arc},

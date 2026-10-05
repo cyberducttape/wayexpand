@@ -2,6 +2,9 @@
 
 use crate::*;
 
+const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 256;
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
 /// The last published focused window and a counter bumped on every change,
 /// so the quick-insert picker can tell focus left and came back.
 pub(crate) struct FocusState {
@@ -19,24 +22,30 @@ impl FocusState {
     }
 }
 
-pub(crate) fn focus_token(window: &WindowContext) -> String {
-    let mut hasher = DefaultHasher::new();
-    window.instance_id.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+/// Encode a compositor-issued window identity without hashing it: picker
+/// targeting must not collapse distinct IDs through a finite-width hash.
+/// Missing, empty, and unreasonably large backend identities are unavailable
+/// for exact targeting and therefore make picker insertion clipboard-only.
+pub(crate) fn focus_token(window: &WindowContext) -> Option<String> {
+    let identity = window.instance_id.as_deref()?.as_bytes();
+    if identity.is_empty() || identity.len() > MAX_WINDOW_INSTANCE_ID_BYTES {
+        return None;
+    }
+
+    let mut token = String::with_capacity(identity.len() * 2);
+    for byte in identity {
+        token.push(HEX_DIGITS[(byte >> 4) as usize] as char);
+        token.push(HEX_DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    Some(token)
 }
 
 pub(crate) fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
+    let token = state.previous.as_ref().and_then(focus_token);
     control.set_focus_snapshot(FocusSnapshot {
         generation: state.generation,
-        token: state
-            .previous
-            .as_ref()
-            .filter(|window| window.instance_id.is_some())
-            .map(focus_token),
-        exact_window_identity: state
-            .previous
-            .as_ref()
-            .is_some_and(|window| window.instance_id.is_some()),
+        exact_window_identity: token.is_some(),
+        token,
     });
 }
 
@@ -85,6 +94,50 @@ mod tests {
         };
         let second = WindowContext {
             instance_id: Some("window-b".into()),
+            ..first.clone()
+        };
+        let first_token = focus_token(&first).unwrap();
+        let second_token = focus_token(&second).unwrap();
+        assert_ne!(first_token, second_token);
+        assert_eq!(first_token, "77696e646f772d61");
+    }
+
+    #[test]
+    fn empty_missing_and_oversized_window_ids_are_not_exact_identity() {
+        let missing = WindowContext {
+            app_id: Some("org.example.Editor".into()),
+            title: Some("Document".into()),
+            instance_id: None,
+        };
+        let empty = WindowContext {
+            instance_id: Some(String::new()),
+            ..missing.clone()
+        };
+        let oversized = WindowContext {
+            instance_id: Some("x".repeat(super::MAX_WINDOW_INSTANCE_ID_BYTES + 1)),
+            ..missing
+        };
+
+        assert_eq!(focus_token(&empty), None);
+        assert_eq!(focus_token(&oversized), None);
+        assert_eq!(
+            focus_token(&WindowContext {
+                instance_id: None,
+                ..empty
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn exact_window_encoding_is_injective_for_distinct_ids() {
+        let first = WindowContext {
+            instance_id: Some("window-α".into()),
+            app_id: None,
+            title: None,
+        };
+        let second = WindowContext {
+            instance_id: Some("window-β".into()),
             ..first.clone()
         };
         assert_ne!(focus_token(&first), focus_token(&second));
