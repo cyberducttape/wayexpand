@@ -75,9 +75,12 @@ git tag -a v<version> -m "WayExpand <version>"
 git push origin v<version>
 ```
 
-The release workflow runs the full CI verification suite (`ci.yml`) before
-packaging, and publishing is skipped if it fails. It then builds the Linux
-x86_64 binaries with the locked dependency graph and publishes:
+The release workflow runs the full CI verification suite (`ci.yml`) and
+requires the real compositor certification workflow to certify all four
+desktop targets at the exact release ref. Missing self-hosted drivers,
+incomplete backend capabilities, or unverified scenario cells block packaging
+and publishing. It then builds the Linux x86_64 binaries with the locked
+dependency graph and publishes:
 
 To republish artifacts for an existing tag, use the workflow's manual
 dispatch and enter that tag in the `release_ref` field (for example,

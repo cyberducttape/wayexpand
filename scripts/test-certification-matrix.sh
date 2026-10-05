@@ -47,4 +47,10 @@ fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
 
+release_workflow="$project_dir/.github/workflows/release.yml"
+grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null
+grep -F -- 'needs: [ci, certification]' "$release_workflow" >/dev/null
+grep -F -- 'needs: [ci, certification, linux-aarch64]' "$release_workflow" >/dev/null
+grep -F -- "checkout_ref: \${{ inputs.release_ref || github.ref }}" "$release_workflow" >/dev/null
+
 printf '%s\n' 'certification matrix contract passed'

@@ -21,9 +21,15 @@ jobs:
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 
+  certification:
+    name: Real compositor certification
+    uses: ./.github/workflows/certification.yml
+    with:
+      checkout_ref: ${{ inputs.release_ref || github.ref }}
+
   linux-aarch64:
     name: Linux aarch64 release
-    needs: ci
+    needs: [ci, certification]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     permissions:
@@ -55,7 +61,7 @@ jobs:
 
   linux-x86_64:
     name: Linux x86_64 release
-    needs: [ci, linux-aarch64]
+    needs: [ci, certification, linux-aarch64]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
