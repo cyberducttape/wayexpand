@@ -263,6 +263,23 @@ impl StateData {
         }
     }
 
+    fn set_content_type(
+        &mut self,
+        hint: WEnum<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentHint>,
+        purpose: WEnum<
+            wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose,
+        >,
+    ) {
+        self.pending_sensitive = Some(content_type_is_sensitive(hint, purpose));
+    }
+
+    fn finish_protocol_batch(&mut self) {
+        self.commit_serial = self.commit_serial.wrapping_add(1);
+        if let Some(sensitive) = self.pending_sensitive.take() {
+            self.queue_event(InputEvent::FocusChanged { sensitive });
+        }
+    }
+
     fn queue_event(&mut self, event: InputEvent) {
         // Focus policy changes supersede every queued keyboard event. This
         // prevents stale text from being processed across activation,
@@ -483,7 +500,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.queue_event(deactivation_event());
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::ContentType { hint, purpose } => {
-                state.pending_sensitive = Some(content_type_is_sensitive(hint, purpose));
+                state.set_content_type(hint, purpose);
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::SurroundingText {
                 text,
@@ -497,10 +514,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 });
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Done => {
-                state.commit_serial = state.commit_serial.wrapping_add(1);
-                if let Some(sensitive) = state.pending_sensitive.take() {
-                    state.queue_event(InputEvent::FocusChanged { sensitive });
-                }
+                state.finish_protocol_batch();
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Unavailable => {
                 state.error = Some(InputMethodError::Unavailable);

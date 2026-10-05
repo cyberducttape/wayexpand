@@ -860,6 +860,43 @@ fn password_and_unknown_content_purposes_are_sensitive() {
 }
 
 #[test]
+fn content_purpose_updates_apply_only_at_done_and_only_once() {
+    use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
+        ContentHint, ContentPurpose,
+    };
+
+    let mut state = StateData::new();
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Normal),
+    );
+    assert!(state.events.is_empty());
+    assert_eq!(state.pending_sensitive, Some(false));
+
+    state.finish_protocol_batch();
+    assert_eq!(state.commit_serial, 1);
+    assert_eq!(state.pending_sensitive, None);
+    assert_eq!(
+        state.events.pop_front(),
+        Some(InputEvent::FocusChanged { sensitive: false })
+    );
+
+    state.finish_protocol_batch();
+    assert_eq!(state.commit_serial, 2);
+    assert!(state.events.is_empty());
+
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Password),
+    );
+    state.finish_protocol_batch();
+    assert_eq!(
+        state.events.pop_front(),
+        Some(InputEvent::FocusChanged { sensitive: true })
+    );
+}
+
+#[test]
 fn input_method_commit_size_is_checked_before_injection() {
     assert!(validate_commit_text(&"a".repeat(MAX_COMMIT_TEXT_BYTES)).is_ok());
     assert!(validate_commit_text(&"a".repeat(MAX_COMMIT_TEXT_BYTES + 1)).is_err());
