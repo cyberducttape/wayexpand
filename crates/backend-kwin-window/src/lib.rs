@@ -515,9 +515,15 @@ mod tests {
             initial.is_some(),
             "KWin should report its initial active window"
         );
+        let initial_window = initial
+            .flatten()
+            .expect("KWin should identify its initially focused window");
         assert!(
-            initial.flatten().is_some(),
-            "KWin should provide application or window identity for the focused window"
+            initial_window
+                .instance_id
+                .as_deref()
+                .is_some_and(|identity| !identity.is_empty()),
+            "KWin should provide a strong identity for the exact focused window"
         );
 
         let untrusted_client =

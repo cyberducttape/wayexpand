@@ -85,9 +85,10 @@ product boundaries, not untested passing scenarios. The committed-text
 composition scenarios exercise expansion after the user completes composition.
 
 The KDE self-hosted workflow also runs the live KWin tracker lifecycle test,
-which verifies focused-window identity, rejects an untrusted D-Bus focus event,
-and detects when its own temporary KWin script is unloaded. This is a focused
-backend integration check, not a typing or end-to-end certification result.
+which requires a non-empty compositor-issued identity for the focused window,
+rejects an untrusted D-Bus focus event, and detects when its own temporary KWin
+script is unloaded. This is a focused backend integration check, not a typing
+or end-to-end certification result.
 The workflow still expects a compositor-specific executable driver configured
 by the runner. The repository does not yet provide that real-client driver;
 fake-driver contract tests verify orchestration only and are not compositor
