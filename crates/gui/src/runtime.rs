@@ -16,7 +16,7 @@ use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_selection::{
     probe_capabilities, recommended_route, Capabilities, RecommendedRoute,
 };
-use wayexpand_core::{discover_backends, Config, FleetConfig};
+use wayexpand_core::{discover_backends, Config, FleetConfig, CONTROL_STATUS_SCHEMA};
 
 const REQUEST_CAPACITY: usize = 8;
 const RESULT_CAPACITY: usize = 16;
@@ -132,6 +132,16 @@ pub(crate) struct DaemonCapabilities {
 
 impl DaemonCapabilities {
     pub fn parse(response: &str) -> Option<Self> {
+        let status_schema = response.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key == "status_schema")
+                .then(|| value.parse::<u32>().ok())
+                .flatten()
+        });
+        if status_schema != Some(CONTROL_STATUS_SCHEMA) {
+            return None;
+        }
+
         let mut capabilities = Self::default();
         let mut found = false;
         for line in response.lines() {
@@ -450,7 +460,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "capture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=6\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -465,6 +475,23 @@ mod tests {
         assert_eq!(capabilities.inject_atomic_replace, Some(false));
         assert_eq!(capabilities.inject_full_unicode, Some(true));
         assert_eq!(capabilities.inject_key_passthrough, None);
-        assert_eq!(super::DaemonCapabilities::parse("state=connected\n"), None);
+        assert_eq!(
+            super::DaemonCapabilities::parse("status_schema=6\nstate=connected\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn daemon_capability_parser_rejects_stale_or_missing_status_schema() {
+        let capabilities = "capture_sensitive_focus=true\ninject_atomic_replace=true\n";
+        assert_eq!(
+            super::DaemonCapabilities::parse(&format!("status_schema=5\n{capabilities}")),
+            None
+        );
+        assert_eq!(
+            super::DaemonCapabilities::parse(&format!("status_schema=7\n{capabilities}")),
+            None
+        );
+        assert_eq!(super::DaemonCapabilities::parse(capabilities), None);
     }
 }
