@@ -18,6 +18,7 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{Read, Seek, SeekFrom},
+    os::fd::{AsFd, BorrowedFd},
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -50,6 +51,48 @@ fn connection_poll_failed(flags: rustix::event::PollFlags) -> bool {
             | rustix::event::PollFlags::HUP
             | rustix::event::PollFlags::NVAL,
     )
+}
+
+/// Wait for Wayland connection activity or a reactor wakeup. The wake
+/// descriptor is drained here so its readiness behavior can be tested using
+/// synthetic eventfds without a live compositor connection.
+fn poll_connection_with_wake(
+    connection: BorrowedFd<'_>,
+    wake: Option<BorrowedFd<'_>>,
+    timeout: Duration,
+) -> Result<Option<(rustix::event::PollFlags, bool)>, rustix::io::Errno> {
+    let timeout = rustix::event::Timespec {
+        tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
+        tv_nsec: timeout.subsec_nanos().into(),
+    };
+    let mut fds = vec![rustix::event::PollFd::new(
+        &connection,
+        rustix::event::PollFlags::IN
+            | rustix::event::PollFlags::ERR
+            | rustix::event::PollFlags::HUP
+            | rustix::event::PollFlags::NVAL,
+    )];
+    if let Some(wake_fd) = wake.as_ref() {
+        fds.push(rustix::event::PollFd::new(
+            wake_fd,
+            rustix::event::PollFlags::IN,
+        ));
+    }
+    if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
+        return Ok(None);
+    }
+    let connection_flags = fds[0].revents();
+    let woken = fds
+        .get(1)
+        .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
+    drop(fds);
+    if woken {
+        if let Some(wake) = wake {
+            let mut buffer = [0_u8; 8];
+            let _ = rustix::io::read(wake, &mut buffer);
+        }
+    }
+    Ok(Some((connection_flags, woken)))
 }
 
 /// Shared with `wayexpand-backend-evdev`, which drives the same xkb
@@ -1185,43 +1228,18 @@ impl InputMethodSource {
             self.release_virtual_keys();
             return Err(source_error(InputMethodError::Transport(error.to_string())));
         }
-        let timeout = rustix::event::Timespec {
-            tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
-            tv_nsec: timeout.subsec_nanos().into(),
-        };
-        let mut fds = vec![rustix::event::PollFd::new(
-            &self.connection,
-            rustix::event::PollFlags::IN
-                | rustix::event::PollFlags::ERR
-                | rustix::event::PollFlags::HUP
-                | rustix::event::PollFlags::NVAL,
-        )];
-        if let Some(wake) = self.wake.as_deref() {
-            fds.push(rustix::event::PollFd::new(
-                wake,
-                rustix::event::PollFlags::IN,
-            ));
-        }
-        if rustix::event::poll(&mut fds, Some(&timeout))
-            .map_err(|error| source_error(InputMethodError::Transport(error.to_string())))?
-            == 0
-        {
+        let Some((revents, woken)) = poll_connection_with_wake(
+            self.connection.as_fd(),
+            self.wake.as_deref().map(AsFd::as_fd),
+            timeout,
+        )
+        .map_err(|error| source_error(InputMethodError::Transport(error.to_string())))?
+        else {
             return Ok(None);
-        }
-        let revents = fds[0].revents();
-        let woken = fds
-            .get(1)
-            .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
-        drop(fds);
-        if woken {
-            if let Some(wake) = self.wake.as_deref() {
-                let mut buffer = [0_u8; 8];
-                let _ = rustix::io::read(wake, &mut buffer);
-            }
-            if revents.is_empty() {
-                // Only the wake descriptor fired: let the caller run.
-                return Ok(None);
-            }
+        };
+        if woken && revents.is_empty() {
+            // Only the wake descriptor fired: let the caller run.
+            return Ok(None);
         }
         if connection_poll_failed(revents) {
             self.release_virtual_keys();

@@ -1,5 +1,44 @@
 use super::*;
+use std::os::fd::AsFd;
 use xkbcommon_rs::xkb_keymap::RuleNames;
+
+#[test]
+fn reactor_eventfd_wakes_the_wayland_poll_and_is_drained() {
+    let connection = rustix::event::eventfd(
+        0,
+        rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+    )
+    .unwrap();
+    let wake = rustix::event::eventfd(
+        0,
+        rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+    )
+    .unwrap();
+    rustix::io::write(&wake, &1_u64.to_ne_bytes()).unwrap();
+
+    let (connection_flags, woken) = poll_connection_with_wake(
+        connection.as_fd(),
+        Some(wake.as_fd()),
+        Duration::from_secs(1),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(connection_flags.is_empty());
+    assert!(woken);
+    assert!(
+        poll_connection_with_wake(connection.as_fd(), Some(wake.as_fd()), Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+
+    rustix::io::write(&connection, &1_u64.to_ne_bytes()).unwrap();
+    let (connection_flags, woken) =
+        poll_connection_with_wake(connection.as_fd(), None, Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+    assert!(connection_flags.contains(rustix::event::PollFlags::IN));
+    assert!(!woken);
+}
 
 struct RecordingInjector {
     calls: Vec<(u32, Modifiers)>,
