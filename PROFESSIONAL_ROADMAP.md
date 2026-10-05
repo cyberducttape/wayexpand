@@ -4,8 +4,8 @@
 > planning are archived in [docs/archive/2026-09/PROFESSIONAL_ROADMAP.md](docs/archive/2026-09/PROFESSIONAL_ROADMAP.md);
 > current behavior is defined by the support and compatibility documents.
 
-The core engine, configuration format, and CLI/JSON contracts are stable for
-the 1.2.x line. Desktop backend support remains experimental until the
+As of v1.3.3, the core engine, configuration format, and CLI/JSON contracts
+are stable. Desktop backend support remains experimental until the
 certification evidence described in [docs/CERTIFICATION.md](docs/CERTIFICATION.md)
 and [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) is published.
 
@@ -90,8 +90,10 @@ The optional action-broker design remains a security gate for networked or
 credentialed command workflows. See
 docs/ACTION_BROKER_ARCHITECTURE.md.
 
-- [x] Bounded, authenticated, action-name-based IPC exists in the experimental
-      standalone binary; daemon routing is still disabled.
+- [x] Bounded, authenticated, action-name-based IPC and daemon routing are
+      implemented through the standalone broker service. Named actions fail
+      closed when the broker is unavailable; direct commands remain a separate
+      explicitly configured path.
 - [x] Broker-side executable ownership, permission, working-directory, timeout,
       environment, output, and process-group checks are implemented.
 - [x] The packaged broker service has an independent systemd sandbox with
@@ -100,10 +102,11 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 - [ ] Add per-action OS sandbox profiles or a container boundary for stronger
       isolation between configured actions; same-UID software and custom broker
       launches remain outside the packaged unit's trust boundary.
-- [ ] Add a tested execution audit sink with privacy, rotation, failure, and
-      integrity semantics.
-- [ ] Wire daemon policy routing with fail-closed behavior when the broker is
-      unavailable, then certify the managed service lifecycle.
+- [x] Optional execution audit logging has bounded rotation, privacy-preserving
+      records, queue and persistence-failure reporting, and tests. Operational
+      deployment and lifecycle certification remain release work.
+- [x] Daemon policy routing fails closed for named actions when the broker is
+      unavailable; the managed service lifecycle still needs certification.
 
 ### Distribution and release evidence
 
