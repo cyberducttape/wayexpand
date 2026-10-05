@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "capture_sensitive_focus=false\ncapture_exclusive=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "capture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -458,6 +458,8 @@ mod tests {
         assert_eq!(capabilities.injection_throughput_chars_per_sec, Some(83));
         assert_eq!(capabilities.capture_sensitive_focus, Some(false));
         assert_eq!(capabilities.capture_exclusive, Some(true));
+        assert_eq!(capabilities.capture_composition_aware, Some(false));
+        assert_eq!(capabilities.capture_local_compose_aware, Some(true));
         assert_eq!(capabilities.capture_reliable_key_state, None);
         assert_eq!(capabilities.window_tracker_connected, Some(true));
         assert_eq!(capabilities.inject_atomic_replace, Some(false));
