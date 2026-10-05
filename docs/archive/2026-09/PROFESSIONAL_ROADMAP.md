@@ -1,8 +1,10 @@
 # WayExpand Professional Roadmap
 
-> This roadmap contains historical v1.0/v1.2 planning language as well as
-> current open work. For present behavior and certification, use
-> `../../SUPPORT_MATRIX.md`, `../../CERTIFICATION_MATRIX.md`, and `wayexpand doctor`.
+> **Archived planning snapshot (September 2026).** Statuses and package claims
+> in this document are historical and may be stale; do not use it as the
+> current roadmap or deployment guidance. For current behavior, publication,
+> and certification status, use `../../SUPPORT_MATRIX.md`,
+> `../../CERTIFICATION_MATRIX.md`, `../../PACKAGING.md`, and `wayexpand doctor`.
 
 The core engine, config format, and CLI/JSON contracts are stable as of v1.0.0; desktop backend support is compositor-dependent (see [../../SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md)). This roadmap covers planned enhancements for 1.x releases and beyond.
 

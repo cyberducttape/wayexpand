@@ -679,5 +679,5 @@ audit system for compliance or credential-release workflows.
 
 ---
 
-**Last updated:** 2026-09-23
-**Scope:** WayExpand 1.x; examples tested against the current 1.2 release line
+**Last updated:** 2026-10-05
+**Scope:** WayExpand 1.x; snippets are examples and must be reviewed for the target environment before use
