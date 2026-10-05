@@ -51,15 +51,23 @@ run_certification() {
         --cli "$certification_cli" "$@"
 }
 
-run_certification --results "$results" --output "$output"
+if run_certification --results "$results" --output "$output"; then
+    printf '%s\n' 'certification accepted the production-ineligible IBus route' >&2
+    exit 1
+fi
 grep -F -- '- keyboard_layout: us,de,fr,altgr,multi-layout-switching' "$output" >/dev/null
 grep -F -- "- required_layout_profiles: \`us\`, \`de\`, \`fr\`, \`altgr\`, \`multi-layout-switching\`" "$output" >/dev/null
 grep -F -- "- target_apps: $target_apps" "$output" >/dev/null
 
 json_output="$test_root/certification.json"
-run_certification --format json --results "$results" --output "$json_output"
+if run_certification --format json --results "$results" --output "$json_output"; then
+    printf '%s\n' 'JSON certification accepted the production-ineligible IBus route' >&2
+    exit 1
+fi
 jq -e --argjson expected_cases "$expected_cases" '
-    .schema == 2 and .certified == true and .status == "certified" and
+    .schema == 2 and .certified == false and .status == "incomplete" and
+    .backend_certification_eligible == false and
+    .backend_certification_block_reason == "IBus lacks atomic replacement, exact window identity, and composition awareness" and
     ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and
     .compositor == "kde" and .backend == "ibus" and
     .expected_desktop == "KDE Plasma" and .detected_desktop == "KDE Plasma" and
@@ -78,15 +86,17 @@ mkdir -p "$spaced_cli_dir"
 cp "$certification_cli" "$spaced_cli_dir/wayexpand"
 chmod 0755 "$spaced_cli_dir/wayexpand"
 spaced_json="$test_root/spaced-cli.json"
-"$project_dir/scripts/certify-compositor.sh" --format json \
+if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps "$target_apps" --results "$results" \
-    --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null
-jq -e '.certified == true and .doctor_probe_valid == true' "$spaced_json" >/dev/null
+    --cli "$spaced_cli_dir/wayexpand" --output "$spaced_json" >/dev/null; then
+    printf '%s\n' 'certification accepted the production-ineligible IBus route with a spaced CLI path' >&2
+    exit 1
+fi
+jq -e '.certified == false and .doctor_probe_valid == true and .backend_certification_eligible == false' "$spaced_json" >/dev/null
 
-# IBus certification does not require a daemon status response. A missing
-# optional probe must neither invalidate a complete report nor produce a
-# contradictory `certified=true` artifact with a failing exit status.
+# IBus remains ineligible regardless of its optional daemon status probe; a
+# missing status snapshot is recorded without accidentally certifying it.
 optional_status_cli="$test_root/optional-status-cli"
 cat >"$optional_status_cli" <<'EOF'
 #!/bin/sh
@@ -97,11 +107,15 @@ esac
 EOF
 chmod 0755 "$optional_status_cli"
 optional_status_json="$test_root/optional-status-certification.json"
-"$project_dir/scripts/certify-compositor.sh" --format json \
+if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus \
     --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
-    --results "$results" --cli "$optional_status_cli" --output "$optional_status_json" >/dev/null
-jq -e '.certified == true and .status == "certified" and .status_required == false and .status_probe_valid == false' \
+    --results "$results" --cli "$optional_status_cli" --output "$optional_status_json" >/dev/null; then
+    printf '%s\n' 'certification accepted IBus despite its missing required guarantees' >&2
+    exit 1
+fi
+jq -e '.certified == false and .status == "incomplete" and .status_required == false and
+    .status_probe_valid == false and .backend_certification_eligible == false' \
     "$optional_status_json" >/dev/null
 
 daemon_cli="$test_root/daemon-cli"

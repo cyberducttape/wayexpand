@@ -17,10 +17,10 @@ feed_interval=${SOAK_FEED_INTERVAL_SECONDS:-1}
 case "$soak_seconds:$sample_interval:$rss_slack_kib:$fd_slack:$feed_interval" in
     *[!0-9:]*|:*|*::*|*:) printf '%s\n' 'error: duration, feed/sample intervals, and slack values must be non-negative integers' >&2; exit 2 ;;
 esac
-[ "$soak_seconds" -gt 0 ] && [ "$sample_interval" -gt 0 ] || {
+if [ "$soak_seconds" -le 0 ] || [ "$sample_interval" -le 0 ]; then
     printf '%s\n' 'error: SOAK_SECONDS and SOAK_SAMPLE_INTERVAL_SECONDS must be positive' >&2
     exit 2
-}
+fi
 
 runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-soak.XXXXXX")
 config_path="$runtime_dir/expansions.toml"

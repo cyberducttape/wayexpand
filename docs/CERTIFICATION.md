@@ -71,9 +71,11 @@ and `UNVERIFIED` means no trustworthy result was collected. Only an artifact
 whose required cells are all `pass` can set `certified: true`; human
 support tables are compatibility observations, not certification evidence.
 
-JSON mode exits successfully when the report is produced; automation must
-inspect `.certified`. Human-readable mode exits nonzero while certification is
-incomplete.
+The collector writes its report in either format, then exits nonzero whenever
+certification is incomplete or failed. Automation should still inspect
+`.certified` and `.status` so it can distinguish an ineligible route from
+missing scenario evidence; the JSON artifact remains available for upload and
+review after a nonzero exit.
 
 The compositor evidence collector emits schema version 2, where each entry in
 `scenarios` is an individual scenario × layout × client result. Scenario-only
