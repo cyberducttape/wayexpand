@@ -172,10 +172,6 @@ impl EvdevSource {
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);
         }
-        let timeout = rustix::event::Timespec {
-            tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
-            tv_nsec: timeout.subsec_nanos().into(),
-        };
         let borrowed: Vec<BorrowedFd<'_>> = self
             .devices
             .iter()
@@ -200,15 +196,9 @@ impl EvdevSource {
                 rustix::event::PollFlags::IN,
             ));
         }
-        rustix::event::poll(&mut fds, Some(&timeout))
-            .map_err(|error| EvdevError::Poll(error.to_string()))?;
-        if let Some(wake) = wake {
-            let woken = fds
-                .pop()
-                .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
-            if woken {
-                drain_wake_fd(wake.as_fd());
-            }
+        poll_with_wake(&mut fds, timeout, wake)?;
+        if wake.is_some() {
+            fds.pop();
         }
         let mut ready = Vec::new();
         let mut lost = Vec::new();
@@ -566,6 +556,32 @@ fn drain_wake_fd(fd: BorrowedFd<'_>) {
     let _ = rustix::io::read(fd, &mut buffer);
 }
 
+/// Poll the device descriptors and, when present, the final wake descriptor.
+/// Keeping wake handling here lets its readiness and drain behavior be tested
+/// without opening a host keyboard device.
+fn poll_with_wake(
+    fds: &mut [rustix::event::PollFd<'_>],
+    timeout: Duration,
+    wake: Option<&OwnedFd>,
+) -> Result<bool, EvdevError> {
+    let timeout = rustix::event::Timespec {
+        tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
+        tv_nsec: timeout.subsec_nanos().into(),
+    };
+    rustix::event::poll(fds, Some(&timeout))
+        .map_err(|error| EvdevError::Poll(error.to_string()))?;
+    let woken = wake.is_some()
+        && fds
+            .last()
+            .is_some_and(|fd| fd.revents().contains(rustix::event::PollFlags::IN));
+    if woken {
+        if let Some(wake) = wake {
+            drain_wake_fd(wake.as_fd());
+        }
+    }
+    Ok(woken)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +589,23 @@ mod tests {
     fn test_state() -> State {
         let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
         State::new(keymap)
+    }
+
+    #[test]
+    fn eventfd_wakes_the_evdev_poll_and_is_drained() {
+        let wake = rustix::event::eventfd(
+            0,
+            rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+        )
+        .unwrap();
+        let mut fds = [rustix::event::PollFd::new(
+            &wake,
+            rustix::event::PollFlags::IN,
+        )];
+        rustix::io::write(&wake, &1_u64.to_ne_bytes()).unwrap();
+
+        assert!(poll_with_wake(&mut fds, Duration::from_secs(1), Some(&wake)).unwrap());
+        assert!(!poll_with_wake(&mut fds, Duration::ZERO, Some(&wake)).unwrap());
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord

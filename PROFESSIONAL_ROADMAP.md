@@ -75,8 +75,10 @@ supported end state before broad adoption:
 
 - [ ] Device lifecycle (two keyboards, hotplug, suspend) needs a fake-evdev
       test seam or a hardware lab; evdev tests cannot create devices today.
-- [ ] The source-level wake path (evdev and input-method waiting on the
-      reactor eventfd) is not unit-tested for the same reason.
+- [x] The evdev poll helper's eventfd readiness and drain behavior is covered
+      by a synthetic test without opening a kernel device.
+- [ ] The input-method wait path still needs a deterministic Wayland
+      dispatcher seam to test reactor-eventfd wakeups without a live compositor.
 - [ ] Loom-style modelling of the waker, output-completion, and completion
       notifier paths would need `cfg(loom)` shims for std sync types.
 - [ ] Form snippets and the clipboard variable need validation with real
