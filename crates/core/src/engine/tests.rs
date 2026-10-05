@@ -4543,15 +4543,33 @@ fn form_fields_are_parsed_and_validated() {
 
 #[test]
 fn explain_describes_form_snippets_instead_of_failing_to_render() {
-    let engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
     let explanation = engine.explain(":tk", "libei");
-    assert!(explanation.would_expand(), "{}", explanation.render_text());
+    assert!(!explanation.would_expand(), "{}", explanation.render_text());
     assert!(explanation
         .checks
         .iter()
         .any(|check| check.detail.contains("opens a form for name, id, Choice")));
+    assert!(explanation.checks.iter().any(|check| {
+        check.name == "window identity"
+            && check.status == CheckStatus::Fail
+            && check.detail.contains("form will not open")
+    }));
     assert!(explanation
         .checks
         .iter()
         .any(|check| check.name == "policy"));
+
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.example.mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: Some("toplevel-1".into()),
+    }));
+    let explanation = engine.explain(":tk", "libei");
+    assert!(explanation.would_expand(), "{}", explanation.render_text());
+    assert!(explanation.checks.iter().any(|check| {
+        check.name == "window identity"
+            && check.status == CheckStatus::Pass
+            && check.detail.contains("exact original toplevel")
+    }));
 }

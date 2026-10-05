@@ -265,14 +265,31 @@ impl ExpansionEngine {
                 if !fields.is_empty() {
                     let labels: Vec<&str> =
                         fields.iter().map(|field| field.label.as_str()).collect();
+                    let exact_window_identity = self
+                        .normalized_window
+                        .as_ref()
+                        .and_then(|window| window.instance_id.as_ref())
+                        .is_some_and(|identity| {
+                            !identity.is_empty()
+                                && identity.len() <= super::MAX_WINDOW_INSTANCE_ID_BYTES
+                        });
                     explanation.push(
                         "replacement",
                         CheckStatus::Info,
-                        format!(
-                            "opens a form for {} before typing; the result is applied only if \
-                             focus returns to the same application",
-                            labels.join(", ")
-                        ),
+                        format!("opens a form for {} before typing", labels.join(", ")),
+                    );
+                    explanation.push(
+                        "window identity",
+                        if exact_window_identity {
+                            CheckStatus::Pass
+                        } else {
+                            CheckStatus::Fail
+                        },
+                        if exact_window_identity {
+                            "form output is applied only if focus returns to the exact original toplevel"
+                        } else {
+                            "backend does not provide a bounded exact window identity; the form will not open"
+                        },
                     );
                     return explanation_with_policy(self, explanation, expansion, backend);
                 }

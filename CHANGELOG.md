@@ -35,7 +35,8 @@ Changes not yet released.
   and `{{choice:A|B}}` open a form when the snippet fires; the filled text is
   typed only if focus returns to the exact original toplevel. Backends without
   a bounded window identity refuse to open forms rather than risk inserting
-  into a different window.
+  into a different window; `wayexpand explain` reports when the capability is
+  unavailable.
 - **Local usage statistics:** `wayexpand stats` reports expansions,
   keystrokes avoided, most-used and unused snippets, and risky triggers from
   a local, ID-only `usage-stats.json` (`settings.usage_stats = false` to
