@@ -29,6 +29,89 @@ impl ExpansionEngine {
     }
 }
 
+/// The policy-specific part of taking a match. The event transitions and
+/// character scanner below are shared; only match execution and undo metadata
+/// differ between synchronous and deferred callers.
+trait MatchProcessor {
+    type Output;
+
+    fn before_event(engine: &mut ExpansionEngine);
+    fn take(
+        engine: &mut ExpansionEngine,
+        config_index: usize,
+        length: usize,
+        terminator: Option<char>,
+    ) -> Option<Self::Output>;
+    fn output_bytes(output: &Self::Output) -> usize;
+    fn invalidate_outputs(engine: &mut ExpansionEngine, outputs: &mut [Self::Output]);
+    fn finish_end_of_input(engine: &ExpansionEngine, output: Self::Output) -> Self::Output;
+}
+
+struct ImmediateProcessor;
+struct DeferredProcessor;
+
+impl MatchProcessor for ImmediateProcessor {
+    type Output = ExpansionResult;
+
+    fn before_event(_: &mut ExpansionEngine) {}
+
+    fn take(
+        engine: &mut ExpansionEngine,
+        config_index: usize,
+        length: usize,
+        terminator: Option<char>,
+    ) -> Option<Self::Output> {
+        engine.take_match(config_index, length, terminator)
+    }
+
+    fn output_bytes(output: &Self::Output) -> usize {
+        output.trigger.len().saturating_add(output.insert.len())
+    }
+
+    fn invalidate_outputs(engine: &mut ExpansionEngine, _: &mut [Self::Output]) {
+        engine.last_expansion = None;
+    }
+
+    fn finish_end_of_input(_: &ExpansionEngine, output: Self::Output) -> Self::Output {
+        output
+    }
+}
+
+impl MatchProcessor for DeferredProcessor {
+    type Output = PendingExpansionResult;
+
+    fn before_event(engine: &mut ExpansionEngine) {
+        engine.restore_deferred_matches();
+    }
+
+    fn take(
+        engine: &mut ExpansionEngine,
+        config_index: usize,
+        length: usize,
+        terminator: Option<char>,
+    ) -> Option<Self::Output> {
+        engine.take_match_deferred(config_index, length, terminator)
+    }
+
+    fn output_bytes(output: &Self::Output) -> usize {
+        output
+            .trigger
+            .len()
+            .saturating_add(output.template_text.len())
+    }
+
+    fn invalidate_outputs(_: &mut ExpansionEngine, outputs: &mut [Self::Output]) {
+        for output in outputs {
+            output.undoable = false;
+        }
+    }
+
+    fn finish_end_of_input(engine: &ExpansionEngine, mut output: Self::Output) -> Self::Output {
+        output.generation = engine.input_generation;
+        output
+    }
+}
+
 /// What the buffer's current suffix means once a character has been appended.
 enum SettledMatch {
     /// Keep buffering: nothing matched, a longer trigger could still follow,
@@ -174,119 +257,7 @@ impl ExpansionEngine {
     /// Process an event stream. A text event may contain multiple Unicode
     /// scalar values; matching is performed after each one.
     pub(super) fn process_internal(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
-        self.invalidate_undo_unless_undo_chord(&event);
-        match event {
-            InputEvent::Key(_) => {
-                self.note_key_event();
-                Vec::new()
-            }
-            InputEvent::Text(text) => {
-                let mut results = Vec::new();
-                let mut result_bytes = 0usize;
-                if !self.is_capture_enabled() {
-                    return results;
-                }
-                for character in text.chars() {
-                    // An undoable expansion is valid only when no later
-                    // scalar from this same text event follows it.
-                    if !results.is_empty() {
-                        self.last_expansion = None;
-                    }
-                    self.bump_generation();
-                    if let Some((config_index, length)) = self.match_completed_by(character) {
-                        if let Some(result) = self.take_match(config_index, length, Some(character))
-                        {
-                            // `result.trigger` is the configured trigger the
-                            // plan carried, so the byte budget no longer
-                            // clones it out of the config just to measure it.
-                            let bytes = result.trigger.len().saturating_add(result.insert.len());
-                            if results.len() >= MAX_RESULTS_PER_EVENT
-                                || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
-                            {
-                                self.clear_buffer();
-                                break;
-                            }
-                            result_bytes = result_bytes.saturating_add(bytes);
-                            results.push(result);
-                        }
-                    }
-                    if results.len() >= MAX_RESULTS_PER_EVENT {
-                        self.clear_buffer();
-                        break;
-                    }
-                    self.push_buffered(character);
-                    match self.settled_match() {
-                        SettledMatch::Continue => {}
-                        SettledMatch::Stale => {
-                            self.clear_buffer();
-                            continue;
-                        }
-                        SettledMatch::Take {
-                            config_index,
-                            length,
-                        } => {
-                            if let Some(result) = self.take_match(config_index, length, None) {
-                                let expansion_bytes =
-                                    result.trigger.len().saturating_add(result.insert.len());
-                                if result_bytes.saturating_add(expansion_bytes)
-                                    > MAX_RESULT_BYTES_PER_EVENT
-                                {
-                                    self.clear_buffer();
-                                    break;
-                                }
-                                result_bytes = result_bytes.saturating_add(expansion_bytes);
-                                results.push(result);
-                            }
-                            // Do not allow a replacement to combine with the
-                            // next typed text and accidentally trigger again.
-                            self.clear_buffer();
-                        }
-                    }
-                }
-                results
-            }
-            InputEvent::Delimiter(character) => {
-                self.process_internal(InputEvent::Text(character.to_string()))
-            }
-            InputEvent::Backspace => {
-                self.on_backspace();
-                Vec::new()
-            }
-            InputEvent::EndOfInput => {
-                self.bump_generation();
-                let result = self
-                    .matcher
-                    .find_suffix(self.buffer.iter().rev().copied())
-                    .and_then(|(index, length)| {
-                        self.matcher_indices
-                            .get(index)
-                            .copied()
-                            .and_then(|config_index| self.take_match(config_index, length, None))
-                    });
-                self.clear_buffer();
-                result.into_iter().collect()
-            }
-            InputEvent::Reset => {
-                self.on_reset();
-                Vec::new()
-            }
-            InputEvent::FocusChanged { sensitive } => {
-                self.on_focus_changed(sensitive);
-                Vec::new()
-            }
-            InputEvent::CompositionChanged { active } => {
-                self.on_composition_changed(active);
-                Vec::new()
-            }
-            InputEvent::PauseChanged(paused) => {
-                self.on_pause_changed(paused);
-                Vec::new()
-            }
-            InputEvent::WindowChanged(window) => {
-                self.on_window_changed(window);
-                Vec::new()
-            }
-        }
+        self.process_event::<ImmediateProcessor>(event)
     }
 
     /// Process input and return pending expansion results for deferred execution.
@@ -296,86 +267,20 @@ impl ExpansionEngine {
         &mut self,
         event: InputEvent,
     ) -> Vec<PendingExpansionResult> {
-        self.restore_deferred_matches();
+        self.process_event::<DeferredProcessor>(event)
+    }
+
+    fn process_event<P: MatchProcessor>(&mut self, event: InputEvent) -> Vec<P::Output> {
+        P::before_event(self);
         self.invalidate_undo_unless_undo_chord(&event);
         match event {
             InputEvent::Key(_) => {
                 self.note_key_event();
                 Vec::new()
             }
-            InputEvent::Text(text) => {
-                let mut results = Vec::new();
-                let mut result_bytes = 0usize;
-                if !self.is_capture_enabled() {
-                    return results;
-                }
-                for character in text.chars() {
-                    // Match the immediate processor's undo semantics: once
-                    // another scalar follows a match in the same event, that
-                    // earlier expansion is no longer immediately undoable.
-                    if !results.is_empty() {
-                        for result in &mut results {
-                            result.undoable = false;
-                        }
-                    }
-                    self.bump_generation();
-                    if let Some((config_index, length)) = self.match_completed_by(character) {
-                        if let Some(result) =
-                            self.take_match_deferred(config_index, length, Some(character))
-                        {
-                            let bytes = result
-                                .trigger
-                                .len()
-                                .saturating_add(result.template_text.len());
-                            if results.len() >= MAX_RESULTS_PER_EVENT
-                                || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
-                            {
-                                self.clear_buffer();
-                                break;
-                            }
-                            result_bytes = result_bytes.saturating_add(bytes);
-                            results.push(result);
-                        }
-                    }
-                    if results.len() >= MAX_RESULTS_PER_EVENT {
-                        self.clear_buffer();
-                        break;
-                    }
-                    self.push_buffered(character);
-                    match self.settled_match() {
-                        SettledMatch::Continue => {}
-                        SettledMatch::Stale => {
-                            self.clear_buffer();
-                            continue;
-                        }
-                        SettledMatch::Take {
-                            config_index,
-                            length,
-                        } => {
-                            if let Some(result) =
-                                self.take_match_deferred(config_index, length, None)
-                            {
-                                let expansion_bytes = result
-                                    .trigger
-                                    .len()
-                                    .saturating_add(result.template_text.len());
-                                if result_bytes.saturating_add(expansion_bytes)
-                                    > MAX_RESULT_BYTES_PER_EVENT
-                                {
-                                    self.clear_buffer();
-                                    break;
-                                }
-                                result_bytes = result_bytes.saturating_add(expansion_bytes);
-                                results.push(result);
-                            }
-                            self.clear_buffer();
-                        }
-                    }
-                }
-                results
-            }
+            InputEvent::Text(text) => self.process_text::<P>(&text),
             InputEvent::Delimiter(character) => {
-                self.process_deferred_internal(InputEvent::Text(character.to_string()))
+                self.process_event::<P>(InputEvent::Text(character.to_string()))
             }
             InputEvent::Backspace => {
                 self.on_backspace();
@@ -390,16 +295,11 @@ impl ExpansionEngine {
                         self.matcher_indices
                             .get(index)
                             .copied()
-                            .and_then(|config_index| {
-                                self.take_match_deferred(config_index, length, None)
-                            })
+                            .and_then(|config_index| P::take(self, config_index, length, None))
                     });
                 self.clear_buffer();
                 result
-                    .map(|mut pending| {
-                        pending.generation = self.input_generation;
-                        pending
-                    })
+                    .map(|output| P::finish_end_of_input(self, output))
                     .into_iter()
                     .collect()
             }
@@ -424,5 +324,64 @@ impl ExpansionEngine {
                 Vec::new()
             }
         }
+    }
+
+    fn process_text<P: MatchProcessor>(&mut self, text: &str) -> Vec<P::Output> {
+        let mut results = Vec::new();
+        let mut result_bytes = 0usize;
+        if !self.is_capture_enabled() {
+            return results;
+        }
+        for character in text.chars() {
+            // A later scalar in the same text event invalidates undo for
+            // earlier matches, with policy-specific metadata handled here.
+            if !results.is_empty() {
+                P::invalidate_outputs(self, &mut results);
+            }
+            self.bump_generation();
+            if let Some((config_index, length)) = self.match_completed_by(character) {
+                if let Some(output) = P::take(self, config_index, length, Some(character)) {
+                    let bytes = P::output_bytes(&output);
+                    if results.len() >= MAX_RESULTS_PER_EVENT
+                        || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
+                    {
+                        self.clear_buffer();
+                        break;
+                    }
+                    result_bytes = result_bytes.saturating_add(bytes);
+                    results.push(output);
+                }
+            }
+            if results.len() >= MAX_RESULTS_PER_EVENT {
+                self.clear_buffer();
+                break;
+            }
+            self.push_buffered(character);
+            match self.settled_match() {
+                SettledMatch::Continue => {}
+                SettledMatch::Stale => {
+                    self.clear_buffer();
+                    continue;
+                }
+                SettledMatch::Take {
+                    config_index,
+                    length,
+                } => {
+                    if let Some(output) = P::take(self, config_index, length, None) {
+                        let bytes = P::output_bytes(&output);
+                        if result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT {
+                            self.clear_buffer();
+                            break;
+                        }
+                        result_bytes = result_bytes.saturating_add(bytes);
+                        results.push(output);
+                    }
+                    // Do not allow a replacement to combine with following
+                    // input and accidentally trigger again.
+                    self.clear_buffer();
+                }
+            }
+        }
+        results
     }
 }
