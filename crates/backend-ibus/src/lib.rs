@@ -77,6 +77,7 @@ pub fn source_capabilities() -> InputSourceCapabilities {
         reliable_key_state: false,
         key_passthrough: true,
         composition_aware: false,
+        local_compose_aware: false,
         layout_aware: true,
     }
 }

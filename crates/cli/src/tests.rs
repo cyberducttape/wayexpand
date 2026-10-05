@@ -102,12 +102,12 @@ fn backup_refuses_existing_destination_atomically() {
 #[test]
 fn status_json_preserves_types_and_ignores_banner() {
     let value = status_as_json(
-        "running\nsource=stdin\nstatus_schema=5\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\n",
+        "running\nsource=stdin\nstatus_schema=6\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\n",
     )
     .unwrap();
     assert_eq!(value["response"], "running");
     assert_eq!(value["source"], "stdin");
-    assert_eq!(value["status_schema"], 5);
+    assert_eq!(value["status_schema"], 6);
     assert_eq!(value["daemon_commit"], "test-commit");
     assert_eq!(value["paused"], true);
     assert_eq!(value["command_queue_depth"], 3);
@@ -120,11 +120,11 @@ fn status_json_preserves_types_and_ignores_banner() {
 #[test]
 fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
     assert!(status_schema_compatible(
-        &serde_json::json!({ "status_schema": 5 })
+        &serde_json::json!({ "status_schema": 6 })
     ));
     assert!(!status_schema_compatible(&serde_json::json!({})));
     assert!(!status_schema_compatible(
-        &serde_json::json!({ "status_schema": 6 })
+        &serde_json::json!({ "status_schema": 7 })
     ));
     assert!(!status_schema_compatible(
         &serde_json::json!({ "status_schema": "1" })
@@ -161,7 +161,7 @@ fn status_json_matches_documented_stable_contract() {
          source=input-method\n\
          backend=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=5\n\
+         status_schema=6\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -172,6 +172,7 @@ fn status_json_matches_documented_stable_contract() {
          capture_reliable_key_state=true\n\
          capture_key_passthrough=false\n\
          capture_composition_aware=false\n\
+         capture_local_compose_aware=true\n\
          capture_layout_aware=true\n\
          window_tracker_connected=false\n\
          window_identity_exact=false\n\
@@ -292,6 +293,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "capture_reliable_key_state",
             "capture_key_passthrough",
             "capture_composition_aware",
+            "capture_local_compose_aware",
             "capture_layout_aware",
             "window_tracker_connected",
             "window_identity_exact",

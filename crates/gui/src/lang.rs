@@ -744,6 +744,8 @@ impl Strings {
             (Language::German, "capture_passthrough") => "Weitergabe nicht unterstützter Tasten",
             (Language::English, "composition") => "IME composition awareness",
             (Language::German, "composition") => "IME-Kompositionserkennung",
+            (Language::English, "local_compose") => "Dead-key/Compose sequence tracking",
+            (Language::German, "local_compose") => "Tot-/Compose-Tastenfolgen verfolgen",
             (Language::English, "layout") => "Runtime keyboard-layout awareness",
             (Language::German, "layout") => "Erkennung wechselnder Tastaturlayouts",
             (Language::English, "window_tracker") => "KWin window tracker",

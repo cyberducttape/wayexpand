@@ -75,8 +75,11 @@ pub struct InputSourceCapabilities {
     pub reliable_key_state: bool,
     /// Capture can forward unsupported keys through its attached injector.
     pub key_passthrough: bool,
-    /// The source is aware of active IME/preedit composition.
+    /// The source observes active external IME/preedit composition.
     pub composition_aware: bool,
+    /// The source tracks local XKB dead-key and Compose sequences until
+    /// their text is committed or the sequence is cancelled.
+    pub local_compose_aware: bool,
     /// The source tracks compositor/runtime keyboard layout changes rather
     /// than relying on a startup-only local layout snapshot.
     pub layout_aware: bool,
@@ -90,6 +93,7 @@ impl InputSourceCapabilities {
         reliable_key_state: true,
         key_passthrough: false,
         composition_aware: false,
+        local_compose_aware: false,
         layout_aware: false,
     };
 
@@ -102,6 +106,7 @@ impl InputSourceCapabilities {
         // was explicitly attached to the live session.
         key_passthrough: false,
         composition_aware: false,
+        local_compose_aware: true,
         layout_aware: true,
     };
 }
@@ -607,17 +612,20 @@ mod tests {
             exclusive_capture: bool,
             key_passthrough: bool,
             composition_aware: bool,
+            local_compose_aware: bool,
             layout_aware: bool,
         ) {
             assert_eq!(profile.sensitive_focus, sensitive_focus);
             assert_eq!(profile.exclusive_capture, exclusive_capture);
             assert_eq!(profile.key_passthrough, key_passthrough);
             assert_eq!(profile.composition_aware, composition_aware);
+            assert_eq!(profile.local_compose_aware, local_compose_aware);
             assert_eq!(profile.layout_aware, layout_aware);
         }
 
         assert_profile(
             InputSourceCapabilities::EVDEV,
+            false,
             false,
             false,
             false,
@@ -631,9 +639,11 @@ mod tests {
             false,
             false,
             true,
+            true,
         );
         assert_profile(
             InputSourceCapabilities::default(),
+            false,
             false,
             false,
             false,

@@ -259,7 +259,7 @@ case "$backend" in
             .backend == "input-method-v2" and
             .capture_sensitive_focus == true and
             .capture_key_passthrough == true and
-            .capture_composition_aware == true and
+            .capture_local_compose_aware == true and
             .capture_layout_aware == true and
             .inject_atomic_replace == true and
             .inject_full_unicode == true and
@@ -267,7 +267,7 @@ case "$backend" in
         ' >/dev/null 2>&1; then
             backend_probe_valid=0
             backend_certification_eligible=false
-            backend_certification_block_reason='input-method route does not provide the complete sensitive-field, composition, key-pass-through, atomic-replacement, and Unicode capability contract'
+            backend_certification_block_reason='input-method route does not provide the complete sensitive-field, local dead-key/Compose, key-pass-through, atomic-replacement, and Unicode capability contract'
         fi
         ;;
     *)

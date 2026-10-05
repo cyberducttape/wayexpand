@@ -105,6 +105,7 @@ impl GuiApp {
                     ("window_tracker", capabilities.window_tracker_connected),
                     ("sensitive_focus", capabilities.capture_sensitive_focus),
                     ("composition", capabilities.capture_composition_aware),
+                    ("local_compose", capabilities.capture_local_compose_aware),
                     ("layout", capabilities.capture_layout_aware),
                 ] {
                     self.render_capability_row(ui, palette, key, value);
@@ -186,6 +187,7 @@ impl GuiApp {
                 ),
                 ("capture_passthrough", capabilities.capture_key_passthrough),
                 ("composition", capabilities.capture_composition_aware),
+                ("local_compose", capabilities.capture_local_compose_aware),
                 ("layout", capabilities.capture_layout_aware),
             ] {
                 self.render_capability_row(ui, palette, key, value);
