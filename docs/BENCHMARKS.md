@@ -74,13 +74,16 @@ bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
 ### Recheck: 2026-10-05, commit `1bd5ea9`
 
 On the same host and toolchain, rerunning the 10,000-snippet case produced a
-158.56 ms estimate (95% interval 157.24–160.08 ms). Two direct-process RSS
-observations were 132,592 and 133,636 KiB. Construction time is consistent
-with the earlier capture, but RSS is materially higher than its 114,644 KiB
-reading. Treat peak RSS as unresolved host/run variance until a controlled
-comparison identifies the cause; do not use the earlier single observation as
-a memory guarantee. The current run used Linux 7.0.0-34-generic and the exact
-source revision above.
+162.72 ms estimate (95% interval 160.64–165.09 ms), with a direct-process
+maximum RSS of 135,336 KiB. A controlled run of the same benchmark from
+`fe65d4b` in a separate worktree and target directory measured 163.31 ms
+(160.92–166.14 ms) and 131,048 KiB RSS. Timing is statistically similar; the
+current peak RSS is about 3.3% higher. Earlier rechecks on the current binary
+reported 132,592 and 133,636 KiB, while the previous single baseline reported
+114,644 KiB. This spread indicates the older RSS figure was not representative;
+the controlled comparison does not show a large memory regression. Treat these
+as process-level observations, not a memory guarantee. The runs used Linux
+7.0.0-34-generic and Rust 1.96.0 on the same host.
 
 ## Configuration editing
 
