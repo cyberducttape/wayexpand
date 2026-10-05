@@ -123,6 +123,8 @@ pub struct KwinWindowTracker {
     // callback interface the loaded script calls into.
     connection: Connection,
     receiver: mpsc::Receiver<Option<WindowContext>>,
+    #[cfg(test)]
+    service_name: String,
     plugin_name: String,
     script_path: std::path::PathBuf,
     next_health_check: Instant,
@@ -253,6 +255,8 @@ impl KwinWindowTracker {
         Ok(Self {
             connection,
             receiver,
+            #[cfg(test)]
+            service_name: bus_name,
             plugin_name,
             script_path,
             next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
@@ -514,6 +518,25 @@ mod tests {
         assert!(
             initial.flatten().is_some(),
             "KWin should provide application or window identity for the focused window"
+        );
+
+        let untrusted_client =
+            zbus::blocking::Connection::session().expect("connect a second session-bus client");
+        untrusted_client
+            .call_method(
+                Some(tracker.service_name.as_str()),
+                "/WindowTracker",
+                Some("org.wayexpand.WindowTracker1"),
+                "WindowChanged",
+                &("org.example.Spoof", "fake-window", "not-a-kwin-id"),
+            )
+            .expect("the tracker method should reject an untrusted caller without disconnecting");
+        assert!(
+            tracker
+                .next_window_timeout(std::time::Duration::from_millis(100))
+                .expect("the tracker should stay responsive after a spoof attempt")
+                .is_none(),
+            "an untrusted D-Bus caller must not publish a focus event"
         );
 
         let deadline =
