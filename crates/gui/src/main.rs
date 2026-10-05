@@ -27,6 +27,7 @@ use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
 use std::{
+    collections::HashMap,
     env,
     path::{Path, PathBuf},
     sync::{
@@ -118,6 +119,8 @@ const TEMPLATE_VARIABLES: &[&str] = &[
 struct GuiApp {
     path: PathBuf,
     config_revision: wayexpand_core::ConfigRevision,
+    preview_library_revision: wayexpand_core::ConfigRevision,
+    preview_library_snippets: Arc<HashMap<String, String>>,
     pending_reload_revision: Option<wayexpand_core::ConfigRevision>,
     config_document: toml_edit::DocumentMut,
     config: Config,
@@ -299,6 +302,8 @@ impl GuiApp {
         let config_document = persistence::read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;
+        let preview_library_snippets = config.includable_snippets();
+        let preview_library_revision = config_revision.clone();
         let search_index = library::SearchIndex::new(&config);
         let selected = (!config.expansion.is_empty()).then_some(0);
         let selected_id = selected.map(|index| config.expansion[index].id.clone());
@@ -314,6 +319,8 @@ impl GuiApp {
         Ok(Self {
             path,
             config_revision,
+            preview_library_revision,
+            preview_library_snippets,
             pending_reload_revision: None,
             config_document,
             config,

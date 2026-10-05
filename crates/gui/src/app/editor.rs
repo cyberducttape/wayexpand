@@ -63,6 +63,10 @@ impl GuiApp {
     /// Command previews are explicit and user-triggered instead; see
     /// `run_command_preview`.
     pub(crate) fn preview(&mut self) -> String {
+        if self.preview_library_revision != self.config_revision {
+            self.preview_library_snippets = self.config.includable_snippets();
+            self.preview_library_revision = self.config_revision.clone();
+        }
         let source = if self.new_draft {
             if self.draft.is_none() {
                 return self.strings.no_selection().into();
@@ -79,14 +83,14 @@ impl GuiApp {
                 return cached_result.clone();
             }
         }
-        let result = preview::render_with_library(
+        let result = preview::render_with_library_snippets(
             source,
             &self.config.settings,
             &self.config.organization,
             self.draft.as_ref(),
             &self.preview_input,
             &self.preview_app,
-            Some(&self.config),
+            Some(Arc::clone(&self.preview_library_snippets)),
         );
         self.preview_cache = Some((
             self.preview_revision,

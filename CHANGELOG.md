@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Cache the editor preview's library snippet lookup by configuration revision, avoiding a full-library scan and clone after each edit while keeping dynamic template values fresh.
+
 Changes not yet released.
 
 - **GUI undo while saving:** pressing Undo again before the previous save

@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::Arc};
+
 use wayexpand_core::{
     Config, ExpansionConfig, ExpansionEngine, InputEvent, OrganizationPolicy, Settings,
     WindowContext,
@@ -24,17 +26,17 @@ pub(crate) fn render(
     input: &str,
     app: &str,
 ) -> String {
-    render_with_library(source, settings, organization, draft, input, app, None)
+    render_with_library_snippets(source, settings, organization, draft, input, app, None)
 }
 
-pub(crate) fn render_with_library(
+pub(crate) fn render_with_library_snippets(
     source: Option<&ExpansionConfig>,
     settings: &Settings,
     organization: &OrganizationPolicy,
     draft: Option<&Draft>,
     input: &str,
     app: &str,
-    library: Option<&Config>,
+    library_snippets: Option<Arc<HashMap<String, String>>>,
 ) -> String {
     let expansion = match draft {
         Some(draft) => Some(ExpansionConfig {
@@ -70,11 +72,16 @@ pub(crate) fn render_with_library(
         settings: settings.clone(),
         organization: organization.clone(),
     };
+    let context = library_snippets.map(|snippets| {
+        let mut context = config.template_context(None);
+        context.snippets = snippets;
+        context
+    });
     let Ok(mut engine) = ExpansionEngine::new(config) else {
         return "Configuration is invalid".into();
     };
-    if let Some(library) = library {
-        engine.set_template_context(library.template_context(None));
+    if let Some(context) = context {
+        engine.set_template_context(context);
     }
     if !app.trim().is_empty() {
         engine.set_current_window(Some(WindowContext {
