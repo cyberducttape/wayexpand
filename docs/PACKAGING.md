@@ -49,7 +49,7 @@ makepkg -si
 ```bash
 # Debian packaging expects the vendored release archive for offline builds.
 # Do not build the clean Git checkout: Launchpad builders cannot fetch crates.io.
-# Replace ${VERSION} with the current release version (e.g., 1.2.0)
+# Replace ${VERSION} with the current release version (e.g., 1.3.3)
 tar -xzf wayexpand-${VERSION}-vendored.tar.gz
 cd wayexpand-${VERSION}
 
@@ -76,9 +76,10 @@ gates pass.
 
 ### Fedora/RHEL
 
-**Status:** New GitHub releases are configured to include a local-install RPM
-for x86_64. The RPM spec is maintained and built in CI, but no official Copr
-repository is published, so DNF repository-based updates are not yet available.
+**Status:** The release workflow is configured to attach a local-install RPM
+for x86_64 after certification gates pass; no RPM is currently published. The
+RPM spec is maintained and built in CI, but no official Copr repository is
+published, so DNF repository-based updates are not available.
 
 For the release RPM, install the downloaded local package with:
 
@@ -93,7 +94,7 @@ sudo dnf install ./wayexpand-<version>-1.x86_64.rpm
 rpmbuild -ba wayexpand.spec
 
 # Or use mock for clean builds
-# Replace ${VERSION} with the current release version (e.g., 1.2.0)
+# Replace ${VERSION} with the current release version (e.g., 1.3.3)
 mock wayexpand-${VERSION}-1.fc39.src.rpm
 ```
 
@@ -115,11 +116,11 @@ rpmbuild -ba wayexpand.spec
 
 ### aarch64
 
-The release workflow builds on native x86_64 and aarch64 runners and attaches
-both archives to new tagged releases. Older releases may have only x86_64.
-On an aarch64 Fedora, Debian, Ubuntu, or Arch system, either use the matching
-release archive or build from source after installing Rust 1.95+ and native
-Wayland dependencies:
+The release workflow builds on native x86_64 and aarch64 runners and is
+configured to attach both archives after certification gates pass. No release
+archive is currently published. For local evaluation on an aarch64 Fedora,
+Debian, Ubuntu, or Arch system, build from source after installing Rust 1.95+
+and native Wayland dependencies:
 
 ```bash
 sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev
