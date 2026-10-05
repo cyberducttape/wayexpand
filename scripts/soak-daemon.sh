@@ -155,6 +155,9 @@ start_daemon() {
 
     ready=0
     for _attempt in $(seq 50); do
+        if ! kill -0 "$daemon_pid" 2>/dev/null; then
+            break
+        fi
         if run_isolated "$runtime_dir" "$config_path" "$cli" status >/dev/null 2>&1; then
             ready=1
             break
@@ -175,8 +178,25 @@ restart_daemon() {
     fi
     feeder_pid=
     if [ -n "$daemon_pid" ] && kill -0 "$daemon_pid" 2>/dev/null; then
-        kill -TERM "$daemon_pid"
-        wait "$daemon_pid" 2>/dev/null || true
+        # SIGTERM bypasses Rust Drop and leaves the control socket behind.
+        # The next daemon can then be mistaken for the old one or fail to bind.
+        run_isolated "$runtime_dir" "$config_path" "$cli" stop >/dev/null
+        stopped=0
+        for _attempt in $(seq 50); do
+            if ! kill -0 "$daemon_pid" 2>/dev/null; then
+                stopped=1
+                break
+            fi
+            sleep 0.1
+        done
+        if [ "$stopped" -ne 1 ]; then
+            printf '%s\n' 'error: daemon did not stop cleanly through its control socket' >&2
+            return 1
+        fi
+        if ! wait "$daemon_pid"; then
+            printf '%s\n' 'error: daemon failed while stopping through its control socket' >&2
+            return 1
+        fi
     fi
     daemon_pid=
     start_daemon

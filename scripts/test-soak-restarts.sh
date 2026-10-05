@@ -17,8 +17,13 @@ if ! TMPDIR="$runtime_tmp" SOAK_SECONDS=36 SOAK_SAMPLE_INTERVAL_SECONDS=10 \
 fi
 
 grep -Fx 'result=passed' "$report_dir/summary.txt" >/dev/null
-grep -Eq '^daemon_restarts=[2-9][0-9]*$' "$report_dir/summary.txt"
-test -s "$report_dir/daemon.log"
+if ! grep -Eq '^daemon_restarts=[2-9][0-9]*$' "$report_dir/summary.txt"; then
+    cat "$report_dir/summary.txt" >&2
+    cat "$test_root/soak.log" >&2
+    printf '%s\n' 'soak did not complete the expected daemon restarts' >&2
+    exit 1
+fi
+test -f "$report_dir/daemon.log"
 test -s "$report_dir/resource-samples.csv"
 if find "$runtime_tmp" -mindepth 1 -maxdepth 1 -type d -name 'wayexpand-soak.*' -print -quit | grep -q .; then
     printf '%s\n' 'restart soak left its private runtime directory behind' >&2
