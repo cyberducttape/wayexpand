@@ -6,6 +6,12 @@ set -eu
 umask 077
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+source_revision=$(git -C "$project_dir" rev-parse HEAD)
+if [ -z "$(git -C "$project_dir" status --porcelain)" ]; then
+    source_worktree=clean
+else
+    source_worktree=dirty
+fi
 soak_seconds=${SOAK_SECONDS:-60}
 warmup_seconds=$(( soak_seconds / 6 ))
 [ "$warmup_seconds" -ge 5 ] || warmup_seconds=5
@@ -212,6 +218,8 @@ if [ -n "$report_dir" ]; then
         echo "started_utc=$started_utc"
         echo "host=$(hostname)"
         echo "kernel=$(uname -sr)"
+        echo "source_revision=$source_revision"
+        echo "source_worktree=$source_worktree"
         echo "wayexpand_version=$("$cli" --version)"
         echo "daemon_version=$("$daemon" --version)"
         echo "duration_seconds=$soak_seconds"

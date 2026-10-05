@@ -218,7 +218,19 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Soak the daemon with typing, reloads, and control requests
-        run: SOAK_SECONDS=180 bash scripts/soak-daemon.sh
+        env:
+          SOAK_REPORT_DIR: ${{ runner.temp }}/wayexpand-soak
+        run: |
+          SOAK_SECONDS=180 bash scripts/soak-daemon.sh
+          grep -Fx "source_revision=$GITHUB_SHA" "$SOAK_REPORT_DIR/summary.txt"
+          grep -Fx 'source_worktree=clean' "$SOAK_REPORT_DIR/summary.txt"
+      - name: Upload daemon soak evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: daemon-soak-${{ github.sha }}
+          path: ${{ runner.temp }}/wayexpand-soak
+          if-no-files-found: warn
 
   msrv:
     name: MSRV (Rust 1.95)

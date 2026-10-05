@@ -67,7 +67,10 @@ explain requests. It does not simulate compositor, portal, keyboard, suspend,
 or systemd-restart events; those must be exercised by a real-session operator
 or the compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
 preserve the CSV samples, raw latency samples, daemon log, and summary. The
-script refuses to reuse an existing report directory.
+script refuses to reuse an existing report directory. Each summary records the
+exact Git revision and whether the worktree was clean when the soak began; CI
+uploads its short-run evidence as an artifact and verifies those fields against
+the checked-out commit.
 Synthetic input is rate-limited to one pair of lines per second by default;
 `SOAK_FEED_INTERVAL_SECONDS` can adjust that workload. Daemon logging is
 limited to warnings during the soak so a 24-hour run does not accumulate
