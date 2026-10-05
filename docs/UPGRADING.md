@@ -14,7 +14,7 @@ cd wayexpand
 git pull
 ./scripts/install-user.sh
 
-# If installed via PPA
+# If you already have a PPA build installed (no current PPA binaries are published)
 sudo apt update && sudo apt upgrade wayexpand
 
 # If built from the repository PKGBUILD preview
@@ -157,7 +157,7 @@ git checkout v1.1.1
 systemctl --user restart wayexpand-input-method.service
 ```
 
-### From PPA
+### From PPA (only if a previous PPA version is installed and still available)
 
 ```bash
 sudo apt install wayexpand=1.1.1-1

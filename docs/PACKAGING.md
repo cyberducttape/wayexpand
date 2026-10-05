@@ -13,13 +13,18 @@ packagers and source-build users need a compatible toolchain.
 
 ## Quick Reference
 
+**Current publication status:** the v1.3.3 GitHub release has no downloadable
+assets, and the Launchpad PPA currently publishes no WayExpand binaries. Treat
+all package formats below as build/packaging paths, not as currently available
+downloads. Release publication remains gated on compositor certification.
+
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
-| Arch Linux | `wayexpand` | Packaging preview | Not yet submitted to AUR; x86_64 and aarch64 PKGBUILD |
-| Ubuntu | `wayexpand` | [PPA](https://launchpad.net) | Source uploads require maintainer signing; check current series build status below |
-| Debian | `.deb` release asset | Per-release x86_64 package on new tags; no APT repository | Ubuntu PPA remains Ubuntu-only |
-| Fedora/RHEL | `.rpm` release asset | Per-release x86_64 package on new tags; no DNF repository | RPM spec and CI build are maintained; Copr publication pending |
-| aarch64 | `wayexpand` | Native release archive on new tagged releases | Existing releases may be x86_64-only |
+| Arch Linux | `wayexpand` | Build locally | Packaging preview; not submitted to AUR |
+| Ubuntu | `wayexpand` | No published PPA binaries | Source packaging path exists; signed upload and successful series build are pending |
+| Debian | `.deb` | Build locally from source | No release asset or APT repository currently published |
+| Fedora/RHEL | `.rpm` | Build locally from source/spec | No release asset or Copr repository currently published |
+| aarch64 | `wayexpand` | Build locally from source | No release archive currently published |
 
 ## Building Locally
 
@@ -58,10 +63,10 @@ dpkg-buildpackage -b
 sudo dpkg -i ../wayexpand_${VERSION}-1_amd64.deb
 ```
 
-The Launchpad PPA path targets Ubuntu series. New GitHub releases are configured
-to include a directly installable Debian package for x86_64; it is a local
-package, not an APT repository with automatic updates. Plain Debian users can
-also build from the vendored source archive.
+This documents a local packaging path; it does not imply that a package is
+currently published. Check the actual GitHub release and PPA before installing
+or deploying. The release workflow only builds artifacts after its certification
+gates pass.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -155,15 +160,18 @@ git push
 
 ### Ubuntu PPA
 
-GitHub releases include an unsigned Debian source package built from the
-vendored archive. This is the Launchpad input; the clean Git recipe does not
-contain `vendor/` and must not be used for offline PPA builds. Download the
-`.dsc`, `.orig.tar.gz`, `.debian.tar.xz`, `_source.changes`, and
-`_source.buildinfo` files into one directory, then sign and upload the changes
-file with the Launchpad-upload GPG key:
+To create an unsigned Debian source package for Launchpad, manually dispatch
+the GitHub Release workflow with `launchpad_series` set to the Ubuntu series
+codename. The workflow targets that suite in `debian/changelog`; it intentionally
+does not guess a PPA target for tag-push releases. The source package is built
+from the vendored archive; the clean Git recipe does not contain `vendor/` and
+must not be used for offline PPA builds. Download the `.dsc`, `.orig.tar.gz`,
+`.debian.tar.xz`, `_source.changes`, and `_source.buildinfo` files into one
+directory, then sign and upload the changes file with the Launchpad-upload GPG
+key:
 
 ```bash
-source_version=1.3.3-1 # use the version shown in the .dsc filename
+source_version=1.3.3-2 # use the version shown in the .dsc filename
 debsign "wayexpand_${source_version}_source.changes"
 dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 ```
@@ -206,9 +214,8 @@ wayexpand-gui
 ```bash
 # In a container
 docker run -it debian:bookworm bash
-# Ubuntu PPA test
-add-apt-repository ppa:cyberducttape/ppa
-apt update && apt install wayexpand
+# Build/install from the vendored source archive; no published package is
+# currently available for an installation test.
 wayexpand-gui
 ```
 
@@ -250,12 +257,13 @@ See [RELEASING.md](RELEASING.md) section "Release Checklist" for the complete wo
 
 ## Automated Updates
 
-Consider setting up:
-- **GitHub Actions** to auto-publish releases when tags are pushed
-- **Copr webhook** to auto-rebuild when an official Copr exists
-- **Ubuntu PPA** to auto-sync from GitHub releases
+Potential future work, not active publication paths:
+- **Copr webhook** after an official Copr repository is created
+- **Ubuntu PPA automation** after a supported series is selected and successful builds are published
 
-This minimizes manual work for patch releases.
+GitHub release workflows are configured, but release artifacts remain gated
+on certification. Do not treat workflow configuration as evidence of published
+packages.
 
 ---
 

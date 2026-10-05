@@ -10,6 +10,10 @@ on:
         description: "Existing tag or branch to build and publish"
         required: true
         type: string
+      launchpad_series:
+        description: "Optional Ubuntu series for a series-targeted Launchpad source package"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -173,7 +177,8 @@ jobs:
           tar -tzf "wayexpand-${version}-vendored.tar.gz" \
             | grep -E "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" >/dev/null
       - name: Build unsigned Launchpad source package
-        run: bash scripts/build-launchpad-source.sh "${RELEASE_REF_NAME#v}"
+        if: ${{ inputs.launchpad_series != '' }}
+        run: bash scripts/build-launchpad-source.sh "${RELEASE_REF_NAME#v}" "${{ inputs.launchpad_series }}"
       - name: Generate SBOM (Software Bill of Materials)
         shell: bash
         run: |

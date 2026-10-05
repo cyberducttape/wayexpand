@@ -41,22 +41,14 @@ local, offline, no account, no telemetry.
 
 ## Install
 
-For production or managed deployment, use the release binaries and packages
-with their checksums/provenance attached to a GitHub release, or the Ubuntu
-PPA. These routes do not require Rust or Cargo on the target machine. Use the
-source installer for development, unavailable architectures, or when building
-an organization-maintained package.
+**There is currently no published production binary/package release.** The
+public [v1.3.3 release](https://github.com/cyberducttape/wayexpand/releases/tag/v1.3.3)
+has no downloadable assets, and the [Ubuntu PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa)
+currently has no published WayExpand binaries. Release artifacts remain gated
+on real compositor certification; see the [support matrix](docs/SUPPORT_MATRIX.md)
+before deploying.
 
-On Ubuntu:
-
-```sh
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
-wayexpand-gui
-```
-
-From source (development or local packaging):
+For local evaluation or development, install from source (Rust 1.95+ required):
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
@@ -65,12 +57,11 @@ cd wayexpand
 wayexpand-gui
 ```
 
-New GitHub releases include installable `.deb` and `.rpm` packages for x86_64
-and an aarch64 archive: `sudo apt install ./wayexpand_*_amd64.deb` or
-`sudo dnf install ./wayexpand-*.x86_64.rpm`. Fedora/Copr, AUR, and Flathub are
-not published yet, so those users should use the matching release asset or
-their distribution's maintained package build; see [Packaging](docs/PACKAGING.md)
-for the current status.
+The release workflow is configured to attach `.deb`, `.rpm`, and architecture
+archives after its certification gates pass. Check the actual release page
+before following package-install commands; a configured workflow is not
+evidence that an artifact has been published. See [Packaging](docs/PACKAGING.md)
+for source-build and Launchpad status.
 
 The installers never run as root, enable services, grant raw-input access, or
 accept portal consent for you.

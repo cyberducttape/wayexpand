@@ -2,14 +2,19 @@
 # Build an unsigned Debian source package from the complete vendored archive.
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-    printf '%s\n' "usage: $0 <version>" >&2
+if [ "$#" -ne 2 ]; then
+    printf '%s\n' "usage: $0 <version> <ubuntu-series>" >&2
     exit 2
 fi
 
 version="$1"
+series="$2"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf '%s\n' "error: version must be numeric SemVer (X.Y.Z)" >&2
+    exit 2
+fi
+if [[ ! "$series" =~ ^[a-z][a-z0-9-]*$ ]]; then
+    printf '%s\n' "error: Ubuntu series must be a lowercase series codename" >&2
     exit 2
 fi
 
@@ -35,10 +40,20 @@ if [ ! -f "$source_dir/debian/control" ] || [ ! -f "$source_dir/.cargo/config.to
     exit 1
 fi
 
+DEBFULLNAME='Stephan Loesevitz' DEBEMAIL='stephan.loesevitz@gmail.com' \
+    dch --changelog "$source_dir/debian/changelog" --increment --upstream \
+        --distribution "$series" --force-distribution --no-auto-nmu \
+        "Launchpad source upload for ${series}."
 package_version=$(dpkg-parsechangelog --file "$source_dir/debian/changelog" --show-field Version)
+package_distribution=$(dpkg-parsechangelog --file "$source_dir/debian/changelog" --show-field Distribution)
 if [[ "$package_version" != "${version}-"* ]]; then
     printf 'error: Debian version %s does not match archive version %s\n' \
         "$package_version" "$version" >&2
+    exit 1
+fi
+if [ "$package_distribution" != "$series" ]; then
+    printf 'error: Debian distribution %s does not match requested series %s\n' \
+        "$package_distribution" "$series" >&2
     exit 1
 fi
 

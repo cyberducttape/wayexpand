@@ -81,10 +81,12 @@ desktop targets at the exact release ref. Missing self-hosted drivers,
 incomplete backend capabilities, or unverified scenario cells block packaging
 and publishing. It then builds the Linux x86_64 binaries with the locked
 dependency graph and publishes the end-user packages and source archives.
-It also produces an unsigned Debian source package from the vendored archive
-for Launchpad. That source package is not automatically uploaded: the
-maintainer must sign its `.changes` file and upload it only to Ubuntu series
-whose builders satisfy the Rust MSRV. See [PACKAGING.md](PACKAGING.md) for the
+When manually dispatched with a `launchpad_series` input, it also produces an
+unsigned Debian source package from the vendored archive targeted to that
+Ubuntu series. It intentionally does not guess a suite during tag-push
+releases. The source package is not automatically uploaded: the maintainer
+must sign its `.changes` file and upload it only to Ubuntu series whose
+builders satisfy the Rust MSRV. See [PACKAGING.md](PACKAGING.md) for the
 current Launchpad restrictions and signing commands.
 
 To republish artifacts for an existing tag, use the workflow's manual
@@ -139,7 +141,8 @@ fi
 
 - Debian source package (`wayexpand_<version>-<revision>_source.changes` and
   companion `.dsc`, `.orig.tar.gz`, `.debian.tar.xz`, and `.buildinfo` files)
-  - Generated from the vendored archive and included in the GitHub release
+  - Generated from the vendored archive when `launchpad_series` is set on a
+    manual Release workflow dispatch
   - Unsigned until the maintainer signs it with the Launchpad upload key
 
 The Launchpad recipe must build from the vendored source archive (or an

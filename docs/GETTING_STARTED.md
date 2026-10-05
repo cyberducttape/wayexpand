@@ -108,11 +108,10 @@ For the output-driven recovery flow, go directly to the
 
 ### Architecture note: aarch64
 
-New tagged releases include pre-built Linux binaries for `x86_64` and native
-`aarch64`; earlier releases may be x86_64-only.
-Fedora Copr is not published yet; Fedora users can build from source or the
-maintained RPM spec for now. See the [packaging guide](PACKAGING.md) for the
-current release and repository status.
+The release workflow supports native `x86_64` and `aarch64` builds, but the
+current v1.3.3 release has no downloadable assets. Check the [packaging
+guide](PACKAGING.md) for actual publication status before choosing an install
+path.
 
 ## Which Desktop Are You Using?
 
@@ -123,12 +122,10 @@ session testing and is not certified by the current support matrix. Start
 here only after reviewing the backend tradeoffs:
 
 ```bash
-# Install from the Ubuntu PPA
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
-# Debian users: use the vendored source/release route in PACKAGING.md.
-# or: build the repository PKGBUILD with `makepkg -si` # Arch (preview)
+# No production package is currently published; build from source for local evaluation.
+git clone https://github.com/cyberducttape/wayexpand.git
+cd wayexpand
+./scripts/install-user.sh
 
 # Start the explicit evdev route (after reviewing its raw-input tradeoff)
 wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml

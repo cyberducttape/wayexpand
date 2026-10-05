@@ -10,31 +10,31 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 
 ### Individual User (Self-Service)
 
-Users install locally via available package managers or source:
+**Publication status:** there are currently no downloadable production
+packages: the v1.3.3 release has no assets and the Ubuntu PPA publishes no
+WayExpand binaries. Do not deploy based on the example package workflows below;
+check the release page and PPA for actual published artifacts. Release assets
+remain gated on compositor certification.
+
+For local evaluation, users can build from source with Rust 1.95+:
 
 ```bash
-# Ubuntu (via PPA)
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
-
-# Debian: use the x86_64 .deb release asset (from new tagged releases), or build
-# from the vendored source archive. The PPA is Ubuntu-only.
-
-# Arch (packaging prepared; build locally)
+# Arch packaging preview (not yet submitted to AUR)
 git clone https://github.com/cyberducttape/wayexpand.git
 cd wayexpand && makepkg -si
 
-# From source
+# Other distributions: build/install from source
+git clone https://github.com/cyberducttape/wayexpand.git
+cd wayexpand
 ./scripts/install-user.sh --enable --service=wayexpand-input-method.service
 ```
 
 **Packaging Status:**
-- ✅ Ubuntu: Available via PPA
-- ✅ Debian: Per-release x86_64 .deb on new tags; no APT repository, PPA is Ubuntu-only
+- ⏳ Ubuntu: PPA configured, but currently no published binaries; Resolute lacks the Rust 1.95 build dependency
+- ⏳ Debian: packaging maintained; no release asset or APT repository currently published
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
-- ✅ Fedora: Per-release x86_64 RPM on new tags; no Copr repository published
-- 🔧 Others: Build from source using `./scripts/install-user.sh`
+- ⏳ Fedora: RPM spec/build maintained; no release asset or Copr repository currently published
+- 🔧 Others: local source builds are available with Rust 1.95+
 
 **Admin overhead:** Minimal. Users manage their own configs.
 
@@ -44,11 +44,11 @@ cd wayexpand && makepkg -si
 
 For teams with shared machines or controlled environments:
 
-**Approach 1: Package distribution** (recommended)
-- **Ubuntu:** Deploy via PPA (apt)
-- **Debian:** Install the per-release .deb or mirror it to an internal package repository
-- **Arch:** Packaging prepared (not yet official AUR)
-- **Fedora:** Install the per-release RPM or mirror it to an internal repository; Copr publication pending
+**Approach 1: Package distribution** (once artifacts are published)
+- Verify actual release/PPA availability and successful certification before deployment.
+- **Ubuntu:** PPA publication is pending; current Resolute build dependencies cannot satisfy Rust MSRV.
+- **Debian/Fedora:** No release packages are currently published; build and validate an internal package if needed.
+- **Arch:** Packaging prepared but not yet submitted to AUR.
 - Users self-install from organizational repo
 - Admin manages package version, not individual instances
 
@@ -66,22 +66,18 @@ For teams with shared machines or controlled environments:
 
 ## Installation at Scale
 
-### Ansible Playbook Example
+### Ansible Playbook Example (for a future internal package repository)
 
 ```yaml
 ---
 - name: Deploy WayExpand
   hosts: workstations
   tasks:
-    - name: Add PPA (Ubuntu)
-      ansible.builtin.apt_repository:
-        repo: "ppa:cyberducttape/ppa"
-      when: ansible_distribution == "Ubuntu"
-
     - name: Install WayExpand
       ansible.builtin.apt:
         name: wayexpand
         state: present
+      # Configure this host's approved internal repository first.
       when: ansible_distribution == "Ubuntu"
 
     - name: Create config directory
