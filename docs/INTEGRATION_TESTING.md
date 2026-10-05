@@ -66,7 +66,8 @@ and CPU percentage, and reports p50/p95 CLI round-trip latency for status and
 explain requests. By default it also performs a controlled daemon restart every
 six hours and records the restart count; use `SOAK_RESTART_INTERVAL_SECONDS=0`
 to disable restarts or a shorter interval for a focused regression test. This
-does not simulate compositor, portal, keyboard, suspend, or systemd-restart
+also records each stop-to-ready latency and reports its p50/p95 values. It does
+not simulate compositor, portal, keyboard, suspend, or systemd-restart
 events; those must be exercised by a real-session operator or the
 compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
 preserve the CSV samples, raw latency samples, daemon log, and summary. The

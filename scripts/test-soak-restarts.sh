@@ -25,6 +25,10 @@ if ! grep -Eq '^daemon_restarts=[2-9][0-9]*$' "$report_dir/summary.txt"; then
 fi
 test -f "$report_dir/daemon.log"
 test -s "$report_dir/resource-samples.csv"
+restart_count=$(sed -n 's/^daemon_restarts=//p' "$report_dir/summary.txt")
+test "$(wc -l <"$report_dir/daemon-restart-latency-ms.txt")" -eq "$restart_count"
+grep -Eq '^restart_latency_p50_ms=[0-9]+\.[0-9]{3}$' "$report_dir/summary.txt"
+grep -Eq '^restart_latency_p95_ms=[0-9]+\.[0-9]{3}$' "$report_dir/summary.txt"
 if find "$runtime_tmp" -mindepth 1 -maxdepth 1 -type d -name 'wayexpand-soak.*' -print -quit | grep -q .; then
     printf '%s\n' 'restart soak left its private runtime directory behind' >&2
     exit 1

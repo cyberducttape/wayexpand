@@ -78,6 +78,7 @@ test -s "$report_dir/daemon.log"
 test -s "$report_dir/resource-samples.csv"
 test -s "$report_dir/status-latency-ms.txt"
 test -s "$report_dir/explain-latency-ms.txt"
+test -f "$report_dir/daemon-restart-latency-ms.txt"
 if find "$runtime_tmp" -mindepth 1 -maxdepth 1 -type d -name 'wayexpand-soak.*' -print -quit | grep -q .; then
     printf '%s\n' 'interrupted soak left its private runtime directory behind' >&2
     exit 1

@@ -47,6 +47,7 @@ config_path="$runtime_dir/expansions.toml"
 metrics_path="$runtime_dir/metrics.csv"
 status_latency_path="$runtime_dir/status-latency-ms"
 explain_latency_path="$runtime_dir/explain-latency-ms"
+restart_latency_path="$runtime_dir/restart-latency-ms"
 cli_stderr_path="$runtime_dir/cli.stderr"
 report_dir=${SOAK_REPORT_DIR:-}
 daemon_pid=
@@ -68,6 +69,7 @@ preserve_partial_report() {
     copy_partial_artifact "$metrics_path" resource-samples.csv
     copy_partial_artifact "$status_latency_path" status-latency-ms.txt
     copy_partial_artifact "$explain_latency_path" explain-latency-ms.txt
+    copy_partial_artifact "$restart_latency_path" daemon-restart-latency-ms.txt
     copy_partial_artifact "$cli_stderr_path" cli.stderr
     copy_partial_artifact "$runtime_dir/daemon.log" daemon.log
     elapsed_seconds=0
@@ -172,6 +174,7 @@ start_daemon() {
 }
 
 restart_daemon() {
+    restart_started_ns=$(date +%s%N)
     if [ -n "$feeder_pid" ] && kill -0 "$feeder_pid" 2>/dev/null; then
         kill "$feeder_pid" 2>/dev/null || true
         wait "$feeder_pid" 2>/dev/null || true
@@ -200,6 +203,10 @@ restart_daemon() {
     fi
     daemon_pid=
     start_daemon
+    restart_finished_ns=$(date +%s%N)
+    restart_latency_ms=$(awk -v started="$restart_started_ns" -v finished="$restart_finished_ns" \
+        'BEGIN { printf "%.3f", (finished - started) / 1000000 }')
+    printf '%s\n' "$restart_latency_ms" >>"$restart_latency_path"
     daemon_restarts=$((daemon_restarts + 1))
     # The new process has a fresh CPU-tick origin; reset the interval baseline
     # so resource evidence never reports a negative or cross-process CPU delta.
@@ -263,6 +270,7 @@ previous_sample_wall_ns=$(date +%s%N)
 printf '%s\n' 'timestamp_utc,elapsed_seconds,round,rss_kib,threads,open_fds,cpu_percent_since_previous_sample' >"$metrics_path"
 : >"$status_latency_path"
 : >"$explain_latency_path"
+: >"$restart_latency_path"
 : >"$cli_stderr_path"
 
 start=$(date +%s)
@@ -328,6 +336,7 @@ if [ -n "$report_dir" ]; then
     cp "$metrics_path" "$report_dir/resource-samples.csv"
     cp "$status_latency_path" "$report_dir/status-latency-ms.txt"
     cp "$explain_latency_path" "$report_dir/explain-latency-ms.txt"
+    cp "$restart_latency_path" "$report_dir/daemon-restart-latency-ms.txt"
     cp "$cli_stderr_path" "$report_dir/cli.stderr"
     cp "$runtime_dir/daemon.log" "$report_dir/daemon.log"
     {
@@ -352,9 +361,11 @@ if [ -n "$report_dir" ]; then
         echo "cpu_percent_last_interval=$cpu_percent"
         echo "status_latency_p50_ms=$(percentile 50 "$status_latency_path")"
         echo "status_latency_p95_ms=$(percentile 95 "$status_latency_path")"
-    echo "explain_latency_p50_ms=$(percentile 50 "$explain_latency_path")"
-    echo "explain_latency_p95_ms=$(percentile 95 "$explain_latency_path")"
-    echo "feed_interval_seconds=$feed_interval"
+        echo "explain_latency_p50_ms=$(percentile 50 "$explain_latency_path")"
+        echo "explain_latency_p95_ms=$(percentile 95 "$explain_latency_path")"
+        echo "restart_latency_p50_ms=$(percentile 50 "$restart_latency_path")"
+        echo "restart_latency_p95_ms=$(percentile 95 "$restart_latency_path")"
+        echo "feed_interval_seconds=$feed_interval"
     } >"$report_dir/summary.txt"
     echo "soak evidence saved to $report_dir"
 fi
