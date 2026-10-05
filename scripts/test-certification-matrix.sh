@@ -40,6 +40,8 @@ grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_TARGET_APPS' "$workflow" >/dev/null
 grep -F -- 'backend: input-method-v2' "$workflow" >/dev/null
+grep -F -- 'backend: ibus' "$workflow" >/dev/null
+grep -F -- 'backend: evdev+wlroots' "$workflow" >/dev/null
 if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
     printf '%s\n' 'certification workflow must not certify raw evdev' >&2
     exit 1
@@ -47,6 +49,8 @@ fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
 grep -F -- "backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'" "$project_dir/scripts/certify-compositor.sh" >/dev/null
+grep -F -- 'the current workflow is a fail-closed candidate-path test' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'Ineligible: evdev lacks sensitive-field awareness and atomic replacement' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null

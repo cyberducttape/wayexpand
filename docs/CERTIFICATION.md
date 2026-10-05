@@ -99,12 +99,27 @@ outside its declared certification paths, and requires the layout profiles
 drivers. A layout profile is evidence metadata only until the driver records
 the actual keymap and observed behavior.
 
-| Environment | Required coverage |
-| --- | --- |
-| KDE Plasma / KWin | IBus, libei portal, input-method-v2 when exposed, Qt and GTK clients; application filters supported through KWin tracking |
-| GNOME | IBus, libei portal, input-method-v2 when exposed, GTK and Qt clients; application filters unavailable |
-| Sway | evdev plus wlroots virtual keyboard, GTK and Qt clients; application filters unavailable |
-| Hyprland | evdev plus wlroots virtual keyboard, GTK and Qt clients; application filters unavailable |
+The workflow's backend column identifies the path a runner driver exercises;
+it does not mean that path is currently eligible for production certification.
+At present, IBus and both evdev paths are explicitly ineligible because they
+cannot meet the safety contract. Input-method-v2 is also ineligible until the
+live daemon demonstrates the complete capability contract above. Therefore
+the current workflow is a fail-closed candidate-path test, not evidence that
+any desktop is production-certified. The actual eligibility decision is made
+from the live daemon snapshot in each evidence artifact.
+
+| Environment | Current workflow candidate | Certification eligibility |
+| --- | --- | --- |
+| KDE Plasma / KWin | input-method-v2; KWin window tracker available for app-filter scenarios | Not eligible until live input-method-v2 satisfies the full capability contract |
+| GNOME | IBus | Ineligible: IBus lacks atomic replacement, exact window identity, and composition awareness |
+| Sway | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |
+| Hyprland | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |
+
+The scenario contract still requires GTK and Qt clients, relevant password
+fields, and focus isolation on each desktop. Application-filter scenarios
+must verify KWin tracking on KDE; on GNOME, Sway, and Hyprland filters must
+remain visibly unavailable. This coverage exercises candidate behavior and
+does not override a route's missing capabilities.
 
 Each environment must cover printable press/release, auto-repeat, modifiers,
 Unicode and combining text, multiline replacement, password fields, focus
