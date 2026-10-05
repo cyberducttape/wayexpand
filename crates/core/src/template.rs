@@ -549,6 +549,11 @@ mod tests {
             "y".repeat(512)
         );
         assert_eq!(
+            render_template_preview("a🙂z", &context, 2).unwrap(),
+            "a",
+            "preview truncation must not split a UTF-8 scalar"
+        );
+        assert_eq!(
             render_template_preview("hello {{username}}", &context, 512).unwrap(),
             format!("hello {}", context.username)
         );
