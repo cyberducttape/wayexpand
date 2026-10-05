@@ -46,6 +46,12 @@ jobs:
       - name: Build certification binaries
         id: build
         run: cargo build --locked -p wayexpand -p wayexpand-daemon -p wayexpand-backend-ibus
+      - name: Exercise live KWin tracker lifecycle
+        if: ${{ matrix.compositor == 'kde' }}
+        run: >-
+          cargo test --locked -p wayexpand-backend-kwin-window
+          live_kwin_tracker_health_probe_detects_script_unload
+          -- --ignored --nocapture
       - name: Require runner-provided compositor driver
         id: metadata
         env:
