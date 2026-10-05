@@ -28,7 +28,7 @@ if "$project_dir/scripts/run-certification-driver.sh" \
     --driver "$driver" --compositor kde --version 6.6.2 \
     --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
     --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
-    --output "$results" --log-dir "$logs"; then
+    --output "$results" --log-dir "$logs" --timeout 120 --deadline 3600; then
     printf '%s\n' 'driver accepted failed scenarios' >&2
     exit 1
 fi
@@ -50,5 +50,60 @@ jq -R -e -s --argjson expected "$expected_cases" --argjson per_scenario "$((expe
     ($results | map(select(startswith("failed-insertion|") and endswith("=fail"))) | length == $per_scenario) and
     ($results | map(select(startswith("expansion-after-committed-composition|") and endswith("=pass"))) | length == $per_scenario)
 ' "$sorted_results" >/dev/null
+
+timeout_driver="$test_root/timeout-driver"
+timeout_marker="$test_root/timeout-driver-first-cell"
+cat >"$timeout_driver" <<'EOF'
+#!/bin/sh
+if [ ! -e "${CERT_TEST_TIMEOUT_MARKER:?}" ]; then
+    : >"$CERT_TEST_TIMEOUT_MARKER"
+    exec sleep 10
+fi
+EOF
+chmod 0755 "$timeout_driver"
+timeout_results="$test_root/timeout-results.txt"
+timeout_logs="$test_root/timeout-logs"
+if CERT_TEST_TIMEOUT_MARKER="$timeout_marker" \
+    "$project_dir/scripts/run-certification-driver.sh" \
+        --driver "$timeout_driver" --compositor kde --version 6.6.2 \
+        --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
+        --target-apps "$target_apps" --output "$timeout_results" --log-dir "$timeout_logs" \
+        --timeout 1 --deadline 120; then
+    printf '%s\n' 'driver timeout was incorrectly recorded as a pass' >&2
+    exit 1
+fi
+grep -Fx 'printable-press-release|us|gtk4-demo=UNVERIFIED' "$timeout_results" >/dev/null
+[ "$(grep -c '=UNVERIFIED$' "$timeout_results")" -eq 1 ]
+grep -F 'scenario exceeded its 1s timeout' \
+    "$timeout_logs/printable-press-release_us_gtk4-demo.log" >/dev/null
+
+deadline_driver="$test_root/deadline-driver"
+deadline_marker="$test_root/deadline-driver-first-cell"
+deadline_calls="$test_root/deadline-driver-calls"
+cat >"$deadline_driver" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"${CERT_TEST_DEADLINE_CALLS:?}"
+if [ ! -e "${CERT_TEST_DEADLINE_MARKER:?}" ]; then
+    : >"$CERT_TEST_DEADLINE_MARKER"
+    exec sleep 2
+fi
+EOF
+chmod 0755 "$deadline_driver"
+deadline_results="$test_root/deadline-results.txt"
+deadline_logs="$test_root/deadline-logs"
+if CERT_TEST_DEADLINE_MARKER="$deadline_marker" CERT_TEST_DEADLINE_CALLS="$deadline_calls" \
+    "$project_dir/scripts/run-certification-driver.sh" \
+        --driver "$deadline_driver" --compositor kde --version 6.6.2 \
+        --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
+        --target-apps "$target_apps" --output "$deadline_results" \
+        --log-dir "$deadline_logs" --deadline 1 --timeout 10; then
+    printf '%s\n' 'matrix deadline was incorrectly treated as a complete pass' >&2
+    exit 1
+fi
+[ "$(wc -l <"$deadline_calls")" -eq 1 ]
+grep -Fx 'printable-press-release|us|gtk4-demo=pass' "$deadline_results" >/dev/null
+[ "$(grep -c '=UNVERIFIED$' "$deadline_results")" -eq $((expected_cases - 1)) ]
+grep -F 'overall certification deadline (1s) reached' \
+    "$deadline_logs/backspace_us_gtk4-demo.log" >/dev/null
 
 printf '%s\n' 'certification driver contract test passed'

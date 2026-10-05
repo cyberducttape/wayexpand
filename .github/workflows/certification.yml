@@ -81,6 +81,8 @@ jobs:
             --backend "$BACKEND" \
             --layout "$WAYEXPAND_CERTIFICATION_LAYOUT" \
             --target-apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" \
+            --timeout 120 \
+            --deadline 3600 \
             --output "$RUNNER_TEMP/wayexpand-certification/results.txt" \
             --log-dir "$RUNNER_TEMP/wayexpand-certification/driver-logs"
       - name: Collect machine-readable evidence

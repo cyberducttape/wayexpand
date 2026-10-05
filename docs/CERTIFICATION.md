@@ -98,6 +98,11 @@ fake-driver contract tests verify orchestration only and are not compositor
 evidence. Until real driver implementations run and reviewed artifacts pass,
 every desktop remains uncertified.
 
+Each driver invocation is capped at 120 seconds and the complete matrix has a
+60-minute deadline. A timed-out cell and every cell remaining after the overall
+deadline are recorded as `UNVERIFIED`; the collector therefore cannot turn a
+hung driver into a pass or lose the evidence for cells that were not run.
+
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
 CI validates that all four required desktop targets and all thirty-six scenarios

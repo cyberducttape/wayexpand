@@ -15,9 +15,15 @@ keyboard_layout=
 target_apps=
 output=
 log_dir=
+scenario_timeout_seconds=120
+matrix_deadline_seconds=3600
 
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
+    exit 2
+}
+command -v timeout >/dev/null 2>&1 || {
+    printf '%s\n' 'error: coreutils timeout is required to bound certification drivers' >&2
     exit 2
 }
 
@@ -33,12 +39,26 @@ while [ "$#" -gt 0 ]; do
         --log-dir) log_dir=${2:?missing value for --log-dir}; shift 2 ;;
         --help|-h)
             printf '%s\n' "usage: $0 --driver PATH --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --output RESULTS [--log-dir DIR]"
-            printf '%s\n' 'driver contract: argv[1] is the scenario; WAYEXPAND_CERTIFICATION_LAYOUT and WAYEXPAND_CERTIFICATION_TARGET_APP identify the required matrix cell. Exit 0=pass, 1=fail, 2=unverified, 3=unsupported-by-design.'
+            printf '%s\n' 'driver contract: argv[1] is the scenario; WAYEXPAND_CERTIFICATION_LAYOUT and WAYEXPAND_CERTIFICATION_TARGET_APP identify the required matrix cell. Exit 0=pass, 1=fail, 2=unverified, 3=unsupported-by-design; timed out=UNVERIFIED.'
+            printf '%s\n' 'driver limits: --timeout SECONDS bounds one matrix cell; --deadline SECONDS bounds the complete matrix and marks remaining cells UNVERIFIED.'
             exit 0
             ;;
+        --timeout) scenario_timeout_seconds=${2:?missing value for --timeout}; shift 2 ;;
+        --deadline) matrix_deadline_seconds=${2:?missing value for --deadline}; shift 2 ;;
         *) printf '%s\n' "error: unknown option $1" >&2; exit 2 ;;
     esac
 done
+
+valid_timeout_limits=$(jq -en --arg cell "$scenario_timeout_seconds" --arg matrix "$matrix_deadline_seconds" '
+    ($cell | test("^[1-9][0-9]*$")) and
+    ($matrix | test("^[1-9][0-9]*$")) and
+    (($cell | tonumber) <= 3600) and
+    (($matrix | tonumber) <= 86400)
+' 2>/dev/null) || valid_timeout_limits=false
+[ "$valid_timeout_limits" = true ] || {
+    printf '%s\n' 'error: --timeout must be 1..3600 seconds and --deadline must be 1..86400 seconds' >&2
+    exit 2
+}
 
 [ -n "$driver" ] || { printf '%s\n' 'error: --driver is required' >&2; exit 2; }
 [ -x "$driver" ] || { printf '%s\n' "error: driver is not executable: $driver" >&2; exit 2; }
@@ -101,6 +121,8 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 
 : >"$output"
 driver_status=0
+matrix_started=$(date +%s)
+matrix_deadline_reached=0
 while IFS= read -r scenario; do
     [ -n "$scenario" ] || continue
     old_ifs=$IFS
@@ -119,7 +141,15 @@ while IFS= read -r scenario; do
             cell_key="$scenario|$layout_profile|$target_app"
             safe_log=$(printf '%s' "$cell_key" | tr '|' '_')
             log="$log_dir/$safe_log.log"
-            if WAYEXPAND_CERTIFICATION_COMPOSITOR="$compositor" \
+            elapsed_seconds=$(( $(date +%s) - matrix_started ))
+            if [ "$matrix_deadline_reached" -eq 1 ] \
+                || [ "$elapsed_seconds" -ge "$matrix_deadline_seconds" ]; then
+                result=UNVERIFIED
+                driver_status=1
+                matrix_deadline_reached=1
+                printf '%s\n' "scenario not run: overall certification deadline (${matrix_deadline_seconds}s) reached" >"$log"
+            elif timeout --signal=TERM --kill-after=5s "${scenario_timeout_seconds}s" \
+                env WAYEXPAND_CERTIFICATION_COMPOSITOR="$compositor" \
                 WAYEXPAND_CERTIFICATION_VERSION="$compositor_version" \
                 WAYEXPAND_CERTIFICATION_BACKEND="$backend" \
                 WAYEXPAND_CERTIFICATION_LAYOUT="$layout_profile" \
@@ -135,6 +165,11 @@ while IFS= read -r scenario; do
                     1) result=fail; driver_status=1 ;;
                     2) result=UNVERIFIED; driver_status=1 ;;
                     3) result=unsupported-by-design; driver_status=1 ;;
+                    124|137)
+                        result=UNVERIFIED
+                        driver_status=1
+                        printf '%s\n' "scenario exceeded its ${scenario_timeout_seconds}s timeout" >>"$log"
+                        ;;
                     *)
                         printf '%s\n' "error: driver failed unexpectedly for $cell_key (exit $exit_code)" >&2
                         exit 2
