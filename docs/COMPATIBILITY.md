@@ -272,6 +272,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     "capabilities": {
       "sensitive_field_detection": false,
       "composition_awareness": false,
+      "local_compose_tracking": false,
       "key_passthrough": false,
       "exact_window_identity": true,
       "atomic_replacement": false,
@@ -279,7 +280,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     },
     "blockers": [
       "sensitive-field detection",
-      "active composition awareness",
+      "external IME/preedit awareness",
       "key pass-through",
       "atomic replacement",
       "full Unicode injection",
@@ -359,7 +360,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `production_readiness` (object): Derived safety summary for the connected daemon route. `status` is `unavailable`, `limited`, or `uncertified`; `certified` remains false until reviewed compositor/client evidence is collected. `blockers` names each missing guarantee rather than inferring readiness from daemon connectivity.
-- `production_readiness.capabilities` (object): Negotiated live-route guarantees for sensitive-field detection, composition awareness, key pass-through, exact window identity, atomic replacement, and full Unicode injection.
+- `production_readiness.capabilities` (object): Negotiated live-route guarantees for sensitive-field detection, external IME/preedit awareness, local dead-key/Compose tracking, key pass-through, exact window identity, atomic replacement, and full Unicode injection. External IME/preedit awareness is separate and is not implied by local composition tracking.
 - `action_broker` (object): Named-action runtime dependency status; `required` is false when the configuration has no named actions, and `healthy` is required for doctor health when it is true
 - `action_broker.socket` (object): Broker socket path and ownership/permission probe
 - `action_broker.service.active` (bool): Whether the packaged user service is active

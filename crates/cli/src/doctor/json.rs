@@ -236,7 +236,7 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
     }
     for (name, label) in [
         ("sensitive_field_detection", "sensitive-field detection"),
-        ("composition_awareness", "active composition awareness"),
+        ("composition_awareness", "external IME/preedit awareness"),
         ("layout_awareness", "runtime layout awareness"),
         ("key_passthrough", "key pass-through"),
         ("atomic_replacement", "atomic replacement"),

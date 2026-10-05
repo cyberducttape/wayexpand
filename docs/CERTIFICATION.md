@@ -57,11 +57,14 @@ delete/commit operations are not atomic, it has no portable exact window
 identity, and it does not observe active composition. Live GTK/Qt scenario
 passes cannot compensate for those missing guarantees.
 
-The same collector requires the live input-method route to report composition
-awareness, sensitive-field handling, key pass-through, atomic replacement, and
-full Unicode support. The currently shipped input-method-v2 implementation
-reports active preedit composition as unsupported, so it remains a candidate
-route rather than a certified production route until that capability changes.
+The same collector requires the live input-method route to report local
+dead-key/Compose tracking, sensitive-field handling, key pass-through, atomic
+replacement, and full Unicode support. It does not require awareness of an
+external IME's active preedit: that remains explicitly unsupported-by-design
+and outside this certification's scope. The status contract keeps these
+guarantees separate (`capture_local_compose_aware` versus
+`capture_composition_aware`) so certification of committed text cannot be
+misread as support for expansion during active IME composition.
 
 Matrix-cell outcomes are deliberately more expressive than pass/fail: `pass`
 means the scenario passed, `fail` means it was exercised and failed,
@@ -115,7 +118,7 @@ from the live daemon snapshot in each evidence artifact.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
-| KDE Plasma / KWin | input-method-v2; KWin window tracker available for app-filter scenarios | Not eligible until live input-method-v2 satisfies the full capability contract |
+| KDE Plasma / KWin | input-method-v2; KWin window tracker available for app-filter scenarios | Candidate; requires live local dead-key/Compose tracking and the full input/output contract |
 | GNOME | IBus | Ineligible: IBus lacks atomic replacement, exact window identity, and composition awareness |
 | Sway | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |
 | Hyprland | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |

@@ -77,7 +77,9 @@ fn production_readiness_reports_limited_live_capabilities() {
     }));
     assert_eq!(report["status"], "limited");
     assert_eq!(report["certified"], false);
-    assert!(report["blockers"].as_array().unwrap().len() >= 5);
+    let blockers = report["blockers"].as_array().unwrap();
+    assert!(blockers.len() >= 5);
+    assert!(blockers.contains(&serde_json::json!("external IME/preedit awareness")));
 }
 
 #[test]
