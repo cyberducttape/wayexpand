@@ -29,6 +29,7 @@ fuzz_target!(|data: &[u8]| {
     engine.process(InputEvent::WindowChanged(Some(WindowContext {
         app_id: Some(app_id.to_owned()),
         title: Some(app_id.to_owned()),
+        instance_id: Some("fuzz-window-instance".to_owned()),
     })));
     let _ = engine.process(InputEvent::Text(":x".into()));
 });
