@@ -4,6 +4,7 @@
 
 use std::ops::ControlFlow;
 
+use crate::control::InsertRequest;
 use crate::*;
 use wayexpand_core::CheckStatus;
 
@@ -173,24 +174,31 @@ impl Daemon {
     /// happens when the request is refused because focus changed.
     pub(crate) fn handle_insert_request(&mut self) -> Result<bool> {
         if let Some(request) = self.control.take_insert_request() {
+            // Window-tracker events may have arrived while this reactor turn
+            // was handling command completions. Drain again immediately
+            // before the target check so it uses the freshest observed
+            // KWin identity.
+            crate::focus::drain_pending_window_events(
+                &self.window_tracker,
+                &mut self.config.engine,
+                &self.policy,
+                self.active_backend,
+                &self.control,
+                &mut self.focus_state,
+            )?;
             // An explicit insert (quick-insert picker, `wayexpand insert`)
             // types a snippet at the cursor through the same injector and
             // evdev safety gate as a typed expansion. It is a user action,
             // so a refusal or injection failure is logged, never fatal.
-            if let Some(expected_token) = request.focus_token.as_deref() {
-                let snapshot = self.control.focus_snapshot();
-                let current_token = self.config.engine.current_window().map(focus_token);
-                if current_token.as_deref() != Some(expected_token)
-                    || snapshot.token.as_deref() != Some(expected_token)
-                    || snapshot.generation != request.focus_generation.unwrap_or_default()
-                {
-                    warn!(
-                        expected = expected_token,
-                        actual = ?current_token,
-                        "requested snippet insert refused because focus changed"
-                    );
-                    return Ok(true);
-                }
+            let snapshot = self.control.focus_snapshot();
+            let current_token = self.config.engine.current_window().map(focus_token);
+            if !insert_target_matches_current_focus(&request, current_token.as_deref(), &snapshot) {
+                warn!(
+                    expected = ?request.focus_token,
+                    actual = ?current_token,
+                    "requested snippet insert refused because focus changed"
+                );
+                return Ok(true);
             }
             match self.config.engine.prepare_insert(&request.trigger) {
                 Ok(result) => {
@@ -416,9 +424,84 @@ impl Daemon {
     }
 }
 
+fn insert_target_matches_current_focus(
+    request: &InsertRequest,
+    current_token: Option<&str>,
+    snapshot: &FocusSnapshot,
+) -> bool {
+    let Some(expected_token) = request.focus_token.as_deref() else {
+        // The legacy explicit `wayexpand insert` command has no picker target.
+        return true;
+    };
+    current_token == Some(expected_token)
+        && snapshot.exact_window_identity
+        && snapshot.token.as_deref() == Some(expected_token)
+        && request.focus_generation == Some(snapshot.generation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insert_target_rejects_same_app_title_window_after_focus_changes() {
+        let first = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("bash".into()),
+            instance_id: Some("window-a".into()),
+        };
+        let second = WindowContext {
+            instance_id: Some("window-b".into()),
+            ..first.clone()
+        };
+        let expected_token = focus_token(&first);
+        let request = InsertRequest {
+            trigger: ";sig".into(),
+            focus_token: Some(expected_token.clone()),
+            focus_generation: Some(4),
+        };
+        let current_token = focus_token(&second);
+        let changed_snapshot = FocusSnapshot {
+            generation: 5,
+            token: Some(current_token.clone()),
+            exact_window_identity: true,
+        };
+
+        assert!(!insert_target_matches_current_focus(
+            &request,
+            Some(&current_token),
+            &changed_snapshot,
+        ));
+    }
+
+    #[test]
+    fn insert_target_requires_exact_identity_and_allows_unguarded_cli_insert() {
+        let token = "0123456789abcdef";
+        let guarded = InsertRequest {
+            trigger: ";sig".into(),
+            focus_token: Some(token.into()),
+            focus_generation: Some(8),
+        };
+        let snapshot = FocusSnapshot {
+            generation: 8,
+            token: Some(token.into()),
+            exact_window_identity: false,
+        };
+        assert!(!insert_target_matches_current_focus(
+            &guarded,
+            Some(token),
+            &snapshot,
+        ));
+
+        let unguarded = InsertRequest {
+            trigger: ";sig".into(),
+            focus_token: None,
+            focus_generation: None,
+        };
+        assert!(insert_target_matches_current_focus(
+            &unguarded, None, &snapshot
+        ));
+    }
 
     #[test]
     fn input_method_status_combines_text_and_key_injector_capabilities() {
