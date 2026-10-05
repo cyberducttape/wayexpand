@@ -131,6 +131,17 @@ pub(crate) struct DaemonCapabilities {
 }
 
 impl DaemonCapabilities {
+    pub fn provides_full_protection(self) -> bool {
+        self.capture_sensitive_focus == Some(true)
+            && self.capture_composition_aware == Some(true)
+            && self.capture_key_passthrough == Some(true)
+            && self.capture_layout_aware == Some(true)
+            && self.window_identity_exact == Some(true)
+            && self.inject_atomic_replace == Some(true)
+            && self.inject_full_unicode == Some(true)
+            && self.inject_key_passthrough == Some(true)
+    }
+
     pub fn parse(response: &str) -> Option<Self> {
         let status_schema = response.lines().find_map(|line| {
             let (key, value) = line.split_once('=')?;
@@ -493,5 +504,27 @@ mod tests {
             None
         );
         assert_eq!(super::DaemonCapabilities::parse(capabilities), None);
+    }
+
+    #[test]
+    fn full_protection_requires_every_end_to_end_guarantee() {
+        let full = super::DaemonCapabilities {
+            capture_sensitive_focus: Some(true),
+            capture_key_passthrough: Some(true),
+            capture_composition_aware: Some(true),
+            capture_layout_aware: Some(true),
+            window_identity_exact: Some(true),
+            inject_atomic_replace: Some(true),
+            inject_full_unicode: Some(true),
+            inject_key_passthrough: Some(true),
+            ..Default::default()
+        };
+        assert!(full.provides_full_protection());
+        assert!(!super::DaemonCapabilities::default().provides_full_protection());
+        assert!(!super::DaemonCapabilities {
+            window_identity_exact: Some(false),
+            ..full
+        }
+        .provides_full_protection());
     }
 }

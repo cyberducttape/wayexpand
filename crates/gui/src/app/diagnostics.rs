@@ -64,16 +64,7 @@ impl GuiApp {
                 self.strings.production_readiness_unavailable(),
                 palette.muted,
             ),
-            Some(capabilities)
-                if capabilities.capture_sensitive_focus == Some(true)
-                    && capabilities.capture_composition_aware == Some(true)
-                    && capabilities.capture_key_passthrough == Some(true)
-                    && capabilities.capture_layout_aware == Some(true)
-                    && capabilities.window_identity_exact == Some(true)
-                    && capabilities.inject_atomic_replace == Some(true)
-                    && capabilities.inject_full_unicode == Some(true)
-                    && capabilities.inject_key_passthrough == Some(true) =>
-            {
+            Some(capabilities) if capabilities.provides_full_protection() => {
                 (self.strings.production_readiness_pending(), palette.warning)
             }
             Some(_) => (self.strings.production_readiness_limited(), palette.warning),

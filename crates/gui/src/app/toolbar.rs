@@ -104,10 +104,9 @@ impl GuiApp {
                 (self.strings.route_paused_status(), palette.warning)
             }
             Some(runtime::RouteState::Connected) => {
-                let full_protection = self.daemon_capabilities.is_some_and(|capabilities| {
-                    capabilities.capture_sensitive_focus == Some(true)
-                        && capabilities.inject_atomic_replace == Some(true)
-                });
+                let full_protection = self
+                    .daemon_capabilities
+                    .is_some_and(runtime::DaemonCapabilities::provides_full_protection);
                 if full_protection {
                     (self.strings.route_connected_status(), palette.success)
                 } else {
