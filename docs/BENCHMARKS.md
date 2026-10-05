@@ -33,19 +33,22 @@ Same machine and toolchain. The workload builds an `ExpansionEngine` from a
 pre-parsed, pre-cloned configuration containing aliases, case propagation,
 and decomposable Unicode triggers. At 1,000 snippets it uses eight aliases
 per snippet; at 5,000 and 10,000 it uses one alias per snippet to stay below
-the effective-trigger cap. The short run used 1 s warmup and 2 s measurement
-with 10 samples, so treat these as a rough startup-CPU baseline only:
+the effective-trigger cap. This run used a 2 s warmup and 5 s measurement
+with 20 samples:
 
 | Snippets | Estimate | 95% interval |
 | ---: | ---: | ---: |
-| 1,000 | 38.295 ms | 37.802–38.659 ms |
-| 5,000 | 57.517 ms | 57.315–57.715 ms |
-| 10,000 | 165.18 ms | 142.78–196.60 ms |
+| 1,000 | 38.706 ms | 38.199–39.192 ms |
+| 5,000 | 57.176 ms | 56.914–57.472 ms |
+| 10,000 | 122.88 ms | 122.36–123.47 ms |
 
-The 10,000-snippet sample had one high outlier. The timed operation is engine
-construction; TOML parsing and config cloning are outside the measurement.
-It does not measure peak RSS. A separate memory measurement is still needed
-before making a maximum-configuration memory claim.
+The timed operation is engine construction; TOML parsing and config cloning
+are outside the measurement. The full benchmark process peaked at 125,304 KiB
+RSS under GNU `time -v`. This includes the benchmark harness and prepared
+configuration, so it is process-level evidence rather than isolated matcher
+memory. Reproduce the RSS observation by building the benchmark, then running
+its executable directly with Criterion's `--bench` flag under `/usr/bin/time
+-v`; do not time `cargo bench` if you want to exclude compiler memory.
 
 ## Configuration editing
 
