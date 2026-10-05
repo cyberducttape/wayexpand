@@ -36,25 +36,28 @@ use crate::{control, status};
 /// Reading is isolated from the reactor because stdin has no useful polling
 /// timeout on all supported platforms. The bounded channel keeps a producer
 /// that writes faster than the matcher from consuming unbounded memory.
-pub fn spawn_stdin_reader() -> mpsc::Receiver<String> {
+pub fn spawn_stdin_reader() -> Result<mpsc::Receiver<String>> {
     let (sender, receiver) = mpsc::sync_channel(crate::MAX_PENDING_INPUT_LINES);
-    thread::spawn(move || {
-        let mut reader = io::BufReader::new(io::stdin().lock());
-        loop {
-            match crate::read_bounded_line(&mut reader) {
-                Ok(Some(line)) => {
-                    if sender.send(line).is_err() {
-                        break;
+    thread::Builder::new()
+        .name("wayexpand-stdin-reader".into())
+        .spawn(move || {
+            let mut reader = io::BufReader::new(io::stdin().lock());
+            loop {
+                match crate::read_bounded_line(&mut reader) {
+                    Ok(Some(line)) => {
+                        if sender.send(line).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        warn!(%error, "stdin line rejected");
                     }
                 }
-                Ok(None) => break,
-                Err(error) => {
-                    warn!(%error, "stdin line rejected");
-                }
             }
-        }
-    });
-    receiver
+        })
+        .map_err(|error| anyhow::anyhow!("could not start stdin reader: {error}"))?;
+    Ok(receiver)
 }
 
 /// Determine polling interval based on async work queue depth.

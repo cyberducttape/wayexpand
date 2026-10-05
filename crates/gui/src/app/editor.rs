@@ -137,11 +137,19 @@ impl GuiApp {
         // `Strings` is a plain language tag, so the worker can phrase its own
         // failure in the user's language without borrowing the app.
         let strings = Strings::new(self.language);
-        thread::spawn(move || {
-            let result = wayexpand_core::run_command_cancellable(&command, &worker_cancel)
-                .map_err(|error| strings.status_command_failed(&error.to_string()));
-            let _ = sender.send(result);
-        });
+        let spawned = thread::Builder::new()
+            .name("wayexpand-command-preview".into())
+            .spawn(move || {
+                let result = wayexpand_core::run_command_cancellable(&command, &worker_cancel)
+                    .map_err(|error| strings.status_command_failed(&error.to_string()));
+                let _ = sender.send(result);
+            });
+        if let Err(error) = spawned {
+            self.command_preview_receiver = None;
+            self.command_preview_cancel = None;
+            self.command_preview_result =
+                Some(Err(format!("Could not start command preview: {error}")));
+        }
     }
 
     pub(crate) fn poll_command_preview(&mut self, ctx: &egui::Context) {
@@ -601,26 +609,32 @@ impl GuiApp {
                 receiver,
                 cancelled,
             });
-            thread::spawn(move || {
-                let detection = match KwinWindowTracker::new_cancellable(Some(&worker_cancel)) {
-                    Ok(mut tracker) => {
-                        if worker_cancel.load(Ordering::Acquire) {
-                            let _ = sender.send(AppDetection::Unavailable);
-                            return;
+            let spawned = thread::Builder::new()
+                .name("wayexpand-app-detection".into())
+                .spawn(move || {
+                    let detection = match KwinWindowTracker::new_cancellable(Some(&worker_cancel)) {
+                        Ok(mut tracker) => {
+                            if worker_cancel.load(Ordering::Acquire) {
+                                let _ = sender.send(AppDetection::Unavailable);
+                                return;
+                            }
+                            match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
+                                Ok(Some(Some(window))) => AppDetection::Found(window),
+                                Ok(Some(None)) => AppDetection::NoWindow,
+                                Ok(None) | Err(_) => AppDetection::Unavailable,
+                            }
                         }
-                        match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
-                            Ok(Some(Some(window))) => AppDetection::Found(window),
-                            Ok(Some(None)) => AppDetection::NoWindow,
-                            Ok(None) | Err(_) => AppDetection::Unavailable,
-                        }
-                    }
-                    Err(_) => AppDetection::Unavailable,
-                };
-                // The GUI may have given up waiting (Cancel, or the
-                // window closed) by the time this send happens; that is
-                // not an error, there is simply nothing left to notify.
-                let _ = sender.send(detection);
-            });
+                        Err(_) => AppDetection::Unavailable,
+                    };
+                    // The GUI may have given up waiting (Cancel, or the
+                    // window closed) by the time this send happens; that is
+                    // not an error, there is simply nothing left to notify.
+                    let _ = sender.send(detection);
+                });
+            if let Err(error) = spawned {
+                self.app_detection = None;
+                self.status = Status::error(format!("Could not start app detection: {error}"));
+            }
         }
         let detection_cancelled = self
             .app_detection

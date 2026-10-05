@@ -195,7 +195,7 @@ fn enqueue_command(
 /// drained by the daemon reactor so worker failures trigger normal recovery.
 pub fn spawn_async_injector(
     backend: Box<dyn TextInjector>,
-) -> (Box<dyn TextInjector>, Receiver<OutputFailure>) {
+) -> std::result::Result<(Box<dyn TextInjector>, Receiver<OutputFailure>), OutputConnectError> {
     let capabilities = backend.capabilities();
     let name = backend.name();
     let status_detail = backend.status_detail();
@@ -252,7 +252,10 @@ pub fn spawn_async_injector(
             }
             backend.shutdown();
         })
-        .expect("output worker thread must start");
+        .map_err(|error| OutputConnectError {
+            message: format!("could not start serialized output worker: {error}"),
+            retryable: true,
+        })?;
     let injector = AsyncInjector {
         sender,
         failures: Some(worker),
@@ -262,7 +265,7 @@ pub fn spawn_async_injector(
         name,
         status_detail,
     };
-    (Box::new(injector), failure_receiver)
+    Ok((Box::new(injector), failure_receiver))
 }
 
 impl TextInjector for AsyncInjector {
@@ -499,7 +502,7 @@ mod tests {
         let backend = SlowInjector {
             calls: Arc::clone(&calls),
         };
-        let (mut injector, failures) = spawn_async_injector(Box::new(backend));
+        let (mut injector, failures) = spawn_async_injector(Box::new(backend)).unwrap();
         let started = std::time::Instant::now();
         injector.replace(":a", "replacement").unwrap();
         assert!(started.elapsed() >= Duration::from_millis(70));
@@ -539,7 +542,7 @@ mod tests {
 
     #[test]
     fn backend_failure_is_returned_to_the_transaction_caller() {
-        let (mut injector, failures) = spawn_async_injector(Box::new(FailingInjector));
+        let (mut injector, failures) = spawn_async_injector(Box::new(FailingInjector)).unwrap();
         let error = injector
             .replace(":a", "replacement")
             .expect_err("backend failure must not be reported as queue admission success");

@@ -233,10 +233,20 @@ impl PickerApp {
             let (sender, receiver) = mpsc::channel();
             let trigger = expansion.trigger.clone();
             let worker_trigger = trigger.clone();
-            thread::spawn(move || {
-                let result = wait_for_focus_and_insert(target_focus, &worker_trigger);
-                let _ = sender.send(result);
-            });
+            let spawned = thread::Builder::new()
+                .name("wayexpand-picker-insert".into())
+                .spawn(move || {
+                    let result = wait_for_focus_and_insert(target_focus, &worker_trigger);
+                    let _ = sender.send(result);
+                });
+            if let Err(error) = spawned {
+                self.insert_state = InsertState::Failed {
+                    trigger,
+                    text: String::new(),
+                    error: format!("Could not start insertion worker: {error}"),
+                };
+                return;
+            }
             self.insert_state = InsertState::Waiting {
                 trigger,
                 // The daemon owns the execution context, including the

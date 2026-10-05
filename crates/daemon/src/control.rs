@@ -15,6 +15,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tracing::warn;
 
 /// Large enough for `insert ` plus a maximum-length (128 character) trigger.
 const MAX_COMMAND_BYTES: usize = 1024;
@@ -157,43 +158,52 @@ impl ControlServer {
         let status_flag = Arc::clone(&status);
         let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let active_requests_for_listener = Arc::clone(&active_requests);
-        thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { break };
-                let flags = Flags {
-                    reload: Arc::clone(&reload_flag),
-                    stop: Arc::clone(&stop_flag),
-                    pause: Arc::clone(&pause_flag),
-                    insert: Arc::clone(&insert_slot),
-                    focus: Arc::clone(&focus_slot),
-                    explain: Arc::clone(&explain_slot),
-                    status: Arc::clone(&status_flag),
-                    waker: Arc::clone(&waker_slot),
-                };
-                let admitted = active_requests_for_listener.fetch_update(
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                    |active| (active < CONTROL_WORKERS).then_some(active + 1),
-                );
-                if admitted.is_err() {
-                    // Keep control-plane concurrency bounded. A busy or
-                    // malicious same-user client can be dropped without
-                    // delaying the accept loop or keyboard data plane.
-                    continue;
+        thread::Builder::new()
+            .name("wayexpand-control-listener".into())
+            .spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { break };
+                    let flags = Flags {
+                        reload: Arc::clone(&reload_flag),
+                        stop: Arc::clone(&stop_flag),
+                        pause: Arc::clone(&pause_flag),
+                        insert: Arc::clone(&insert_slot),
+                        focus: Arc::clone(&focus_slot),
+                        explain: Arc::clone(&explain_slot),
+                        status: Arc::clone(&status_flag),
+                        waker: Arc::clone(&waker_slot),
+                    };
+                    let admitted = active_requests_for_listener.fetch_update(
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                        |active| (active < CONTROL_WORKERS).then_some(active + 1),
+                    );
+                    if admitted.is_err() {
+                        // Keep control-plane concurrency bounded. A busy or
+                        // malicious same-user client can be dropped without
+                        // delaying the accept loop or keyboard data plane.
+                        continue;
+                    }
+                    let active_requests = Arc::clone(&active_requests_for_listener);
+                    let worker = thread::Builder::new()
+                        .name("wayexpand-control-request".into())
+                        .spawn(move || {
+                            // The control plane is deliberately isolated from
+                            // keyboard processing. A client that holds a socket open
+                            // cannot head-of-line block later requests.
+                            let _ = handle_request(stream, flags);
+                            active_requests.fetch_sub(1, Ordering::AcqRel);
+                        });
+                    if let Err(error) = worker {
+                        active_requests_for_listener.fetch_sub(1, Ordering::AcqRel);
+                        warn!(%error, "could not start control request worker; dropping request");
+                    }
+                    if stop_flag.load(Ordering::Acquire) {
+                        break;
+                    }
                 }
-                let active_requests = Arc::clone(&active_requests_for_listener);
-                thread::spawn(move || {
-                    // The control plane is deliberately isolated from
-                    // keyboard processing. A client that holds a socket open
-                    // cannot head-of-line block later requests.
-                    let _ = handle_request(stream, flags);
-                    active_requests.fetch_sub(1, Ordering::AcqRel);
-                });
-                if stop_flag.load(Ordering::Acquire) {
-                    break;
-                }
-            }
-        });
+            })
+            .context("starting control socket listener")?;
         Ok(Self {
             reload_requested,
             stop_requested,

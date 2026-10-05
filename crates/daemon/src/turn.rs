@@ -338,9 +338,19 @@ impl Daemon {
             ) {
                 Ok(backend) => {
                     if self.evdev_mode && self.backend_name == "libei" {
-                        let (backend, failures) = spawn_async_injector(backend);
-                        self.injector = Some(backend);
-                        self.output_failures = Some(failures);
+                        match spawn_async_injector(backend) {
+                            Ok((backend, failures)) => {
+                                self.injector = Some(backend);
+                                self.output_failures = Some(failures);
+                            }
+                            Err(error) => {
+                                self.output_retry_at =
+                                    Some(Instant::now() + self.output_retry_delay);
+                                self.output_retry_delay = next_retry_delay(self.output_retry_delay);
+                                warn!(%error, backend = self.backend_name, "output worker unavailable; retry scheduled");
+                                return Ok(());
+                            }
+                        }
                     } else {
                         self.injector = Some(backend);
                     }

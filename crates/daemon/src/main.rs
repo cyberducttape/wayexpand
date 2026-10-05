@@ -276,12 +276,15 @@ fn main() -> Result<()> {
     let signal_waker = waker.clone();
     let mut signals = Signals::new([SIGINT, SIGTERM])
         .map_err(|error| anyhow::anyhow!("could not install signal handlers: {error}"))?;
-    thread::spawn(move || {
-        if signals.forever().next().is_some() {
-            signal_stop.store(true, std::sync::atomic::Ordering::Release);
-            signal_waker.wake();
-        }
-    });
+    thread::Builder::new()
+        .name("wayexpand-signal-handler".into())
+        .spawn(move || {
+            if signals.forever().next().is_some() {
+                signal_stop.store(true, std::sync::atomic::Ordering::Release);
+                signal_waker.wake();
+            }
+        })
+        .map_err(|error| anyhow::anyhow!("could not start signal handler: {error}"))?;
     info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
     if let Some(socket) = control.path() {
         info!(path = %socket.display(), "control socket ready");
@@ -351,7 +354,8 @@ fn main() -> Result<()> {
                     anyhow::bail!("output backend startup cancelled while stopping")
                 };
                 if evdev_mode && backend == "libei" {
-                    let (injector, failures) = spawn_async_injector(injector);
+                    let (injector, failures) = spawn_async_injector(injector)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
                     output_failures = Some(failures);
                     Some(injector)
                 } else {
@@ -410,7 +414,7 @@ fn main() -> Result<()> {
     );
 
     let receiver = if input_method.is_none() && evdev.is_none() {
-        Some(spawn_stdin_reader())
+        Some(spawn_stdin_reader()?)
     } else {
         None
     };
