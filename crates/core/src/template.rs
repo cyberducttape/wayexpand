@@ -186,14 +186,14 @@ pub fn render_template(template: &str, context: &TemplateContext) -> Result<Stri
 }
 
 /// Render a deliberately bounded preview. This is for interactive UIs only:
-/// a preview must not be able to spend a frame materializing a full-size
-/// replacement or included snippet.
+/// rendering stops at the first output newline or byte budget, including in
+/// included snippets, so a preview cannot materialize a full replacement.
 pub fn render_template_preview(
     template: &str,
     context: &TemplateContext,
     maximum_bytes: usize,
 ) -> Result<String, TemplateError> {
-    render(template, context, true, maximum_bytes).map(|(rendered, _)| rendered)
+    render_nested(template, context, true, 0, maximum_bytes, true).map(|(rendered, _, _)| rendered)
 }
 
 /// Every `{{...}}` variable name in a template, in order. Unclosed markers
@@ -221,7 +221,8 @@ fn render(
     allow_cursor: bool,
     maximum_bytes: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    render_nested(template, context, allow_cursor, 0, maximum_bytes)
+    render_nested(template, context, allow_cursor, 0, maximum_bytes, false)
+        .map(|(rendered, cursor, _)| (rendered, cursor))
 }
 
 fn render_nested(
@@ -230,7 +231,8 @@ fn render_nested(
     allow_cursor: bool,
     depth: usize,
     maximum_bytes: usize,
-) -> Result<(String, Option<usize>), TemplateError> {
+    preview: bool,
+) -> Result<(String, Option<usize>, bool), TemplateError> {
     // Preview callers may pass an arbitrarily large valid template. Do not
     // reserve its full size before the output limit has a chance to reject it.
     let mut rendered = String::with_capacity(template.len().min(maximum_bytes));
@@ -238,11 +240,22 @@ fn render_nested(
     let mut cursor = 0;
     while cursor < template.len() {
         let Some(relative_start) = template[cursor..].find("{{") else {
-            push_bounded(&mut rendered, &template[cursor..], maximum_bytes)?;
+            let stopped = push_bounded(&mut rendered, &template[cursor..], maximum_bytes, preview)?;
+            if stopped {
+                return Ok((rendered, cursor_position, true));
+            }
             break;
         };
         let start = cursor + relative_start;
-        push_bounded(&mut rendered, &template[cursor..start], maximum_bytes)?;
+        let stopped = push_bounded(
+            &mut rendered,
+            &template[cursor..start],
+            maximum_bytes,
+            preview,
+        )?;
+        if stopped {
+            return Ok((rendered, cursor_position, true));
+        }
         let variable_start = start + 2;
         let Some(relative_end) = template[variable_start..].find("}}") else {
             return Err(TemplateError::Unclosed { offset: start });
@@ -260,6 +273,7 @@ fn render_nested(
             cursor = end + 2;
             continue;
         }
+        let mut included_stopped = false;
         let value = match name {
             "date" => format_date(context.unix_timestamp),
             "time" => format_time(context.unix_timestamp),
@@ -273,6 +287,7 @@ fn render_nested(
             "unix_timestamp" => context.unix_timestamp.to_string(),
             "newline" => "\n".to_owned(),
             "tab" => "\t".to_owned(),
+            "clipboard" if preview => return Err(TemplateError::ClipboardDisabled),
             "clipboard" => match &context.clipboard {
                 None => return Err(TemplateError::ClipboardDisabled),
                 Some(_) if context.validating => String::new(),
@@ -312,7 +327,10 @@ fn render_nested(
                 if template_variables(included).contains(&"cursor") {
                     return Err(TemplateError::CursorInInclude);
                 }
-                render_nested(included, context, false, depth + 1, maximum_bytes)?.0
+                let (rendered, _, stopped) =
+                    render_nested(included, context, false, depth + 1, maximum_bytes, preview)?;
+                included_stopped = stopped;
+                rendered
             }
             other => match parse_offset_variable(other) {
                 Some((base, offset)) => {
@@ -342,10 +360,13 @@ fn render_nested(
                 }
             },
         };
-        push_bounded(&mut rendered, &value, maximum_bytes)?;
+        let stopped = push_bounded(&mut rendered, &value, maximum_bytes, preview)?;
+        if stopped || included_stopped {
+            return Ok((rendered, cursor_position, true));
+        }
         cursor = end + 2;
     }
-    Ok((rendered, cursor_position))
+    Ok((rendered, cursor_position, false))
 }
 
 /// Parses a variable name of the form `<base><sign><magnitude><unit>` (e.g.
@@ -407,14 +428,35 @@ fn push_bounded(
     output: &mut String,
     value: &str,
     maximum_bytes: usize,
-) -> Result<(), TemplateError> {
+    preview: bool,
+) -> Result<bool, TemplateError> {
+    if preview {
+        if output.len() >= maximum_bytes {
+            return Ok(true);
+        }
+        let remaining = maximum_bytes.saturating_sub(output.len());
+        // Scan only far enough to find a newline or prove the byte budget is
+        // exhausted. This also keeps a huge first line from requiring a full
+        // pass before it can be truncated.
+        let inspect_len = value.len().min(remaining.saturating_add(1));
+        let line_end = value.as_bytes()[..inspect_len]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .unwrap_or(value.len());
+        let mut byte_end = line_end.min(remaining);
+        while !value.is_char_boundary(byte_end) {
+            byte_end -= 1;
+        }
+        output.push_str(&value[..byte_end]);
+        return Ok(byte_end < value.len());
+    }
     if output.len().saturating_add(value.len()) > maximum_bytes {
         return Err(TemplateError::RenderedTooLarge {
             maximum: maximum_bytes,
         });
     }
     output.push_str(value);
-    Ok(())
+    Ok(false)
 }
 
 fn format_time(timestamp: u64) -> String {
@@ -456,13 +498,45 @@ mod tests {
     #[test]
     fn preview_renderer_stops_at_its_output_budget_for_large_templates() {
         let context = TemplateContext::default();
-        assert!(matches!(
-            render_template_preview(&"x".repeat(1024 * 1024), &context, 512),
-            Err(TemplateError::RenderedTooLarge { maximum: 512 })
-        ));
+        assert_eq!(
+            render_template_preview(&"x".repeat(1024 * 1024), &context, 512).unwrap(),
+            "x".repeat(512)
+        );
         assert_eq!(
             render_template_preview("hello {{username}}", &context, 512).unwrap(),
             format!("hello {}", context.username)
+        );
+        assert_eq!(
+            render_template_preview(
+                &format!("first line\n{}", "x".repeat(1024 * 1024)),
+                &context,
+                512
+            )
+            .unwrap(),
+            "first line"
+        );
+        assert_eq!(
+            render_template_preview(
+                &format!("{{{{newline}}}}{}", "x".repeat(1024 * 1024)),
+                &context,
+                512
+            )
+            .unwrap(),
+            ""
+        );
+
+        let mut snippets = HashMap::new();
+        snippets.insert(
+            "signature".into(),
+            format!("included line\n{}", "x".repeat(1024 * 1024)),
+        );
+        let context = TemplateContext {
+            snippets: Arc::new(snippets),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template_preview("{{snippet:signature}}", &context, 512).unwrap(),
+            "included line"
         );
     }
 
