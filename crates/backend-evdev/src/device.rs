@@ -7,6 +7,12 @@ use std::path::{Path, PathBuf};
 
 use evdev::{Device, KeyCode};
 
+pub(super) trait KeyboardDeviceAccess: Send {
+    fn path(&self) -> &Path;
+    fn as_fd(&self) -> BorrowedFd<'_>;
+    fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>>;
+}
+
 pub struct KeyboardDevice {
     path: PathBuf,
     device: Device,
@@ -23,6 +29,20 @@ impl KeyboardDevice {
 
     pub fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>> {
         Ok(self.device.fetch_events()?.collect())
+    }
+}
+
+impl KeyboardDeviceAccess for KeyboardDevice {
+    fn path(&self) -> &Path {
+        KeyboardDevice::path(self)
+    }
+
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        KeyboardDevice::as_fd(self)
+    }
+
+    fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>> {
+        KeyboardDevice::fetch_events(self)
     }
 }
 

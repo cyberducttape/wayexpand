@@ -105,7 +105,7 @@ impl EvdevError {
 }
 
 pub struct EvdevSource {
-    devices: Vec<device::KeyboardDevice>,
+    devices: Vec<Box<dyn device::KeyboardDeviceAccess>>,
     state: State,
     pending: VecDeque<InputEvent>,
     /// Evdev keycodes currently held down. Capture is non-exclusive, so the
@@ -142,13 +142,17 @@ impl EvdevSource {
              matching is never suspended in password or other sensitive fields; the XKB state is \
              a local snapshot and does not track compositor layout switching (docs/SECURITY.md)"
         );
-        let pressed = discovery
+        let devices: Vec<Box<dyn device::KeyboardDeviceAccess>> = discovery
             .keyboards
+            .into_iter()
+            .map(|keyboard| Box::new(keyboard) as Box<dyn device::KeyboardDeviceAccess>)
+            .collect();
+        let pressed = devices
             .iter()
             .map(|keyboard| (keyboard.path().to_path_buf(), HashSet::new()))
             .collect();
         Ok(Self {
-            devices: discovery.keyboards,
+            devices,
             state: State::new(keymap),
             pending: VecDeque::new(),
             pressed,
@@ -172,11 +176,8 @@ impl EvdevSource {
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);
         }
-        let borrowed: Vec<BorrowedFd<'_>> = self
-            .devices
-            .iter()
-            .map(device::KeyboardDevice::as_fd)
-            .collect();
+        let borrowed: Vec<BorrowedFd<'_>> =
+            self.devices.iter().map(|device| device.as_fd()).collect();
         let mut fds: Vec<rustix::event::PollFd<'_>> = borrowed
             .iter()
             .map(|fd| {
@@ -320,7 +321,7 @@ impl EvdevSource {
             self.pressed
                 .entry(keyboard.path().to_path_buf())
                 .or_default();
-            self.devices.push(keyboard);
+            self.devices.push(Box::new(keyboard));
         }
     }
 
@@ -585,6 +586,39 @@ fn poll_with_wake(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{Read, Write},
+        os::fd::BorrowedFd,
+        os::unix::net::UnixStream,
+        sync::{Arc, Mutex},
+    };
+
+    struct TestKeyboard {
+        path: PathBuf,
+        reader: UnixStream,
+        events: Arc<Mutex<Vec<evdev::InputEvent>>>,
+    }
+
+    impl device::KeyboardDeviceAccess for TestKeyboard {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.reader.as_fd()
+        }
+
+        fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>> {
+            let mut buffer = [0_u8; 64];
+            let _ = self.reader.read(&mut buffer)?;
+            Ok(std::mem::take(
+                &mut *self
+                    .events
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()),
+            ))
+        }
+    }
 
     fn test_state() -> State {
         let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
@@ -606,6 +640,48 @@ mod tests {
 
         assert!(poll_with_wake(&mut fds, Duration::from_secs(1), Some(&wake)).unwrap());
         assert!(!poll_with_wake(&mut fds, Duration::ZERO, Some(&wake)).unwrap());
+    }
+
+    #[test]
+    fn readable_fake_keyboard_events_are_processed_and_disconnect_resets_state() {
+        let path = PathBuf::from("/dev/input/test-keyboard");
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path: path.clone(),
+                reader,
+                events: Arc::clone(&events),
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashMap::from([(path.clone(), HashSet::new())]),
+            last_device_refresh: Instant::now(),
+            wake: None,
+        };
+
+        events
+            .lock()
+            .unwrap()
+            .push(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        writer.write_all(b"event").unwrap();
+        source.poll_once(Duration::from_secs(1), false).unwrap();
+        assert!(source.keys_held());
+        assert!(matches!(
+            source.pending.pop_front(),
+            Some(InputEvent::Key(_))
+        ));
+        assert_eq!(
+            source.pending.pop_front(),
+            Some(InputEvent::Text("a".into()))
+        );
+
+        drop(writer);
+        source.poll_once(Duration::from_secs(1), false).unwrap();
+        assert!(source.devices.is_empty());
+        assert!(!source.keys_held());
+        assert_eq!(source.pending.pop_front(), Some(InputEvent::Reset));
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord

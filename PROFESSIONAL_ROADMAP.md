@@ -73,8 +73,11 @@ supported end state before broad adoption:
 
 ### 7. Testing gaps that need hardware or deeper tooling
 
-- [ ] Device lifecycle (two keyboards, hotplug, suspend) needs a fake-evdev
-      test seam or a hardware lab; evdev tests cannot create devices today.
+- [x] An injectable keyboard-descriptor seam exercises real poll readiness,
+      event delivery, disconnect removal, and matcher reset using fake streams.
+- [ ] Kernel `/dev/input` discovery, physical multi-keyboard hotplug, and
+      suspend/resume still need a hardware lab; fake descriptors cannot certify
+      kernel or device lifecycle behavior.
 - [x] The evdev poll helper's eventfd readiness and drain behavior is covered
       by a synthetic test without opening a kernel device.
 - [x] The input-method poll helper's eventfd readiness and drain behavior is
