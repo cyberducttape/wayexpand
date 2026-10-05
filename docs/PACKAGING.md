@@ -185,6 +185,16 @@ clean `main` rather than the vendored release source; it is not a supported
 automatic PPA publishing path. Check each Launchpad build result before
 advertising a series as installable.
 
+**Recipe maintenance:** publish the self-contained branch used by the
+Launchpad Git recipe after each release:
+
+```bash
+GIT_SSH_COMMAND='ssh -F /dev/null' bash scripts/publish-launchpad-branch.sh
+```
+
+The recipe must point at `launchpad-vendored`, not `main`. This branch is
+generated from the release tree and includes Cargo's locked vendor sources.
+
 **Note:** See [RELEASING.md](RELEASING.md) for the authoritative release version workflow
 (it is the single source of truth for version numbers across all distributions).
 

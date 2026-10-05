@@ -146,11 +146,14 @@ fi
     manual Release workflow dispatch
   - Unsigned until the maintainer signs it with the Launchpad upload key
 
-The Launchpad recipe must build from the vendored source archive (or an
-equivalent source upload containing both `vendor/` and `.cargo/config.toml`).
-It must not build the clean Git checkout: Launchpad builders do not have
-reliable crates.io access, and Debian packaging fails closed rather than
-attempting a network dependency download.
+The Launchpad recipe must use the `launchpad-vendored` branch published by
+`scripts/publish-launchpad-branch.sh`, or an equivalent source upload
+containing both `vendor/` and `.cargo/config.toml`. The checked-in recipe
+definition is [`launchpad/wayexpand.recipe`](../launchpad/wayexpand.recipe).
+Publish the branch after each release, then configure the Launchpad recipe to
+use that branch. It must not build the clean Git checkout: Launchpad builders
+do not have reliable crates.io access, and Debian packaging fails closed
+rather than attempting a network dependency download.
 
 The workflow pins every GitHub Action to a full commit SHA. Do not replace
 those pins with moving version tags during release-workflow maintenance.

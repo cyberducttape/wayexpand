@@ -1,0 +1,6 @@
+# git-build-recipe format 0.4 deb-version {debversion}
+#
+# This recipe must use the generated launchpad-vendored branch.  A clean Git
+# checkout cannot build Debian packages because Cargo dependencies are not
+# available from crates.io on Launchpad build workers.
+lp:~cyberducttape/+git/wayexpand launchpad-vendored
