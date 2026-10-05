@@ -4381,6 +4381,11 @@ replacement = "Hi {{field:name}}, ticket {{field:id=OPS-1}} is {{choice:Open|Res
 "#;
 
 fn queue_form(engine: &mut ExpansionEngine) {
+    engine.set_current_window(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: Some("toplevel-mail-1".into()),
+    }));
     let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
     assert_eq!(pending.len(), 1);
     let dispatch = engine
@@ -4443,15 +4448,64 @@ fn a_form_result_is_dropped_when_focus_moved_to_another_app() {
     engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
         app_id: Some("org.example.Mail".into()),
         title: None,
-        instance_id: None,
+        instance_id: Some("toplevel-mail-1".into()),
     })));
     queue_form(&mut engine);
     engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
         app_id: Some("org.example.Chat".into()),
         title: None,
-        instance_id: None,
+        instance_id: Some("toplevel-chat-1".into()),
     })));
     assert!(wait_for_completion(&mut engine).is_empty());
+}
+
+#[test]
+fn a_form_result_is_dropped_when_focus_moves_to_another_window_of_the_same_app() {
+    let _helper = FakeFormHelper::new(
+        "same-app-different-window",
+        r#"sleep 0.2; printf '{"field:name":"Ada","field:id":"x","choice:Open|Resolved":"Open"}'"#,
+    );
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    queue_form(&mut engine);
+    engine.process(InputEvent::WindowChanged(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Another mailbox window".into()),
+        instance_id: Some("toplevel-mail-2".into()),
+    })));
+    assert!(wait_for_completion(&mut engine).is_empty());
+}
+
+#[test]
+fn a_form_is_not_opened_when_the_backend_cannot_identify_the_exact_window() {
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    engine.set_current_window(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: None,
+    }));
+    let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
+    assert_eq!(pending.len(), 1);
+    let result = engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0);
+    assert_eq!(result, Err(CommandError::WindowIdentityUnavailable));
+    assert!(!engine.is_form_open());
+}
+
+#[test]
+fn a_form_is_not_opened_with_an_unbounded_window_identity() {
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    engine.set_current_window(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: Some("x".repeat(MAX_WINDOW_INSTANCE_ID_BYTES + 1)),
+    }));
+    let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
+    assert_eq!(pending.len(), 1);
+    let result = engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0);
+    assert_eq!(result, Err(CommandError::WindowIdentityUnavailable));
+    assert!(!engine.is_form_open());
 }
 
 #[test]

@@ -37,7 +37,7 @@ pub use engine::{
     run_command, run_command_cancellable, CheckStatus, CommandError, CommandMetrics,
     CompletionNotifier, ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck,
     Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError, PendingExpansionDispatch,
-    PendingExpansionResult, TransactionOutcome, WindowContext,
+    PendingExpansionResult, TransactionOutcome, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};

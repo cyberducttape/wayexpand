@@ -57,6 +57,7 @@ use wayexpand_backend_selection::auto_select;
 use wayexpand_core::{
     default_config_path, CommandMetrics, ExpansionEngine, ExpansionResult, InjectorCapabilities,
     InputEvent, InputSource, InputSourceCapabilities, TextInjector, WindowContext,
+    MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 
 /// How long to wait for physically held keys to be released before injecting

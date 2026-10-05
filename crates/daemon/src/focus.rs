@@ -2,9 +2,8 @@
 
 use crate::*;
 
-// Leaves room in the 1 KiB control frame for the hex token, a u64 generation,
-// and the longest valid UTF-8 trigger (128 scalars).
-const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 192;
+// The shared core limit leaves room in the 1 KiB control frame for the hex
+// token, a u64 generation, and the longest valid UTF-8 trigger (128 scalars).
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 /// The last published focused window and a counter bumped on every change,

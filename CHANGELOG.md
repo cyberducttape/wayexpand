@@ -33,7 +33,9 @@ Changes not yet released.
   after merge and never committing private files; GUI Library → Sync.
 - **Interactive form snippets:** `{{field:name}}`, `{{field:name=default}}`,
   and `{{choice:A|B}}` open a form when the snippet fires; the filled text is
-  typed only if focus returns to the original application.
+  typed only if focus returns to the exact original toplevel. Backends without
+  a bounded window identity refuse to open forms rather than risk inserting
+  into a different window.
 - **Local usage statistics:** `wayexpand stats` reports expansions,
   keystrokes avoided, most-used and unused snippets, and risky triggers from
   a local, ID-only `usage-stats.json` (`settings.usage_stats = false` to

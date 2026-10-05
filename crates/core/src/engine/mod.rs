@@ -81,10 +81,17 @@ pub struct WindowContext {
     pub instance_id: Option<String>,
 }
 
+/// Maximum accepted size for opaque backend-provided toplevel identities.
+/// Shared by focus handoff and asynchronous form-return checks.
+pub const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 192;
+
 #[derive(Debug, Clone, Default)]
 struct NormalizedWindowContext {
     app_id: Option<String>,
     title: Option<String>,
+    /// Opaque backend identity used only to return asynchronous forms to the
+    /// exact toplevel that initiated them. It is deliberately not normalized.
+    instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,6 +442,7 @@ enum AsyncCommandJob {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FormOrigin {
     app_id: Option<String>,
+    instance_id: String,
 }
 
 struct AsyncCommandCompletion {
@@ -1015,15 +1023,17 @@ impl ExpansionEngine {
                     continue;
                 };
                 // Apply only where the form was opened: focus must be back in
-                // that application, and not in a sensitive field or paused.
-                let current_app = self
-                    .normalized_window
-                    .as_ref()
-                    .and_then(|window| window.app_id.clone());
+                // that exact toplevel, not merely another window of the same
+                // application. Backends without a strong window ID never
+                // start a form job (see queue_form).
+                let returned_to_origin = self.normalized_window.as_ref().is_some_and(|window| {
+                    window.app_id == origin.app_id
+                        && window.instance_id.as_deref() == Some(origin.instance_id.as_str())
+                });
                 let limit = self.config.organization.max_replacement_size;
                 if self.sensitive_focus
                     || self.user_paused
-                    || current_app != origin.app_id
+                    || !returned_to_origin
                     || (limit > 0 && output.len() > limit)
                     || (completion.additional_max_size > 0
                         && output.len() > completion.additional_max_size)
@@ -1244,6 +1254,19 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
         }
+        let origin = self.normalized_window.as_ref().and_then(|window| {
+            let instance_id = window.instance_id.as_ref()?;
+            (!instance_id.is_empty() && instance_id.len() <= MAX_WINDOW_INSTANCE_ID_BYTES).then(
+                || FormOrigin {
+                    app_id: window.app_id.clone(),
+                    instance_id: instance_id.clone(),
+                },
+            )
+        });
+        let Some(origin) = origin else {
+            self.restore_deferred_match(&matched_text);
+            return Err(CommandError::WindowIdentityUnavailable);
+        };
         let Some(runtime) = self.async_commands.as_ref() else {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::WorkerUnavailable);
@@ -1255,12 +1278,7 @@ impl ExpansionEngine {
             fields,
             context: self.template_context(),
             title: pending.trigger.clone(),
-            origin: FormOrigin {
-                app_id: self
-                    .normalized_window
-                    .as_ref()
-                    .and_then(|window| window.app_id.clone()),
-            },
+            origin,
             result: ExpansionResult {
                 snippet_id: pending.snippet_id,
                 trigger: pending.trigger,
@@ -1430,6 +1448,7 @@ impl ExpansionEngine {
         self.normalized_window = window.as_ref().map(|window| NormalizedWindowContext {
             app_id: window.app_id.as_ref().map(|value| value.to_lowercase()),
             title: window.title.as_ref().map(|value| value.to_lowercase()),
+            instance_id: window.instance_id.clone(),
         });
         self.current_window = window;
     }
@@ -1947,6 +1966,9 @@ pub enum CommandError {
     PolicyOutputTooLarge { size: usize, limit: usize },
     /// Input changed or capture became disabled before a deferred match completed.
     StaleInput,
+    /// Forms require an exact, bounded toplevel identity to prevent inserting
+    /// their result into a different window of the same application.
+    WindowIdentityUnavailable,
     /// Command execution was disabled by the active organization policy.
     PolicyBlocked,
     /// The bounded command queue is full.
@@ -1993,6 +2015,10 @@ impl std::fmt::Display for CommandError {
                 "produced {size} bytes, exceeding the organization limit of {limit} bytes"
             ),
             CommandError::StaleInput => write!(f, "input changed before the expansion completed"),
+            CommandError::WindowIdentityUnavailable => write!(
+                f,
+                "cannot open a snippet form because this backend does not provide an exact window identity"
+            ),
             CommandError::PolicyBlocked => write!(f, "command execution is disabled by policy"),
             CommandError::QueueFull => write!(f, "command queue is full"),
             CommandError::WorkerUnavailable => write!(f, "command workers are unavailable"),

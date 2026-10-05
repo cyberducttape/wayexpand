@@ -95,9 +95,10 @@ Current status: {{choice:Open|Waiting on customer|Resolved}}
 Tab moves between fields, Enter inserts, and Escape cancels, leaving the typed
 trigger in place. While the form is open, expansion is paused so typing in the
 form cannot trigger other snippets. After you press Enter, the trigger is erased
-and the filled text typed, but only if focus has returned to the application
-where you typed the trigger (where window tracking is available), and not into
-a password field.
+and the filled text typed only if focus has returned to the exact original
+toplevel window and not into a password field. A backend that cannot provide a
+bounded, exact window identity refuses to open the form; it will not guess based
+on app ID or title, since multiple windows can share both.
 
 The form is the `wayexpand-gui --form` window; under systemd the daemon starts
 it with `systemd-run --user` so it runs outside the daemon's sandbox. Form
