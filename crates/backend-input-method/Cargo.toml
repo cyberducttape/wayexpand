@@ -17,6 +17,7 @@ wayland-client.workspace = true
 wayland-protocols.workspace = true
 wayland-protocols-misc.workspace = true
 xkbcommon-rs = { workspace = true, features = ["server"] }
+xkbcommon.workspace = true
 xkeysym = "0.2.1"
 rustix = { version = "1", features = ["event"] }
 unicode-segmentation.workspace = true

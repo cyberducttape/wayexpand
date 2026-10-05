@@ -50,6 +50,7 @@ wayland-protocols = "0.32.13"
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 xkbcommon-rs = { version = "0.1.2", features = ["client"] }
+xkbcommon = { version = "0.9", default-features = false }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 unicode-general-category = "1.1"

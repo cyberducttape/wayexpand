@@ -11,6 +11,9 @@
 //! missing or fails, this source reports an error rather than silently
 //! discarding keys.
 
+mod composition;
+
+use composition::{ComposeUpdate, LocalCompose};
 use std::{
     collections::VecDeque,
     fs::File,
@@ -182,6 +185,7 @@ struct StateData {
     /// Local XKB dead-key/Compose state. This is separate from compositor
     /// IME preedit, which zwp_input_method_v2 does not expose.
     composition_active: bool,
+    local_compose: Option<LocalCompose>,
     commit_serial: u32,
     initial_roundtrip_done: bool,
     error: Option<InputMethodError>,
@@ -207,6 +211,7 @@ impl StateData {
             surrounding_text: None,
             pending_sensitive: None,
             composition_active: false,
+            local_compose: LocalCompose::new(),
             commit_serial: 0,
             initial_roundtrip_done: false,
             error: None,
@@ -414,7 +419,11 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard = Some(proxy.grab_keyboard(qh, ()));
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
+                if state.composition_active {
+                    state.queue_event(InputEvent::CompositionChanged { active: false });
+                }
                 state.composition_active = false;
+                state.local_compose = LocalCompose::new();
                 // Do not capture until the compositor has delivered the
                 // current content purpose. This prevents an activation race
                 // from briefly treating a password field as ordinary text.
@@ -428,7 +437,11 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 state.keyboard_state = None;
                 state.surrounding_text = None;
                 state.pending_sensitive = None;
+                if state.composition_active {
+                    state.queue_event(InputEvent::CompositionChanged { active: false });
+                }
                 state.composition_active = false;
+                state.local_compose = LocalCompose::new();
                 // Deactivation can race with already-queued keyboard events.
                 // Keep the engine disabled until a new activation reports a
                 // non-sensitive content type.
@@ -486,7 +499,13 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     return;
                 }
                 match decode_keymap(fd, size) {
-                    Ok(keymap) => state.keyboard_state = Some(State::new(keymap)),
+                    Ok(keymap) => {
+                        if state.composition_active {
+                            finish_local_composition(state);
+                        }
+                        state.keyboard_state = Some(State::new(keymap));
+                        state.local_compose = LocalCompose::new();
+                    }
                     Err(error) => state.error = Some(error),
                 }
             }
@@ -514,9 +533,14 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                 ..
             } => {
                 let composition_key = key_is_composition(state.keyboard_state.as_ref(), key);
-                if key_state == wl_keyboard::KeyState::Pressed && composition_key {
-                    begin_local_composition(state);
-                }
+                let raw_keysym = state
+                    .keyboard_state
+                    .as_ref()
+                    .and_then(|keyboard_state| {
+                        key.checked_add(8)
+                            .and_then(|code| keyboard_state.key_get_one_sym(code))
+                    })
+                    .map(|keysym| keysym.raw());
                 let is_modifier = state
                     .keyboard_state
                     .as_ref()
@@ -540,6 +564,66 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     .map_or(Some(KeyAction::Unsupported), |keyboard_state| {
                         key_action_and_update(keyboard_state, key, key_state)
                     });
+                let fallback_text = action.as_ref().and_then(|action| match action {
+                    KeyAction::Text(text) => Some(text.as_str()),
+                    KeyAction::Commit(text) => Some(*text),
+                    _ => None,
+                });
+                let safe_compose_modifier = raw_keysym.is_some_and(|keysym| {
+                    matches!(keysym, xkeysym::key::Shift_L | xkeysym::key::Shift_R)
+                });
+                let compose_active = state
+                    .local_compose
+                    .as_ref()
+                    .is_some_and(LocalCompose::is_composing);
+                let compose_update = if key_state == wl_keyboard::KeyState::Pressed && !is_modifier
+                {
+                    raw_keysym.and_then(|keysym| {
+                        state
+                            .local_compose
+                            .as_mut()
+                            .map(|compose| compose.feed(keysym, fallback_text))
+                    })
+                } else {
+                    None
+                };
+                let compose_update = if is_modifier && !safe_compose_modifier && compose_active {
+                    state
+                        .local_compose
+                        .as_mut()
+                        .map(|compose| ComposeUpdate::Cancelled(compose.cancel()))
+                } else {
+                    compose_update
+                };
+                match compose_update.map(|update| apply_compose_update(state, update)) {
+                    Some(ComposeUpdate::Pending) => {
+                        return;
+                    }
+                    Some(ComposeUpdate::Composed(text)) => {
+                        if !text.is_empty() {
+                            forward_commit(state, connection, &text);
+                            state.queue_event(InputEvent::Text(text));
+                        }
+                        return;
+                    }
+                    Some(ComposeUpdate::Cancelled(fallback)) => {
+                        if !fallback.is_empty() {
+                            forward_commit(state, connection, &fallback);
+                            state.queue_event(InputEvent::Text(fallback));
+                        }
+                        if matches!(action, Some(KeyAction::Text(_) | KeyAction::Commit(_))) {
+                            return;
+                        }
+                    }
+                    Some(ComposeUpdate::Inactive) | None => {
+                        if key_state == wl_keyboard::KeyState::Pressed && composition_key {
+                            begin_local_composition(state);
+                        }
+                    }
+                }
+                if is_modifier && compose_active && safe_compose_modifier {
+                    return;
+                }
                 if is_modifier
                     || matches!(action, Some(KeyAction::Unsupported))
                     || (key_state == wl_keyboard::KeyState::Released && was_held)
@@ -631,6 +715,15 @@ fn begin_local_composition(state: &mut StateData) {
         state.composition_active = true;
         state.queue_event(InputEvent::CompositionChanged { active: true });
     }
+}
+
+fn apply_compose_update(state: &mut StateData, update: ComposeUpdate) -> ComposeUpdate {
+    match update {
+        ComposeUpdate::Pending => begin_local_composition(state),
+        ComposeUpdate::Composed(_) | ComposeUpdate::Cancelled(_) => finish_local_composition(state),
+        ComposeUpdate::Inactive => {}
+    }
+    update
 }
 
 /// Shared with `wayexpand-backend-evdev`; see `classify_keysym`.
