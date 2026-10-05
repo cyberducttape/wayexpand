@@ -17,6 +17,7 @@ libfuzzer-sys = "0.4"
 wayexpand-core = { path = "../crates/core" }
 action-broker = { path = "../crates/action-broker" }
 wayexpand-backend-ibus = { path = "../crates/backend-ibus" }
+unicode-segmentation = "1"
 
 [profile.release]
 debug = 1

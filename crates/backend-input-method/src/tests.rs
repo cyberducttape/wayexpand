@@ -1162,6 +1162,22 @@ fn backspace_deletes_whole_grapheme_cluster() {
 }
 
 #[test]
+fn backspace_deletes_modifier_zwj_and_indic_graphemes_whole() {
+    for grapheme in ["👍🏽", "👩‍💻", "क्ष", "क्‍ष"] {
+        let surrounding = SurroundingText {
+            text: grapheme.to_owned(),
+            cursor: grapheme.len() as u32,
+            anchor: grapheme.len() as u32,
+        };
+        assert_eq!(
+            backspace_delete_lengths(Some(&surrounding)),
+            Some((grapheme.len() as u32, 0)),
+            "{grapheme:?}"
+        );
+    }
+}
+
+#[test]
 fn backspace_deletes_selection_or_fails_closed() {
     let selected = SurroundingText {
         text: "hello".into(),

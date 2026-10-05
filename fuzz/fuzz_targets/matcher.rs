@@ -4,6 +4,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{Config, ExpansionEngine, InputEvent};
 
 const CONFIG: &str = r#"
@@ -28,6 +29,26 @@ replacement = "coffee"
 [[expansion]]
 trigger = ":東京"
 replacement = "Tokyo"
+
+[[expansion]]
+trigger = ":über"
+replacement = "German"
+
+[[expansion]]
+trigger = ":élève"
+replacement = "French"
+
+[[expansion]]
+trigger = ":👍🏽"
+replacement = "modifier"
+
+[[expansion]]
+trigger = ":👩‍💻"
+replacement = "zwj"
+
+[[expansion]]
+trigger = ":क्ष"
+replacement = "Indic"
 "#;
 
 fuzz_target!(|data: &[u8]| {
@@ -50,7 +71,9 @@ fuzz_target!(|data: &[u8]| {
                 let pick = bytes.next().unwrap_or(0);
                 let alphabet = [
                     ':', 's', 'i', 'g', 'b', 't', 'w', ';', 'a', 'd', 'r', 'A', 'D', 'R', 'c', 'f',
-                    'e', '\u{e9}', '\u{301}', '東', '京',
+                    'e', 'u', 'b', 'r', 'l', 'v', 'ü', 'é', 'è', 'ö', '\u{308}',
+                    '\u{e9}', '\u{301}', '東', '京', '👍', '🏽', '👩', '💻', '\u{200d}',
+                    'क', 'ष', '\u{094d}',
                 ];
                 InputEvent::Text(alphabet[usize::from(pick) % alphabet.len()].to_string())
             }
@@ -67,7 +90,9 @@ fuzz_target!(|data: &[u8]| {
             InputEvent::Text(text) => typed.push_str(text),
             InputEvent::Delimiter(character) => typed.push(*character),
             InputEvent::Backspace => {
-                typed.pop();
+                if let Some((start, _)) = typed.grapheme_indices(true).next_back() {
+                    typed.truncate(start);
+                }
             }
             _ => {}
         }

@@ -1448,8 +1448,10 @@ mod tests {
 
     #[test]
     fn erase_count_treats_decomposed_accent_and_devanagari_as_one() {
-        assert_eq!(super::erase_grapheme_count("e\u{301}"), 1);
-        assert_eq!(super::erase_grapheme_count("क्ष"), 1);
+        for grapheme in ["e\u{301}", "ü", "u\u{308}", "👍🏽", "👩‍💻", "क्ष", "क्‍ष"]
+        {
+            assert_eq!(super::erase_grapheme_count(grapheme), 1, "{grapheme:?}");
+        }
     }
 
     #[test]

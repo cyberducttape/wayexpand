@@ -3900,6 +3900,66 @@ fn canonically_equivalent_input_matches_and_deletes_what_was_typed() {
 }
 
 #[test]
+fn grapheme_heavy_triggers_preserve_exact_input_for_deletion() {
+    let cases = [
+        (":café", ":cafe\u{301}"),
+        (":über", ":u\u{308}ber"),
+        // Mixed normalization is common when a line contains accents from
+        // several sources or input methods.
+        (":élève", ":e\u{301}lève"),
+        (":👍🏽", ":👍🏽"),
+        (":👩‍💻", ":👩‍💻"),
+        (":क्ष", ":क्ष"),
+    ];
+
+    for (trigger, typed) in cases {
+        let results = typed_results(trigger, typed);
+        assert_eq!(results.len(), 1, "trigger {trigger:?} typed {typed:?}");
+        assert_eq!(results[0].matched_text, typed);
+
+        // The engine passes the exact committed input to the backend. The
+        // backend then interprets it in grapheme units for backspace counts.
+        let mut injector = RecordingInjector { calls: Vec::new() };
+        assert!(ExpansionEngine::apply(&mut injector, &results[0]).is_applied());
+        assert_eq!(injector.calls[0], format!("erase:{typed}"));
+    }
+}
+
+#[test]
+fn backspace_removes_the_same_grapheme_from_the_matcher_buffer() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \"e:x\"\nreplacement = \"wrong\"\n\
+         [[expansion]]\ntrigger = \":x\"\nreplacement = \"right\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    engine.process(InputEvent::Text("e\u{301}".into()));
+    engine.process(InputEvent::Backspace);
+    let results = engine.process(InputEvent::Text(":x".into()));
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].trigger, ":x");
+    assert_eq!(results[0].insert, "right");
+}
+
+#[test]
+fn mixed_normalization_mapping_is_preserved_for_word_boundary_deletion() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \"élève\"\nreplacement = \"student\"\n\
+         match_mode = \"word-boundary\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let typed = "e\u{301}lève ";
+    let results = engine.process(InputEvent::Text(typed.into()));
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "e\u{301}lève");
+    assert_eq!(results[0].reinsert_after, Some(' '));
+}
+
+#[test]
 fn canonically_equivalent_triggers_in_two_snippets_are_duplicates() {
     let config = crate::Config::parse(
         "[[expansion]]\ntrigger = \":caf\u{e9}\"\nreplacement = \"a\"\n\

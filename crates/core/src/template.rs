@@ -750,4 +750,13 @@ mod tests {
         assert_eq!(rendered, format!("prefix{family}"));
         assert_eq!(offset, Some(1));
     }
+
+    #[test]
+    fn cursor_offset_counts_emoji_modifier_as_one_grapheme() {
+        let (rendered, offset) =
+            render_template_with_cursor("prefix{{cursor}}👍🏽", &TemplateContext::default()).unwrap();
+
+        assert_eq!(rendered, "prefix👍🏽");
+        assert_eq!(offset, Some(1));
+    }
 }

@@ -7,6 +7,15 @@ use super::matching;
 use super::{ExpansionEngine, ExpansionResult, InputEvent, PendingExpansionResult};
 use super::{MAX_RESULTS_PER_EVENT, MAX_RESULT_BYTES_PER_EVENT};
 use crate::MatchMode;
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
+
+struct MatchSuffix {
+    index: usize,
+    raw_length: usize,
+    normalized: Option<Vec<char>>,
+    normalized_length: usize,
+}
 
 impl ExpansionEngine {
     /// Process an input event through the expansion state machine.
@@ -152,7 +161,18 @@ impl ExpansionEngine {
 
     fn on_backspace(&mut self) {
         self.bump_generation();
-        self.buffer.pop_back();
+        // All active input paths forward one Backspace per deleted grapheme
+        // cluster (the input-method route derives its byte deletion from
+        // surrounding text). Keep matcher state aligned with the document,
+        // including decomposed accents and emoji sequences.
+        let buffered: String = self.buffer.iter().collect();
+        let scalar_count = buffered
+            .graphemes(true)
+            .next_back()
+            .map_or(0, |grapheme| grapheme.chars().count());
+        for _ in 0..scalar_count {
+            self.buffer.pop_back();
+        }
     }
 
     fn on_reset(&mut self) {
@@ -185,21 +205,32 @@ impl ExpansionEngine {
     /// case: `:a` matches only once the next character rules out `:address`.
     /// Returns the configured expansion and the matched suffix length.
     fn match_completed_by(&self, character: char) -> Option<(usize, usize)> {
-        let (index, length) = self
-            .matcher
-            .find_suffix(self.buffer.iter().rev().copied())?;
-        let config_index = self.matcher_indices.get(index).copied()?;
+        let suffix = self.find_match_suffix()?;
+        let config_index = self.matcher_indices.get(suffix.index).copied()?;
         // The configured trigger is the lowercase form. With propagate_case
         // the pending suffix may instead be `:A` or `:AB`, so continuation is
         // checked against the text the user actually typed -- that is the
         // string present in the forward trie, not the generated sibling. The
         // suffix is read straight out of the rolling buffer; collecting it
         // into a `String` first cost one allocation per keystroke.
-        let typed_start = self.buffer.len().saturating_sub(length);
-        if self
-            .matcher
-            .can_continue(self.buffer.iter().skip(typed_start).copied(), character)
-        {
+        let can_continue = if let Some(normalized) = &suffix.normalized {
+            self.matcher.can_continue(
+                normalized
+                    .iter()
+                    .skip(normalized.len().saturating_sub(suffix.normalized_length))
+                    .copied(),
+                character,
+            )
+        } else {
+            self.matcher.can_continue(
+                self.buffer
+                    .iter()
+                    .skip(self.buffer.len().saturating_sub(suffix.raw_length))
+                    .copied(),
+                character,
+            )
+        };
+        if can_continue {
             return None;
         }
         let match_mode = self.config.expansion[config_index].match_mode;
@@ -208,24 +239,34 @@ impl ExpansionEngine {
         {
             return None;
         }
-        Some((config_index, length))
+        Some((config_index, suffix.raw_length))
     }
 
     /// Whether the buffer, with `character` already appended, now ends in a
     /// complete trigger that nothing can extend.
     fn settled_match(&self) -> SettledMatch {
-        let Some((index, length)) = self.matcher.find_suffix(self.buffer.iter().rev().copied())
-        else {
+        let Some(suffix) = self.find_match_suffix() else {
             return SettledMatch::Continue;
         };
-        let Some(config_index) = self.matcher_indices.get(index).copied() else {
+        let Some(config_index) = self.matcher_indices.get(suffix.index).copied() else {
             return SettledMatch::Stale;
         };
-        let typed_start = self.buffer.len().saturating_sub(length);
-        if self
-            .matcher
-            .has_continuation(self.buffer.iter().skip(typed_start).copied())
-        {
+        let has_continuation = if let Some(normalized) = &suffix.normalized {
+            self.matcher.has_continuation(
+                normalized
+                    .iter()
+                    .skip(normalized.len().saturating_sub(suffix.normalized_length))
+                    .copied(),
+            )
+        } else {
+            self.matcher.has_continuation(
+                self.buffer
+                    .iter()
+                    .skip(self.buffer.len().saturating_sub(suffix.raw_length))
+                    .copied(),
+            )
+        };
+        if has_continuation {
             return SettledMatch::Continue;
         }
         if self.config.expansion[config_index].match_mode == MatchMode::WordBoundary {
@@ -235,8 +276,51 @@ impl ExpansionEngine {
         }
         SettledMatch::Take {
             config_index,
-            length,
+            length: suffix.raw_length,
         }
+    }
+
+    /// Find a trigger suffix in NFC form while retaining the corresponding
+    /// raw scalar length. NFC input takes the allocation-free trie path; only
+    /// non-NFC buffers need a normalized view and grapheme-to-source map.
+    fn find_match_suffix(&self) -> Option<MatchSuffix> {
+        if self
+            .buffer
+            .iter()
+            .copied()
+            .nfc()
+            .eq(self.buffer.iter().copied())
+        {
+            let (index, length) = self
+                .matcher
+                .find_suffix(self.buffer.iter().rev().copied())?;
+            return Some(MatchSuffix {
+                index,
+                raw_length: length,
+                normalized: None,
+                normalized_length: length,
+            });
+        }
+
+        let raw: String = self.buffer.iter().collect();
+        let mut normalized = Vec::new();
+        let mut source_starts = Vec::new();
+        let mut raw_start = 0;
+        for grapheme in raw.graphemes(true) {
+            let cluster: Vec<char> = grapheme.nfc().collect();
+            normalized.extend(cluster.iter().copied());
+            source_starts.extend(std::iter::repeat_n(raw_start, cluster.len()));
+            raw_start += grapheme.chars().count();
+        }
+        let (index, length) = self.matcher.find_suffix(normalized.iter().rev().copied())?;
+        let normalized_start = normalized.len().checked_sub(length)?;
+        let raw_start = *source_starts.get(normalized_start)?;
+        Some(MatchSuffix {
+            index,
+            raw_length: self.buffer.len().saturating_sub(raw_start),
+            normalized: Some(normalized),
+            normalized_length: length,
+        })
     }
 
     fn on_window_changed(&mut self, window: Option<super::WindowContext>) {
@@ -288,15 +372,14 @@ impl ExpansionEngine {
             }
             InputEvent::EndOfInput => {
                 self.bump_generation();
-                let result = self
-                    .matcher
-                    .find_suffix(self.buffer.iter().rev().copied())
-                    .and_then(|(index, length)| {
-                        self.matcher_indices
-                            .get(index)
-                            .copied()
-                            .and_then(|config_index| P::take(self, config_index, length, None))
-                    });
+                let result = self.find_match_suffix().and_then(|suffix| {
+                    self.matcher_indices
+                        .get(suffix.index)
+                        .copied()
+                        .and_then(|config_index| {
+                            P::take(self, config_index, suffix.raw_length, None)
+                        })
+                });
                 self.clear_buffer();
                 result
                     .map(|output| P::finish_end_of_input(self, output))
