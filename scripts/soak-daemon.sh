@@ -1,7 +1,9 @@
 #!/bin/sh
 # Long-running, compositor-independent daemon soak. It records process resource
-# samples and control-path latency; it does not simulate compositor/device
-# lifecycle events. Use SOAK_SECONDS=86400 or 259200 for release soaks.
+# samples and control-path latency, exercises configuration reload/pause cycles,
+# and restarts the daemon at a bounded interval. It does not simulate
+# compositor/device lifecycle events. Use SOAK_SECONDS=86400 or 259200 for
+# release soaks.
 set -eu
 umask 077
 
@@ -20,13 +22,25 @@ rss_slack_kib=${SOAK_RSS_SLACK_KIB:-8192}
 fd_slack=${SOAK_FD_SLACK:-4}
 sample_interval=${SOAK_SAMPLE_INTERVAL_SECONDS:-60}
 feed_interval=${SOAK_FEED_INTERVAL_SECONDS:-1}
-case "$soak_seconds:$sample_interval:$rss_slack_kib:$fd_slack:$feed_interval" in
+restart_interval=${SOAK_RESTART_INTERVAL_SECONDS:-21600}
+case "$soak_seconds:$sample_interval:$rss_slack_kib:$fd_slack:$feed_interval:$restart_interval" in
     *[!0-9:]*|:*|*::*|*:) printf '%s\n' 'error: duration, feed/sample intervals, and slack values must be non-negative integers' >&2; exit 2 ;;
 esac
 if [ "$soak_seconds" -le 0 ] || [ "$sample_interval" -le 0 ]; then
     printf '%s\n' 'error: SOAK_SECONDS and SOAK_SAMPLE_INTERVAL_SECONDS must be positive' >&2
     exit 2
 fi
+normalized_restart_interval=$(awk -v interval="$restart_interval" '
+    BEGIN {
+        if (interval == 0) print 0
+        else if (interval > 0 && interval <= 259200) printf "%.0f\n", interval
+        else exit 1
+    }
+') || {
+    printf '%s\n' 'error: SOAK_RESTART_INTERVAL_SECONDS must be 0 or at most 259200' >&2
+    exit 2
+}
+restart_interval=$normalized_restart_interval
 
 runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-soak.XXXXXX")
 config_path="$runtime_dir/expansions.toml"
@@ -77,6 +91,7 @@ preserve_partial_report() {
         echo "duration_seconds=$soak_seconds"
         echo "elapsed_seconds=$elapsed_seconds"
         echo "rounds=${round:-0}"
+        echo "daemon_restarts=${daemon_restarts:-0}"
     } >"$report_dir/summary.txt" || true
 }
 
@@ -123,31 +138,56 @@ cli="$project_dir/target/debug/wayexpand"
 # The feeder types continuously; the daemon reads it as its input stream.
 fifo="$runtime_dir/input"
 mkfifo "$fifo"
-run_isolated "$runtime_dir" "$config_path" "$daemon" --source=stdin --backend=none \
-    <"$fifo" >"$runtime_dir/daemon.log" 2>&1 &
-daemon_pid=$!
-(
-    while :; do
-        printf 'hello ;;sig and ;;signature then ;;date \n'
-        printf 'ordinary words without triggers\n'
-        sleep "$feed_interval"
-    done
-) >"$fifo" &
-feeder_pid=$!
+daemon_restarts=0
 
-ready=0
-for _attempt in $(seq 50); do
-    if run_isolated "$runtime_dir" "$config_path" "$cli" status >/dev/null 2>&1; then
-        ready=1
-        break
+start_daemon() {
+    run_isolated "$runtime_dir" "$config_path" "$daemon" --source=stdin --backend=none \
+        <"$fifo" >>"$runtime_dir/daemon.log" 2>&1 &
+    daemon_pid=$!
+    (
+        while :; do
+            printf 'hello ;;sig and ;;signature then ;;date \n'
+            printf 'ordinary words without triggers\n'
+            sleep "$feed_interval"
+        done
+    ) >"$fifo" &
+    feeder_pid=$!
+
+    ready=0
+    for _attempt in $(seq 50); do
+        if run_isolated "$runtime_dir" "$config_path" "$cli" status >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "$ready" -ne 1 ]; then
+        printf '%s\n' 'error: daemon did not become ready before the soak' >&2
+        cat "$runtime_dir/daemon.log" >&2
+        return 1
     fi
-    sleep 0.1
-done
-if [ "$ready" -ne 1 ]; then
-    printf '%s\n' 'error: daemon did not become ready before the soak' >&2
-    cat "$runtime_dir/daemon.log" >&2
-    exit 1
-fi
+}
+
+restart_daemon() {
+    if [ -n "$feeder_pid" ] && kill -0 "$feeder_pid" 2>/dev/null; then
+        kill "$feeder_pid" 2>/dev/null || true
+        wait "$feeder_pid" 2>/dev/null || true
+    fi
+    feeder_pid=
+    if [ -n "$daemon_pid" ] && kill -0 "$daemon_pid" 2>/dev/null; then
+        kill -TERM "$daemon_pid"
+        wait "$daemon_pid" 2>/dev/null || true
+    fi
+    daemon_pid=
+    start_daemon
+    daemon_restarts=$((daemon_restarts + 1))
+    # The new process has a fresh CPU-tick origin; reset the interval baseline
+    # so resource evidence never reports a negative or cross-process CPU delta.
+    previous_cpu_ticks=$(sed 's/^.*) //' "/proc/$daemon_pid/stat" | awk '{print $12 + $13}')
+    previous_sample_wall_ns=$(date +%s%N)
+}
+
+start_daemon
 
 sample() {
     elapsed=$1
@@ -207,6 +247,7 @@ printf '%s\n' 'timestamp_utc,elapsed_seconds,round,rss_kib,threads,open_fds,cpu_
 
 start=$(date +%s)
 started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+next_restart=$((start + restart_interval))
 baseline=
 round=0
 next_sample=$sample_interval
@@ -225,6 +266,10 @@ while [ $(( $(date +%s) - start )) -lt "$soak_seconds" ]; do
         run_isolated "$runtime_dir" "$config_path" "$cli" resume >/dev/null
     fi
     elapsed=$(( $(date +%s) - start ))
+    if [ "$restart_interval" -gt 0 ] && [ "$(date +%s)" -ge "$next_restart" ]; then
+        restart_daemon
+        next_restart=$(( $(date +%s) + restart_interval ))
+    fi
     if [ "$elapsed" -ge "$next_sample" ]; then
         sample "$elapsed"
         next_sample=$((next_sample + sample_interval))
@@ -278,6 +323,7 @@ if [ -n "$report_dir" ]; then
         echo "duration_seconds=$soak_seconds"
         echo "warmup_seconds=$warmup_seconds"
         echo "rounds=$round"
+        echo "daemon_restarts=$daemon_restarts"
         echo "rss_baseline_kib=$base_rss"
         echo "rss_final_kib=$final_rss"
         echo "fd_baseline=$base_fds"

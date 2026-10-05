@@ -63,9 +63,12 @@ and clears inherited D-Bus/display handles so it cannot load a tracker script
 into the operator's live desktop. CI regression-tests that environment
 allowlist. It periodically records daemon RSS, thread count, open descriptors,
 and CPU percentage, and reports p50/p95 CLI round-trip latency for status and
-explain requests. It does not simulate compositor, portal, keyboard, suspend,
-or systemd-restart events; those must be exercised by a real-session operator
-or the compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
+explain requests. By default it also performs a controlled daemon restart every
+six hours and records the restart count; use `SOAK_RESTART_INTERVAL_SECONDS=0`
+to disable restarts or a shorter interval for a focused regression test. This
+does not simulate compositor, portal, keyboard, suspend, or systemd-restart
+events; those must be exercised by a real-session operator or the
+compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
 preserve the CSV samples, raw latency samples, daemon log, and summary. The
 script refuses to reuse an existing report directory. Each summary records the
 exact Git revision and whether the worktree was clean when the soak began; CI

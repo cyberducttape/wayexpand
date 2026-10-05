@@ -71,6 +71,7 @@ soak_pid=
 
 grep -Fx 'result=failed' "$report_dir/summary.txt" >/dev/null
 grep -Fx 'exit_status=1' "$report_dir/summary.txt" >/dev/null
+grep -Fx 'daemon_restarts=0' "$report_dir/summary.txt" >/dev/null
 grep -Eq '^source_revision=[0-9a-f]{40}$' "$report_dir/summary.txt"
 grep -Eq '^source_worktree=(clean|dirty)$' "$report_dir/summary.txt"
 test -s "$report_dir/daemon.log"
