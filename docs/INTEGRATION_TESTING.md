@@ -57,12 +57,15 @@ lock/unlock, suspend/resume, keyboard disconnect/reconnect (including two
 simultaneous keyboards), failing command snippets, portal-session revocation,
 and hundreds of window changes.
 
-`scripts/soak-daemon.sh` is a compositor-independent stdin workload. It
-periodically records daemon RSS, thread count, open descriptors, and CPU
-percentage, and reports p50/p95 CLI round-trip latency for status and explain
-requests. It does not simulate compositor, portal, keyboard, suspend, or
-systemd-restart events; those must be exercised by a real-session operator or
-the compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
+`scripts/soak-daemon.sh` is an isolated, compositor-independent stdin workload.
+It gives the daemon and CLI a private runtime, home, temp directory, and config,
+and clears inherited D-Bus/display handles so it cannot load a tracker script
+into the operator's live desktop. CI regression-tests that environment
+allowlist. It periodically records daemon RSS, thread count, open descriptors,
+and CPU percentage, and reports p50/p95 CLI round-trip latency for status and
+explain requests. It does not simulate compositor, portal, keyboard, suspend,
+or systemd-restart events; those must be exercised by a real-session operator
+or the compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
 preserve the CSV samples, raw latency samples, daemon log, and summary. The
 script refuses to reuse an existing report directory.
 Synthetic input is rate-limited to one pair of lines per second by default;

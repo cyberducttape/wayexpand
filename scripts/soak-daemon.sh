@@ -46,6 +46,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Keep the synthetic daemon out of the developer's desktop session. A private
+# XDG_RUNTIME_DIR alone is insufficient when D-Bus, Wayland, or X11 addresses
+# are inherited: on KDE, the daemon can otherwise install a real KWin tracker
+# script while the soak claims to be compositor-independent.
+mkdir -m 0700 "$runtime_dir/home"
+. "$project_dir/scripts/soak-isolation.sh"
+
 write_config() {
     printf '[[expansion]]\ntrigger = ";;sig"\naliases = [";;signature"]\nreplacement = "Best regards %s"\n\n[[expansion]]\ntrigger = ";;date"\nreplacement = "{{date}} {{time}}"\nmatch_mode = "word-boundary"\n' "$1" >"$config_path.tmp"
     chmod 0600 "$config_path.tmp"
@@ -60,8 +67,8 @@ cli="$project_dir/target/debug/wayexpand"
 # The feeder types continuously; the daemon reads it as its input stream.
 fifo="$runtime_dir/input"
 mkfifo "$fifo"
-XDG_RUNTIME_DIR="$runtime_dir" WAYEXPAND_CONFIG="$config_path" RUST_LOG=warn \
-    "$daemon" --source=stdin --backend=none <"$fifo" >"$runtime_dir/daemon.log" 2>&1 &
+run_isolated "$runtime_dir" "$config_path" "$daemon" --source=stdin --backend=none \
+    <"$fifo" >"$runtime_dir/daemon.log" 2>&1 &
 daemon_pid=$!
 (
     while :; do
@@ -74,7 +81,7 @@ feeder_pid=$!
 
 ready=0
 for _attempt in $(seq 50); do
-    if XDG_RUNTIME_DIR="$runtime_dir" "$cli" status >/dev/null 2>&1; then
+    if run_isolated "$runtime_dir" "$config_path" "$cli" status >/dev/null 2>&1; then
         ready=1
         break
     fi
@@ -153,13 +160,13 @@ while [ $(( $(date +%s) - start )) -lt "$soak_seconds" ]; do
     write_config "$round"
     # Plain status isolates the daemon control round-trip; --json also probes
     # the user's action-broker/systemd state, which is unrelated to this soak.
-    status_ms=$(XDG_RUNTIME_DIR="$runtime_dir" measure_latency_ms "$cli" status)
-    explain_ms=$(XDG_RUNTIME_DIR="$runtime_dir" measure_latency_ms "$cli" explain ';;sig')
+    status_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" status)
+    explain_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" explain ';;sig')
     printf '%s\n' "$status_ms" >>"$status_latency_path"
     printf '%s\n' "$explain_ms" >>"$explain_latency_path"
     if [ $((round % 5)) -eq 0 ]; then
-        XDG_RUNTIME_DIR="$runtime_dir" "$cli" pause >/dev/null
-        XDG_RUNTIME_DIR="$runtime_dir" "$cli" resume >/dev/null
+        run_isolated "$runtime_dir" "$config_path" "$cli" pause >/dev/null
+        run_isolated "$runtime_dir" "$config_path" "$cli" resume >/dev/null
     fi
     elapsed=$(( $(date +%s) - start ))
     if [ "$elapsed" -ge "$next_sample" ]; then
