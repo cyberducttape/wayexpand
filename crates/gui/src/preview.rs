@@ -72,17 +72,9 @@ pub(crate) fn render_with_library_snippets(
         settings: settings.clone(),
         organization: organization.clone(),
     };
-    let context = library_snippets.map(|snippets| {
-        let mut context = config.template_context(None);
-        context.snippets = snippets;
-        context
-    });
-    let Ok(mut engine) = ExpansionEngine::new(config) else {
+    let Ok(mut engine) = ExpansionEngine::new_with_snippets(config, library_snippets) else {
         return "Configuration is invalid".into();
     };
-    if let Some(context) = context {
-        engine.set_template_context(context);
-    }
     if !app.trim().is_empty() {
         engine.set_current_window(Some(WindowContext {
             app_id: Some(app.trim().to_owned()),

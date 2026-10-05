@@ -463,7 +463,17 @@ struct AsyncHotkeyCompletion {
 
 impl ExpansionEngine {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
-        config.validate()?;
+        Self::new_with_snippets(config, None)
+    }
+
+    /// Construct an engine using an externally supplied static snippet
+    /// library for template validation and rendering. Trigger matching still
+    /// compiles only the expansions in `config`.
+    pub fn new_with_snippets(
+        config: Config,
+        snippets: Option<Arc<std::collections::HashMap<String, String>>>,
+    ) -> Result<Self, ConfigError> {
+        config.validate_with_snippets(snippets.clone())?;
         // Triggers match literally (see `Matcher`, a case-sensitive char
         // trie), so a `propagate_case` expansion is matched by inserting
         // its uppercase and capitalized forms as additional trigger
@@ -513,7 +523,10 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
-        let template_base = config.template_context(None);
+        let mut template_base = config.template_context(None);
+        if let Some(snippets) = snippets {
+            template_base.snippets = snippets;
+        }
         let max_buffer_chars = config.settings.max_buffer_chars;
         // `validate()` above already confirmed this parses; a config that
         // fails to load is never used to construct an engine.

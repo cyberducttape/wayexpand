@@ -293,6 +293,34 @@ fn new_snippet_stays_out_of_config_until_a_nonempty_replacement_is_saved() {
 }
 
 #[test]
+fn editor_preview_keeps_cross_snippet_include_semantics() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-preview-library-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let outer = import_expansion(":outer", "{{snippet::inner}}");
+    let inner = import_expansion(":inner", "Included value");
+    let config = Config {
+        expansion: vec![outer, inner],
+        hotkey: Vec::new(),
+        settings: wayexpand_core::Settings::default(),
+        organization: wayexpand_core::OrganizationPolicy::default(),
+    };
+    config.save_atomic(&path).unwrap();
+
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    assert_eq!(app.preview(), "Included value");
+    let cached_snippets = Arc::clone(&app.preview_library_snippets);
+    app.preview_input = ":outer ".into();
+    app.invalidate_preview();
+    assert_eq!(app.preview(), "Included value");
+    assert!(Arc::ptr_eq(&cached_snippets, &app.preview_library_snippets));
+
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn the_save_shortcut_saves_a_new_snippet_and_skips_a_clean_draft() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-save-shortcut-{}.toml",

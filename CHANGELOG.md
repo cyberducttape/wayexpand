@@ -5,6 +5,7 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Cache the editor preview's library snippet lookup by configuration revision, avoiding a full-library scan and clone after each edit while keeping dynamic template values fresh.
+- Preserve production `{{snippet:...}}` include validation in single-snippet editor previews without rebuilding the full trigger matcher.
 
 Changes not yet released.
 

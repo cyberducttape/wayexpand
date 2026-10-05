@@ -956,6 +956,13 @@ impl Config {
     /// Parsing is not the only way callers can construct `Config`, so engine
     /// construction and other consumers can enforce the same limits here.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.validate_with_snippets(None)
+    }
+
+    pub(crate) fn validate_with_snippets(
+        &self,
+        snippets: Option<std::sync::Arc<HashMap<String, String>>>,
+    ) -> Result<(), ConfigError> {
         if self.expansion.len() > MAX_EXPANSIONS {
             return Err(ConfigError::TooManyExpansions {
                 count: self.expansion.len(),
@@ -1063,7 +1070,10 @@ impl Config {
                 });
             }
         }
-        let template_context = self.validation_template_context();
+        let mut template_context = self.validation_template_context();
+        if let Some(snippets) = snippets {
+            template_context.snippets = snippets;
+        }
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
