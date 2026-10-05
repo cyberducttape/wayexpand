@@ -22,6 +22,9 @@ use wayexpand_core::{CommandMetrics, OrganizationPolicy, TextInjector};
 
 /// Low-latency polling while command/hotkey work is queued or running.
 const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// The stdin test/pipe source uses `recv_timeout`, which cannot be woken by
+/// the control socket. Keep control requests responsive without a 250 ms wait.
+const IDLE_STDIN_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// Idle maintenance cadence for reload/pause/stop checks.
 pub(crate) const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -59,7 +62,7 @@ pub fn input_poll_interval(metrics: CommandMetrics) -> Duration {
     if metrics.command_queue_depth > 0 || metrics.command_in_flight > 0 {
         ACTIVE_COMPLETION_POLL_INTERVAL
     } else {
-        IDLE_MAINTENANCE_INTERVAL
+        IDLE_STDIN_POLL_INTERVAL
     }
 }
 
@@ -259,4 +262,29 @@ pub fn wait_for_retry(stop: &AtomicBool, delay: Duration) -> bool {
 /// Calculate next retry delay with exponential backoff (max 30s).
 pub fn next_retry_delay(delay: Duration) -> Duration {
     delay.saturating_mul(2).min(Duration::from_secs(30))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{input_poll_interval, ACTIVE_COMPLETION_POLL_INTERVAL, IDLE_STDIN_POLL_INTERVAL};
+    use std::time::Duration;
+    use wayexpand_core::CommandMetrics;
+
+    #[test]
+    fn stdin_idle_poll_keeps_control_requests_responsive() {
+        assert_eq!(
+            input_poll_interval(CommandMetrics::default()),
+            IDLE_STDIN_POLL_INTERVAL
+        );
+        assert_eq!(IDLE_STDIN_POLL_INTERVAL, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn stdin_poll_accelerates_for_queued_command_work() {
+        let queued = CommandMetrics {
+            command_queue_depth: 1,
+            ..CommandMetrics::default()
+        };
+        assert_eq!(input_poll_interval(queued), ACTIVE_COMPLETION_POLL_INTERVAL);
+    }
 }

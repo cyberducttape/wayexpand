@@ -43,12 +43,17 @@ workflow pin deliberately when changing the release compiler.
    ```
 
 3. Run a 24-hour daemon soak on the release candidate (72 hours for a major
-   release). It drives the daemon with continuous typing, configuration
-   reloads, and control requests, and fails if memory or open descriptors keep
-   growing after warmup. CI runs the same script for 3 minutes.
+   release). The compositor-independent soak uses paced synthetic input,
+   configuration reloads, and control requests; it records resource samples
+   and control latency and fails if memory or open descriptors keep growing
+   after warmup. It does not replace the real-session lifecycle exercises in
+   [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md). CI runs the same script
+   for 3 minutes.
 
    ```sh
-   SOAK_SECONDS=86400 bash scripts/soak-daemon.sh
+   SOAK_SECONDS=86400 \
+     SOAK_REPORT_DIR="target/soak-$(date -u +%Y%m%dT%H%M%SZ)" \
+     bash scripts/soak-daemon.sh
    ```
 
 4. Review the support boundary in
