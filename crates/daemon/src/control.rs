@@ -759,6 +759,21 @@ mod tests {
     }
 
     #[test]
+    fn maximum_exact_focus_insert_fits_control_frame() {
+        let window = crate::WindowContext {
+            app_id: None,
+            title: None,
+            instance_id: Some("x".repeat(192)),
+        };
+        let token = crate::focus::focus_token(&window).unwrap();
+        let trigger = "🙂".repeat(128);
+        let command = format!("insert-target {} {} {}\n", u64::MAX, token, trigger);
+
+        assert!(command.len() <= MAX_COMMAND_BYTES);
+        assert!(insert_request(&command).unwrap().is_some());
+    }
+
+    #[test]
     fn unknown_command_is_nonfatal() {
         let reload = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
