@@ -214,6 +214,8 @@ backend_certification_block_reason=''
 case "$backend" in
     ibus)
         status_required=false
+        backend_certification_eligible=false
+        backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'
         if ! printf '%s' "$doctor_json" | jq -e '.healthy == true and .ibus.installed == true' >/dev/null 2>&1; then
             backend_probe_valid=0
             doctor_probe_valid=0

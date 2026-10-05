@@ -46,6 +46,7 @@ if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
 fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
+grep -F -- "backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'" "$project_dir/scripts/certify-compositor.sh" >/dev/null
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null

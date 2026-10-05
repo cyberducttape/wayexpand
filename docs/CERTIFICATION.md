@@ -52,6 +52,11 @@ atomic replacement. The collector records this as
 functional cells as passing. This prevents a successful best-effort evdev run
 from being presented as a safe desktop certification.
 
+The IBus route is also not eligible for production certification: its separate
+delete/commit operations are not atomic, it has no portable exact window
+identity, and it does not observe active composition. Live GTK/Qt scenario
+passes cannot compensate for those missing guarantees.
+
 The same collector requires the live input-method route to report composition
 awareness, sensitive-field handling, key pass-through, atomic replacement, and
 full Unicode support. The currently shipped input-method-v2 implementation
