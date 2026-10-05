@@ -781,4 +781,25 @@ mod tests {
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(picker_expansion_is_eligible(&expansion, true));
     }
+
+    #[test]
+    fn form_snippets_are_hidden_until_picker_form_submission_exists() {
+        let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":form".into(),
+            replacement: "Hello {{field:name}}".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: Vec::new(),
+        };
+
+        assert!(!picker_expansion_is_eligible(&expansion, false));
+        assert!(!picker_expansion_is_eligible(&expansion, true));
+    }
 }
