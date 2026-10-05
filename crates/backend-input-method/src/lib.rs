@@ -280,6 +280,26 @@ impl StateData {
         }
     }
 
+    fn activate(&mut self) {
+        self.keyboard_state = None;
+        self.surrounding_text = None;
+        self.pending_sensitive = None;
+        reset_local_composition(self);
+        // Do not capture until the compositor reports the current content
+        // purpose for this activation.
+        self.queue_event(InputEvent::FocusChanged { sensitive: true });
+    }
+
+    fn deactivate(&mut self) {
+        self.keyboard_state = None;
+        self.surrounding_text = None;
+        self.pending_sensitive = None;
+        reset_local_composition(self);
+        // Deactivation can race with already-queued keyboard events. Keep the
+        // engine disabled until a new activation reports a safe content type.
+        self.queue_event(deactivation_event());
+    }
+
     fn queue_event(&mut self, event: InputEvent) {
         // Focus policy changes supersede every queued keyboard event. This
         // prevents stale text from being processed across activation,
@@ -477,27 +497,14 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                     let _ = connection.flush();
                 }
                 state.keyboard = Some(proxy.grab_keyboard(qh, ()));
-                state.surrounding_text = None;
-                state.pending_sensitive = None;
-                reset_local_composition(state);
-                // Do not capture until the compositor has delivered the
-                // current content purpose. This prevents an activation race
-                // from briefly treating a password field as ordinary text.
-                state.queue_event(InputEvent::FocusChanged { sensitive: true });
+                state.activate();
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Deactivate => {
                 if let Some(previous) = state.keyboard.take() {
                     previous.release();
                     let _ = connection.flush();
                 }
-                state.keyboard_state = None;
-                state.surrounding_text = None;
-                state.pending_sensitive = None;
-                reset_local_composition(state);
-                // Deactivation can race with already-queued keyboard events.
-                // Keep the engine disabled until a new activation reports a
-                // non-sensitive content type.
-                state.queue_event(deactivation_event());
+                state.deactivate();
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::ContentType { hint, purpose } => {
                 state.set_content_type(hint, purpose);

@@ -897,6 +897,68 @@ fn content_purpose_updates_apply_only_at_done_and_only_once() {
 }
 
 #[test]
+fn activation_discards_stale_keymap_and_waits_for_safe_content_type() {
+    use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
+        ContentHint, ContentPurpose,
+    };
+
+    let mut state = StateData::new();
+    state.keyboard_state = Some(default_state());
+    state.surrounding_text = Some(SurroundingText {
+        text: "old context".into(),
+        cursor: 11,
+        anchor: 11,
+    });
+    state.pending_sensitive = Some(false);
+    state.composition_active = true;
+
+    state.activate();
+
+    assert!(state.keyboard_state.is_none());
+    assert!(state.surrounding_text.is_none());
+    assert_eq!(state.pending_sensitive, None);
+    assert!(!state.composition_active);
+    assert_eq!(
+        state.events.pop_front(),
+        Some(InputEvent::FocusChanged { sensitive: true })
+    );
+
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Normal),
+    );
+    state.finish_protocol_batch();
+    assert_eq!(
+        state.events.pop_front(),
+        Some(InputEvent::FocusChanged { sensitive: false })
+    );
+}
+
+#[test]
+fn deactivation_clears_context_and_keeps_capture_sensitive() {
+    let mut state = StateData::new();
+    state.keyboard_state = Some(default_state());
+    state.surrounding_text = Some(SurroundingText {
+        text: "private context".into(),
+        cursor: 15,
+        anchor: 15,
+    });
+    state.pending_sensitive = Some(false);
+    state.composition_active = true;
+
+    state.deactivate();
+
+    assert!(state.keyboard_state.is_none());
+    assert!(state.surrounding_text.is_none());
+    assert_eq!(state.pending_sensitive, None);
+    assert!(!state.composition_active);
+    assert_eq!(
+        state.events.pop_front(),
+        Some(InputEvent::FocusChanged { sensitive: true })
+    );
+}
+
+#[test]
 fn input_method_commit_size_is_checked_before_injection() {
     assert!(validate_commit_text(&"a".repeat(MAX_COMMIT_TEXT_BYTES)).is_ok());
     assert!(validate_commit_text(&"a".repeat(MAX_COMMIT_TEXT_BYTES + 1)).is_err());
