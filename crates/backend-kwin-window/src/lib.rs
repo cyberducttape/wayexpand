@@ -59,6 +59,13 @@ pub enum KwinWindowError {
 
 struct WindowTrackerService {
     sender: Mutex<mpsc::Sender<Option<WindowContext>>>,
+    // Session-bus methods are callable by other local clients; only accept
+    // focus reports from the KWin process that owns org.kde.KWin at setup.
+    kwin_owner: String,
+}
+
+fn is_kwin_sender(sender: Option<&str>, kwin_owner: &str) -> bool {
+    sender == Some(kwin_owner)
 }
 
 fn window_context_from_signal(
@@ -79,7 +86,19 @@ fn window_context_from_signal(
 
 #[interface(name = "org.wayexpand.WindowTracker1")]
 impl WindowTrackerService {
-    fn window_changed(&self, app_id: String, title: String, instance_id: String) {
+    fn window_changed(
+        &self,
+        app_id: String,
+        title: String,
+        instance_id: String,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) {
+        if !is_kwin_sender(
+            header.sender().map(|sender| sender.as_str()),
+            &self.kwin_owner,
+        ) {
+            return;
+        }
         let context = window_context_from_signal(app_id, title, instance_id);
         // The receiver may already be gone if the tracker was dropped
         // between the script firing and this call landing; that is not an
@@ -170,15 +189,28 @@ impl KwinWindowTracker {
         let nonce = u64::from_le_bytes(nonce_bytes);
         let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce:x}");
         let (sender, receiver) = mpsc::channel();
-        let service = WindowTrackerService {
-            sender: Mutex::new(sender),
-        };
         let connection = bounded_session_connection(
             zbus::connection::Builder::session()?
                 .method_timeout(DBUS_METHOD_TIMEOUT)
-                .name(bus_name.clone())?
-                .serve_at("/WindowTracker", service)?,
+                .name(bus_name.clone())?,
             DBUS_CONNECTION_TIMEOUT,
+        )?;
+        let kwin_owner: String = connection
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "GetNameOwner",
+                &("org.kde.KWin",),
+            )?
+            .body()
+            .deserialize()?;
+        connection.object_server().at(
+            "/WindowTracker",
+            WindowTrackerService {
+                sender: Mutex::new(sender),
+                kwin_owner,
+            },
         )?;
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce:x}");
@@ -387,8 +419,8 @@ impl WindowTracker for KwinWindowTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_session_connection, window_context_from_signal, KwinWindowError, KwinWindowTracker,
-        TRACKER_HEALTH_CHECK_INTERVAL,
+        bounded_session_connection, is_kwin_sender, window_context_from_signal, KwinWindowError,
+        KwinWindowTracker, TRACKER_HEALTH_CHECK_INTERVAL,
     };
     use std::{
         io::Read,
@@ -431,6 +463,14 @@ mod tests {
         assert_eq!(context.app_id.as_deref(), Some("org.example.Editor"));
         assert_eq!(context.title.as_deref(), Some("Document"));
         assert_eq!(context.instance_id.as_deref(), Some("window-1"));
+    }
+
+    #[test]
+    fn window_tracker_accepts_only_the_current_kwin_bus_owner() {
+        let kwin_owner = ":1.42";
+        assert!(is_kwin_sender(Some(kwin_owner), kwin_owner));
+        assert!(!is_kwin_sender(Some(":1.43"), kwin_owner));
+        assert!(!is_kwin_sender(None, kwin_owner));
     }
 
     #[test]
