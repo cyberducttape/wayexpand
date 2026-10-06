@@ -1040,3 +1040,31 @@ fn key_event_calls_note_key_event() {
     // which prove that generation invalidation prevents stale output.
     // This test simply verifies the daemon path doesn't crash.
 }
+
+/// Clients refuse control responses larger than
+/// `CONTROL_MAX_RESPONSE_BYTES`; the status response must fit even with a
+/// long configuration path and the longest backend mode string.
+#[test]
+fn status_response_fits_the_client_read_limit() {
+    let long_path = format!("/home/{}/expansions.toml", "d".repeat(1024));
+    let body = status::daemon_status_body_with_runtime_capabilities(
+        "input-method",
+        "input-method-v2",
+        "reconnecting",
+        true,
+        Path::new(&long_path),
+        false,
+        "ei_keyboard keysym fallback (12ms key pacing)",
+        CommandMetrics::default(),
+        latency::Snapshot::default(),
+        InputSourceCapabilities::INPUT_METHOD_V2,
+        InjectorCapabilities::default(),
+        true,
+    );
+    let response = format!("running\n{}\n", body.as_str());
+    assert!(
+        response.len() <= wayexpand_core::CONTROL_MAX_RESPONSE_BYTES,
+        "status response is {} bytes",
+        response.len()
+    );
+}

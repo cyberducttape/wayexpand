@@ -3,13 +3,6 @@ use wayexpand_core::{
     validate_command_config, CommandConfig, CommandEnvironment, ExpansionConfig, MatchMode,
 };
 
-const MAX_COMMAND_ARGS: usize = 32;
-const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
-const MAX_COMMAND_ARG_CHARS: usize = 1024;
-const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
-const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
-const MAX_COMMAND_CACHE_MS: u64 = 60_000;
-
 /// Editable form state for one expansion. Keeping this separate from the
 /// application shell makes editor validation and future editor widgets
 /// independently testable.
@@ -192,37 +185,8 @@ impl Draft {
             .parse::<u64>()
             .context("cache duration must be an integer in milliseconds")?;
         let args = self.command_args.clone();
-        if action.chars().count() > MAX_COMMAND_PROGRAM_CHARS {
-            anyhow::bail!("action ID is too long");
-        }
-        if action.contains('\0') {
-            anyhow::bail!("action ID cannot contain NUL bytes");
-        }
-        if program.chars().count() > MAX_COMMAND_PROGRAM_CHARS {
-            anyhow::bail!("program is too long");
-        }
-        if program.contains('\0') {
-            anyhow::bail!("program cannot contain NUL bytes");
-        }
-        if args.len() > MAX_COMMAND_ARGS {
-            anyhow::bail!("too many command arguments");
-        }
-        let arg_data_chars: usize = args.iter().map(|arg| arg.chars().count()).sum();
-        if arg_data_chars > MAX_COMMAND_ARG_DATA_CHARS {
-            anyhow::bail!("command arguments are too large");
-        }
-        if args
-            .iter()
-            .any(|arg| arg.chars().count() > MAX_COMMAND_ARG_CHARS || arg.contains('\0'))
-        {
-            anyhow::bail!("command argument is too long or contains NUL bytes");
-        }
-        if !(1..=MAX_COMMAND_TIMEOUT_MS).contains(&timeout_ms) {
-            anyhow::bail!("timeout must be between 1 and 5000 milliseconds");
-        }
-        if cache_ms > MAX_COMMAND_CACHE_MS {
-            anyhow::bail!("cache duration must not exceed 60000 milliseconds");
-        }
+        // Limits are enforced by core's validate_command_config below, the
+        // same check the daemon and CLI apply, so the editor cannot drift.
         let command = CommandConfig {
             action: self.command_action_mode.then(|| action.to_owned()),
             program: if self.command_action_mode {

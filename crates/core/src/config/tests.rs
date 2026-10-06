@@ -740,3 +740,25 @@ fn save_atomic_creates_missing_private_file() {
     );
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn command_limit_messages_match_the_published_limits() {
+    let command = |timeout_ms, cache_ms| CommandConfig {
+        action: None,
+        program: "/bin/true".into(),
+        args: Vec::new(),
+        timeout_ms,
+        cache_ms,
+        environment: CommandEnvironment::Minimal,
+        pass_env: Vec::new(),
+    };
+    let limits = crate::COMMAND_LIMITS;
+    assert!(validate_command_config(&command(limits.max_timeout_ms, limits.max_cache_ms)).is_ok());
+    let timeout = validate_command_config(&command(limits.max_timeout_ms + 1, 0)).unwrap_err();
+    assert!(
+        timeout.contains(&limits.max_timeout_ms.to_string()),
+        "{timeout}"
+    );
+    let cache = validate_command_config(&command(1, limits.max_cache_ms + 1)).unwrap_err();
+    assert!(cache.contains(&limits.max_cache_ms.to_string()), "{cache}");
+}

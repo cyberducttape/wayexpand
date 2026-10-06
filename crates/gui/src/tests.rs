@@ -1762,3 +1762,21 @@ fn save_rejects_an_alias_that_collides_with_another_snippet() {
     assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn editor_command_limits_are_exactly_cores() {
+    let limits = wayexpand_core::COMMAND_LIMITS;
+    let mut draft = editor::Draft::from_expansion(&import_expansion(":cmd", ""));
+    draft.command_enabled = true;
+    draft.command_program = "/bin/true".into();
+    draft.command_cache_ms = "0".into();
+    draft.command_timeout_ms = limits.max_timeout_ms.to_string();
+    assert!(draft.command_config().is_ok());
+    draft.command_timeout_ms = (limits.max_timeout_ms + 1).to_string();
+    assert!(draft.command_config().is_err());
+    draft.command_timeout_ms = "1".into();
+    draft.command_args = vec!["x".into(); limits.max_args];
+    assert!(draft.command_config().is_ok());
+    draft.command_args.push("x".into());
+    assert!(draft.command_config().is_err());
+}

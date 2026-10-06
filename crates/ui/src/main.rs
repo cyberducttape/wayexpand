@@ -19,7 +19,7 @@ use std::{
 use wayexpand_core::{default_config_path, Config, ConfigRevision, ExpansionEngine, InputEvent};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
+const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 
 struct App {
     path: PathBuf,

@@ -47,7 +47,7 @@ use std::{
 use unicode_segmentation::UnicodeSegmentation;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
+const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};

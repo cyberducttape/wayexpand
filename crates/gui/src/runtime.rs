@@ -21,7 +21,7 @@ use wayexpand_core::{discover_backends, Config, FleetConfig, CONTROL_STATUS_SCHE
 const REQUEST_CAPACITY: usize = 8;
 const RESULT_CAPACITY: usize = 16;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = 4096;
+const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 
 pub(crate) enum Request {
     Diagnostics {

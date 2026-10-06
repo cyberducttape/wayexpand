@@ -27,14 +27,40 @@ const MAX_TAG_CHARS: usize = 64;
 const MAX_CATEGORY_CHARS: usize = 64;
 const MAX_APP_FILTERS: usize = 32;
 const MAX_APP_FILTER_CHARS: usize = 256;
-const MAX_COMMAND_ARGS: usize = 32;
-const MAX_COMMAND_PROGRAM_CHARS: usize = 256;
-const MAX_COMMAND_ARG_CHARS: usize = 1024;
-const MAX_COMMAND_ARG_DATA_CHARS: usize = 16 * 1024;
-const MAX_COMMAND_ENV_VARS: usize = 32;
-const MAX_COMMAND_ENV_NAME_CHARS: usize = 256;
-const MAX_COMMAND_TIMEOUT_MS: u64 = 5_000;
-const MAX_COMMAND_CACHE_MS: u64 = 60_000;
+/// Limits enforced by [`validate_command_config`], the single authority for
+/// command settings. Front ends may display them but must validate through
+/// that function rather than re-implementing the checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandLimits {
+    pub max_args: usize,
+    pub max_program_chars: usize,
+    pub max_arg_chars: usize,
+    pub max_arg_data_chars: usize,
+    pub max_env_vars: usize,
+    pub max_env_name_chars: usize,
+    pub max_timeout_ms: u64,
+    pub max_cache_ms: u64,
+}
+
+pub const COMMAND_LIMITS: CommandLimits = CommandLimits {
+    max_args: 32,
+    max_program_chars: 256,
+    max_arg_chars: 1024,
+    max_arg_data_chars: 16 * 1024,
+    max_env_vars: 32,
+    max_env_name_chars: 256,
+    max_timeout_ms: 5_000,
+    max_cache_ms: 60_000,
+};
+
+const MAX_COMMAND_ARGS: usize = COMMAND_LIMITS.max_args;
+const MAX_COMMAND_PROGRAM_CHARS: usize = COMMAND_LIMITS.max_program_chars;
+const MAX_COMMAND_ARG_CHARS: usize = COMMAND_LIMITS.max_arg_chars;
+const MAX_COMMAND_ARG_DATA_CHARS: usize = COMMAND_LIMITS.max_arg_data_chars;
+const MAX_COMMAND_ENV_VARS: usize = COMMAND_LIMITS.max_env_vars;
+const MAX_COMMAND_ENV_NAME_CHARS: usize = COMMAND_LIMITS.max_env_name_chars;
+const MAX_COMMAND_TIMEOUT_MS: u64 = COMMAND_LIMITS.max_timeout_ms;
+const MAX_COMMAND_CACHE_MS: u64 = COMMAND_LIMITS.max_cache_ms;
 const MAX_EXPANSIONS: usize = 10_000;
 const MAX_HOTKEYS: usize = 1_024;
 const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
