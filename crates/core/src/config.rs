@@ -509,8 +509,9 @@ fn default_enabled() -> bool {
 impl Config {
     /// Static snippet replacements by trigger and alias, for
     /// `{{snippet:TRIGGER}}`. Command-backed and disabled snippets are not
-    /// includable.
-    pub fn includable_snippets(&self) -> std::sync::Arc<HashMap<String, String>> {
+    /// includable. Each snippet's replacement is stored once and shared by
+    /// its trigger and every alias.
+    pub fn includable_snippets(&self) -> std::sync::Arc<crate::SnippetLibrary> {
         let mut snippets = HashMap::new();
         for expansion in self.expansion.iter().filter(|expansion| {
             // Form snippets are not includable: their fields could
@@ -519,8 +520,9 @@ impl Config {
                 && expansion.command.is_none()
                 && crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         }) {
+            let replacement: std::sync::Arc<str> = expansion.replacement.as_str().into();
             for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
-                snippets.insert(trigger.clone(), expansion.replacement.clone());
+                snippets.insert(trigger.clone(), std::sync::Arc::clone(&replacement));
             }
         }
         std::sync::Arc::new(snippets)
@@ -531,6 +533,16 @@ impl Config {
     /// enabled `{{clipboard}}`. Organization policy (safe mode) can disable
     /// the environment and clipboard variables.
     pub fn template_context(&self, clipboard: Option<ClipboardReader>) -> TemplateContext {
+        self.template_context_with_snippets(clipboard, self.includable_snippets())
+    }
+
+    /// [`Config::template_context`] with an already-built snippet library, so
+    /// engine construction builds the library once for validation and use.
+    pub(crate) fn template_context_with_snippets(
+        &self,
+        clipboard: Option<ClipboardReader>,
+        snippets: std::sync::Arc<crate::SnippetLibrary>,
+    ) -> TemplateContext {
         let enforcement = self.organization.effective_enforcement_policy();
         let env = if enforcement.disable_template_env {
             std::collections::BTreeMap::new()
@@ -543,7 +555,7 @@ impl Config {
         };
         TemplateContext {
             env: std::sync::Arc::new(env),
-            snippets: self.includable_snippets(),
+            snippets,
             clipboard: clipboard
                 .filter(|_| self.settings.allow_clipboard && !enforcement.disable_clipboard),
             ..TemplateContext::system()
@@ -552,7 +564,10 @@ impl Config {
 
     /// The context used to validate templates: the same variables are
     /// allowed as at runtime, but nothing is read.
-    fn validation_template_context(&self) -> TemplateContext {
+    fn validation_template_context(
+        &self,
+        snippets: std::sync::Arc<crate::SnippetLibrary>,
+    ) -> TemplateContext {
         TemplateContext {
             env: std::sync::Arc::new(
                 self.settings
@@ -561,7 +576,7 @@ impl Config {
                     .map(|name| (name.clone(), String::new()))
                     .collect(),
             ),
-            snippets: self.includable_snippets(),
+            snippets,
             clipboard: self
                 .settings
                 .allow_clipboard
@@ -961,7 +976,7 @@ impl Config {
 
     pub(crate) fn validate_with_snippets(
         &self,
-        snippets: Option<std::sync::Arc<HashMap<String, String>>>,
+        snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
     ) -> Result<(), ConfigError> {
         if self.expansion.len() > MAX_EXPANSIONS {
             return Err(ConfigError::TooManyExpansions {
@@ -1070,10 +1085,10 @@ impl Config {
                 });
             }
         }
-        let mut template_context = self.validation_template_context();
-        if let Some(snippets) = snippets {
-            template_context.snippets = snippets;
-        }
+        // An externally supplied library replaces the config's own, so only
+        // build the latter when it is actually used.
+        let template_context = self
+            .validation_template_context(snippets.unwrap_or_else(|| self.includable_snippets()));
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {

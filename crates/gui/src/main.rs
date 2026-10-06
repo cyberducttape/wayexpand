@@ -27,7 +27,6 @@ use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};
 use status::Status;
 use std::{
-    collections::HashMap,
     env,
     path::{Path, PathBuf},
     sync::{
@@ -120,7 +119,7 @@ struct GuiApp {
     path: PathBuf,
     config_revision: wayexpand_core::ConfigRevision,
     preview_library_revision: wayexpand_core::ConfigRevision,
-    preview_library_snippets: Arc<HashMap<String, String>>,
+    preview_library_snippets: Arc<wayexpand_core::SnippetLibrary>,
     pending_reload_revision: Option<wayexpand_core::ConfigRevision>,
     config_document: toml_edit::DocumentMut,
     config: Config,

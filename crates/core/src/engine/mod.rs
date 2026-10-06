@@ -474,9 +474,12 @@ impl ExpansionEngine {
     /// compiles only the expansions in `config`.
     pub fn new_with_snippets(
         config: Config,
-        snippets: Option<Arc<std::collections::HashMap<String, String>>>,
+        snippets: Option<Arc<crate::SnippetLibrary>>,
     ) -> Result<Self, ConfigError> {
-        config.validate_with_snippets(snippets.clone())?;
+        // Build the static snippet library once and share it between
+        // validation and rendering; it can hold large replacements.
+        let snippets = snippets.unwrap_or_else(|| config.includable_snippets());
+        config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
         // Triggers match literally (see `Matcher`, a case-sensitive char
         // trie), so a `propagate_case` expansion is matched by inserting
         // its uppercase and capitalized forms as additional trigger
@@ -526,10 +529,7 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
-        let mut template_base = config.template_context(None);
-        if let Some(snippets) = snippets {
-            template_base.snippets = snippets;
-        }
+        let template_base = config.template_context_with_snippets(None, snippets);
         let max_buffer_chars = config.settings.max_buffer_chars;
         // `validate()` above already confirmed this parses; a config that
         // fails to load is never used to construct an engine.

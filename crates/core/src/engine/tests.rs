@@ -4669,3 +4669,33 @@ fn explain_describes_form_snippets_instead_of_failing_to_render() {
             && check.detail.contains("exact original toplevel")
     }));
 }
+
+#[test]
+fn snippet_library_shares_one_replacement_across_aliases() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":sig\"\naliases = [\":s1\", \":s2\"]\nreplacement = \"Best, Sam\"\n",
+    )
+    .unwrap();
+    let library = config.includable_snippets();
+    assert_eq!(library.len(), 3);
+    let canonical = &library[":sig"];
+    assert_eq!(&**canonical, "Best, Sam");
+    for alias in [":s1", ":s2"] {
+        assert!(std::sync::Arc::ptr_eq(canonical, &library[alias]));
+    }
+}
+
+#[test]
+fn engine_renders_with_the_library_it_validated() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":sig\"\naliases = [\":s\"]\nreplacement = \"Best, Sam\"\n\
+         [[expansion]]\ntrigger = \":reply\"\nreplacement = \"Thanks!{{snippet::s}}\"\n",
+    )
+    .unwrap();
+    let engine = ExpansionEngine::new(config).unwrap();
+    assert_eq!(&*engine.template_base.snippets[":s"], "Best, Sam");
+    assert!(std::sync::Arc::ptr_eq(
+        &engine.template_base.snippets[":sig"],
+        &engine.template_base.snippets[":s"]
+    ));
+}

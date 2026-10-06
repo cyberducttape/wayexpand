@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use wayexpand_core::{
     Config, ExpansionConfig, ExpansionEngine, InputEvent, OrganizationPolicy, Settings,
@@ -36,7 +36,7 @@ pub(crate) fn render_with_library_snippets(
     draft: Option<&Draft>,
     input: &str,
     app: &str,
-    library_snippets: Option<Arc<HashMap<String, String>>>,
+    library_snippets: Option<Arc<wayexpand_core::SnippetLibrary>>,
 ) -> String {
     let expansion = match draft {
         Some(draft) => Some(ExpansionConfig {

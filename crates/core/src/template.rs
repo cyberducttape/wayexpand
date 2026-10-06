@@ -23,6 +23,11 @@ impl std::fmt::Debug for ClipboardReader {
     }
 }
 
+/// Static snippet replacements for `{{snippet:TRIGGER}}`, keyed by trigger
+/// and alias. All keys of one snippet share a single `Arc<str>`, so aliases
+/// cost a pointer rather than another copy of a (possibly large) replacement.
+pub type SnippetLibrary = HashMap<String, Arc<str>>;
+
 /// Values a template may read. Variables have different trust levels: the
 /// built-ins are always available, `{{env:NAME}}` only reads names the user
 /// allowlisted, `{{snippet:...}}` only includes other static snippets, and
@@ -36,7 +41,7 @@ pub struct TemplateContext {
     pub env: Arc<BTreeMap<String, String>>,
     /// Static snippet replacements available to `{{snippet:TRIGGER}}`,
     /// keyed by trigger and alias.
-    pub snippets: Arc<HashMap<String, String>>,
+    pub snippets: Arc<SnippetLibrary>,
     /// Present only when the clipboard variable is enabled.
     pub clipboard: Option<ClipboardReader>,
     /// Validation renders: the clipboard is never read and reports as empty.
@@ -579,7 +584,7 @@ mod tests {
         let mut snippets = HashMap::new();
         snippets.insert(
             "signature".into(),
-            format!("included line\n{{{{cursor}}}}{}", "x".repeat(1024 * 1024)),
+            format!("included line\n{{{{cursor}}}}{}", "x".repeat(1024 * 1024)).into(),
         );
         let context = TemplateContext {
             snippets: Arc::new(snippets),
