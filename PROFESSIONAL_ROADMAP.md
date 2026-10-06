@@ -180,13 +180,21 @@ Still open:
       and GUI consume it instead of recompiling, so validation and runtime
       cannot disagree. Effective triggers
       are already reused; app filters, hotkeys and IDs are still recompiled.
-- [ ] Profiles/workspaces (personal, work, support) switchable at runtime.
+- [ ] Profiles/workspaces (personal, work, support, per-customer) switchable
+      at runtime by hotkey or selected automatically from the environment.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [ ] Form snippets through IBus (the route drops surrounding text when focus
       moves to the form) and a GUI editor for form fields.
-- [ ] Signed team-pack registry: `wayexpand pack update`, `pack diff`,
-      `pack rollback`, and `pack verify` against organization trust roots,
-      plus a GUI trust review for signed packs.
+- [ ] Richer forms: field validation, enums, defaults (including clipboard
+      defaults), conditional fields, a date picker, per-field history, and
+      submission into parameterized broker actions.
+- [ ] Signed team-pack registry: `wayexpand pack search`, `pack install`,
+      `pack update`, `pack diff`, `pack rollback`, and `pack verify` against
+      organization trust roots, private registries, and a GUI trust review
+      for signed packs.
+- [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
+      building on Git sync: signed-commit verification, branch pinning,
+      reviewed/approved updates, diff, rollback, and audit.
 - [ ] Parameterized broker actions: a per-action parameter schema (for
       example `type = "enum"` with fixed values) that validates every input
       before it is placed in a fixed argument slot, so forms can drive
