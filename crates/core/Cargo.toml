@@ -27,6 +27,10 @@ unicode-segmentation.workspace = true
 unicode-general-category.workspace = true
 getrandom.workspace = true
 
+[features]
+# Exposes the engine state-machine checker to the fuzz crate.
+fuzzing = []
+
 [dev-dependencies]
 criterion = "0.8"
 

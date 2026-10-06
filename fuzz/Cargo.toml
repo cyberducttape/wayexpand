@@ -14,7 +14,7 @@ members = ["."]
 
 [dependencies]
 libfuzzer-sys = "0.4"
-wayexpand-core = { path = "../crates/core" }
+wayexpand-core = { path = "../crates/core", features = ["fuzzing"] }
 action-broker = { path = "../crates/action-broker" }
 wayexpand-backend-ibus = { path = "../crates/backend-ibus" }
 unicode-segmentation = "1"
@@ -61,5 +61,11 @@ doc = false
 [[bin]]
 name = "ibus_keys"
 path = "fuzz_targets/ibus_keys.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "engine_sequence"
+path = "fuzz_targets/engine_sequence.rs"
 test = false
 doc = false

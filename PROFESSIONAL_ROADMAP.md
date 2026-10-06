@@ -107,8 +107,11 @@ supported end state before broad adoption:
       activation, safe content-type `done`, deactivation, dispatch failure, and
       flush failure, and disconnect through `InputMethodSource`; live
       Wayland/compositor behavior remains a separate certification requirement.
-- [ ] Loom-style modelling of the waker, output-completion, and completion
-      notifier paths would need `cfg(loom)` shims for std sync types.
+- [ ] Loom models of small extracted state machines (needs `cfg(loom)` shims
+      for std sync types), in priority order: output completion
+      notification, daemon shutdown during a pending injection, async command
+      completion during reload, waker delivery, broker shutdown, and GUI save
+      completion versus an external file edit.
 - [ ] Form snippets and the clipboard variable need validation with real
       clients on each compositor (focus return after the form closes).
 - [ ] Run the certification matrix in remote-desktop sessions (RDP/VNC via

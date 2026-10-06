@@ -14,6 +14,9 @@ mod capabilities;
 mod config;
 mod engine;
 mod fleet;
+#[cfg(any(test, feature = "fuzzing"))]
+#[doc(hidden)]
+pub mod fuzzing;
 mod keys;
 pub mod limits;
 mod matcher;
