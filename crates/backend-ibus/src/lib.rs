@@ -62,6 +62,9 @@ pub fn injector_capabilities() -> InjectorCapabilities {
         max_text_chars: 0,
         expected_throughput_chars_per_sec: None,
         atomic_replace: false,
+        // The engine refuses unless IBus surrounding text confirms the
+        // trigger before the cursor.
+        replacement_guarantee: wayexpand_core::ReplacementGuarantee::VerifiedSurroundingText,
         full_unicode: true,
         cursor_reposition: false,
         key_passthrough: true,
@@ -1424,6 +1427,10 @@ timeout_ms = 1000
     #[test]
     fn ibus_route_does_not_claim_atomic_replacement() {
         assert!(!injector_capabilities().atomic_replace);
+        assert_eq!(
+            injector_capabilities().replacement_guarantee,
+            wayexpand_core::ReplacementGuarantee::VerifiedSurroundingText
+        );
     }
 
     fn unfocused_adapter() -> IbusEngineAdapter {

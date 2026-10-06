@@ -25,7 +25,7 @@ mod usage;
 pub use backend::{
     discover_backends, BackendKind, BackendState, BackendStatus, InjectorCapabilities,
     InjectorError, InjectorErrorKind, InputSource, InputSourceCapabilities, InputSourceError,
-    KeyEventState, TextInjector, WindowTracker, WindowTrackerError,
+    KeyEventState, ReplacementGuarantee, TextInjector, WindowTracker, WindowTrackerError,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{

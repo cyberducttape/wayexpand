@@ -301,6 +301,7 @@ Diagnostic output suitable for health checks and monitoring systems.
       "valid": true,
       "require_absolute_commands": false,
       "require_atomic_replace": false,
+      "minimum_replacement_guarantee": null,
       "require_sensitive_focus": false,
       "is_active": false
     }
@@ -367,6 +368,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `policy.policy.require_absolute_commands` (bool): Whether command programs must use absolute paths; in audit mode this is reported but not enforced
 - `policy.policy.require_atomic_replace` (bool): Whether startup requires a protocol-level atomic replacement capability; enforced only when `safe_mode` is true
+- `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"

@@ -239,6 +239,7 @@ fn main() -> Result<()> {
     let preflight_capabilities = if source_name == "input-method" {
         InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             full_unicode: true,
             ..InjectorCapabilities::default()
         }

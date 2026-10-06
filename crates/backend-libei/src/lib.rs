@@ -1523,6 +1523,8 @@ impl TextInjector for LibeiInjector {
             // processed part of the transaction; libei has no rollback
             // primitive for arbitrary application text.
             atomic_replace: false,
+            // Backspaces are sent without seeing the target's text.
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
             full_unicode: matches!(self.mode, TextMode::Text(_)),
             cursor_reposition: true,
             key_passthrough: true,

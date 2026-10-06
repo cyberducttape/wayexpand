@@ -41,6 +41,13 @@ pub struct OrganizationPolicy {
     /// other administrator-owned requirements.
     pub require_atomic_replace: bool,
 
+    /// Refuse startup unless the selected injector provides at least this
+    /// replacement guarantee: `"best-effort"`, `"verified"` (trigger
+    /// confirmed in the target's surrounding text before erasing), or
+    /// `"atomic"`. Enforced only in safe mode. `require_atomic_replace = true`
+    /// is equivalent to `"atomic"`.
+    pub minimum_replacement_guarantee: Option<crate::ReplacementGuarantee>,
+
     /// Refuse startup unless the selected input source reports sensitive-field
     /// focus (password, PIN, or equivalent).
     pub require_sensitive_focus: bool,
@@ -85,6 +92,7 @@ impl Default for OrganizationPolicy {
             disable_title_matching: false,
             allow_weak_app_filters: false,
             require_atomic_replace: false,
+            minimum_replacement_guarantee: None,
             require_sensitive_focus: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
@@ -116,6 +124,7 @@ impl OrganizationPolicy {
         effective.require_absolute_commands = false;
         effective.disable_title_matching = false;
         effective.require_atomic_replace = false;
+        effective.minimum_replacement_guarantee = None;
         effective.require_sensitive_focus = false;
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
@@ -135,6 +144,7 @@ impl OrganizationPolicy {
             || self.disable_title_matching
             || self.allow_weak_app_filters
             || self.require_atomic_replace
+            || self.minimum_replacement_guarantee.is_some()
             || self.require_sensitive_focus
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
@@ -178,6 +188,15 @@ impl OrganizationPolicy {
             return Some(
                 "selected injector cannot guarantee atomic replacement transactions".into(),
             );
+        }
+        if let Some(minimum) = self.minimum_replacement_guarantee {
+            if injector.replacement_guarantee < minimum {
+                return Some(format!(
+                    "selected injector provides {} replacement; organization policy requires at least {}",
+                    injector.replacement_guarantee.as_str(),
+                    minimum.as_str()
+                ));
+            }
         }
         if self.require_sensitive_focus && !source.sensitive_focus {
             return Some(

@@ -407,6 +407,8 @@ impl TextInjector for WlrootsInjector {
             max_text_chars: 0,
             expected_throughput_chars_per_sec: None,
             atomic_replace: false,
+            // Backspaces are sent without seeing the target's text.
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
             full_unicode: false,
             cursor_reposition: true,
             key_passthrough: false,

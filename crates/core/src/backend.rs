@@ -126,6 +126,50 @@ impl fmt::Display for InputSourceError {
 
 impl std::error::Error for InputSourceError {}
 
+/// How strongly an injector guarantees that erasing a trigger removes exactly
+/// the trigger that caused this expansion, in this target context. Ordered
+/// from weakest to strongest so policy can require a minimum.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReplacementGuarantee {
+    /// The injector cannot replace text at all. Also the default, so a
+    /// backend that does not declare a level can never satisfy a policy.
+    #[default]
+    Unsupported,
+    /// Erases by sending key events without seeing the target's text; a
+    /// focus change or cursor move in between can erase the wrong text.
+    BestEffort,
+    /// Refuses unless the target's reported surrounding text ends with the
+    /// trigger at the cursor; erase and insert are separate steps.
+    #[serde(rename = "verified")]
+    VerifiedSurroundingText,
+    /// Verified like `VerifiedSurroundingText`, and erase plus insert are one
+    /// protocol transaction with no visible intermediate state.
+    Atomic,
+}
+
+impl ReplacementGuarantee {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported",
+            Self::BestEffort => "best-effort",
+            Self::VerifiedSurroundingText => "verified",
+            Self::Atomic => "atomic",
+        }
+    }
+}
+
 /// Guarantees provided by a text-injection backend.
 ///
 /// These are deliberately capability values rather than backend-name checks.
@@ -144,6 +188,8 @@ pub struct InjectorCapabilities {
     /// The backend can replace the trigger and replacement as one protocol
     /// transaction, without an externally visible erase-then-insert gap.
     pub atomic_replace: bool,
+    /// How safely the trigger erase is tied to this expansion's trigger.
+    pub replacement_guarantee: ReplacementGuarantee,
     /// Every valid Unicode replacement can be represented without depending
     /// on the active keyboard layout.
     pub full_unicode: bool,

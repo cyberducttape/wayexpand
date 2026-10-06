@@ -63,6 +63,14 @@ disable_template_env = false
 # Require a backend with a protocol-level atomic replacement transaction
 require_atomic_replace = false
 
+# Minimum replacement guarantee (unset = no requirement):
+#   "best-effort"  erase by key events without seeing the target's text
+#   "verified"     erase only after the target's surrounding text confirms
+#                  the trigger at the cursor (IBus, input-method-v2)
+#   "atomic"       verified, and erase + insert are one transaction
+#                  (input-method-v2); same as require_atomic_replace = true
+# minimum_replacement_guarantee = "verified"
+
 # Require the input source to report password/sensitive-field focus
 require_sensitive_focus = false
 
@@ -89,8 +97,10 @@ When `safe_mode = true`:
 - Policy violations **prevent** expansions from executing
 - Violations logged as **errors** to journald
 - Suitable for locked-down production environments
-- `require_atomic_replace` and `require_sensitive_focus` reject startup before
-  capture begins when the selected source/backend cannot provide the guarantee
+- `require_atomic_replace`, `minimum_replacement_guarantee`, and
+  `require_sensitive_focus` reject startup before capture begins when the
+  selected source/backend cannot provide the guarantee. libei and wlroots
+  output are `best-effort`, IBus is `verified`, input-method-v2 is `atomic`
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends
 - Can require absolute command paths so `program = "git"` is rejected
 

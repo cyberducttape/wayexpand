@@ -28,6 +28,11 @@ pub(crate) fn print_policy_diagnostics_json(
                 "safe_mode": policy.safe_mode,
                 "disable_commands": policy.disable_commands,
                 "require_absolute_commands": policy.require_absolute_commands,
+                "require_atomic_replace": policy.require_atomic_replace,
+                "minimum_replacement_guarantee": policy
+                    .minimum_replacement_guarantee
+                    .map(wayexpand_core::ReplacementGuarantee::as_str),
+                "require_sensitive_focus": policy.require_sensitive_focus,
                 "disable_hotkeys": policy.disable_hotkeys,
                 "disable_title_matching": policy.disable_title_matching,
                 "max_replacement_size": policy.max_replacement_size,

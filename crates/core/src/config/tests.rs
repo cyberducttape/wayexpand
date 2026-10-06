@@ -611,6 +611,66 @@ fn capability_requirements_distinguish_atomic_and_sensitive_guarantees() {
 }
 
 #[test]
+fn minimum_replacement_guarantee_is_ordered_and_enforced_in_safe_mode() {
+    use crate::ReplacementGuarantee::*;
+    assert!(Unsupported < BestEffort && BestEffort < VerifiedSurroundingText);
+    assert!(VerifiedSurroundingText < Atomic);
+    let at = |guarantee| crate::InjectorCapabilities {
+        replacement_guarantee: guarantee,
+        ..crate::InjectorCapabilities::default()
+    };
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        minimum_replacement_guarantee: Some(VerifiedSurroundingText),
+        ..OrganizationPolicy::default()
+    };
+    assert_eq!(
+        policy.capability_violation(at(BestEffort), false).as_deref(),
+        Some(
+            "selected injector provides best-effort replacement; organization policy requires at least verified"
+        )
+    );
+    assert!(policy
+        .capability_violation(crate::InjectorCapabilities::default(), false)
+        .is_some());
+    assert!(policy
+        .capability_violation(at(VerifiedSurroundingText), false)
+        .is_none());
+    assert!(policy.capability_violation(at(Atomic), false).is_none());
+
+    // Audit mode reports nothing as enforceable.
+    let audit = OrganizationPolicy {
+        safe_mode: false,
+        ..policy.clone()
+    };
+    assert!(audit
+        .effective_enforcement_policy()
+        .capability_violation(at(BestEffort), false)
+        .is_none());
+    assert!(audit.is_active());
+}
+
+#[test]
+fn minimum_replacement_guarantee_parses_documented_values() {
+    for (value, expected) in [
+        ("best-effort", crate::ReplacementGuarantee::BestEffort),
+        (
+            "verified",
+            crate::ReplacementGuarantee::VerifiedSurroundingText,
+        ),
+        ("atomic", crate::ReplacementGuarantee::Atomic),
+    ] {
+        let policy: OrganizationPolicy =
+            toml::from_str(&format!("minimum_replacement_guarantee = \"{value}\"")).unwrap();
+        assert_eq!(policy.minimum_replacement_guarantee, Some(expected));
+        assert_eq!(expected.as_str(), value);
+    }
+    assert!(
+        toml::from_str::<OrganizationPolicy>("minimum_replacement_guarantee = \"strong\"").is_err()
+    );
+}
+
+#[test]
 fn audit_policy_has_no_effective_enforcement_values() {
     let policy = OrganizationPolicy {
         safe_mode: false,

@@ -1413,6 +1413,9 @@ impl TextInjector for InputMethodSource {
             max_text_chars: 0,
             expected_throughput_chars_per_sec: None,
             atomic_replace: true,
+            // `trigger_delete_length` refuses unless surrounding text ends
+            // with the trigger, and delete + commit share one `done`.
+            replacement_guarantee: wayexpand_core::ReplacementGuarantee::Atomic,
             full_unicode: true,
             cursor_reposition: false,
             key_passthrough: false,
