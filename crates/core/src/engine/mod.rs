@@ -479,7 +479,6 @@ impl ExpansionEngine {
         // Build the static snippet library once and share it between
         // validation and rendering; it can hold large replacements.
         let snippets = snippets.unwrap_or_else(|| config.includable_snippets());
-        config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
         // Triggers match literally (see `Matcher`, a case-sensitive char
         // trie), so a `propagate_case` expansion is matched by inserting
         // its uppercase and capitalized forms as additional trigger
@@ -487,23 +486,10 @@ impl ExpansionEngine {
         // matching itself case-insensitive (which would affect every
         // expansion, not just ones that opted in). `take_match` later reads
         // back which form was actually typed to decide how to case the
-        // replacement. `effective_triggers()` is the single source of
-        // truth for this expansion -- `validate()` (called just above)
-        // checks collisions across the exact same variants, so a config
-        // that reaches this point is already known not to have two
-        // expansions competing for the same matcher entry.
-        let enabled: Vec<(usize, String)> = config
-            .expansion
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.enabled)
-            .flat_map(|(index, entry)| {
-                entry
-                    .effective_triggers()
-                    .into_iter()
-                    .map(move |trigger| (index, trigger))
-            })
-            .collect();
+        // replacement. Validation builds these from `effective_triggers()`
+        // and rejects collisions across exactly these variants, so its
+        // result is reused here instead of being recomputed.
+        let enabled = config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
         let app_filters: Vec<Vec<AppFilter>> = config

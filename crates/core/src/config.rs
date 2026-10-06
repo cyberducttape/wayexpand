@@ -347,22 +347,25 @@ impl ExpansionConfig {
     /// propagation is enabled. Useful to avoid merge-time collisions using
     /// the same semantics as runtime matching and configuration validation.
     pub fn effective_triggers(&self) -> Vec<String> {
+        // Insertion-ordered set: `variants` keeps the order callers rely on,
+        // `seen` makes each duplicate check O(1) instead of a linear scan
+        // over up to (aliases x case x normalization) variants.
         let mut variants = Vec::with_capacity(1 + self.aliases.len());
-        for trigger in std::iter::once(&self.trigger).chain(&self.aliases) {
-            if !variants.contains(trigger) {
-                variants.push(trigger.clone());
+        let mut seen = std::collections::HashSet::with_capacity(1 + self.aliases.len());
+        let mut push = |variants: &mut Vec<String>, candidate: String| {
+            if seen.insert(candidate.clone()) {
+                variants.push(candidate);
             }
+        };
+        for trigger in std::iter::once(&self.trigger).chain(&self.aliases) {
+            push(&mut variants, trigger.clone());
         }
         if self.propagate_case {
             for index in 0..variants.len() {
-                for variant in [
-                    variants[index].to_uppercase(),
-                    capitalize_first_letter(&variants[index]),
-                ] {
-                    if !variants.contains(&variant) {
-                        variants.push(variant);
-                    }
-                }
+                let uppercase = variants[index].to_uppercase();
+                let capitalized = capitalize_first_letter(&variants[index]);
+                push(&mut variants, uppercase);
+                push(&mut variants, capitalized);
             }
         }
         // Canonically equivalent spellings must match too: a trigger saved
@@ -372,14 +375,10 @@ impl ExpansionConfig {
         // typed, so deletion counts stay correct.
         use unicode_normalization::UnicodeNormalization;
         for index in 0..variants.len() {
-            for form in [
-                variants[index].nfc().collect::<String>(),
-                variants[index].nfd().collect::<String>(),
-            ] {
-                if !variants.contains(&form) {
-                    variants.push(form);
-                }
-            }
+            let composed = variants[index].nfc().collect::<String>();
+            let decomposed = variants[index].nfd().collect::<String>();
+            push(&mut variants, composed);
+            push(&mut variants, decomposed);
         }
         variants
     }
@@ -505,6 +504,11 @@ fn default_command_timeout_ms() -> u64 {
 fn default_enabled() -> bool {
     true
 }
+
+/// Every enabled expansion's effective triggers as `(expansion index,
+/// trigger)`, sorted by trigger and known to be collision-free. Validation
+/// computes this anyway, so engine construction reuses it for the matcher.
+pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
 impl Config {
     /// Static snippet replacements by trigger and alias, for
@@ -971,13 +975,13 @@ impl Config {
     /// Parsing is not the only way callers can construct `Config`, so engine
     /// construction and other consumers can enforce the same limits here.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        self.validate_with_snippets(None)
+        self.validate_with_snippets(None).map(drop)
     }
 
     pub(crate) fn validate_with_snippets(
         &self,
         snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
-    ) -> Result<(), ConfigError> {
+    ) -> Result<EffectiveTriggers, ConfigError> {
         if self.expansion.len() > MAX_EXPANSIONS {
             return Err(ConfigError::TooManyExpansions {
                 count: self.expansion.len(),
@@ -1313,7 +1317,7 @@ impl Config {
             ));
         }
 
-        Ok(())
+        Ok(enabled)
     }
 
     /// Apply an active administrator-owned policy and validate the resulting
