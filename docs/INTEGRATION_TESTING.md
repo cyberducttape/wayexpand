@@ -184,6 +184,23 @@ scenario, preserves each driver's stdout/stderr log beside the results file,
 and produces the results file consumed by the evidence collector. Those logs
 are reviewable evidence and must not contain typed secrets or replacement text.
 
+Key pass-through matters most on exclusive-grab routes (input-method-v2):
+any key the route swallows, duplicates, or delivers out of order is a
+certification failure. These scenarios make that explicit; each passes only
+when every listed key reaches its normal handler exactly once and a trigger
+typed afterwards still expands:
+
+| Scenario | Keys |
+| --- | --- |
+| `application-shortcuts` | Ctrl+C, Ctrl+V, Ctrl+Shift+T in the target client |
+| `compositor-shortcuts` | Alt+F4, Super alone, Ctrl+Alt+F*n* VT switch where the session allows it |
+| `media-keys` | volume up/down/mute and play/pause |
+| `held-modifier-unsupported-key` | a held Ctrl, Alt, Shift or Super plus a key WayExpand does not handle |
+
+`ctrl-alt-super-chords`, `arrow-navigation`, `function-keys`,
+`dead-key-committed-text`, and `compose-committed-text` cover the remaining
+pass-through keys.
+
 ## Input-method source
 
 In a session that advertises `zwp_input_method_manager_v2`:

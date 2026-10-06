@@ -381,9 +381,13 @@ pub(crate) fn certification_scenarios() -> Result<Vec<String>> {
 
 pub(crate) fn certification_scenario_category(scenario: &str) -> &'static str {
     match scenario {
-        "printable-press-release" | "held-keys-repeat" | "modifier-navigation" => {
-            "typing-integrity"
-        }
+        "printable-press-release"
+        | "held-keys-repeat"
+        | "modifier-navigation"
+        | "application-shortcuts"
+        | "compositor-shortcuts"
+        | "media-keys"
+        | "held-modifier-unsupported-key" => "typing-integrity",
         "unicode-combining" | "multiline-rapid" => "text-integrity",
         "password-field" | "focus-cross-window" => "safety",
         "config-reload" | "daemon-restart" | "compositor-restart" | "failed-insertion" => {

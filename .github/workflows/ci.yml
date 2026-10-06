@@ -385,7 +385,7 @@ jobs:
         run: bash scripts/test-pack-signing.sh
       - name: Certification JSON contract
         run: |
-          jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | length == 36)' tests/certification/compositor-matrix.json
+          jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | length == 40)' tests/certification/compositor-matrix.json
           bash scripts/test-certification-report.sh target/debug/wayexpand
           bash scripts/certify-compositor.sh --help
           bash scripts/run-certification-driver.sh --help
