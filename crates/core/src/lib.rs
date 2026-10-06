@@ -4,9 +4,7 @@
 /// Increment when a consumer must distinguish a newer required field set.
 pub const CONTROL_STATUS_SCHEMA: u32 = 6;
 
-/// Largest control-socket response a client reads. Shared by the CLI, TUI,
-/// and GUI clients; the daemon's status body is tested to fit within it.
-pub const CONTROL_MAX_RESPONSE_BYTES: usize = 4096;
+pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 
 #[cfg(not(unix))]
 compile_error!("wayexpand-core currently requires a Unix target");
@@ -17,6 +15,7 @@ mod config;
 mod engine;
 mod fleet;
 mod keys;
+pub mod limits;
 mod matcher;
 mod migration;
 mod pack;
@@ -33,9 +32,9 @@ pub use backend::{
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    validate_command_config, AppFilter, CommandConfig, CommandEnvironment, CommandLimits, Config,
-    ConfigError, ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
-    OrganizationPolicy, Settings, COMMAND_LIMITS,
+    validate_command_config, AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError,
+    ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
+    OrganizationPolicy, Settings,
 };
 pub use engine::{
     run_command, run_command_cancellable, CheckStatus, CommandError, CommandMetrics,

@@ -32,9 +32,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_RESULTS_PER_EVENT: usize = 1024;
-const MAX_RESULT_BYTES_PER_EVENT: usize = 4 * 1024 * 1024;
-const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
+pub(crate) use crate::limits::{
+    MAX_COMMAND_OUTPUT_BYTES, MAX_RESULTS_PER_EVENT, MAX_RESULT_BYTES_PER_EVENT,
+};
 const MINIMAL_COMMAND_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 const ASYNC_COMMAND_WORKER_COUNT: usize = 4;

@@ -75,7 +75,7 @@ impl Capabilities {
                 wayland: true,
                 x11: false,
                 app_filter_native: false,
-                max_replacement_size: 1024 * 1024,
+                max_replacement_size: crate::limits::MAX_REPLACEMENT_BYTES,
                 feature_summary: "UTF-8 direct insertion, multiline, portal-based, layout-independent",
                 limitations: &[
                     "portal authorization is interactive unless a valid restoration token exists",
@@ -93,7 +93,7 @@ impl Capabilities {
                 x11: false,
                 // Window tracking is not shipped for wlroots compositors.
                 app_filter_native: false,
-                max_replacement_size: 1024 * 1024,
+                max_replacement_size: crate::limits::MAX_REPLACEMENT_BYTES,
                 feature_summary: "UTF-8 direct insertion, multiline, wlr-virtual-keyboard output; no native window tracker",
                 limitations: &[
                     "no native app_filter window tracker is shipped",
@@ -110,7 +110,7 @@ impl Capabilities {
                 wayland: true,
                 x11: false,
                 app_filter_native: false,
-                max_replacement_size: 1024 * 1024,
+                max_replacement_size: crate::limits::MAX_REPLACEMENT_BYTES,
                 feature_summary: "Exclusive keyboard capture and input-method protocol; compositor support and libei key pass-through must be probed; non-text key pass-through is experimental",
                 limitations: &[
                     "exclusive capture requires working libei pass-through for unsupported keys and shortcuts",
@@ -144,7 +144,7 @@ impl Capabilities {
                 wayland: true,
                 x11: false,
                 app_filter_native: false,
-                max_replacement_size: 1024 * 1024,
+                max_replacement_size: crate::limits::MAX_REPLACEMENT_BYTES,
                 feature_summary: "Input method protocol, exclusive keyboard capture, bidirectional state tracking; libei key pass-through is required and experimental",
                 limitations: &[
                     "exclusive capture requires working libei pass-through for unsupported keys and shortcuts",
@@ -173,7 +173,9 @@ impl Capabilities {
     /// Get recommended max replacement size for this backend
     pub fn recommended_max_size(&self) -> usize {
         match self.text_method {
-            TextMethod::DirectUtf8 | TextMethod::InputMethodProtocol => 1024 * 1024,
+            TextMethod::DirectUtf8 | TextMethod::InputMethodProtocol => {
+                crate::limits::MAX_REPLACEMENT_BYTES
+            }
             TextMethod::KeySynthesis => 65536, // evdev key synthesis gets slow/drops chars above this
         }
     }

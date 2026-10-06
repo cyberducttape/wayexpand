@@ -6,8 +6,9 @@ use std::{
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 
-const MAX_RENDERED_BYTES: usize = 1024 * 1024;
 /// How deeply `{{snippet:...}}` includes may nest.
+use crate::limits::MAX_RENDERED_BYTES;
+
 const MAX_INCLUDE_DEPTH: usize = 8;
 static SYSTEM_USERNAME: OnceLock<String> = OnceLock::new();
 static SYSTEM_HOSTNAME: OnceLock<String> = OnceLock::new();

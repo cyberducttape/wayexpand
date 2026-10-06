@@ -14,10 +14,11 @@ pub const SIGNATURE_FILE: &str = "wayexpand-pack.sig";
 /// `ssh-keygen -Y` namespace for pack signatures.
 const SIGNATURE_NAMESPACE: &str = "wayexpand-pack";
 const SNIPPETS_DIR: &str = "snippets";
-const MAX_MANIFEST_BYTES: usize = 64 * 1024;
-const MAX_SNIPPET_FILE_BYTES: usize = 1024 * 1024;
-const MAX_SNIPPET_FILES: usize = 1024;
-const MAX_PACK_BYTES: usize = 16 * 1024 * 1024;
+use crate::limits::{
+    MAX_PACK_BYTES, MAX_PACK_MANIFEST_BYTES as MAX_MANIFEST_BYTES,
+    MAX_PACK_SNIPPET_FILES as MAX_SNIPPET_FILES,
+    MAX_PACK_SNIPPET_FILE_BYTES as MAX_SNIPPET_FILE_BYTES,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

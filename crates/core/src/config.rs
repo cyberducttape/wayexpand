@@ -17,42 +17,16 @@ use std::{
 };
 use thiserror::Error;
 
-const MAX_TRIGGER_CHARS: usize = 128;
-const MAX_ALIASES: usize = 32;
-const MAX_TEMPLATE_ENV: usize = 32;
-const MAX_REPLACEMENT_BYTES: usize = 1024 * 1024;
-const MAX_DESCRIPTION_CHARS: usize = 512;
-const MAX_TAGS: usize = 32;
-const MAX_TAG_CHARS: usize = 64;
-const MAX_CATEGORY_CHARS: usize = 64;
-const MAX_APP_FILTERS: usize = 32;
-const MAX_APP_FILTER_CHARS: usize = 256;
-/// Limits enforced by [`validate_command_config`], the single authority for
-/// command settings. Front ends may display them but must validate through
-/// that function rather than re-implementing the checks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CommandLimits {
-    pub max_args: usize,
-    pub max_program_chars: usize,
-    pub max_arg_chars: usize,
-    pub max_arg_data_chars: usize,
-    pub max_env_vars: usize,
-    pub max_env_name_chars: usize,
-    pub max_timeout_ms: u64,
-    pub max_cache_ms: u64,
-}
-
-pub const COMMAND_LIMITS: CommandLimits = CommandLimits {
-    max_args: 32,
-    max_program_chars: 256,
-    max_arg_chars: 1024,
-    max_arg_data_chars: 16 * 1024,
-    max_env_vars: 32,
-    max_env_name_chars: 256,
-    max_timeout_ms: 5_000,
-    max_cache_ms: 60_000,
+use crate::limits::COMMAND_LIMITS;
+use crate::limits::{
+    MAX_ALIASES, MAX_APP_FILTERS, MAX_APP_FILTER_CHARS, MAX_CATEGORY_CHARS, MAX_DESCRIPTION_CHARS,
+    MAX_EXPANSIONS, MAX_HOTKEYS, MAX_HOTKEY_DESCRIPTION_CHARS, MAX_REPLACEMENT_BYTES, MAX_TAGS,
+    MAX_TAG_CHARS, MAX_TEMPLATE_ENV, MAX_TRIGGER_CHARS,
 };
-
+pub(crate) use crate::limits::{
+    MAX_CONFIG_BYTES, MAX_EFFECTIVE_TRIGGERS, MAX_EFFECTIVE_TRIGGER_SCALARS,
+    MAX_TOTAL_TRIGGER_CHARS,
+};
 const MAX_COMMAND_ARGS: usize = COMMAND_LIMITS.max_args;
 const MAX_COMMAND_PROGRAM_CHARS: usize = COMMAND_LIMITS.max_program_chars;
 const MAX_COMMAND_ARG_CHARS: usize = COMMAND_LIMITS.max_arg_chars;
@@ -61,14 +35,7 @@ const MAX_COMMAND_ENV_VARS: usize = COMMAND_LIMITS.max_env_vars;
 const MAX_COMMAND_ENV_NAME_CHARS: usize = COMMAND_LIMITS.max_env_name_chars;
 const MAX_COMMAND_TIMEOUT_MS: u64 = COMMAND_LIMITS.max_timeout_ms;
 const MAX_COMMAND_CACHE_MS: u64 = COMMAND_LIMITS.max_cache_ms;
-const MAX_EXPANSIONS: usize = 10_000;
-const MAX_HOTKEYS: usize = 1_024;
-const MAX_HOTKEY_DESCRIPTION_CHARS: usize = 256;
-pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const CONFIG_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
-pub(crate) const MAX_TOTAL_TRIGGER_CHARS: usize = 256 * 1024;
-pub(crate) const MAX_EFFECTIVE_TRIGGER_SCALARS: usize = 1_000_000;
-pub(crate) const MAX_EFFECTIVE_TRIGGERS: usize = 100_000;
 static EXPANSION_ID_FALLBACK_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn new_expansion_id() -> String {

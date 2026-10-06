@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Config, MatchMode};
 
 const USAGE_FILE: &str = "usage-stats.json";
-const MAX_USAGE_FILE_BYTES: u64 = 8 * 1024 * 1024;
+use crate::limits::MAX_USAGE_FILE_BYTES;
 const MAX_DAILY_ENTRIES: usize = 400;
 const MAX_SNIPPET_ENTRIES: usize = 20_000;
 const SECONDS_PER_DAY: u64 = 86_400;

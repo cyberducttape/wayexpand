@@ -443,8 +443,7 @@ pub(super) fn configure_command_environment(process: &mut Command, command: &Com
 
 /// How long a snippet form may stay open before it is abandoned.
 const FORM_TIMEOUT: Duration = Duration::from_secs(600);
-const MAX_FORM_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
-const MAX_FORM_VALUE_BYTES: usize = 64 * 1024;
+use crate::limits::{MAX_FORM_OUTPUT_BYTES, MAX_FORM_VALUE_BYTES};
 
 /// The program that shows snippet forms. `WAYEXPAND_FORM_HELPER` overrides
 /// it (tests, custom installs). Under systemd the GUI is started through
