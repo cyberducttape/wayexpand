@@ -44,6 +44,10 @@ safe to recommend for everyday desktop use.
 - [ ] Exercise two simultaneous keyboards, USB disconnect/reconnect, held keys,
       suspend/resume, and rapid typing.
 - [ ] Treat layout or keymap mismatches as certification failures.
+- [ ] libei keysym fallback: follow the server's active layout group and
+      rebuild the character map when EIS replaces the keyboard device's keymap
+      (today it is built once at connect time from layout 0; Shift, AltGr and
+      Level5 chords are supported).
 
 ### 5. IME and preedit strategy
 
@@ -134,8 +138,23 @@ risk analyzer, Git library sync, and signed organization packs.
 
 Still open:
 
-- [ ] Better cross-desktop application identity (GNOME and wlroots window
-      tracking) so app-filtered snippets work beyond KWin.
+- [ ] Better cross-desktop application identity so app-filtered snippets,
+      Quick Picker direct insertion, and form return-to-origin work beyond
+      KWin: `wlr-foreign-toplevel-management` where available, compositor IPC
+      adapters (Sway, Hyprland) as fallbacks, and an optional GNOME Shell
+      extension exposing a small authenticated window-identity API. Missing
+      identity must keep failing closed.
+- [ ] Certification-driven route planner: replace the IBus-only
+      `recommended_route()` with a planner that ranks routes from their
+      negotiated capabilities (sensitive fields, Unicode, atomic replacement)
+      and local certification evidence, labelling each as recommended,
+      experimental, or requiring explicit consent. Evdev must never be chosen
+      without consent.
+- [ ] Publish a canonical `route_id` in daemon status (additive schema change)
+      so consumers stop reconstructing routes from `source`/`backend`.
+- [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
+      template library, parsed hotkeys, normalized IDs) during validation and
+      construct the engine from it instead of recompiling.
 - [ ] Profiles/workspaces (personal, work, support) switchable at runtime.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [ ] Form snippets through IBus (the route drops surrounding text when focus
