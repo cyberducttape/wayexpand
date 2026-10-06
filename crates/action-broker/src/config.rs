@@ -91,6 +91,10 @@ pub struct ActionConfig {
     pub description: Option<String>,
 }
 
+/// Upper bound for a configured action timeout (one hour). Larger values are
+/// rejected so deadline arithmetic can never overflow `Instant`.
+pub const MAX_ACTION_TIMEOUT_MS: u64 = 3_600_000;
+
 fn default_timeout_ms() -> u64 {
     10000 // 10 seconds
 }
@@ -132,6 +136,9 @@ impl ActionConfig {
         }
         if self.timeout_ms == 0 {
             return Err("timeout_ms must be > 0".to_string());
+        }
+        if self.timeout_ms > MAX_ACTION_TIMEOUT_MS {
+            return Err(format!("timeout_ms must be <= {}", MAX_ACTION_TIMEOUT_MS));
         }
         Ok(())
     }
@@ -538,6 +545,42 @@ mod tests {
         };
         assert!(config.validate().is_ok());
         assert!(config.is_enabled());
+    }
+
+    fn config_with_timeout(timeout_ms: u64) -> ActionConfig {
+        ActionConfig {
+            program: "/bin/true".to_string(),
+            args: vec![],
+            timeout_ms,
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            enabled: true,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn action_config_timeout_bounds() {
+        assert!(config_with_timeout(0).validate().is_err());
+        assert!(config_with_timeout(1).validate().is_ok());
+        assert!(config_with_timeout(MAX_ACTION_TIMEOUT_MS)
+            .validate()
+            .is_ok());
+        assert!(config_with_timeout(MAX_ACTION_TIMEOUT_MS + 1)
+            .validate()
+            .is_err());
+        assert!(config_with_timeout(u64::MAX).validate().is_err());
+    }
+
+    #[test]
+    fn action_config_timeout_u64_max_rejected_from_toml() {
+        let parsed: ActionConfig =
+            toml::from_str("program = \"/bin/true\"\ntimeout_ms = 18446744073709551615\n")
+                .expect("u64::MAX is representable in TOML parsing");
+        assert!(parsed.validate().is_err());
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Executes actions within the constraints defined in ActionConfig and BrokerConfig.
 
 use crate::{
-    config::BrokerConfig,
+    config::{BrokerConfig, MAX_ACTION_TIMEOUT_MS},
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse, MAX_OUTPUT_BYTES},
 };
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub struct ActionExecutor {
 #[derive(Debug)]
 enum ChildRunError {
     Timeout,
+    InvalidTimeout,
     IncompleteOutput,
     Io(std::io::Error),
 }
@@ -98,7 +99,12 @@ fn run_child_unix(
     if let Some(stream) = stderr.as_ref() {
         set_nonblocking(stream).map_err(ChildRunError::Io)?;
     }
-    let deadline = Instant::now() + timeout;
+    // Defensive even though policy validation bounds timeouts: the execution
+    // path must not panic on an unrepresentable deadline. Dropping the guard
+    // kills and reaps the process group.
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or(ChildRunError::InvalidTimeout)?;
     let mut stdout_bytes = Vec::new();
     let mut stderr_bytes = Vec::new();
     let mut stdout_truncated = false;
@@ -190,7 +196,11 @@ fn run_child_fallback(
     stderr: Option<impl Read + Send + 'static>,
     timeout: Duration,
 ) -> Result<ChildRunOutput, ChildRunError> {
-    let deadline = Instant::now() + timeout;
+    let Some(deadline) = Instant::now().checked_add(timeout) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(ChildRunError::InvalidTimeout);
+    };
     let stdout_thread =
         std::thread::spawn(move || stdout.map(bounded_read_stream).unwrap_or_default());
     let stderr_thread =
@@ -237,10 +247,12 @@ impl ActionExecutor {
         Ok(Self { config })
     }
 
-    /// Resolve the effective timeout: the broker config is the upper bound.
+    /// Resolve the effective timeout: the broker config is the upper bound,
+    /// and MAX_ACTION_TIMEOUT_MS bounds both in case validation was bypassed.
     fn effective_timeout(&self, request: &ActionRequest, action_timeout_ms: u64) -> Duration {
-        let config_timeout = action_timeout_ms;
-        let effective = config_timeout.min(request.timeout_ms);
+        let effective = action_timeout_ms
+            .min(request.timeout_ms)
+            .min(MAX_ACTION_TIMEOUT_MS);
         Duration::from_millis(effective)
     }
 
@@ -257,6 +269,13 @@ impl ActionExecutor {
             return Err(ActionError::ActionBlocked {
                 action_id: request.action_id.clone(),
                 reason: "action is disabled".to_string(),
+            });
+        }
+
+        if request.timeout_ms == 0 {
+            return Err(ActionError::ActionBlocked {
+                action_id: request.action_id.clone(),
+                reason: "request timeout_ms must be > 0".to_string(),
             });
         }
 
@@ -373,6 +392,9 @@ impl ActionExecutor {
             Err(ChildRunError::Timeout) => Err(ActionError::Timeout {
                 action_id,
                 timeout_ms: timeout.as_millis() as u64,
+            }),
+            Err(ChildRunError::InvalidTimeout) => Err(ActionError::Internal {
+                reason: "action timeout cannot be represented as a deadline".to_string(),
             }),
             Err(ChildRunError::IncompleteOutput) => Err(ActionError::Internal {
                 reason: "child output stream did not close before the drain deadline; output may be incomplete".to_string(),
@@ -605,6 +627,87 @@ mod tests {
             500,
         );
         assert_eq!(effective, Duration::from_millis(500));
+    }
+
+    fn timeout_test_config(timeout_ms: u64) -> BrokerConfig {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "true".to_string(),
+            ActionConfig {
+                program: "/bin/true".to_string(),
+                args: vec![],
+                timeout_ms,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                enabled: true,
+                description: None,
+            },
+        );
+        config
+    }
+
+    fn timeout_test_request(timeout_ms: u64) -> ActionRequest {
+        ActionRequest {
+            action_id: "true".to_string(),
+            timeout_ms,
+            inherit_env: false,
+            env_vars: vec![],
+            stdout_capture: true,
+        }
+    }
+
+    #[test]
+    fn executor_rejects_policy_timeout_above_maximum() {
+        assert!(ActionExecutor::new(&timeout_test_config(u64::MAX)).is_err());
+        assert!(ActionExecutor::new(&timeout_test_config(MAX_ACTION_TIMEOUT_MS + 1)).is_err());
+        assert!(ActionExecutor::new(&timeout_test_config(MAX_ACTION_TIMEOUT_MS)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn executor_runs_with_maximum_policy_and_u64_max_request_timeout() {
+        let executor = ActionExecutor::new(&timeout_test_config(MAX_ACTION_TIMEOUT_MS)).unwrap();
+        assert_eq!(
+            executor.effective_timeout(&timeout_test_request(u64::MAX), MAX_ACTION_TIMEOUT_MS),
+            Duration::from_millis(MAX_ACTION_TIMEOUT_MS)
+        );
+        let result = executor.execute(timeout_test_request(u64::MAX)).await;
+        assert!(result.is_ok(), "unexpected result: {result:?}");
+    }
+
+    #[test]
+    fn executor_effective_timeout_is_bounded_even_if_validation_is_bypassed() {
+        let executor = ActionExecutor::new(&BrokerConfig::default()).unwrap();
+        assert_eq!(
+            executor.effective_timeout(&timeout_test_request(u64::MAX), u64::MAX),
+            Duration::from_millis(MAX_ACTION_TIMEOUT_MS)
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_rejects_zero_request_timeout_before_spawning() {
+        let executor = ActionExecutor::new(&timeout_test_config(1_000)).unwrap();
+        let result = executor.execute(timeout_test_request(0)).await;
+        assert!(
+            matches!(&result, Err(ActionError::ActionBlocked { reason, .. }) if reason.contains("timeout_ms")),
+            "unexpected result: {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_child_unrepresentable_deadline_errors_without_panicking() {
+        let mut cmd = Command::new("/bin/sleep");
+        cmd.arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_group(&mut cmd);
+        let child = cmd.spawn().expect("spawn sleep");
+        let result = run_child_unix(child, None, None, Duration::MAX);
+        assert!(matches!(result, Err(ChildRunError::InvalidTimeout)));
     }
 
     #[tokio::test]

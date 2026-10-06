@@ -266,7 +266,9 @@ missing broker service from an unknown or disabled action.
   model rather than being inferred from the current `args` array
 - Environment variables explicitly allowlisted
 - Working directory restricted
-- Execution timeout enforced
+- Execution timeout enforced; policy `timeout_ms` must be between 1 and
+  3,600,000 (one hour), and a request may only shorten it (a zero request
+  timeout is rejected before spawning)
 - No escalated privileges (runs as regular user)
 
 ### Audit Trail
