@@ -132,9 +132,15 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 - [x] The packaged broker service has an independent systemd sandbox with
       explicit no-network (`AF_UNIX` only), read-only-home, and restricted
       filesystem policy; its contract is tested in CI.
-- [ ] Add per-action OS sandbox profiles or a container boundary for stronger
-      isolation between configured actions; same-UID software and custom broker
-      launches remain outside the packaged unit's trust boundary.
+- [ ] Add per-action OS sandbox profiles for stronger isolation between
+      configured actions; same-UID software and custom broker launches remain
+      outside the packaged unit's trust boundary. Proposed policy shape:
+      `[actions."x".sandbox]` with `network` (host:port allowlist), `read`,
+      `write`, `home`, and `devices`. Candidate mechanisms, Linux-native and
+      without containers: Landlock for filesystem (and TCP port) rules,
+      seccomp for syscalls, user/network namespaces, with bubblewrap or
+      `systemd-run` transient units as fallbacks. Refuse to run an action
+      whose profile cannot be enforced on the running kernel.
 - [x] Optional execution audit logging has bounded rotation, privacy-preserving
       records, queue and persistence-failure reporting, and tests. Operational
       deployment and lifecycle certification remain release work.
