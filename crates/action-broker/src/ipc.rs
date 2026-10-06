@@ -384,6 +384,12 @@ impl ServerConnection {
         &self.peer
     }
 
+    /// A handle another thread can use to abort this connection's blocking
+    /// reads and writes, e.g. when the broker shuts down.
+    pub fn canceller(&self) -> Result<ConnectionCanceller, IpcError> {
+        Ok(ConnectionCanceller(self.stream.try_clone()?))
+    }
+
     /// Read an action request from the client.
     pub fn read_request(&mut self) -> Result<ActionRequest, IpcError> {
         decode_request_frame(&mut self.reader)
@@ -401,6 +407,24 @@ impl ServerConnection {
             }
             Err(error) => Err(error),
         }
+    }
+}
+
+/// Aborts or bounds blocking I/O on a [`ServerConnection`] from another
+/// thread. It holds a duplicate of the connection's socket; socket shutdown
+/// and timeouts apply to every descriptor of that socket.
+pub struct ConnectionCanceller(UnixStream);
+
+impl ConnectionCanceller {
+    /// Close the connection: a blocked read or write returns immediately.
+    pub fn cancel(&self) {
+        let _ = self.0.shutdown(std::net::Shutdown::Both);
+    }
+
+    /// Shorten the write timeout, so a client that stopped reading cannot
+    /// hold a response write for the full default timeout.
+    pub fn limit_writes(&self, timeout: Duration) {
+        let _ = self.0.set_write_timeout(Some(timeout));
     }
 }
 
@@ -785,5 +809,32 @@ mod tests {
             stderr_truncated: false,
             duration_ms: 1,
         }));
+    }
+
+    #[test]
+    fn canceller_aborts_a_blocked_request_read() {
+        let (server_stream, _client_stream) = UnixStream::pair().unwrap();
+        server_stream
+            .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
+            .unwrap();
+        let mut server = ServerConnection {
+            reader: BufReader::new(server_stream.try_clone().unwrap()),
+            stream: server_stream,
+            peer: PeerIdentity {
+                pid: None,
+                uid: 0,
+                executable: None,
+            },
+        };
+        let canceller = server.canceller().unwrap();
+        let started = Instant::now();
+        let reader = std::thread::spawn(move || server.read_request());
+        std::thread::sleep(Duration::from_millis(50));
+        canceller.cancel();
+        assert!(reader.join().unwrap().is_err());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a cancelled read must not wait for the {SOCKET_READ_TIMEOUT:?} socket timeout"
+        );
     }
 }

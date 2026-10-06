@@ -10,6 +10,7 @@
 
 use action_broker::{
     config::{is_root_owner, is_user_or_root_owner},
+    ipc::ConnectionCanceller,
     policy_hash, ActionError, ActionExecutor, AuditEvent, AuditHealth, AuditLogger, BrokerConfig,
     BrokerServer,
 };
@@ -29,25 +30,107 @@ use tracing::{error, info, warn};
 const MAX_CONCURRENT_ACTIONS: usize = 16;
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
-async fn wait_for_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let mut interrupt =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-                .expect("failed to install SIGINT handler");
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("failed to install SIGTERM handler");
+/// How long a response write may take once shutdown has begun, so a client
+/// that stopped reading cannot hold up the broker for the full socket timeout.
+const SHUTDOWN_WRITE_GRACE: Duration = Duration::from_secs(1);
+
+/// SIGINT/SIGTERM listeners, installed before the broker starts serving so
+/// a registration failure is a startup error rather than a later panic.
+struct ShutdownSignals {
+    interrupt: tokio::signal::unix::Signal,
+    terminate: tokio::signal::unix::Signal,
+}
+
+impl ShutdownSignals {
+    fn install() -> Result<Self> {
+        use tokio::signal::unix::{signal, SignalKind};
+        Ok(Self {
+            interrupt: signal(SignalKind::interrupt())
+                .map_err(|error| anyhow!("failed to install SIGINT handler: {error}"))?,
+            terminate: signal(SignalKind::terminate())
+                .map_err(|error| anyhow!("failed to install SIGTERM handler: {error}"))?,
+        })
+    }
+
+    async fn wait(&mut self) {
         tokio::select! {
-            _ = interrupt.recv() => {}
-            _ = terminate.recv() => {}
+            _ = self.interrupt.recv() => {}
+            _ = self.terminate.recv() => {}
         }
     }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl-C handler");
+}
+
+/// Which blocking protocol step a connection is in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IoPhase {
+    ReadingRequest,
+    WritingResponse,
+}
+
+/// Connections currently blocked on client I/O. On shutdown, clients that
+/// have not finished sending a request are disconnected at once and response
+/// writes get [`SHUTDOWN_WRITE_GRACE`]; connections whose action is running
+/// are left alone so the action finishes within its own deadline and its
+/// audit event is recorded.
+#[derive(Default)]
+struct ClientIo {
+    shutting_down: bool,
+    next_id: u64,
+    active: std::collections::HashMap<u64, (IoPhase, ConnectionCanceller)>,
+}
+
+type ClientIoRegistry = Arc<std::sync::Mutex<ClientIo>>;
+
+/// Removes a connection's entry when its blocking I/O step ends.
+struct ClientIoGuard {
+    registry: ClientIoRegistry,
+    id: u64,
+}
+
+impl Drop for ClientIoGuard {
+    fn drop(&mut self) {
+        if let Ok(mut io) = self.registry.lock() {
+            io.active.remove(&self.id);
+        }
+    }
+}
+
+fn apply_shutdown(phase: IoPhase, canceller: &ConnectionCanceller) {
+    match phase {
+        IoPhase::ReadingRequest => canceller.cancel(),
+        IoPhase::WritingResponse => canceller.limit_writes(SHUTDOWN_WRITE_GRACE),
+    }
+}
+
+/// Register a blocking I/O step; if shutdown already began, the step is
+/// cancelled or bounded immediately.
+fn track_client_io(
+    registry: &ClientIoRegistry,
+    phase: IoPhase,
+    canceller: ConnectionCanceller,
+) -> ClientIoGuard {
+    let mut io = registry
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if io.shutting_down {
+        apply_shutdown(phase, &canceller);
+    }
+    let id = io.next_id;
+    io.next_id = io.next_id.wrapping_add(1);
+    io.active.insert(id, (phase, canceller));
+    ClientIoGuard {
+        registry: Arc::clone(registry),
+        id,
+    }
+}
+
+fn begin_client_io_shutdown(registry: &ClientIoRegistry) {
+    let mut io = registry
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    io.shutting_down = true;
+    for (phase, canceller) in io.active.values() {
+        apply_shutdown(*phase, canceller);
     }
 }
 
@@ -354,6 +437,7 @@ async fn main() -> Result<()> {
 
     // Parse command-line arguments
     let options = parse_args()?;
+    let mut shutdown_signals = ShutdownSignals::install()?;
 
     info!(
         config_file = %options.config_file.display(),
@@ -405,7 +489,8 @@ async fn main() -> Result<()> {
 
     // Main service loop - accept connections and handle requests
     let mut connection_tasks = tokio::task::JoinSet::new();
-    let mut shutdown = Box::pin(wait_for_shutdown_signal());
+    let client_io: ClientIoRegistry = Arc::default();
+    let mut shutdown = Box::pin(shutdown_signals.wait());
     loop {
         // Finished tasks still hold their captured Arcs until their join
         // handle is reaped. Keep the set bounded over a long-running broker
@@ -419,6 +504,7 @@ async fn main() -> Result<()> {
         let accepted = tokio::select! {
             _ = &mut shutdown => {
                 info!("shutdown signal received; flushing audit events");
+                begin_client_io_shutdown(&client_io);
                 let wake_path = server.socket_path().to_owned();
                 let _ = tokio::task::spawn_blocking(move || {
                     std::os::unix::net::UnixStream::connect(wake_path)
@@ -455,14 +541,28 @@ async fn main() -> Result<()> {
         let health_path = health_path.clone();
         let request_counter = Arc::clone(&request_counter);
         let action_slots = Arc::clone(&action_slots);
+        let client_io = Arc::clone(&client_io);
         connection_tasks.spawn(async move {
             let _connection_permit = connection_permit;
-            let (mut conn, request) = match tokio::task::spawn_blocking(move || {
+            let track = |phase, conn: &action_broker::ipc::ServerConnection| {
+                conn.canceller()
+                    .map(|canceller| track_client_io(&client_io, phase, canceller))
+            };
+            let read_guard = match track(IoPhase::ReadingRequest, &conn) {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("failed to prepare connection: {}", e);
+                    return;
+                }
+            };
+            let read = tokio::task::spawn_blocking(move || {
                 let mut conn = conn;
                 let request = conn.read_request()?;
                 Ok::<_, action_broker::ipc::IpcError>((conn, request))
             })
-            .await
+            .await;
+            drop(read_guard);
+            let (mut conn, request) = match read
             {
                 Ok(Ok(value)) => value,
                 Ok(Err(e)) => {
@@ -496,6 +596,7 @@ async fn main() -> Result<()> {
                             ),
                         },
                     );
+                    let _write_guard = track(IoPhase::WritingResponse, &conn).ok();
                     match tokio::task::spawn_blocking(move || conn.write_response(&response)).await
                     {
                         Ok(Ok(())) => {}
@@ -543,6 +644,7 @@ async fn main() -> Result<()> {
                 }
             }
             let success = action_response.is_success();
+            let _write_guard = track(IoPhase::WritingResponse, &conn).ok();
             match tokio::task::spawn_blocking(move || conn.write_response(&action_response)).await {
                 Ok(Ok(())) if verbose => info!(action_id = %action_id, success, "sent response"),
                 Ok(Ok(())) => {}

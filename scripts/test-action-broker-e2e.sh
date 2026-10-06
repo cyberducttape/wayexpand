@@ -90,4 +90,49 @@ assert health["audit_healthy"] is True, health
 assert health["running"] is False, health
 PY
 
+# A client that connects but never sends a request must not hold shutdown
+# for the 30 s socket read timeout: the broker disconnects it on SIGTERM.
+"$project_dir/target/debug/wayexpand-action-broker" \
+    --config "$config" --socket "$socket" >"$test_root/broker-idle.log" 2>&1 &
+broker_pid=$!
+
+SOCKET="$socket" BROKER_PID="$broker_pid" python3 - <<'PY'
+import os
+import signal
+import socket
+import time
+
+path = os.environ["SOCKET"]
+pid = int(os.environ["BROKER_PID"])
+deadline = time.time() + 5
+while time.time() < deadline:
+    try:
+        idle = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        idle.connect(path)
+        break
+    except OSError:
+        time.sleep(0.05)
+else:
+    raise SystemExit("broker socket did not become ready")
+
+time.sleep(0.2)  # let the broker accept and start reading
+started = time.time()
+os.kill(pid, signal.SIGTERM)
+while time.time() - started < 5:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        break
+    with open(f"/proc/{pid}/stat", encoding="ascii") as stat:
+        if stat.read().split(") ", 1)[1].startswith("Z"):
+            break
+    time.sleep(0.05)
+else:
+    raise SystemExit("broker shutdown waited on an idle client")
+idle.close()
+PY
+
+wait "$broker_pid"
+broker_pid=0
+
 printf '%s\n' "Action Broker end-to-end test passed"

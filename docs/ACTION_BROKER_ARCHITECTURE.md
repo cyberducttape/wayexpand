@@ -136,6 +136,10 @@ What's implemented:
     rotates the active JSONL file at 16 MiB, retaining one `.1` generation
   - Clean broker shutdown flushes accepted queued events and joins the audit
     writer before the process exits
+  - On SIGINT/SIGTERM the broker stops accepting, disconnects clients that
+    have not finished sending a request, gives in-flight response writes one
+    second, and lets running actions finish within their own timeout so their
+    audit events are recorded
   - Runtime health is published as mode `0600` JSON beside the broker socket;
     `wayexpand doctor` reports queue drops, write failures, and health state
   - Slow or unavailable storage never blocks action execution; dropped events
