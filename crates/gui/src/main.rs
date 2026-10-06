@@ -74,6 +74,7 @@ struct RouteRecommendation {
     focus_tracking: bool,
     sensitive_fields: bool,
     atomic_replace: bool,
+    certified: bool,
 }
 
 fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> {
@@ -98,6 +99,7 @@ fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> 
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
+        certified: contract.is_certified(),
     })
 }
 /// Built-in template variables offered as insert buttons. Their hover

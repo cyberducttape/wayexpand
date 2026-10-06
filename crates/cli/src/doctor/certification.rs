@@ -26,8 +26,12 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             })
         });
     let ibus_installed = ibus_engine_available();
-    let recommendation = recommended_route(&capabilities, ibus_installed, policy_allows_ibus);
-    let ibus = matches!(recommendation, Some(RecommendedRoute::IBus));
+    let recommendation = recommended_route(&capabilities, ibus_installed, |route| {
+        policy_result
+            .as_ref()
+            .is_ok_and(|policy| route_allowed_by_policy(policy, route))
+    });
+    let ibus = recommendation.is_some_and(|route| route.id() == "ibus");
     let selected_label = match recommendation {
         Some(route) => route.setup_backend(),
         None => selection

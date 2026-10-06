@@ -46,14 +46,21 @@ impl RouteBackend {
 }
 
 /// A route that `setup --mode recommended` can configure without an expert
-/// backend override. Raw evdev is intentionally absent: it remains an
-/// explicit maximum-compatibility opt-in because it can observe password
-/// fields. Keep this in the shared selection crate so GUI copy, CLI setup,
-/// doctor, and certification describe the same topology.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecommendedRoute {
-    IBus,
+/// backend override, as chosen by [`plan_routes`]. Raw evdev routes can never
+/// be recommended: they remain an explicit maximum-compatibility opt-in
+/// because they can observe password fields. Keep this in the shared
+/// selection crate so GUI copy, CLI setup, doctor, and certification describe
+/// the same topology.
+#[derive(Debug, Clone, Copy)]
+pub struct RecommendedRoute(&'static RouteContract);
+
+impl PartialEq for RecommendedRoute {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.id == other.0.id
+    }
 }
+
+impl Eq for RecommendedRoute {}
 
 /// Operator-facing route metadata shared by setup, diagnostics, GUI copy,
 /// and certification documentation. The data is maintained in the checked-in
@@ -155,14 +162,12 @@ pub fn route_contract_for(source: &str, injection: &str) -> Option<&'static Rout
 
 impl RecommendedRoute {
     pub fn contract(self) -> &'static RouteContract {
-        let id = match self {
-            Self::IBus => "ibus",
-        };
-        route_catalog()
-            .routes
-            .iter()
-            .find(|route| route.id == id)
-            .unwrap_or_else(|| panic!("missing route contract {id:?}"))
+        self.0
+    }
+
+    /// The route contract's stable id (for example `ibus`).
+    pub fn id(self) -> &'static str {
+        &self.0.id
     }
 }
 
@@ -180,19 +185,200 @@ impl RecommendedRoute {
     }
 }
 
-/// Resolve the one-click/recommended route from one capability snapshot.
-/// Policy decisions are explicit inputs so callers cannot silently fall back
-/// to a different route after the UI has displayed its recommendation.
+/// Where a route stands on this machine, from best to worst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteStanding {
+    /// The planner's choice for Recommended mode.
+    Recommended,
+    /// Usable and allowed, but ranked below the recommended route.
+    Available,
+    /// Usable only after the user explicitly accepts global keyboard
+    /// visibility (raw evdev capture). Never recommended.
+    RequiresConsent,
+    /// The capabilities are present but organization policy forbids it.
+    BlockedByPolicy,
+    /// A required protocol, device, or service is missing.
+    Unavailable,
+}
+
+/// One route of a [`RoutePlan`] with its standing and the reason for it.
+#[derive(Debug, Clone, Copy)]
+pub struct PlannedRoute {
+    pub contract: &'static RouteContract,
+    pub standing: RouteStanding,
+    pub reason: &'static str,
+}
+
+/// Every catalog route ranked for this machine.
+#[derive(Debug, Clone)]
+pub struct RoutePlan {
+    pub routes: Vec<PlannedRoute>,
+}
+
+impl RoutePlan {
+    pub fn recommended(&self) -> Option<RecommendedRoute> {
+        self.routes
+            .iter()
+            .find(|route| route.standing == RouteStanding::Recommended)
+            .map(|route| RecommendedRoute(route.contract))
+    }
+}
+
+impl RouteContract {
+    /// Raw evdev capture observes every keystroke, including password fields.
+    pub fn requires_raw_input(&self) -> bool {
+        self.capture == "evdev"
+    }
+}
+
+/// Rank of a route among eligible candidates; lower is better. Certification
+/// evidence dominates: any certified route outranks every experimental one.
+/// Within the same evidence level, native text-input (input-method-v2) ranks
+/// above IBus, and raw-input routes come last (they need consent anyway).
+fn route_rank(route: &RouteContract) -> (bool, bool, u8) {
+    let kind = match route.capture.as_str() {
+        "input-method-v2" => 0,
+        "ibus" => 1,
+        _ => 2,
+    };
+    (route.requires_raw_input(), !route.is_certified(), kind)
+}
+
+/// Whether a route's protocols and services are present, judged from one
+/// capability snapshot (no portal dialog is triggered).
+fn route_availability(
+    route: &RouteContract,
+    capabilities: &Capabilities,
+    ibus_available: bool,
+) -> Result<(), &'static str> {
+    // libei can be reached through a direct EIS socket, or through the
+    // RemoteDesktop portal on desktops that provide it.
+    let libei_reachable = capabilities.has_direct_libei_socket
+        || matches!(
+            capabilities.compositor,
+            Compositor::KdePlasma | Compositor::Gnome
+        );
+    match route.id.as_str() {
+        "ibus" if ibus_available => Ok(()),
+        "ibus" => Err("the WayExpand IBus engine is not installed or IBus is unavailable"),
+        "input-method-v2" if !capabilities.has_input_method_v2 => {
+            Err("the compositor does not offer zwp_input_method_manager_v2")
+        }
+        // Without libei key pass-through the exclusive grab would swallow
+        // unsupported keys, so the daemon refuses to capture.
+        "input-method-v2" if !libei_reachable => {
+            Err("libei key pass-through is unavailable for the exclusive input-method grab")
+        }
+        "input-method-v2" => Ok(()),
+        _ if route.requires_raw_input() && !capabilities.has_dev_input => {
+            Err("no readable /dev/input keyboard")
+        }
+        "kde-evdev-libei" if !libei_reachable => Err("no libei/EIS path was detected"),
+        "sway-evdev-wlroots" if !capabilities.has_virtual_keyboard => {
+            Err("the compositor does not offer the wlroots virtual-keyboard protocol")
+        }
+        "kde-evdev-libei" | "sway-evdev-wlroots" => Ok(()),
+        _ => Err("this route is not known to the planner"),
+    }
+}
+
+/// Rank every catalog route for this machine: discover candidates from the
+/// capability snapshot, drop unavailable ones, apply organization policy
+/// (`allowed` receives the route contract), require consent for raw input,
+/// and order the rest by certification evidence and route kind. The best
+/// eligible route becomes the recommendation.
+pub fn plan_routes(
+    capabilities: &Capabilities,
+    ibus_available: bool,
+    allowed: impl Fn(&RouteContract) -> bool,
+) -> RoutePlan {
+    let mut routes: Vec<PlannedRoute> = route_catalog()
+        .routes
+        .iter()
+        .map(|contract| {
+            let (standing, reason) =
+                match route_availability(contract, capabilities, ibus_available) {
+                    Err(reason) => (RouteStanding::Unavailable, reason),
+                    Ok(()) if !allowed(contract) => (
+                        RouteStanding::BlockedByPolicy,
+                        "organization policy does not allow this route",
+                    ),
+                    Ok(()) if contract.requires_raw_input() => (
+                        RouteStanding::RequiresConsent,
+                        "raw keyboard capture needs explicit consent; never selected automatically",
+                    ),
+                    Ok(()) => (RouteStanding::Available, "available"),
+                };
+            PlannedRoute {
+                contract,
+                standing,
+                reason,
+            }
+        })
+        .collect();
+    let standing_rank = |standing: RouteStanding| match standing {
+        RouteStanding::Recommended | RouteStanding::Available => 0,
+        RouteStanding::RequiresConsent => 1,
+        RouteStanding::BlockedByPolicy => 2,
+        RouteStanding::Unavailable => 3,
+    };
+    routes.sort_by_key(|route| (standing_rank(route.standing), route_rank(route.contract)));
+    if let Some(best) = routes
+        .iter_mut()
+        .find(|route| route.standing == RouteStanding::Available)
+    {
+        best.standing = RouteStanding::Recommended;
+        best.reason = if best.contract.is_certified() {
+            "highest-ranked certified route"
+        } else {
+            "highest-ranked available route; experimental until certified"
+        };
+    }
+    RoutePlan { routes }
+}
+
+/// Whether organization policy allows a setup backend (`ibus`,
+/// `input-method`, or `evdev`). Shared by setup, doctor, and the GUI so the
+/// route planner applies one policy everywhere.
+pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backend: &str) -> bool {
+    match backend {
+        // IBus is governed under its own name and must also satisfy the
+        // policy's capability requirements, as the IBus service enforces.
+        "ibus" => {
+            let enforcement = policy.effective_enforcement_policy();
+            policy.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
+                && enforcement
+                    .capability_violation_for_source(
+                        wayexpand_backend_ibus::injector_capabilities(),
+                        wayexpand_backend_ibus::source_capabilities(),
+                    )
+                    .is_none()
+        }
+        "input-method" => policy.backend_allowed("input-method-v2"),
+        // The packaged setup path enables wayexpand-evdev.service, whose
+        // declared output is evdev + libei. Do not treat a wlroots-only
+        // policy as permission to activate that different service.
+        "evdev" => policy.backend_allowed("libei"),
+        _ => false,
+    }
+}
+
+/// [`plan_routes`] policy filter: a route is allowed when policy allows the
+/// backend that setup would configure for it.
+pub fn route_allowed_by_policy(
+    policy: &wayexpand_core::OrganizationPolicy,
+    route: &RouteContract,
+) -> bool {
+    setup_backend_allowed(policy, &route.setup_backend)
+}
+
+/// The recommended route from [`plan_routes`].
 pub fn recommended_route(
     capabilities: &Capabilities,
     ibus_available: bool,
-    input_method_allowed: bool,
+    allowed: impl Fn(&RouteContract) -> bool,
 ) -> Option<RecommendedRoute> {
-    if ibus_available && input_method_allowed {
-        return Some(RecommendedRoute::IBus);
-    }
-    let _ = capabilities;
-    None
+    plan_routes(capabilities, ibus_available, allowed).recommended()
 }
 
 impl InjectorBackend {
@@ -779,26 +965,114 @@ mod tests {
         assert!(selection.explanation().contains("conservative default"));
     }
 
+    fn allow_all(_: &RouteContract) -> bool {
+        true
+    }
+
     #[test]
     fn recommended_route_is_shared_and_policy_aware() {
+        // IBus only (no input-method-v2).
         let capabilities = capabilities(false, true, true);
         assert_eq!(
-            recommended_route(&capabilities, true, true),
-            Some(RecommendedRoute::IBus)
+            recommended_route(&capabilities, true, allow_all).map(RecommendedRoute::id),
+            Some("ibus")
         );
-        assert_eq!(recommended_route(&capabilities, true, false), None);
-        assert_eq!(recommended_route(&capabilities, false, true), None);
+        assert_eq!(
+            recommended_route(&capabilities, true, |route| route.id != "ibus"),
+            None
+        );
+        assert_eq!(recommended_route(&capabilities, false, allow_all), None);
+    }
+
+    #[test]
+    fn experimental_input_method_outranks_experimental_ibus_when_pass_through_exists() {
+        let capabilities = capabilities(true, false, true);
+        let plan = plan_routes(&capabilities, true, allow_all);
+        assert_eq!(
+            plan.recommended().map(RecommendedRoute::id),
+            Some("input-method-v2")
+        );
+        let ibus = plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "ibus")
+            .unwrap();
+        assert_eq!(ibus.standing, RouteStanding::Available);
+        // Policy can still steer the recommendation back to IBus.
+        assert_eq!(
+            recommended_route(&capabilities, true, |route| route.id != "input-method-v2")
+                .map(RecommendedRoute::id),
+            Some("ibus")
+        );
+    }
+
+    #[test]
+    fn input_method_needs_libei_pass_through() {
+        let mut capabilities = capabilities(true, false, false);
+        capabilities.compositor = Compositor::Sway;
+        let plan = plan_routes(&capabilities, true, allow_all);
+        assert_eq!(plan.recommended().map(RecommendedRoute::id), Some("ibus"));
+        let input_method = plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "input-method-v2")
+            .unwrap();
+        assert_eq!(input_method.standing, RouteStanding::Unavailable);
     }
 
     #[test]
     fn recommended_route_never_selects_raw_input() {
-        let capabilities = capabilities(true, true, true);
-        assert_eq!(recommended_route(&capabilities, false, false), None);
+        // Every raw-input route available, nothing else.
+        let capabilities = capabilities(false, true, true);
+        let plan = plan_routes(&capabilities, false, allow_all);
+        assert_eq!(plan.recommended(), None);
+        for route in &plan.routes {
+            if route.contract.requires_raw_input() {
+                assert_ne!(route.standing, RouteStanding::Recommended);
+                assert_ne!(route.standing, RouteStanding::Available);
+            }
+        }
+        assert!(plan
+            .routes
+            .iter()
+            .any(|route| route.standing == RouteStanding::RequiresConsent));
+    }
+
+    #[test]
+    fn certification_evidence_outranks_route_kind() {
+        let ibus = route_catalog()
+            .routes
+            .iter()
+            .find(|r| r.id == "ibus")
+            .unwrap();
+        let input_method = route_catalog()
+            .routes
+            .iter()
+            .find(|r| r.id == "input-method-v2")
+            .unwrap();
+        // Both experimental today: native input-method ranks first.
+        assert!(route_rank(input_method) < route_rank(ibus));
+        // A certified IBus would outrank an experimental input-method.
+        let certified_ibus = (false, false, 1u8);
+        assert!(certified_ibus < route_rank(input_method));
+    }
+
+    #[test]
+    fn policy_blocked_routes_are_reported_not_recommended() {
+        let capabilities = capabilities(true, false, true);
+        let plan = plan_routes(&capabilities, true, |_| false);
+        assert_eq!(plan.recommended(), None);
+        assert!(plan
+            .routes
+            .iter()
+            .filter(|route| route.contract.id == "ibus" || route.contract.id == "input-method-v2")
+            .all(|route| route.standing == RouteStanding::BlockedByPolicy));
     }
 
     #[test]
     fn recommended_routes_have_complete_operator_contracts() {
-        let route = RecommendedRoute::IBus;
+        let route = recommended_route(&capabilities(false, false, false), true, allow_all)
+            .expect("IBus is recommended when it is the only route");
         let contract = route.contract();
         assert!(!contract.id.is_empty());
         assert!(!contract.capture.is_empty());

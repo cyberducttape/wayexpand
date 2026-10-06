@@ -143,7 +143,9 @@ directly, or run `wayexpand-gui --picker` from a custom shortcut.
 With an empty library the editor shows three steps: turn on WayExpand, add a
 first snippet (test snippet, new snippet, or Espanso import), and try it. *Turn
 on WayExpand* runs `wayexpand setup --yes` in the background, which configures
-only the Recommended mode and never grants raw keyboard access; the result is
+only the Recommended mode (the route planner's choice, which may be an
+experimental route such as input-method-v2 and is labelled as such) and never
+grants raw keyboard access; the result is
 shown in the status line and the daemon status refreshes. The same button
 appears in the toolbar whenever the library has snippets but no daemon is
 running.

@@ -510,6 +510,11 @@ impl Strings {
                 if route.focus_tracking {
                     properties.push("application focus tracking".into());
                 }
+                properties.push(if route.certified {
+                    "certified".into()
+                } else {
+                    "experimental until certified".into()
+                });
                 properties.join(" · ")
             }
             Language::German => {
@@ -524,6 +529,11 @@ impl Strings {
                 if route.focus_tracking {
                     properties.push("Verfolgung des App-Fokus".into());
                 }
+                properties.push(if route.certified {
+                    "zertifiziert".into()
+                } else {
+                    "experimentell bis zur Zertifizierung".into()
+                });
                 properties.join(" · ")
             }
         };

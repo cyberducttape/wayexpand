@@ -52,15 +52,16 @@ safe to recommend for everyday desktop use.
 
 ### 5. Certification-driven route planner
 
-`recommended_route()` only knows IBus and ignores the capability probe, so a
-machine with a better route still reports no safe automatic path.
+`plan_routes()` ranks every catalog route from the capability snapshot,
+organization policy, and route certification status: certified routes first,
+then input-method-v2 (with libei pass-through), then IBus; raw evdev routes
+always require explicit consent.
 
-- [ ] Discover routes, negotiate capabilities, load local certification
-      evidence, apply organization policy, then rank: certified native
-      text-input, certified IBus/Fcitx, certified libei, experimental routes,
-      and evdev only with explicit consent.
-- [ ] Label each route as recommended, experimental, or requiring consent in
-      setup, the GUI, and `doctor`. Evdev must never be chosen without consent.
+- [ ] Feed local certification evidence (from `wayexpand doctor --certify`
+      records) into the planner, not only the catalog status.
+- [ ] Add Fcitx5 as a candidate once an integration exists.
+- [ ] Show the full ranked plan (standing and reason per route) in setup, the
+      GUI, and `doctor`.
 
 ### 6. IME and preedit strategy
 

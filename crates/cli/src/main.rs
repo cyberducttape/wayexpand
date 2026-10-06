@@ -33,7 +33,7 @@ use errors::{
 };
 use setup::{
     configure_setup_backend, libei_portal_candidate, prompt_mode_choice, recommended_setup_backend,
-    setup_backend_allowed, setup_backend_for_mode,
+    setup_backend_for_mode,
 };
 use std::{
     env, fs,
@@ -52,7 +52,8 @@ use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{
-    explain_auto_selection, probe_capabilities, recommended_route, RecommendedRoute,
+    explain_auto_selection, probe_capabilities, recommended_route, route_allowed_by_policy,
+    setup_backend_allowed,
 };
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{

@@ -315,11 +315,9 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     let recommended_route = wayexpand_core::load_organization_policy()
         .ok()
         .and_then(|policy| {
-            recommended_route(
-                &selection_capabilities,
-                ibus_available,
-                policy.backend_allowed("input-method-v2"),
-            )
+            recommended_route(&selection_capabilities, ibus_available, |route| {
+                wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
+            })
         });
     let fleet_status = match Config::load(config_path) {
         Ok(config) => match wayexpand_core::load_organization_policy().and_then(|policy| {

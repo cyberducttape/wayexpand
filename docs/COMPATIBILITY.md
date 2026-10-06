@@ -379,7 +379,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     unshipped entries that are not directly governed as output backends.
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
-- `setup_recommendation` (object): The setup mode selected from current capabilities; it never turns an experimental path into Recommended mode.
+- `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
 - `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_only`. These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.

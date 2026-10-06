@@ -35,7 +35,10 @@ fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::Expansi
 
 #[test]
 fn route_recommendation_preserves_ibus_topology() {
-    let shared_route = RecommendedRoute::IBus;
+    let ibus_only = Capabilities::default();
+    let shared_route = wayexpand_backend_selection::recommended_route(&ibus_only, true, |_| true)
+        .expect("IBus is recommended when it is the only route");
+    assert_eq!(shared_route.id(), "ibus");
     let route = route_recommendation(shared_route).expect("the IBus route contract is supported");
     assert_eq!(route.capture, wayexpand_core::BackendKind::InputMethodV2);
     assert_eq!(route.injection, wayexpand_core::BackendKind::InputMethodV2);
@@ -50,7 +53,9 @@ fn route_recommendation_preserves_ibus_topology() {
         has_direct_libei_socket: true,
         ..Capabilities::default()
     };
-    assert!(wayexpand_backend_selection::recommended_route(&capabilities, false, true).is_none());
+    assert!(
+        wayexpand_backend_selection::recommended_route(&capabilities, false, |_| true).is_none()
+    );
 }
 
 #[test]

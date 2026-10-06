@@ -12,11 +12,9 @@ pub(crate) fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    match recommended_route(
-        capabilities,
-        ibus_engine_available(),
-        setup_backend_allowed(policy, "ibus"),
-    ) {
+    match recommended_route(capabilities, ibus_engine_available(), |route| {
+        route_allowed_by_policy(policy, route)
+    }) {
         Some(route) => {
             let contract = route.contract();
             SetupRecommendation {
@@ -72,29 +70,6 @@ pub(crate) fn setup_backend_for_mode(
         other => bail!(
             "unknown compatibility mode {other:?}; choose recommended, maximum, or experimental"
         ),
-    }
-}
-
-pub(crate) fn setup_backend_allowed(policy: &OrganizationPolicy, backend: &str) -> bool {
-    match backend {
-        // IBus is governed under its own name and must also satisfy the
-        // policy's capability requirements, as the IBus service enforces.
-        "ibus" => {
-            let enforcement = policy.effective_enforcement_policy();
-            policy.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
-                && enforcement
-                    .capability_violation_for_source(
-                        wayexpand_backend_ibus::injector_capabilities(),
-                        wayexpand_backend_ibus::source_capabilities(),
-                    )
-                    .is_none()
-        }
-        "input-method" => policy.backend_allowed("input-method-v2"),
-        // The packaged setup path enables wayexpand-evdev.service, whose
-        // declared output is evdev + libei. Do not treat a wlroots-only
-        // policy as permission to activate that different service.
-        "evdev" => policy.backend_allowed("libei"),
-        _ => false,
     }
 }
 
