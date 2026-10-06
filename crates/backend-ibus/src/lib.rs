@@ -420,16 +420,7 @@ impl IbusEngineAdapter {
     pub fn replace_config(&mut self, config: Config) -> Result<(), wayexpand_core::ConfigError> {
         let mut engine = ExpansionEngine::new(config)?;
         engine.apply_administrator_policy(&self.policy)?;
-        engine.set_user_paused(self.engine.is_user_paused());
-        engine.set_sensitive_focus(self.engine.is_sensitive_focus());
-        engine.set_current_window(self.engine.current_window().cloned());
-        engine.set_commands_disabled(self.engine.commands_disabled());
-        engine.set_direct_commands_disabled(self.engine.direct_commands_disabled());
-        engine.set_title_matching_disabled(self.engine.title_matching_disabled());
-        engine.set_reinsert_terminators(self.engine.reinserts_terminators());
-        engine.set_composition_active(self.engine.is_composition_active());
-        engine.set_completion_notifier(self.engine.completion_notifier());
-        engine.set_clipboard_reader(self.engine.clipboard_reader());
+        engine.inherit_runtime_state(&self.engine);
         if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"

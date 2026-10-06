@@ -245,32 +245,14 @@ impl ReloadableConfig {
                                 "asynchronous workers could not restart after configuration reload; command-backed actions are disabled"
                             );
                         }
+                        // Pause, password-field, composition and window
+                        // state, command restrictions and host hooks all
+                        // carry over; losing any of them would, for
+                        // example, resume matching inside a password field.
+                        engine.inherit_runtime_state(&self.engine);
                         engine.set_commands_disabled(
                             self.engine.commands_disabled() || workers_restart_failed,
                         );
-                        engine.set_title_matching_disabled(self.engine.title_matching_disabled());
-                        engine.set_reinsert_terminators(self.engine.reinserts_terminators());
-                        // Keep waking the reactor when commands finish.
-                        engine.set_completion_notifier(self.engine.completion_notifier());
-                        engine.set_clipboard_reader(self.engine.clipboard_reader());
-                        engine.set_clipboard_prefetch(self.engine.clipboard_prefetch());
-                        // A fresh engine has no window context yet. Without
-                        // this, any reload (e.g. every GUI save) would
-                        // wrongly fail-close `app_filter`-scoped expansions
-                        // until the next real focus change, even though the
-                        // user's actual window never changed.
-                        engine.set_current_window(self.engine.current_window().cloned());
-                        // CRITICAL: Restore runtime safety state across reloads.
-                        // A fresh engine defaults user_paused=false and sensitive_focus=false,
-                        // losing any protection or pause state. This causes:
-                        // - Password-field protection to be lost until the next compositor
-                        //   focus event, creating a security window where matching resumes
-                        //   in a sensitive field despite the old engine being paused.
-                        // - User pause state to be lost, making the daemon appear to resume
-                        //   matching even though the control status still says paused.
-                        engine.set_user_paused(self.engine.is_user_paused());
-                        engine.set_sensitive_focus(self.engine.is_sensitive_focus());
-                        engine.set_composition_active(self.engine.is_composition_active());
                         self.engine = engine;
                         self.stamp = stable_stamp;
                         self.observed = stable_stamp;

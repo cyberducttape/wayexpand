@@ -1612,6 +1612,36 @@ impl ExpansionEngine {
         !self.user_paused && !self.sensitive_focus && !self.composition_active && !self.form_active
     }
 
+    #[cfg(any(test, feature = "fuzzing"))]
+    pub(crate) fn buffer_len_for_checks(&self) -> usize {
+        self.buffer.len()
+    }
+
+    #[cfg(any(test, feature = "fuzzing"))]
+    pub(crate) fn max_buffer_chars_for_checks(&self) -> usize {
+        self.max_buffer_chars
+    }
+
+    /// Carry runtime state across a configuration reload, from the engine
+    /// this one replaces: pause, sensitive-field and composition gates,
+    /// window identity, command and title-matching restrictions, terminator
+    /// handling, and host hooks. Every host that reloads uses this one list,
+    /// so a protection cannot be dropped by one host and kept by another.
+    /// Asynchronous workers are not carried; hosts restart them.
+    pub fn inherit_runtime_state(&mut self, previous: &ExpansionEngine) {
+        self.set_user_paused(previous.is_user_paused());
+        self.set_sensitive_focus(previous.is_sensitive_focus());
+        self.set_composition_active(previous.is_composition_active());
+        self.set_current_window(previous.current_window().cloned());
+        self.set_commands_disabled(previous.commands_disabled());
+        self.set_direct_commands_disabled(previous.direct_commands_disabled());
+        self.set_title_matching_disabled(previous.title_matching_disabled());
+        self.set_reinsert_terminators(previous.reinserts_terminators());
+        self.set_completion_notifier(previous.completion_notifier());
+        self.set_clipboard_reader(previous.clipboard_reader());
+        self.set_clipboard_prefetch(previous.clipboard_prefetch());
+    }
+
     /// Whether a snippet form is open (capture is suspended meanwhile).
     pub fn is_form_open(&self) -> bool {
         self.form_active
