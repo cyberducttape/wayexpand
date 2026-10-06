@@ -401,7 +401,9 @@ impl Daemon {
                                 &mut self.status_publisher,
                                 &self.control,
                                 self.active_source,
-                                self.backend_name,
+                                wayexpand_backend_selection::injection_status_label(
+                                    self.backend_name,
+                                ),
                                 self.connection_state,
                                 &self.path,
                                 self.config.healthy(),

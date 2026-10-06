@@ -116,16 +116,35 @@ pub fn recommended_mode_description() -> &'static str {
     &route_catalog().recommended_description
 }
 
+/// Canonical status/catalog label for an output backend name. Selection and
+/// the CLI use the short spelling `wlroots`, while the injector and the route
+/// catalog name that output `wlroots-virtual-keyboard`. The daemon publishes
+/// this label so status consumers never see two spellings of one backend.
+pub fn injection_status_label(backend: &str) -> &str {
+    match backend {
+        "wlroots" => "wlroots-virtual-keyboard",
+        other => other,
+    }
+}
+
 /// Find the route contract represented by daemon status fields. The
 /// input-method daemon uses `source=input-method` while the contract names
 /// that capture path `input-method-v2`; keep that compatibility alias here so
 /// GUI and CLI consumers do not duplicate it.
+///
+/// Input-method-v2 captures and injects through one protocol object, so its
+/// route is identified by the source alone: status may carry the resolved
+/// pair's `none`, the canonical `input-method-v2`, or the libei key
+/// pass-through while that is reconnecting.
 pub fn route_contract_for(source: &str, injection: &str) -> Option<&'static RouteContract> {
-    route_catalog().routes.iter().find(|route| {
-        let capture_matches = route.capture == source
-            || (source == "input-method" && route.capture == "input-method-v2");
-        capture_matches && route.injection == injection
-    })
+    let (capture, injection) = match source {
+        "input-method" | "input-method-v2" => ("input-method-v2", "input-method-v2"),
+        other => (other, injection_status_label(injection)),
+    };
+    route_catalog()
+        .routes
+        .iter()
+        .find(|route| route.capture == capture && route.injection == injection)
 }
 
 impl RecommendedRoute {
@@ -792,5 +811,57 @@ mod tests {
         let contract = route_contract_for("input-method", "input-method-v2").unwrap();
         assert_eq!(contract.id, "input-method-v2");
         assert!(route_contract_for("unknown", "backend").is_none());
+    }
+
+    #[test]
+    fn every_resolved_pair_status_resolves_to_a_route_contract() {
+        // The exact (source, backend) values the resolver hands the daemon,
+        // plus their canonical status labels, must all find a contract.
+        let input_method = ResolvedBackendPair::InputMethod;
+        assert_eq!(
+            route_contract_for(input_method.source(), input_method.backend())
+                .unwrap()
+                .id,
+            "input-method-v2"
+        );
+        assert_eq!(
+            route_contract_for("input-method", "none").unwrap().id,
+            "input-method-v2"
+        );
+        assert_eq!(
+            route_contract_for("input-method", "libei").unwrap().id,
+            "input-method-v2"
+        );
+        for (pair, id) in [
+            (
+                ResolvedBackendPair::Evdev(InjectorBackend::Libei),
+                "kde-evdev-libei",
+            ),
+            (
+                ResolvedBackendPair::Evdev(InjectorBackend::Wlroots),
+                "sway-evdev-wlroots",
+            ),
+        ] {
+            assert_eq!(
+                route_contract_for(pair.source(), pair.backend())
+                    .unwrap()
+                    .id,
+                id
+            );
+            assert_eq!(
+                route_contract_for(pair.source(), injection_status_label(pair.backend()))
+                    .unwrap()
+                    .id,
+                id
+            );
+        }
+        assert_eq!(
+            route_contract_for("evdev", "wlroots-virtual-keyboard")
+                .unwrap()
+                .id,
+            "sway-evdev-wlroots"
+        );
+        assert!(route_contract_for("evdev", "none").is_none());
+        assert!(route_contract_for("stdin", "none").is_none());
     }
 }

@@ -394,6 +394,7 @@ pub fn connect_output_with_retry(
     persist_portal_token: bool,
     portal_token_path_arg: Option<&Path>,
 ) -> Result<Option<Box<dyn TextInjector>>> {
+    let status_backend = wayexpand_backend_selection::injection_status_label(backend);
     let mut retry_delay = Duration::from_millis(250);
     loop {
         match connect_output_backend(backend, persist_portal_token, portal_token_path_arg) {
@@ -401,7 +402,7 @@ pub fn connect_output_with_retry(
                 status::set_daemon_status_with_mode(
                     control,
                     source,
-                    backend,
+                    status_backend,
                     "connected",
                     config_path,
                     config_healthy,
@@ -420,7 +421,7 @@ pub fn connect_output_with_retry(
                 status::set_daemon_status_direct(
                     control,
                     source,
-                    backend,
+                    status_backend,
                     "reconnecting",
                     config_path,
                     config_healthy,

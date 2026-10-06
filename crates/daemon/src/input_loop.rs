@@ -112,7 +112,7 @@ pub fn connect_input_method_session(
             status::set_daemon_status_direct(
                 control,
                 "input-method",
-                "libei",
+                "input-method-v2",
                 "reconnecting",
                 config_path,
                 config_healthy,
@@ -209,7 +209,7 @@ pub fn connect_evdev_with_retry(
     backend_name: &str,
     config_healthy: bool,
 ) -> Result<EvdevSource> {
-    let backend = backend_name;
+    let backend = wayexpand_backend_selection::injection_status_label(backend_name);
     let mut retry_delay = Duration::from_millis(250);
     loop {
         match EvdevSource::connect() {
