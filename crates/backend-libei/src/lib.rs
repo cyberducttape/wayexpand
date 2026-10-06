@@ -8,8 +8,8 @@
 //! synthesizing individual key presses over `ei_keyboard` instead. That
 //! fallback is layout-dependent and strictly weaker: the EIS server, not
 //! this client, owns the keyboard's keymap, so only characters already
-//! reachable on the *current* layout via an unshifted or Shift-level keysym
-//! can be typed. A character the layout cannot produce is reported as an
+//! reachable on the *current* layout -- unmodified or with the layout's own
+//! Shift, AltGr (ISO Level3) and Level5 keys -- can be typed. A character the layout cannot produce is reported as an
 //! error before anything is typed, rather than silently dropped or
 //! mistyped. It accepts a direct `LIBEI_SOCKET` or the XDG RemoteDesktop
 //! portal, but portal access is only attempted when this backend is
@@ -50,7 +50,9 @@ use std::{
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
 use wayexpand_core::{InjectorCapabilities, InjectorError, KeyEventState, Modifiers, TextInjector};
-use xkbcommon_rs::{Context, Keymap as XkbKeymap, KeymapFormat};
+use xkbcommon_rs::{
+    xkb_state::KeyDirection, Context, Keymap as XkbKeymap, KeymapFormat, State as XkbState,
+};
 
 const BACKEND_NAME: &str = "libei";
 const KEY_BACKSPACE: u32 = 14;
@@ -221,18 +223,36 @@ impl TextMode {
     }
 }
 
-/// Maps characters to a keycode (and whether Shift is needed) reachable on
-/// the EIS server's own keymap, built once at connect time.
+/// Modifier keys the keysym fallback may hold around a key, as bits of
+/// [`KeyStroke::modifiers`]. Each is a key of the server's own keymap, so the
+/// compositor resolves the level exactly as for a physical keyboard.
+const MOD_SHIFT: u8 = 1 << 0;
+const MOD_LEVEL3: u8 = 1 << 1;
+const MOD_LEVEL5: u8 = 1 << 2;
+/// The `MOD_*` bits, indexed like [`KeysymTyper::modifier_keycodes`].
+const MODIFIER_BITS: [u8; 3] = [MOD_SHIFT, MOD_LEVEL3, MOD_LEVEL5];
+
+/// One synthesized key press: an evdev keycode and the modifier keys (bits
+/// of `MOD_*`) held around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KeyStroke {
+    keycode: u32,
+    modifiers: u8,
+}
+
+/// Maps characters to a keystroke reachable on the EIS server's own keymap,
+/// built once at connect time.
 struct KeysymTyper {
-    /// Evdev keycode of a Shift key, pressed around characters that need it.
-    shift_keycode: u32,
+    /// Evdev keycodes of the Shift, Level3 (AltGr) and Level5 keys, indexed
+    /// like the `MOD_*` bits. Level3/Level5 are absent on layouts that do
+    /// not define them.
+    modifier_keycodes: [Option<u32>; 3],
     /// Evdev keycode for Return/Enter key (for newlines).
     return_keycode: u32,
     /// Evdev keycode for Tab key (for horizontal tabs).
     tab_keycode: u32,
-    /// Linux evdev keycode, and whether the Shift level was needed to reach
-    /// it, keyed by the character it produces.
-    chars: HashMap<char, (u32, bool)>,
+    /// The simplest keystroke producing each character on layout 0.
+    chars: HashMap<char, KeyStroke>,
 }
 
 impl KeysymTyper {
@@ -244,31 +264,66 @@ impl KeysymTyper {
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Return key".into()))?;
         let tab_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Tab)
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Tab key".into()))?;
+        let modifier_keycodes = [
+            Some(shift_keycode),
+            find_keycode_for_keysym(keymap, xkeysym::key::ISO_Level3_Shift),
+            find_keycode_for_keysym(keymap, xkeysym::key::ISO_Level5_Shift),
+        ];
+        // Rather than translating XKB modifier masks back into keys, hold
+        // each available combination of the layout's own modifier keys in an
+        // XKB state and record what every key then produces. Fewest
+        // modifiers first, so the simplest chord wins (e.g. 'a' unmodified,
+        // 'A' with Shift, '@' with AltGr on a German layout).
+        let mut combinations: Vec<u8> = (0..8u8)
+            .filter(|mask| {
+                MODIFIER_BITS
+                    .iter()
+                    .zip(&modifier_keycodes)
+                    .all(|(bit, keycode)| mask & bit == 0 || keycode.is_some())
+            })
+            .collect();
+        combinations.sort_by_key(|mask| mask.count_ones());
         let mut chars = HashMap::new();
-        for &xkb_keycode in keymap.iter_keycodes() {
-            let Some(evdev_keycode) = xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET) else {
-                continue;
-            };
-            for (level, shift) in [(0, false), (1, true)] {
-                let Ok(syms) = keymap.key_get_syms_by_level(xkb_keycode, 0, level) else {
+        for modifiers in combinations {
+            let mut state = XkbState::new(keymap.clone());
+            for (bit, keycode) in MODIFIER_BITS.iter().zip(&modifier_keycodes) {
+                if let Some(keycode) = keycode.filter(|_| modifiers & bit != 0) {
+                    state.update_key(keycode + XKB_KEYCODE_OFFSET, KeyDirection::Down);
+                }
+            }
+            for &xkb_keycode in keymap.iter_keycodes() {
+                let Some(evdev_keycode) = xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET) else {
                     continue;
                 };
-                for sym in syms {
-                    let Some(character) = sym.key_char() else {
-                        continue;
-                    };
-                    // Prefer the lowest (first-found) level for a character,
-                    // matching the simplest, most likely-correct chord.
-                    chars.entry(character).or_insert((evdev_keycode, shift));
+                if modifier_keycodes.contains(&Some(evdev_keycode)) {
+                    continue;
+                }
+                for sym in state.key_get_syms(xkb_keycode) {
+                    if let Some(character) = sym.key_char() {
+                        chars.entry(character).or_insert(KeyStroke {
+                            keycode: evdev_keycode,
+                            modifiers,
+                        });
+                    }
                 }
             }
         }
         Ok(Self {
-            shift_keycode,
+            modifier_keycodes,
             return_keycode,
             tab_keycode,
             chars,
         })
+    }
+
+    /// Modifier keycodes to press (in order) around `stroke`, released in
+    /// reverse.
+    fn modifiers_for(&self, stroke: KeyStroke) -> impl DoubleEndedIterator<Item = u32> + '_ {
+        MODIFIER_BITS
+            .iter()
+            .zip(&self.modifier_keycodes)
+            .filter(move |(bit, _)| stroke.modifiers & **bit != 0)
+            .filter_map(|(_, keycode)| *keycode)
     }
 }
 
@@ -658,30 +713,33 @@ impl LibeiInjector {
         let TextMode::Keysym(typer) = &self.mode else {
             return Ok(());
         };
-        let shift_keycode = typer.shift_keycode;
-        let return_keycode = typer.return_keycode;
-        let tab_keycode = typer.tab_keycode;
-
         let mut chars = text.chars().peekable();
         while let Some(c) = chars.next() {
-            let (keycode, shift) = match c {
-                '\n' => (return_keycode, false),
-                '\t' => (tab_keycode, false),
+            let stroke = match c {
+                '\n' => KeyStroke {
+                    keycode: typer.return_keycode,
+                    modifiers: 0,
+                },
+                '\t' => KeyStroke {
+                    keycode: typer.tab_keycode,
+                    modifiers: 0,
+                },
                 _ => typer.chars[&c],
             };
 
             let serial = self.connection.serial();
             self.device.device().start_emulating(serial, self.sequence);
             self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-            if shift {
-                self.keyboard
-                    .key(shift_keycode, ei::keyboard::KeyState::Press);
+            for modifier in typer.modifiers_for(stroke) {
+                self.keyboard.key(modifier, ei::keyboard::KeyState::Press);
             }
-            self.keyboard.key(keycode, ei::keyboard::KeyState::Press);
-            self.keyboard.key(keycode, ei::keyboard::KeyState::Released);
-            if shift {
+            self.keyboard
+                .key(stroke.keycode, ei::keyboard::KeyState::Press);
+            self.keyboard
+                .key(stroke.keycode, ei::keyboard::KeyState::Released);
+            for modifier in typer.modifiers_for(stroke).rev() {
                 self.keyboard
-                    .key(shift_keycode, ei::keyboard::KeyState::Released);
+                    .key(modifier, ei::keyboard::KeyState::Released);
             }
             self.device
                 .device()
@@ -1732,16 +1790,17 @@ mod tests {
     fn keysym_typer_maps_shifted_and_unshifted_letters_to_the_same_key() {
         let keymap = default_keymap();
         let typer = super::KeysymTyper::build(&keymap).unwrap();
-        let (lower_keycode, lower_shift) = typer.chars[&'a'];
-        let (upper_keycode, upper_shift) = typer.chars[&'A'];
-        assert!(!lower_shift);
-        assert!(upper_shift);
+        let lower = typer.chars[&'a'];
+        let upper = typer.chars[&'A'];
+        assert_eq!(lower.modifiers, 0);
+        assert_eq!(upper.modifiers, super::MOD_SHIFT);
         assert_eq!(
-            lower_keycode, upper_keycode,
+            lower.keycode, upper.keycode,
             "'a' and 'A' are the same physical key, differing only by Shift"
         );
         assert_ne!(
-            upper_keycode, typer.shift_keycode,
+            Some(upper.keycode),
+            typer.modifier_keycodes[0],
             "Shift itself must not be reported as a typeable character's key"
         );
     }
@@ -1754,5 +1813,57 @@ mod tests {
         // keysym for CJK ideographs -- those need an input method, which the
         // fallback deliberately cannot provide (see the module docs).
         assert!(!typer.chars.contains_key(&'中'));
+    }
+
+    fn layout_keymap(layout: &str) -> super::XkbKeymap {
+        super::XkbKeymap::new_from_names(
+            super::Context::new(0).unwrap(),
+            Some(xkbcommon_rs::xkb_keymap::RuleNames {
+                rules: None,
+                model: None,
+                layout: Some(layout.into()),
+                variant: None,
+                options: None,
+            }),
+            0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn keysym_typer_reaches_altgr_characters_on_a_german_layout() {
+        let keymap = layout_keymap("de");
+        let typer = super::KeysymTyper::build(&keymap).unwrap();
+        let q = typer.chars[&'q'];
+        let at = typer.chars[&'@'];
+        assert_eq!(q.modifiers, 0);
+        assert_eq!(
+            at,
+            super::KeyStroke {
+                keycode: q.keycode,
+                modifiers: super::MOD_LEVEL3,
+            },
+            "'@' is AltGr+Q on a German layout"
+        );
+        assert!(typer.chars.contains_key(&'€'));
+        assert_eq!(typer.chars[&'{'].modifiers, super::MOD_LEVEL3);
+        assert_eq!(typer.chars[&'ä'].modifiers, 0);
+        assert_eq!(typer.chars[&'Ä'].modifiers, super::MOD_SHIFT);
+        let level3 = typer.modifier_keycodes[1].expect("German layout defines AltGr");
+        assert_eq!(
+            typer.modifiers_for(at).collect::<Vec<_>>(),
+            vec![level3],
+            "only the AltGr key is held for '@'"
+        );
+    }
+
+    #[test]
+    fn keysym_typer_prefers_the_simplest_chord() {
+        let keymap = layout_keymap("de");
+        let typer = super::KeysymTyper::build(&keymap).unwrap();
+        // Digits exist unmodified; they must not be mapped to a modified
+        // chord on some other key.
+        assert_eq!(typer.chars[&'1'].modifiers, 0);
+        assert_eq!(typer.chars[&'!'].modifiers, super::MOD_SHIFT);
     }
 }
