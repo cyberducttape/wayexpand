@@ -82,6 +82,13 @@ pub struct ActionConfig {
     #[serde(default)]
     pub cwd: Option<String>,
 
+    /// Send uncaptured action stdout/stderr to the broker's own stdout/stderr
+    /// (normally the service journal). Disabled by default: output a client
+    /// did not ask to capture is discarded, because command output can carry
+    /// tokens, API responses, or infrastructure data.
+    #[serde(default)]
+    pub log_output: bool,
+
     /// Whether this action is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -540,6 +547,7 @@ mod tests {
             allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
+            log_output: false,
             enabled: true,
             description: Some("Get Kubernetes resources".to_string()),
         };
@@ -557,6 +565,7 @@ mod tests {
             allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
+            log_output: false,
             enabled: true,
             description: None,
         }
@@ -594,6 +603,7 @@ mod tests {
             allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
+            log_output: false,
             enabled: true,
             description: None,
         };
@@ -611,6 +621,7 @@ mod tests {
             allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
+            log_output: false,
             enabled: true,
             description: None,
         };
@@ -635,6 +646,7 @@ mod tests {
             allow_dangerous_env: false,
             inherit_env: false,
             cwd: None,
+            log_output: false,
             enabled: true,
             description: None,
         };
@@ -716,6 +728,7 @@ program = "echo"
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -820,6 +833,7 @@ enabled = true
                     allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
+                    log_output: false,
                     enabled: true,
                     description: None,
                 },
@@ -849,6 +863,7 @@ enabled = true
                     allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
+                    log_output: false,
                     enabled: true,
                     description: None,
                 },
@@ -874,6 +889,7 @@ enabled = true
                     allow_dangerous_env: false,
                     inherit_env: false,
                     cwd: None,
+                    log_output: false,
                     enabled: true,
                     description: None,
                 },

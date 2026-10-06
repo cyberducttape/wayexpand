@@ -16,4 +16,6 @@ strict_env = true
 # server_env = ["KUBECONFIG"]
 # client_forward_env = ["MY_DYNAMIC_VALUE"]
 # cwd = "/home/user"
+# Uncaptured output is discarded; set this only to keep it in the journal.
+# log_output = false
 # enabled = true

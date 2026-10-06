@@ -319,11 +319,16 @@ impl ActionExecutor {
         let capture_stdout = request.stdout_capture;
         if capture_stdout {
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        } else {
-            // The broker service's stdout/stderr are normally collected by its
-            // service manager (for example journald). Do not buffer discarded
-            // action output in the broker when the caller did not request it.
+        } else if action_config.log_output {
+            // An administrator explicitly opted this action into logging: the
+            // broker's stdout/stderr are normally collected by its service
+            // manager (for example journald).
             cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        } else {
+            // Output nobody asked for is discarded rather than persisted to a
+            // journal, where tokens or infrastructure data would outlive the
+            // action. It is never buffered in the broker either.
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }
 
         #[cfg(unix)]
@@ -466,6 +471,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: false,
                 description: None,
             },
@@ -518,6 +524,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -563,6 +570,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -610,6 +618,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -629,6 +638,52 @@ mod tests {
         assert_eq!(effective, Duration::from_millis(500));
     }
 
+    #[tokio::test]
+    async fn uncaptured_output_is_discarded_unless_policy_logs_it() {
+        let target_file = format!(
+            "/tmp/wayexpand-broker-uncaptured-output-{}.txt",
+            std::process::id()
+        );
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "report-stdout".to_string(),
+            ActionConfig {
+                program: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    // Command substitutions keep the shell itself alive, so
+                    // $$ names the process holding the action's descriptors.
+                    format!(
+                        "printf '%s\\n%s\\n' \"$(/usr/bin/readlink /proc/$$/fd/1)\" \"$(/usr/bin/readlink /proc/$$/fd/2)\" > {target_file}"
+                    ),
+                ],
+                timeout_ms: 5_000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let result = executor
+            .execute(ActionRequest {
+                action_id: "report-stdout".to_string(),
+                timeout_ms: 5_000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: false,
+            })
+            .await;
+        let targets = std::fs::read_to_string(&target_file).unwrap_or_default();
+        let _ = std::fs::remove_file(&target_file);
+        assert!(result.is_ok(), "unexpected result: {result:?}");
+        assert_eq!(targets, "/dev/null\n/dev/null\n");
+    }
+
     fn timeout_test_config(timeout_ms: u64) -> BrokerConfig {
         let mut config = BrokerConfig::default();
         config.actions.insert(
@@ -642,6 +697,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -724,6 +780,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -766,6 +823,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },
@@ -808,6 +866,7 @@ mod tests {
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
+                log_output: false,
                 enabled: true,
                 description: None,
             },

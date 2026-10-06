@@ -59,6 +59,11 @@ variables such as `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `PERL5LIB`,
 `allow_dangerous_env = true`. The broker authenticates the peer UID; it is not
 a sandbox against compromised software running as the same desktop user.
 
+When a request does not capture output (`stdout_capture = false`), the
+action's stdout and stderr go to `/dev/null`. Command output can contain
+tokens, API responses, or infrastructure data, so it is written to the
+broker's journal only when the action's policy sets `log_output = true`.
+
 ```
 ┌─────────────────────────────┐
 │ Keyboard Capture Daemon     │

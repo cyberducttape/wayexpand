@@ -31,7 +31,8 @@ pub struct ActionRequest {
     pub env_vars: Vec<String>,
 
     /// Whether to capture and return stdout/stderr from the action.
-    /// If false, output is streamed to syslog/journald only.
+    /// If false, output is discarded unless the action's policy sets
+    /// `log_output`, in which case it goes to the broker's journal.
     pub stdout_capture: bool,
 }
 
