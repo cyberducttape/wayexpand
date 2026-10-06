@@ -185,6 +185,7 @@ impl Strings {
         maturity: &str,
         sensitive_fields: bool,
         atomic_replace: bool,
+        certified: bool,
     ) -> String {
         let semantics = match (self.lang, sensitive_fields, atomic_replace) {
             (Language::English, true, true) => "sensitive-field aware · atomic replacement",
@@ -200,18 +201,29 @@ impl Strings {
                 "globale Tastatursichtbarkeit · nicht-atomare Ersetzung"
             }
         };
-        match self.lang {
-            Language::English => {
-                format!("{route} · {maturity} · {semantics} · certification pending")
-            }
-            Language::German => {
-                format!("{route} · {maturity} · {semantics} · Zertifizierung ausstehend")
-            }
-        }
+        let evidence = match (self.lang, certified) {
+            (Language::English, true) => "certified",
+            (Language::English, false) => "certification pending",
+            (Language::German, true) => "zertifiziert",
+            (Language::German, false) => "Zertifizierung ausstehend",
+        };
+        format!("{route} · {maturity} · {semantics} · {evidence}")
     }
 
     pub fn route_connected_status(&self) -> &'static str {
-        "Typing integration: Ready"
+        match self.lang {
+            Language::English => "Typing integration: Ready",
+            Language::German => "Tastaturintegration: Bereit",
+        }
+    }
+
+    /// Connected with full protection, but the route is not certified, so
+    /// expansion has not been verified on this desktop.
+    pub fn route_running_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Typing integration: Running",
+            Language::German => "Tastaturintegration: Aktiv",
+        }
     }
     pub fn route_limited_status(&self) -> &'static str {
         match self.lang {

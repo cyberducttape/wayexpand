@@ -107,8 +107,15 @@ impl GuiApp {
                 let full_protection = self
                     .daemon_capabilities
                     .is_some_and(runtime::DaemonCapabilities::provides_full_protection);
-                if full_protection {
+                // "Ready" claims verified text expansion on this desktop;
+                // without certification evidence the route is only running.
+                let certified = self
+                    .active_route_contract()
+                    .is_some_and(|contract| contract.is_certified());
+                if full_protection && certified {
                     (self.strings.route_connected_status(), palette.success)
+                } else if full_protection {
+                    (self.strings.route_running_status(), palette.success)
                 } else {
                     (self.strings.route_limited_status(), palette.warning)
                 }
@@ -147,8 +154,13 @@ impl GuiApp {
                     &contract.status,
                     contract.sensitive_fields,
                     contract.atomic_replace,
+                    contract.is_certified(),
                 ),
-                palette.warning,
+                if contract.is_certified() {
+                    palette.success
+                } else {
+                    palette.warning
+                },
             )
         });
         let more_actions = self.strings.more_actions();

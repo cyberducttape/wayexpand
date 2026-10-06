@@ -86,6 +86,12 @@ pub struct SensitiveFieldSupport {
 }
 
 impl RouteContract {
+    /// Whether reviewed certification evidence backs this route. Only then
+    /// may a frontend describe it as ready rather than merely running.
+    pub fn is_certified(&self) -> bool {
+        self.status == "certified"
+    }
+
     pub fn capture_backend(&self) -> Option<RouteBackend> {
         RouteBackend::parse(&self.capture)
     }
@@ -811,6 +817,21 @@ mod tests {
         let contract = route_contract_for("input-method", "input-method-v2").unwrap();
         assert_eq!(contract.id, "input-method-v2");
         assert!(route_contract_for("unknown", "backend").is_none());
+    }
+
+    #[test]
+    fn route_maturity_is_a_known_value_and_none_is_certified_yet() {
+        for route in &route_catalog().routes {
+            assert!(
+                matches!(route.status.as_str(), "experimental" | "certified"),
+                "{} has unknown status {:?}",
+                route.id,
+                route.status
+            );
+            // Flip this only together with published evidence in
+            // docs/SUPPORT_MATRIX.md (promotion policy).
+            assert!(!route.is_certified(), "{} claims certification", route.id);
+        }
     }
 
     #[test]
