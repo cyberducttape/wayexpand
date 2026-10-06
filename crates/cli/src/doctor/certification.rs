@@ -391,9 +391,14 @@ pub(crate) fn certification_scenario_category(scenario: &str) -> &'static str {
         | "application-shortcuts"
         | "compositor-shortcuts"
         | "media-keys"
-        | "held-modifier-unsupported-key" => "typing-integrity",
+        | "held-modifier-unsupported-key"
+        | "caps-lock"
+        | "fast-typing" => "typing-integrity",
         "unicode-combining" | "multiline-rapid" => "text-integrity",
-        "password-field" | "focus-cross-window" => "safety",
+        "password-field"
+        | "focus-cross-window"
+        | "focus-change-during-expansion"
+        | "target-closes-during-expansion" => "safety",
         "config-reload" | "daemon-restart" | "compositor-restart" | "failed-insertion" => {
             "recovery"
         }

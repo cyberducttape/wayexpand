@@ -111,6 +111,9 @@ supported end state before broad adoption:
       notifier paths would need `cfg(loom)` shims for std sync types.
 - [ ] Form snippets and the clipboard variable need validation with real
       clients on each compositor (focus return after the form closes).
+- [ ] Run the certification matrix in remote-desktop sessions (RDP/VNC via
+      the compositor's remote-desktop portal) and nested compositor sessions,
+      and record whether each route is supported there.
 
 ## Security and product gates
 

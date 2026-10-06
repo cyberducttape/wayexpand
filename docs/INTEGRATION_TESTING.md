@@ -197,6 +197,18 @@ typed afterwards still expands:
 | `media-keys` | volume up/down/mute and play/pause |
 | `held-modifier-unsupported-key` | a held Ctrl, Alt, Shift or Super plus a key WayExpand does not handle |
 
+Partial replacement is the most dangerous failure, so these scenarios pass
+only when no text other than the trigger is ever erased and no replacement is
+half-applied without being reported:
+
+| Scenario | What happens |
+| --- | --- |
+| `focus-change-during-expansion` | focus moves to another window while a (paced) replacement is being typed |
+| `target-closes-during-expansion` | the target application exits mid-replacement |
+| `fast-typing` | the user keeps typing faster than paced output during and after an expansion |
+| `caps-lock` | triggers and replacements with Caps Lock on, including mixed-case text |
+| `bluetooth-keyboard-reconnect` | a Bluetooth keyboard sleeps or reconnects between and during expansions |
+
 `ctrl-alt-super-chords`, `arrow-navigation`, `function-keys`,
 `dead-key-committed-text`, and `compose-committed-text` cover the remaining
 pass-through keys.
