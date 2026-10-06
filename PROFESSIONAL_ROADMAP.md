@@ -56,7 +56,10 @@ supported end state before broad adoption:
 
 - [ ] Evaluate native text-input/IME integration for composition-aware
       expansion.
-- [ ] Define an explicit Fcitx/Rime/IBus strategy.
+- [ ] Define an explicit Fcitx/Rime/IBus strategy. A native Fcitx5 addon and
+      deeper IBus engine integration are likely cleaner than inferring
+      composition state from raw key streams; scope this as a 1.5/2.0 project
+      and position earlier releases explicitly for direct/committed text.
 - [ ] Certify Chinese, Japanese, Korean, dead-key, and Compose workflows or
       document their supported fallback behavior.
 - [ ] Keep the limitation prominent in docs/SUPPORT_MATRIX.md until evidence
@@ -152,9 +155,13 @@ Still open:
       without consent.
 - [ ] Publish a canonical `route_id` in daemon status (additive schema change)
       so consumers stop reconstructing routes from `source`/`backend`.
+- [ ] `{{clipboard}}` runs `wl-paste` synchronously (bounded at 500 ms) while
+      rendering; a persistent Wayland clipboard client or an asynchronously
+      prefetched value would remove that latency from clipboard snippets.
 - [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
       template library, parsed hotkeys, normalized IDs) during validation and
-      construct the engine from it instead of recompiling.
+      construct the engine from it instead of recompiling. Effective triggers
+      are already reused; app filters, hotkeys and IDs are still recompiled.
 - [ ] Profiles/workspaces (personal, work, support) switchable at runtime.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [ ] Form snippets through IBus (the route drops surrounding text when focus
