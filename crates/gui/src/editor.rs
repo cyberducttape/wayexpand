@@ -120,6 +120,26 @@ impl Draft {
         with_pending_token(&self.app_filter, &self.pending_app)
     }
 
+    /// The expansion this draft describes, exactly as Save would store it
+    /// (pending tag/alias/app input included). Preview and both save paths
+    /// use this one conversion so a field cannot be forgotten in one of them.
+    pub(crate) fn to_expansion(&self, id: String) -> Result<ExpansionConfig> {
+        Ok(ExpansionConfig {
+            id,
+            trigger: self.trigger.clone(),
+            replacement: self.replacement.clone(),
+            description: self.description.clone(),
+            tags: self.committed_tags(),
+            category: self.category.clone(),
+            app_filter: self.committed_app_filter(),
+            match_mode: self.match_mode,
+            command: self.command_config()?,
+            enabled: self.enabled,
+            propagate_case: self.propagate_case,
+            aliases: self.committed_aliases(),
+        })
+    }
+
     /// Compare the raw form fields with the loaded model, without attempting
     /// to validate or normalize them. Invalid edits must still be dirty.
     pub(crate) fn matches_command(&self, command: Option<&CommandConfig>) -> bool {

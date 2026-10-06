@@ -17,8 +17,13 @@ impl GuiApp {
             return;
         };
         let mut candidate = self.config.clone();
-        let command = match draft.command_config() {
-            Ok(command) => command,
+        let id = if is_new {
+            ExpansionConfig::new_id()
+        } else {
+            candidate.expansion[index].id.clone()
+        };
+        let expansion = match draft.to_expansion(id) {
+            Ok(expansion) => expansion,
             Err(error) => {
                 self.status =
                     Status::error(self.strings.status_command_invalid(&error.to_string()));
@@ -26,39 +31,16 @@ impl GuiApp {
             }
         };
         if is_new {
-            if draft.replacement.is_empty() {
+            if expansion.replacement.is_empty() {
                 self.status = Status::error(
                     self.strings
                         .status_save_rejected(self.strings.new_snippet_replacement_required()),
                 );
                 return;
             }
-            candidate.expansion.push(ExpansionConfig {
-                id: ExpansionConfig::new_id(),
-                trigger: draft.trigger.clone(),
-                replacement: draft.replacement.clone(),
-                description: draft.description.clone(),
-                tags: draft.committed_tags(),
-                category: draft.category.clone(),
-                app_filter: draft.committed_app_filter(),
-                match_mode: draft.match_mode,
-                command,
-                enabled: draft.enabled,
-                propagate_case: draft.propagate_case,
-                aliases: draft.committed_aliases(),
-            });
+            candidate.expansion.push(expansion);
         } else {
-            candidate.expansion[index].trigger = draft.trigger.clone();
-            candidate.expansion[index].aliases = draft.committed_aliases();
-            candidate.expansion[index].description = draft.description.clone();
-            candidate.expansion[index].tags = draft.committed_tags();
-            candidate.expansion[index].category = draft.category.clone();
-            candidate.expansion[index].app_filter = draft.committed_app_filter();
-            candidate.expansion[index].replacement = draft.replacement.clone();
-            candidate.expansion[index].enabled = draft.enabled;
-            candidate.expansion[index].match_mode = draft.match_mode;
-            candidate.expansion[index].propagate_case = draft.propagate_case;
-            candidate.expansion[index].command = command;
+            candidate.expansion[index] = expansion;
         }
         if let Err(error) = candidate.validate() {
             self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
@@ -156,6 +138,9 @@ impl GuiApp {
             suffix += 1;
         }
         duplicate.trigger = trigger;
+        // The original keeps its aliases; a copy answering to the same ones
+        // would be rejected as a duplicate trigger, so it starts without any.
+        duplicate.aliases.clear();
         duplicate.id = ExpansionConfig::new_id();
         if !duplicate.description.is_empty() {
             duplicate.description.push_str(" (copy)");

@@ -39,25 +39,14 @@ pub(crate) fn render_with_library_snippets(
     library_snippets: Option<Arc<wayexpand_core::SnippetLibrary>>,
 ) -> String {
     let expansion = match draft {
-        Some(draft) => Some(ExpansionConfig {
-            id: source
+        Some(draft) => match draft.to_expansion(
+            source
                 .map(|expansion| expansion.id.clone())
                 .unwrap_or_else(ExpansionConfig::new_id),
-            trigger: draft.trigger.clone(),
-            replacement: draft.replacement.clone(),
-            description: draft.description.clone(),
-            tags: draft.tags.clone(),
-            category: draft.category.clone(),
-            app_filter: draft.app_filter.clone(),
-            match_mode: draft.match_mode,
-            command: match draft.command_config() {
-                Ok(command) => command,
-                Err(_) => return "Configuration is invalid".into(),
-            },
-            enabled: draft.enabled,
-            propagate_case: draft.propagate_case,
-            aliases: Vec::new(),
-        }),
+        ) {
+            Ok(expansion) => Some(expansion),
+            Err(_) => return "Configuration is invalid".into(),
+        },
         None => source.cloned(),
     };
     let Some(expansion) = expansion else {
@@ -215,5 +204,61 @@ mod tests {
             run_command_preview(&draft),
             Err("Enable the dynamic command first".into())
         );
+    }
+
+    fn aliased() -> ExpansionConfig {
+        let mut expansion = config(Vec::new()).expansion.remove(0);
+        expansion.trigger = ";sig".into();
+        expansion.replacement = "Best, Sam".into();
+        expansion.aliases = vec![";signature".into(), ";sign".into()];
+        expansion
+    }
+
+    fn preview(draft: &Draft, input: &str) -> String {
+        render(
+            Some(&aliased()),
+            &Settings::default(),
+            &OrganizationPolicy::default(),
+            Some(draft),
+            input,
+            "",
+        )
+    }
+
+    #[test]
+    fn draft_preview_answers_to_the_trigger_and_every_alias() {
+        let draft = Draft::from_expansion(&aliased());
+        assert_eq!(preview(&draft, ";sig"), "Best, Sam");
+        assert_eq!(preview(&draft, ";signature"), "Best, Sam");
+        assert_eq!(preview(&draft, ";sign"), "Best, Sam");
+    }
+
+    #[test]
+    fn draft_preview_includes_a_pending_alias_like_save_does() {
+        let mut draft = Draft::from_expansion(&aliased());
+        draft.pending_alias = ";bestsam".into();
+        assert_eq!(preview(&draft, ";bestsam"), "Best, Sam");
+    }
+
+    #[test]
+    fn removed_alias_stops_previewing() {
+        let mut draft = Draft::from_expansion(&aliased());
+        draft.aliases.retain(|alias| alias != ";sign");
+        assert_eq!(preview(&draft, ";sign"), "No expansion matched");
+        assert_eq!(preview(&draft, ";signature"), "Best, Sam");
+    }
+
+    #[test]
+    fn invalid_alias_is_reported_invalid() {
+        let mut draft = Draft::from_expansion(&aliased());
+        draft.pending_alias = ";".repeat(1_000);
+        assert_eq!(preview(&draft, ";sig"), "Configuration is invalid");
+    }
+
+    #[test]
+    fn draft_preview_includes_a_pending_app_filter_like_save_does() {
+        let mut draft = Draft::from_expansion(&aliased());
+        draft.pending_app = "app_id_exact:org.editor".into();
+        assert_eq!(preview(&draft, ";sig"), "No expansion matched");
     }
 }

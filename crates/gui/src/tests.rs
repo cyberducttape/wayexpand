@@ -1685,3 +1685,75 @@ fn the_snippet_form_renders_every_field_kind_and_submits_with_enter() {
     assert_eq!(values["field:name"], "Ada");
     assert_eq!(values["choice:Open|Resolved"], "Open");
 }
+
+#[test]
+fn duplicating_a_snippet_with_aliases_saves_a_copy_without_them() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-duplicate-aliases-{}.toml",
+        std::process::id()
+    ));
+    let config = Config {
+        expansion: vec![ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ";sig".into(),
+            replacement: "Best, Sam".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: vec![";signature".into()],
+        }],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.duplicate_selected();
+    assert_eq!(app.config.expansion.len(), 2);
+    assert_eq!(app.config.expansion[1].trigger, ";sig-copy");
+    assert!(app.config.expansion[1].aliases.is_empty());
+    assert_eq!(app.config.expansion[0].aliases, [";signature"]);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn save_rejects_an_alias_that_collides_with_another_snippet() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-alias-collision-{}.toml",
+        std::process::id()
+    ));
+    let snippet = |trigger: &str| ExpansionConfig {
+        id: ExpansionConfig::new_id(),
+        trigger: trigger.into(),
+        replacement: "value".into(),
+        description: String::new(),
+        tags: Vec::new(),
+        category: String::new(),
+        app_filter: Vec::new(),
+        match_mode: MatchMode::Immediate,
+        command: None,
+        enabled: true,
+        propagate_case: false,
+        aliases: Vec::new(),
+    };
+    let config = Config {
+        expansion: vec![snippet(";one"), snippet(";two")],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.draft.as_mut().unwrap().pending_alias = ";two".into();
+    app.save_selected();
+    assert!(app.config.expansion[0].aliases.is_empty());
+    assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+    fs::remove_file(path).unwrap();
+}
