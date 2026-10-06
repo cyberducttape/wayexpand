@@ -1,3 +1,6 @@
+# Development and release toolchain. The minimum supported Rust version is
+# separate (rust-version in Cargo.toml, currently 1.95) and has its own CI lane;
+# do not use features newer than that MSRV.
 [toolchain]
 channel = "1.96.0"
 components = ["rustfmt", "clippy"]

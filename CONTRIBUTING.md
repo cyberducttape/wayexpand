@@ -16,7 +16,10 @@ Every change should preserve the project's operational guarantees:
 
 ### Prerequisites
 
-- Rust 1.95+ (install via [rustup](https://rustup.rs/))
+- Rust 1.95+ (install via [rustup](https://rustup.rs/)). 1.95 is the minimum
+  supported version (`rust-version` in `Cargo.toml`, checked by a CI lane);
+  `rust-toolchain.toml` pins 1.96.0 for development and release builds, and
+  rustup installs it automatically. Code must still build with 1.95.
 - Standard tools: `git`, `make`, `pkg-config`
 - Wayland dev libraries (usually pre-installed on Wayland systems)
 
