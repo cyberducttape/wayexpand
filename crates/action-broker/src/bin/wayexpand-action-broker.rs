@@ -158,7 +158,7 @@ For more information, see: https://github.com/cyberducttape/wayexpand
 "#;
     println!(
         "WayExpand Action Broker Service v{}\n\n{}",
-        env!("CARGO_PKG_VERSION"),
+        env!("WAYEXPAND_BUILD_VERSION"),
         HELP
     );
 }

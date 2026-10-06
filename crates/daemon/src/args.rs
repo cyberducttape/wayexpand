@@ -19,10 +19,14 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
         } else if argument == "--allow-evdev-sensitive-fields" {
             allow_evdev_sensitive_fields = true;
         } else if matches!(argument.as_str(), "--help" | "-h") {
-            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [config]", env!("CARGO_PKG_VERSION"));
+            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [config]", build_info::VERSION);
             std::process::exit(0);
         } else if matches!(argument.as_str(), "--version" | "-V") {
-            println!("wayexpand-daemon {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "wayexpand-daemon {} (commit {})",
+                build_info::VERSION,
+                build_info::COMMIT
+            );
             std::process::exit(0);
         } else if argument.starts_with('-') {
             anyhow::bail!("unknown option {argument:?}; try --help");

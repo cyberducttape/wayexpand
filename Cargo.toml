@@ -15,6 +15,7 @@ members = [
     "crates/backend-ibus",
     "crates/action-broker",
     "crates/process-supervisor",
+    "crates/build-info",
 ]
 
 [workspace.package]

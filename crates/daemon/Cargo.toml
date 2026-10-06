@@ -26,3 +26,6 @@ wayexpand-backend-evdev = { path = "../backend-evdev" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 wayexpand-backend-selection = { path = "../backend-selection" }
 notify.workspace = true
+
+[build-dependencies]
+wayexpand-build-info = { path = "../build-info" }

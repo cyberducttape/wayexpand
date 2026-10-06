@@ -252,7 +252,7 @@ fn help_text() -> String {
         .unwrap_or(0);
     let mut help = format!(
         "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n",
-        env!("CARGO_PKG_VERSION")
+        build_info::VERSION
     );
     for (section, rows) in HELP_SECTIONS {
         help.push_str(&format!("\n{section}:\n"));

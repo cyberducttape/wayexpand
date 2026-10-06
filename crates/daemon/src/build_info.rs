@@ -1,1 +1,2 @@
-pub const COMMIT: &str = env!("WAYEXPAND_DAEMON_COMMIT");
+pub const VERSION: &str = env!("WAYEXPAND_BUILD_VERSION");
+pub const COMMIT: &str = env!("WAYEXPAND_COMMIT");

@@ -31,3 +31,6 @@ name = "wayexpand-action-broker"
 path = "src/bin/wayexpand-action-broker.rs"
 
 [dev-dependencies]
+
+[build-dependencies]
+wayexpand-build-info = { path = "../build-info" }

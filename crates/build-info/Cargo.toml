@@ -1,0 +1,13 @@
+[package]
+name = "wayexpand-build-info"
+description = "Shared build-script version and commit stamping for WayExpand binaries"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
