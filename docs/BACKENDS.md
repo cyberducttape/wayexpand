@@ -31,11 +31,16 @@ protocol's per-request text limit. When the EIS server resumes a keyboard
 device without `ei_text` (observed with xdg-desktop-portal-kde on KWin 6.6),
 the backend falls back to synthesizing individual key presses over
 `ei_keyboard` using the keymap the server itself supplies. That fallback is
-layout-dependent -- only characters the server's keymap can produce on its
-first layout, unmodified or with that keymap's own Shift, AltGr (ISO Level3)
+layout-dependent -- only characters the server's keymap can produce on the
+active layout, unmodified or with that keymap's own Shift, AltGr (ISO Level3)
 and Level5 keys, are typeable (so `@` is typed as AltGr+Q on a German
-layout); the mapping is built once at connect time, so a later layout switch
-is not followed -- and a replacement
+layout). Before every erase or insertion the backend applies the server's
+`ei_keyboard.modifiers` reports: a layout switch or Caps Lock change rebuilds
+the character map, a paused or removed device (a keymap change replaces the
+device) refuses and reconnects, and a keymap with several layouts is refused
+until the server has reported which one is active, rather than guessed. Whether
+a given compositor sends those reports still needs live verification. A
+replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
 is never automatic: selecting this backend may request desktop-control

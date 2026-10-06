@@ -44,10 +44,11 @@ safe to recommend for everyday desktop use.
 - [ ] Exercise two simultaneous keyboards, USB disconnect/reconnect, held keys,
       suspend/resume, and rapid typing.
 - [ ] Treat layout or keymap mismatches as certification failures.
-- [ ] libei keysym fallback: follow the server's active layout group and
-      rebuild the character map when EIS replaces the keyboard device's keymap
-      (today it is built once at connect time from layout 0; Shift, AltGr and
-      Level5 chords are supported).
+- [ ] libei keysym fallback: verify on KWin and other EIS servers that
+      `ei_keyboard.modifiers` reports layout-group and Caps Lock changes and
+      that a keymap change replaces the device. The backend now follows those
+      reports, refuses multi-layout keymaps until the active layout is known,
+      and reconnects when its device is paused or removed.
 
 ### 5. IME and preedit strategy
 

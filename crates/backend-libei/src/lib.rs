@@ -104,6 +104,13 @@ pub enum LibeiError {
     MissingRequiredDevice,
     #[error("could not decode the EIS keyboard keymap: {0}")]
     Keymap(String),
+    #[error("the EIS keyboard device is unavailable ({0}); the expansion was not typed")]
+    DeviceUnavailable(&'static str),
+    #[error(
+        "the EIS keymap has {0} layouts but the server has not reported which one is active; \
+         the ei_keyboard fallback will not guess, so the expansion was not typed"
+    )]
+    UnknownActiveLayout(usize),
     #[error(
         "character U+{0:04X} is not reachable on the current keyboard layout via the ei_keyboard \
          fallback (no ei_text interface was offered); the expansion was not typed"
@@ -137,7 +144,9 @@ impl LibeiError {
                     | std::io::ErrorKind::AddrNotAvailable
                     | std::io::ErrorKind::BrokenPipe
             ),
-            Self::Disconnected(_) | Self::Flush(_) => true,
+            // A removed or paused device is recovered by reconnecting, which
+            // reads the server's current device and keymap.
+            Self::Disconnected(_) | Self::Flush(_) | Self::DeviceUnavailable(_) => true,
             Self::Handshake(reis::Error::Io(_)) => true,
             _ => false,
         }
@@ -176,6 +185,11 @@ impl PortalKeepalive {
 
 pub struct LibeiInjector {
     connection: reis::event::Connection,
+    /// Kept after the handshake so server notifications (modifier/layout
+    /// changes, device pause/removal) are seen before anything is typed.
+    events: EventPump,
+    /// Set while the server has paused or removed our device.
+    device_unavailable: Option<&'static str>,
     device: reis::event::Device,
     mode: TextMode,
     keyboard: ei::Keyboard,
@@ -211,7 +225,7 @@ enum TextMode {
     /// Fallback for a server that only offers `ei_keyboard`: individual
     /// characters are looked up in the keymap the server itself sent and
     /// typed as key presses. Limited to whatever that layout can produce.
-    Keysym(KeysymTyper),
+    Keysym(Box<KeysymTyper>),
 }
 
 impl TextMode {
@@ -241,8 +255,15 @@ struct KeyStroke {
 }
 
 /// Maps characters to a keystroke reachable on the EIS server's own keymap,
-/// built once at connect time.
+/// for one active layout group and set of locked modifiers. Rebuilt whenever
+/// the server reports a different group or lock state.
 struct KeysymTyper {
+    keymap: XkbKeymap,
+    /// Layout group and locked-modifier mask the map below was built for.
+    built_for: KeyboardLock,
+    /// Latest group/locks reported by the server (`None` until the first
+    /// `ei_keyboard.modifiers` event).
+    reported: Option<KeyboardLock>,
     /// Evdev keycodes of the Shift, Level3 (AltGr) and Level5 keys, indexed
     /// like the `MOD_*` bits. Level3/Level5 are absent on layouts that do
     /// not define them.
@@ -255,19 +276,43 @@ struct KeysymTyper {
     chars: HashMap<char, KeyStroke>,
 }
 
+/// Server-side keyboard state that changes which key produces a character:
+/// the active layout group and locked modifiers such as Caps Lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct KeyboardLock {
+    group: u32,
+    locked_mods: u32,
+}
+
 impl KeysymTyper {
     fn build(keymap: &XkbKeymap) -> Result<Self, LibeiError> {
-        let shift_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Shift_L)
-            .or_else(|| find_keycode_for_keysym(keymap, xkeysym::key::Shift_R))
+        Self::build_for(keymap.clone(), KeyboardLock::default(), None)
+    }
+
+    fn build_for(
+        keymap: XkbKeymap,
+        lock: KeyboardLock,
+        reported: Option<KeyboardLock>,
+    ) -> Result<Self, LibeiError> {
+        if lock.group as usize >= keymap.num_layouts() {
+            return Err(LibeiError::Keymap(format!(
+                "server reported layout group {} but the keymap has {} layouts",
+                lock.group,
+                keymap.num_layouts()
+            )));
+        }
+        let keymap_ref = &keymap;
+        let shift_keycode = find_keycode_for_keysym(keymap_ref, xkeysym::key::Shift_L)
+            .or_else(|| find_keycode_for_keysym(keymap_ref, xkeysym::key::Shift_R))
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Shift key".into()))?;
-        let return_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Return)
+        let return_keycode = find_keycode_for_keysym(keymap_ref, xkeysym::key::Return)
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Return key".into()))?;
-        let tab_keycode = find_keycode_for_keysym(keymap, xkeysym::key::Tab)
+        let tab_keycode = find_keycode_for_keysym(keymap_ref, xkeysym::key::Tab)
             .ok_or_else(|| LibeiError::Keymap("current keymap has no Tab key".into()))?;
         let modifier_keycodes = [
             Some(shift_keycode),
-            find_keycode_for_keysym(keymap, xkeysym::key::ISO_Level3_Shift),
-            find_keycode_for_keysym(keymap, xkeysym::key::ISO_Level5_Shift),
+            find_keycode_for_keysym(keymap_ref, xkeysym::key::ISO_Level3_Shift),
+            find_keycode_for_keysym(keymap_ref, xkeysym::key::ISO_Level5_Shift),
         ];
         // Rather than translating XKB modifier masks back into keys, hold
         // each available combination of the layout's own modifier keys in an
@@ -286,12 +331,15 @@ impl KeysymTyper {
         let mut chars = HashMap::new();
         for modifiers in combinations {
             let mut state = XkbState::new(keymap.clone());
+            // Start from the server's active layout and locks (Caps Lock
+            // changes which level an unmodified key produces).
+            state.update_mask(0, 0, lock.locked_mods, 0, 0, lock.group as usize);
             for (bit, keycode) in MODIFIER_BITS.iter().zip(&modifier_keycodes) {
                 if let Some(keycode) = keycode.filter(|_| modifiers & bit != 0) {
                     state.update_key(keycode + XKB_KEYCODE_OFFSET, KeyDirection::Down);
                 }
             }
-            for &xkb_keycode in keymap.iter_keycodes() {
+            for &xkb_keycode in keymap_ref.iter_keycodes() {
                 let Some(evdev_keycode) = xkb_keycode.checked_sub(XKB_KEYCODE_OFFSET) else {
                     continue;
                 };
@@ -309,11 +357,37 @@ impl KeysymTyper {
             }
         }
         Ok(Self {
+            keymap,
+            built_for: lock,
+            reported,
             modifier_keycodes,
             return_keycode,
             tab_keycode,
             chars,
         })
+    }
+
+    /// Record the server's latest group/lock state; the map is rebuilt
+    /// lazily by [`KeysymTyper::current`].
+    fn note_modifiers(&mut self, group: u32, locked_mods: u32) {
+        self.reported = Some(KeyboardLock { group, locked_mods });
+    }
+
+    /// Bring the character map in line with the server's reported state, or
+    /// refuse. With several layouts and no report, the active layout is
+    /// unknown and guessing could type wrong characters.
+    fn refresh(&mut self) -> Result<(), LibeiError> {
+        let wanted = match self.reported {
+            Some(lock) => lock,
+            None if self.keymap.num_layouts() > 1 => {
+                return Err(LibeiError::UnknownActiveLayout(self.keymap.num_layouts()))
+            }
+            None => KeyboardLock::default(),
+        };
+        if wanted != self.built_for {
+            *self = Self::build_for(self.keymap.clone(), wanted, self.reported)?;
+        }
+        Ok(())
     }
 
     /// Modifier keycodes to press (in order) around `stroke`, released in
@@ -367,6 +441,15 @@ struct EventPump {
     converter: reis::event::EiEventConverter,
 }
 
+// SAFETY: `EiEventConverter` is `!Send` only because it can store
+// `Box<dyn FnOnce(u64)>` request-completion callbacks, which are added solely
+// through `EiEventConverter::add_callback_handler`. This crate never calls
+// that method and `converter` is private to `EventPump`, so the callback map
+// is always empty; every other field is built from `Arc`/`Mutex`-backed reis
+// objects that the injector already moves between threads. The pump is used
+// by one thread at a time through `&mut LibeiInjector` (no `Sync` is claimed).
+unsafe impl Send for EventPump {}
+
 impl EventPump {
     fn next(&mut self, timeout: Duration) -> Result<reis::event::EiEvent, LibeiError> {
         let deadline = Instant::now() + timeout;
@@ -401,6 +484,45 @@ impl EventPump {
             }
             match self.context.read() {
                 Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Err(LibeiError::Disconnected("EIS socket closed".into()))
+                }
+                Err(error) => return Err(LibeiError::Handshake(error.into())),
+            }
+        }
+    }
+}
+
+impl EventPump {
+    /// Every event the server has already sent, without blocking.
+    fn drain(&mut self) -> Result<Vec<reis::event::EiEvent>, LibeiError> {
+        let mut events = Vec::new();
+        loop {
+            while let Some(result) = self.context.pending_event() {
+                match result {
+                    reis::PendingRequestResult::Request(request) => self
+                        .converter
+                        .handle_event(request)
+                        .map_err(|error| LibeiError::Handshake(error.into()))?,
+                    reis::PendingRequestResult::ParseError(error) => {
+                        return Err(LibeiError::Handshake(error.into()))
+                    }
+                    reis::PendingRequestResult::InvalidObject(object) => {
+                        return Err(LibeiError::Handshake(
+                            reis::handshake::HandshakeError::InvalidObject(object).into(),
+                        ))
+                    }
+                }
+            }
+            while let Some(event) = self.converter.next_event() {
+                events.push(event);
+            }
+            if !poll_context(&self.context, Duration::ZERO)? {
+                return Ok(events);
+            }
+            match self.context.read() {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(events),
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Err(LibeiError::Disconnected("EIS socket closed".into()))
                 }
@@ -555,7 +677,7 @@ impl LibeiInjector {
                         .map_err(|error| LibeiError::Keymap(error.to_string()))?;
                     let xkb_keymap = decode_keymap(keymap_fd, keymap.size)?;
                     let typer = KeysymTyper::build(&xkb_keymap)?;
-                    break (resumed.device, TextMode::Keysym(typer), keyboard);
+                    break (resumed.device, TextMode::Keysym(Box::new(typer)), keyboard);
                 }
                 reis::event::EiEvent::Disconnected(disconnected) => {
                     return Err(LibeiError::Disconnected(
@@ -592,6 +714,8 @@ impl LibeiInjector {
 
         Ok(Self {
             connection,
+            events,
+            device_unavailable: None,
             device,
             mode,
             keyboard,
@@ -601,6 +725,53 @@ impl LibeiInjector {
             tab_keycode,
             _portal: portal,
         })
+    }
+
+    /// Apply everything the server reported since the last call, then make
+    /// sure the keyboard state still matches what we would type against.
+    /// Called before any text-producing request: a layout switch, Caps Lock,
+    /// or a replaced device must never be typed through with stale
+    /// assumptions, so this rebuilds the keysym map or refuses (fail closed).
+    fn sync_server_state(&mut self) -> Result<(), LibeiError> {
+        for event in self.events.drain()? {
+            match event {
+                reis::event::EiEvent::KeyboardModifiers(modifiers)
+                    if modifiers.device == self.device =>
+                {
+                    if let TextMode::Keysym(typer) = &mut self.mode {
+                        typer.note_modifiers(modifiers.group, modifiers.locked);
+                    }
+                }
+                reis::event::EiEvent::DevicePaused(paused) if paused.device == self.device => {
+                    self.device_unavailable = Some("paused by the server");
+                }
+                reis::event::EiEvent::DeviceResumed(resumed) if resumed.device == self.device => {
+                    if self.device_unavailable == Some("paused by the server") {
+                        self.device_unavailable = None;
+                    }
+                }
+                reis::event::EiEvent::DeviceRemoved(removed) if removed.device == self.device => {
+                    // A keymap change replaces the device; its old keymap
+                    // must not be used again.
+                    self.device_unavailable = Some("removed by the server");
+                }
+                reis::event::EiEvent::Disconnected(disconnected) => {
+                    return Err(LibeiError::Disconnected(
+                        disconnected
+                            .explanation
+                            .unwrap_or_else(|| "no explanation".into()),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if let Some(reason) = self.device_unavailable {
+            return Err(LibeiError::DeviceUnavailable(reason));
+        }
+        if let TextMode::Keysym(typer) = &mut self.mode {
+            typer.refresh()?;
+        }
+        Ok(())
     }
 
     /// Rejects a character the current mode cannot type before anything is
@@ -1363,7 +1534,8 @@ impl TextInjector for LibeiInjector {
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
-        self.send_backspaces(erase_grapheme_count(trigger))
+        self.sync_server_state()
+            .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
@@ -1372,14 +1544,23 @@ impl TextInjector for LibeiInjector {
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
-        self.send_text(text).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })
+        self.sync_server_state()
+            .and_then(|()| self.send_text(text))
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+        // Synchronized before the representability check below, so that
+        // check (and the trigger erase it guards) uses the current layout.
+        self.sync_server_state().map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })?;
         validate_text(text).map_err(|error| InjectorError {
             backend: BACKEND_NAME,
             message: error.to_string(),
@@ -1423,11 +1604,13 @@ impl TextInjector for LibeiInjector {
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        self.send_left_arrows(count).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })
+        self.sync_server_state()
+            .and_then(|()| self.send_left_arrows(count))
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
     }
 
     fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
@@ -1865,5 +2048,72 @@ mod tests {
         // chord on some other key.
         assert_eq!(typer.chars[&'1'].modifiers, 0);
         assert_eq!(typer.chars[&'!'].modifiers, super::MOD_SHIFT);
+    }
+
+    #[test]
+    fn keysym_typer_refuses_to_guess_the_active_layout_of_a_multi_layout_keymap() {
+        let keymap = layout_keymap("us,de");
+        let mut typer = super::KeysymTyper::build(&keymap).unwrap();
+        assert!(matches!(
+            typer.refresh(),
+            Err(super::LibeiError::UnknownActiveLayout(2))
+        ));
+        // A single-layout keymap has only one possible group.
+        let mut single = super::KeysymTyper::build(&layout_keymap("de")).unwrap();
+        assert!(single.refresh().is_ok());
+    }
+
+    #[test]
+    fn keysym_typer_follows_a_reported_layout_switch() {
+        let keymap = layout_keymap("us,de");
+        let mut typer = super::KeysymTyper::build(&keymap).unwrap();
+        typer.note_modifiers(0, 0);
+        typer.refresh().unwrap();
+        let us_z = typer.chars[&'z'];
+        assert!(!typer.chars.contains_key(&'ä'), "US layout has no 'ä'");
+
+        // US -> German: 'z' moves to the key US calls 'y', '@' becomes AltGr+Q.
+        typer.note_modifiers(1, 0);
+        typer.refresh().unwrap();
+        let de_z = typer.chars[&'z'];
+        assert_ne!(us_z.keycode, de_z.keycode, "QWERTZ swaps z and y");
+        assert_eq!(typer.chars[&'y'].keycode, us_z.keycode);
+        assert_eq!(typer.chars[&'@'].modifiers, super::MOD_LEVEL3);
+        assert_eq!(typer.chars[&'ä'].modifiers, 0);
+
+        // And back again.
+        typer.note_modifiers(0, 0);
+        typer.refresh().unwrap();
+        assert_eq!(typer.chars[&'z'], us_z);
+    }
+
+    #[test]
+    fn keysym_typer_accounts_for_caps_lock() {
+        let keymap = layout_keymap("us");
+        let lock = 1
+            << keymap
+                .mod_get_index("Lock")
+                .expect("keymap has a Lock modifier");
+        let mut typer = super::KeysymTyper::build(&keymap).unwrap();
+        typer.note_modifiers(0, lock);
+        typer.refresh().unwrap();
+        // With Caps Lock on, the unmodified letter key types uppercase.
+        assert_eq!(typer.chars[&'A'].modifiers, 0);
+        assert_eq!(typer.chars[&'a'].modifiers, super::MOD_SHIFT);
+        assert_eq!(typer.chars[&'1'].modifiers, 0);
+    }
+
+    #[test]
+    fn keysym_typer_rejects_a_layout_group_the_keymap_does_not_have() {
+        let keymap = layout_keymap("us");
+        let mut typer = super::KeysymTyper::build(&keymap).unwrap();
+        typer.note_modifiers(3, 0);
+        assert!(matches!(typer.refresh(), Err(super::LibeiError::Keymap(_))));
+    }
+
+    #[test]
+    fn unavailable_device_errors_are_retryable_and_unknown_layout_is_not() {
+        assert!(super::LibeiError::DeviceUnavailable("removed by the server").is_retryable());
+        assert!(!super::LibeiError::UnknownActiveLayout(2).is_retryable());
     }
 }
