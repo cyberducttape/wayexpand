@@ -307,11 +307,71 @@ pub struct ExpansionEngine {
     template_base: crate::TemplateContext,
     /// Supplied by the host when it can read the clipboard.
     clipboard: Option<crate::ClipboardReader>,
+    /// Optional host hook that starts a clipboard read early (see
+    /// [`ExpansionEngine::set_clipboard_prefetch`]).
+    clipboard_prefetch: Option<crate::ClipboardPrefetch>,
+    /// Forward trie of the effective triggers of `{{clipboard}}` snippets,
+    /// used only to decide when to prefetch. `None` when there are none.
+    clipboard_triggers: Option<ClipboardTriggers>,
+    /// The prefetch hook already fired for the prefix currently being typed.
+    clipboard_prefetch_armed: bool,
     /// Applied expansions not yet collected by the host; see
     /// [`ExpansionEngine::drain_usage_events`].
     usage_events: VecDeque<crate::UsageEvent>,
     /// A snippet form is open; capture is suspended until it completes.
     form_active: bool,
+}
+
+/// Triggers whose snippets read the clipboard.
+#[derive(Debug, Clone)]
+struct ClipboardTriggers {
+    trie: Matcher,
+    /// Every other effective trigger: a prefix that could still become one
+    /// of these does not read the clipboard ahead of time.
+    others: Matcher,
+    /// First characters of those triggers; a cheap filter for start offsets.
+    first_chars: Vec<char>,
+    /// Longest trigger, in scalars.
+    max_chars: usize,
+}
+
+impl ClipboardTriggers {
+    fn new(triggers: Vec<String>, others: Vec<String>) -> Option<Self> {
+        if triggers.is_empty() {
+            return None;
+        }
+        let mut first_chars: Vec<char> = triggers.iter().filter_map(|t| t.chars().next()).collect();
+        first_chars.sort_unstable();
+        first_chars.dedup();
+        let max_chars = triggers
+            .iter()
+            .map(|t| t.chars().count())
+            .max()
+            .unwrap_or(0);
+        Some(Self {
+            trie: Matcher::new(triggers),
+            others: Matcher::new(others),
+            first_chars,
+            max_chars,
+        })
+    }
+
+    /// Whether the end of `buffer` is a proper prefix (at least two
+    /// characters, so a lone sigil like `;` never reads the clipboard) that
+    /// can only be completed into a clipboard trigger.
+    fn prefix_pending(&self, buffer: &VecDeque<char>) -> bool {
+        let longest = self.max_chars.saturating_sub(1).min(buffer.len());
+        (2..=longest).any(|length| {
+            let start = buffer.len() - length;
+            self.first_chars.binary_search(&buffer[start]).is_ok()
+                && self
+                    .trie
+                    .has_continuation(buffer.iter().skip(start).copied())
+                && !self
+                    .others
+                    .has_continuation(buffer.iter().skip(start).copied())
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -491,6 +551,21 @@ impl ExpansionEngine {
         // result is reused here instead of being recomputed.
         let enabled = config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
         let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
+        let (clipboard, others): (Vec<_>, Vec<_>) = enabled.iter().partition(|(index, _)| {
+            let expansion = &config.expansion[*index];
+            expansion.command.is_none()
+                && crate::template_variables(&expansion.replacement).contains(&"clipboard")
+        });
+        let clipboard_triggers = ClipboardTriggers::new(
+            clipboard
+                .into_iter()
+                .map(|(_, trigger)| trigger.clone())
+                .collect(),
+            others
+                .into_iter()
+                .map(|(_, trigger)| trigger.clone())
+                .collect(),
+        );
         let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
         let app_filters: Vec<Vec<AppFilter>> = config
             .expansion
@@ -565,6 +640,9 @@ impl ExpansionEngine {
             reinsert_terminators: true,
             template_base,
             clipboard: None,
+            clipboard_prefetch: None,
+            clipboard_triggers,
+            clipboard_prefetch_armed: false,
             usage_events: VecDeque::new(),
             form_active: false,
         })
@@ -602,6 +680,42 @@ impl ExpansionEngine {
     /// the configuration enables the variable and policy allows it.
     pub fn set_clipboard_reader(&mut self, reader: Option<crate::ClipboardReader>) {
         self.clipboard = reader;
+    }
+
+    /// Supply a hook that starts a clipboard read as soon as the typed text
+    /// can only be completed into a `{{clipboard}}` snippet, so the render
+    /// does not wait for `wl-paste`. Called at most once per typed prefix,
+    /// and only when the clipboard variable is enabled and allowed.
+    pub fn set_clipboard_prefetch(&mut self, prefetch: Option<crate::ClipboardPrefetch>) {
+        self.clipboard_prefetch = prefetch;
+    }
+
+    /// The registered prefetch hook, for carrying it across a reload.
+    pub fn clipboard_prefetch(&self) -> Option<crate::ClipboardPrefetch> {
+        self.clipboard_prefetch.clone()
+    }
+
+    /// Fire the prefetch hook when a clipboard trigger is being typed.
+    pub(crate) fn maybe_prefetch_clipboard(&mut self) {
+        let (Some(prefetch), Some(triggers)) = (&self.clipboard_prefetch, &self.clipboard_triggers)
+        else {
+            return;
+        };
+        let enforcement = self.config.organization.effective_enforcement_policy();
+        if !self.config.settings.allow_clipboard
+            || enforcement.disable_clipboard
+            || self.clipboard.is_none()
+        {
+            return;
+        }
+        if triggers.prefix_pending(&self.buffer) {
+            if !self.clipboard_prefetch_armed {
+                self.clipboard_prefetch_armed = true;
+                (prefetch.0)();
+            }
+        } else {
+            self.clipboard_prefetch_armed = false;
+        }
     }
 
     /// The registered clipboard reader, for carrying it across a reload.
@@ -1811,6 +1925,7 @@ impl ExpansionEngine {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.buffer_truncated = false;
+        self.clipboard_prefetch_armed = false;
     }
 }
 

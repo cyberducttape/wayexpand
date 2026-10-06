@@ -253,6 +253,7 @@ impl ReloadableConfig {
                         // Keep waking the reactor when commands finish.
                         engine.set_completion_notifier(self.engine.completion_notifier());
                         engine.set_clipboard_reader(self.engine.clipboard_reader());
+                        engine.set_clipboard_prefetch(self.engine.clipboard_prefetch());
                         // A fresh engine has no window context yet. Without
                         // this, any reload (e.g. every GUI save) would
                         // wrongly fail-close `app_filter`-scoped expansions

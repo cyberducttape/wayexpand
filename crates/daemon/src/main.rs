@@ -266,9 +266,11 @@ fn main() -> Result<()> {
     let waker = waker::Waker::new()
         .map_err(|error| anyhow::anyhow!("could not create the reactor wakeup: {error}"))?;
     control.set_waker(waker.clone());
+    let (clipboard_reader, clipboard_prefetch) = clipboard::wl_paste_clipboard();
+    config.engine.set_clipboard_reader(Some(clipboard_reader));
     config
         .engine
-        .set_clipboard_reader(Some(clipboard::wl_paste_reader()));
+        .set_clipboard_prefetch(Some(clipboard_prefetch));
     let completion_waker = waker.clone();
     config
         .engine

@@ -23,6 +23,18 @@ impl std::fmt::Debug for ClipboardReader {
     }
 }
 
+/// Asks the host to start reading the clipboard ahead of time because the
+/// typed text can only be completed into a `{{clipboard}}` snippet. The host
+/// must keep the value only for that imminent render (see the daemon).
+#[derive(Clone)]
+pub struct ClipboardPrefetch(pub Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for ClipboardPrefetch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ClipboardPrefetch")
+    }
+}
+
 /// Static snippet replacements for `{{snippet:TRIGGER}}`, keyed by trigger
 /// and alias. All keys of one snippet share a single `Arc<str>`, so aliases
 /// cost a pointer rather than another copy of a (possibly large) replacement.

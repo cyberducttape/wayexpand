@@ -441,7 +441,7 @@ impl ExpansionEngine {
             }
             self.push_buffered(character);
             match self.settled_match() {
-                SettledMatch::Continue => {}
+                SettledMatch::Continue => self.maybe_prefetch_clipboard(),
                 SettledMatch::Stale => {
                     self.clear_buffer();
                     continue;

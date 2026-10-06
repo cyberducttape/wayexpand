@@ -172,12 +172,6 @@ Still open:
       identity must keep failing closed.
 - [ ] Publish a canonical `route_id` in daemon status (additive schema change)
       so consumers stop reconstructing routes from `source`/`backend`.
-- [ ] `{{clipboard}}` runs `wl-paste` on demand (bounded at 150 ms) while
-      rendering. Reading on demand is deliberate: a background clipboard
-      monitor would keep every copied item, including passwords, in daemon
-      memory. Revisit only with a design that preserves that property (for
-      example a short-lived read started when a clipboard trigger prefix is
-      typed).
 - [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
       template library and parsed templates, parsed hotkeys, normalized IDs,
       policy-resolved settings) during validation, and have the engine, reload

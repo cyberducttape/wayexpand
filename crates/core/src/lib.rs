@@ -60,8 +60,8 @@ pub use policy::{
 pub use store::{ConfigStore, ConfigStoreStatus};
 pub use template::{
     form_fields, render_template, render_template_preview, render_template_with_cursor,
-    template_variables, ClipboardReader, FormField, FormFieldKind, SnippetLibrary, TemplateContext,
-    TemplateError,
+    template_variables, ClipboardPrefetch, ClipboardReader, FormField, FormFieldKind,
+    SnippetLibrary, TemplateContext, TemplateError,
 };
 pub use usage::{
     trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk, UsageEvent, UsageLine, UsageReport,

@@ -4699,3 +4699,68 @@ fn engine_renders_with_the_library_it_validated() {
         &engine.template_base.snippets[":s"]
     ));
 }
+
+fn prefetch_engine(
+    config: &str,
+) -> (
+    ExpansionEngine,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let mut engine = ExpansionEngine::new(Config::parse(config).unwrap()).unwrap();
+    engine.set_clipboard_reader(Some(crate::ClipboardReader(std::sync::Arc::new(|| {
+        Some("pasted".into())
+    }))));
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&calls);
+    engine.set_clipboard_prefetch(Some(crate::ClipboardPrefetch(std::sync::Arc::new(
+        move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    ))));
+    (engine, calls)
+}
+
+fn type_text(engine: &mut ExpansionEngine, text: &str) -> Vec<ExpansionResult> {
+    text.chars()
+        .flat_map(|character| engine.process(InputEvent::Text(character.to_string())))
+        .collect()
+}
+
+#[test]
+fn clipboard_prefetch_fires_once_when_only_a_clipboard_trigger_can_follow() {
+    let (mut engine, calls) = prefetch_engine(
+        "[settings]\nallow_clipboard = true\n\
+         [[expansion]]\ntrigger = \":clip\"\nreplacement = \"> {{clipboard}}\"\n\
+         [[expansion]]\ntrigger = \":cat\"\nreplacement = \"meow\"\n",
+    );
+    let seen =
+        |calls: &std::sync::atomic::AtomicUsize| calls.load(std::sync::atomic::Ordering::SeqCst);
+    type_text(&mut engine, ":c");
+    assert_eq!(seen(&calls), 0, "':c' could still become ':cat'");
+    type_text(&mut engine, "l");
+    assert_eq!(seen(&calls), 1, "':cl' can only become ':clip'");
+    let results = type_text(&mut engine, "ip");
+    assert_eq!(seen(&calls), 1, "one prefetch per typed prefix");
+    assert_eq!(results.last().unwrap().insert, "> pasted");
+
+    // Typing an unrelated word or another trigger never prefetches.
+    type_text(&mut engine, " hello :cat");
+    assert_eq!(seen(&calls), 1);
+}
+
+#[test]
+fn clipboard_prefetch_needs_a_reader_and_policy_permission() {
+    let enabled = "[settings]\nallow_clipboard = true\n\
+                   [[expansion]]\ntrigger = \":clip\"\nreplacement = \"{{clipboard}}\"\n";
+    let (mut engine, calls) = prefetch_engine(enabled);
+    engine.set_clipboard_reader(None);
+    type_text(&mut engine, ":cli");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let blocked = "[organization]\nsafe_mode = true\ndisable_clipboard = true\n\
+                   [settings]\nallow_clipboard = true\n\
+                   [[expansion]]\ntrigger = \":clip\"\nreplacement = \"{{clipboard}}\"\n";
+    let (mut engine, calls) = prefetch_engine(blocked);
+    type_text(&mut engine, ":cli");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
