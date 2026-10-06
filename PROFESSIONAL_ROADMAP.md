@@ -166,8 +166,28 @@ Still open:
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [ ] Form snippets through IBus (the route drops surrounding text when focus
       moves to the form) and a GUI editor for form fields.
-- [ ] Pack update channel and a GUI trust review for signed packs.
+- [ ] Signed team-pack registry: `wayexpand pack update`, `pack diff`,
+      `pack rollback`, and `pack verify` against organization trust roots,
+      plus a GUI trust review for signed packs.
+- [ ] Parameterized broker actions: a per-action parameter schema (for
+      example `type = "enum"` with fixed values) that validates every input
+      before it is placed in a fixed argument slot, so forms can drive
+      allowlisted, shell-free commands. No free-form interpolation.
+- [ ] Runtime keyboard-layout updates for evdev capture (today a layout change
+      needs a daemon restart).
 - [ ] Real external IME/preedit cooperation (see section 5).
+
+## Maintainability
+
+Not release blockers; they keep 2.0 tractable.
+
+- [ ] Continue splitting oversized modules: `core/src/engine/mod.rs`,
+      `core/src/config.rs` (model, limits, validation, templates, storage,
+      migration), `backend-libei/src/lib.rs` (connection, portal, token,
+      keymap, text, keyboard fallback, injector), `gui/src/app/editor.rs`,
+      `backend-input-method/src/lib.rs`, and `backend-ibus/src/lib.rs`.
+- [ ] Move GUI strings out of the Rust `lang.rs` match tables into a
+      data-driven format (for example Fluent/FTL) before adding languages.
 
 ## Maintenance principles
 
