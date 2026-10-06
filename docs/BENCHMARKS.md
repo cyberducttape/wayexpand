@@ -85,6 +85,41 @@ the controlled comparison does not show a large memory regression. Treat these
 as process-level observations, not a memory guarantee. The runs used Linux
 7.0.0-34-generic and Rust 1.96.0 on the same host.
 
+### Arena matcher: 2026-10-05
+
+The matcher's two tries changed from a `HashMap<char, Node>` per node to
+flat arenas with character-sorted edge runs. Same host, Linux
+7.0.0-38-generic, Rust 1.96.0. Criterion compared the change against a
+baseline saved from the previous commit in the same session (`cargo bench
+... -- --save-baseline before`, then `-- --baseline before`); absolute
+timings on this host vary between sessions, so only the relative change is
+meaningful:
+
+| Benchmark | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `matcher_latency/10000` | 8.94 µs | 8.12 µs | −9.1% |
+| `matcher_construction_amplified/1000` | 56.5 ms | 39.4 ms | −30.3% |
+| `matcher_construction_amplified/5000` | 114.9 ms | 69.7 ms | −39.3% |
+| `matcher_construction_amplified/10000` | 224.9 ms | 152.6 ms | −32.2% |
+
+Isolated matcher heap, counted by a global allocator around `Matcher::new`
+only (10,000 snippets; "amplified" adds two aliases, case propagation, and a
+decomposable trigger; "unicode" uses CJK, Cyrillic, and accented Latin
+triggers with the same amplification):
+
+| Workload | Effective triggers | Heap before | Heap after | Build peak after |
+| --- | ---: | ---: | ---: | ---: |
+| plain | 10,000 | 28.4 MiB | 1.6 MiB | 8.9 MiB |
+| amplified | 80,000 | 77.8 MiB | 3.8 MiB | 26.3 MiB |
+| unicode | 90,000 | 101.7 MiB | 5.2 MiB | 37.1 MiB |
+
+The build peak is the temporary insertion structure, released before
+`Matcher::new` returns. Reproduce the heap figures with:
+
+```sh
+cargo run --locked --release -p wayexpand-core --example matcher_memory
+```
+
 ## Configuration editing
 
 The GUI edits a copy of the whole configuration and the save path validates
