@@ -159,7 +159,8 @@ risk analyzer, Git library sync, and signed organization packs.
 
 Still open:
 
-- [ ] Better cross-desktop application identity so app-filtered snippets,
+- [ ] **Next after compositor certification:** cross-desktop application
+      identity so app-filtered snippets,
       Quick Picker direct insertion, and form return-to-origin work beyond
       KWin: `wlr-foreign-toplevel-management` where available, compositor IPC
       adapters (Sway, Hyprland) as fallbacks, and an optional GNOME Shell
@@ -167,12 +168,17 @@ Still open:
       identity must keep failing closed.
 - [ ] Publish a canonical `route_id` in daemon status (additive schema change)
       so consumers stop reconstructing routes from `source`/`backend`.
-- [ ] `{{clipboard}}` runs `wl-paste` synchronously (bounded at 500 ms) while
-      rendering; a persistent Wayland clipboard client or an asynchronously
-      prefetched value would remove that latency from clipboard snippets.
+- [ ] `{{clipboard}}` runs `wl-paste` on demand (bounded at 150 ms) while
+      rendering. Reading on demand is deliberate: a background clipboard
+      monitor would keep every copied item, including passwords, in daemon
+      memory. Revisit only with a design that preserves that property (for
+      example a short-lived read started when a clipboard trigger prefix is
+      typed).
 - [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
-      template library, parsed hotkeys, normalized IDs) during validation and
-      construct the engine from it instead of recompiling. Effective triggers
+      template library and parsed templates, parsed hotkeys, normalized IDs,
+      policy-resolved settings) during validation, and have the engine, reload
+      and GUI consume it instead of recompiling, so validation and runtime
+      cannot disagree. Effective triggers
       are already reused; app filters, hotkeys and IDs are still recompiled.
 - [ ] Profiles/workspaces (personal, work, support) switchable at runtime.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).

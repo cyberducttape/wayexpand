@@ -12,7 +12,11 @@ use std::sync::Arc;
 
 use wayexpand_core::{run_command, ClipboardReader, CommandConfig, CommandEnvironment};
 
-const CLIPBOARD_TIMEOUT_MS: u64 = 500;
+/// Upper bound on one `{{clipboard}}` read. A healthy `wl-paste` returns in a
+/// few milliseconds; this only limits how long a stuck clipboard owner can
+/// delay an expansion. Reading on demand (never caching) is deliberate, see
+/// the module docs.
+const CLIPBOARD_TIMEOUT_MS: u64 = 150;
 
 fn wl_paste_command() -> CommandConfig {
     CommandConfig {
@@ -45,7 +49,7 @@ mod tests {
         wayexpand_core::validate_command_config(&command).unwrap();
         assert_eq!(command.environment, CommandEnvironment::Minimal);
         assert_eq!(command.pass_env, ["WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"]);
-        assert!(command.timeout_ms <= 500);
+        assert!(command.timeout_ms <= 150);
         assert_eq!(command.cache_ms, 0);
     }
 }
