@@ -50,7 +50,19 @@ safe to recommend for everyday desktop use.
       reports, refuses multi-layout keymaps until the active layout is known,
       and reconnects when its device is paused or removed.
 
-### 5. IME and preedit strategy
+### 5. Certification-driven route planner
+
+`recommended_route()` only knows IBus and ignores the capability probe, so a
+machine with a better route still reports no safe automatic path.
+
+- [ ] Discover routes, negotiate capabilities, load local certification
+      evidence, apply organization policy, then rank: certified native
+      text-input, certified IBus/Fcitx, certified libei, experimental routes,
+      and evdev only with explicit consent.
+- [ ] Label each route as recommended, experimental, or requiring consent in
+      setup, the GUI, and `doctor`. Evdev must never be chosen without consent.
+
+### 6. IME and preedit strategy
 
 Preedit/IME composition is currently unsupported. Decide and document the
 supported end state before broad adoption:
@@ -66,7 +78,7 @@ supported end state before broad adoption:
 - [ ] Keep the limitation prominent in docs/SUPPORT_MATRIX.md until evidence
       exists.
 
-### 6. Crash, restart, and lifecycle soak testing
+### 7. Crash, restart, and lifecycle soak testing
 
 - [ ] Run long-duration typing tests across compositor restart, daemon restart,
       portal revocation, suspend/resume, focus changes, reloads, and device
@@ -79,7 +91,7 @@ supported end state before broad adoption:
       72 h release soak on real hardware and record the results; it does not
       yet cover compositor restart, portal revocation, or suspend/resume.
 
-### 7. Testing gaps that need hardware or deeper tooling
+### 8. Testing gaps that need hardware or deeper tooling
 
 - [x] An injectable keyboard-descriptor seam exercises real poll readiness,
       event delivery, disconnect removal, and matcher reset using fake streams.
@@ -127,6 +139,11 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 
 ### Distribution and release evidence
 
+- [ ] Publish installable release assets. Every tag-triggered Release run
+      since v1.2.0 has failed (v1.3.3 failed in "Package aarch64 release"),
+      so GitHub releases have no `.deb`, `.rpm`, or tarball assets even
+      though the packaging and workflows exist.
+
 - [ ] Keep GitHub, Debian/Launchpad, RPM, Arch, and AppStream metadata
       synchronized for each release.
 - [ ] Publish only artifacts that pass the vendored offline-build checks.
@@ -148,12 +165,6 @@ Still open:
       adapters (Sway, Hyprland) as fallbacks, and an optional GNOME Shell
       extension exposing a small authenticated window-identity API. Missing
       identity must keep failing closed.
-- [ ] Certification-driven route planner: replace the IBus-only
-      `recommended_route()` with a planner that ranks routes from their
-      negotiated capabilities (sensitive fields, Unicode, atomic replacement)
-      and local certification evidence, labelling each as recommended,
-      experimental, or requiring explicit consent. Evdev must never be chosen
-      without consent.
 - [ ] Publish a canonical `route_id` in daemon status (additive schema change)
       so consumers stop reconstructing routes from `source`/`backend`.
 - [ ] `{{clipboard}}` runs `wl-paste` synchronously (bounded at 500 ms) while
@@ -176,7 +187,7 @@ Still open:
       allowlisted, shell-free commands. No free-form interpolation.
 - [ ] Runtime keyboard-layout updates for evdev capture (today a layout change
       needs a daemon restart).
-- [ ] Real external IME/preedit cooperation (see section 5).
+- [ ] Real external IME/preedit cooperation (see section 6).
 
 ## Maintainability
 
