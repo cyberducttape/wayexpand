@@ -6,6 +6,9 @@
 
 use std::io;
 use std::process::{Child, Command, ExitStatus};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::Instant;
 
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -26,13 +29,67 @@ pub fn configure_process_group(command: &mut Command) {
     }
 }
 
+static KILL_FAILURES: AtomicU64 = AtomicU64::new(0);
+/// Seconds (since `WARNING_EPOCH`) of the last logged failure, plus one, so
+/// zero means "never logged".
+static LAST_WARNING: AtomicU64 = AtomicU64::new(0);
+static WARNING_EPOCH: OnceLock<Instant> = OnceLock::new();
+const WARNING_INTERVAL_SECS: u64 = 60;
+
+/// Process-group cleanups that failed for a reason other than the group
+/// already being gone (for example `EPERM`), since process start. Cleanup
+/// stays best effort for callers; this exists for metrics and diagnostics.
+pub fn kill_failures_total() -> u64 {
+    KILL_FAILURES.load(Ordering::Relaxed)
+}
+
+/// Send SIGKILL to a process group, classifying the result: `ESRCH` means
+/// the group already exited; anything else is counted and logged at most
+/// once per minute.
+fn kill_group_by_leader(pid: libc::pid_t) {
+    // kill(0, ..) signals the caller's own group and kill(-1, ..) every
+    // process the user can reach. A child leader is never PID 0 or 1, so
+    // refuse rather than ever turn a bad value into a mass kill.
+    if pid <= 1 {
+        record_kill_failure(pid, &io::Error::from_raw_os_error(libc::EINVAL));
+        return;
+    }
+    // SAFETY: the negative PID targets a process group created by
+    // `configure_process_group`; kill has no memory-safety preconditions.
+    if unsafe { libc::kill(-pid, libc::SIGKILL) } == 0 {
+        return;
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return;
+    }
+    record_kill_failure(pid, &error);
+}
+
+fn record_kill_failure(pid: libc::pid_t, error: &io::Error) {
+    let total = KILL_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
+    let now = WARNING_EPOCH.get_or_init(Instant::now).elapsed().as_secs() + 1;
+    let last = LAST_WARNING.load(Ordering::Relaxed);
+    let due = last == 0 || now.saturating_sub(last) >= WARNING_INTERVAL_SECS;
+    if due
+        && LAST_WARNING
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        tracing::warn!(
+            process_group = pid,
+            %error,
+            kill_failures_total = total,
+            "could not terminate a command's process group; descendants may remain"
+        );
+    }
+}
+
 pub fn kill_process_group_by_pid(pid: u32) {
     if let Ok(pid) = libc::pid_t::try_from(pid) {
-        // SAFETY: callers pass the PID of a process group leader created by
+        // Callers pass the PID of a process group leader created by
         // `configure_process_group`.
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
+        kill_group_by_leader(pid);
     }
 }
 
@@ -114,12 +171,9 @@ impl ChildSupervisor {
     pub fn kill_group(&mut self) {
         if let Some(pid) = self.pid.take() {
             if let Ok(pid) = libc::pid_t::try_from(pid) {
-                // SAFETY: the negative PID targets the child-created process
-                // group. The PID is invalidated before returning to prevent a
-                // second kill from ever targeting a recycled process group.
-                unsafe {
-                    libc::kill(-pid, libc::SIGKILL);
-                }
+                // The PID is invalidated above before signalling, so a second
+                // kill can never target a recycled process group.
+                kill_group_by_leader(pid);
             }
         }
     }
@@ -164,6 +218,26 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
 mod tests {
     use super::*;
     use std::{process::Command, thread, time::Duration};
+
+    #[test]
+    fn already_exited_group_is_not_a_cleanup_failure() {
+        let mut command = Command::new("/bin/true");
+        configure_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        let before = kill_failures_total();
+        kill_process_group_by_pid(pid); // ESRCH: the group is gone
+        assert_eq!(kill_failures_total(), before);
+    }
+
+    #[test]
+    fn leader_ids_that_would_signal_everything_are_refused_and_counted() {
+        let before = kill_failures_total();
+        kill_process_group_by_pid(0);
+        kill_process_group_by_pid(1);
+        assert_eq!(kill_failures_total(), before + 2);
+    }
 
     fn wait_until_exited(supervisor: &mut ChildSupervisor) {
         for _ in 0..1000 {
