@@ -1,4 +1,8 @@
 [broker]
+# The packaged broker service is intentionally local-only: its systemd sandbox
+# denies IP networking and permits AF_UNIX only. Networked actions such as
+# kubectl require a separately designed per-action sandbox profile and are not
+# supported by this 1.x example.
 require_absolute_paths = true
 strict_env = true
 # Optional privacy-preserving JSONL execution audit. The parent directory
@@ -9,13 +13,14 @@ strict_env = true
 # Add only commands you explicitly approve. The broker validates executable
 # ownership, permissions, paths, timeouts, and environment allowlists.
 #
-# [actions."cluster-status"]
-# program = "/usr/bin/kubectl"
-# args = ["cluster-info"]
+# Example local-only action. The executable and any files it needs must be
+# available inside the broker service's read-only-home/systemd sandbox.
+# [actions."local-report"]
+# program = "/usr/local/bin/report"
+# args = ["--summary"]
 # timeout_ms = 3000
-# server_env = ["KUBECONFIG"]
 # client_forward_env = ["MY_DYNAMIC_VALUE"]
-# cwd = "/home/user"
+# cwd = "/home/user/reports"
 # Uncaptured output is discarded; set this only to keep it in the journal.
 # log_output = false
 # enabled = true

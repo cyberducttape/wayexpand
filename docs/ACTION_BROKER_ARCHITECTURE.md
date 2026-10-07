@@ -25,6 +25,12 @@ The design aims to provide:
 
 ## Runtime architecture
 
+The packaged 1.x broker is a local-action broker. Its systemd unit denies IP
+networking (`IPAddressDeny=any`) and permits only `AF_UNIX`; the example policy
+therefore contains no networked command such as `kubectl`. Networked actions
+require future per-action OS sandbox profiles and must not be enabled by
+weakening the whole broker service.
+
 The daemon's bounded command worker routes named actions through this socket;
 ordinary `program =` commands retain the existing restricted direct runner.
 
@@ -36,19 +42,19 @@ trigger = ":cluster"
 replacement = ""
 
 [expansion.command]
-action = "cluster-status"
+action = "local-report"
 timeout_ms = 3000
 ```
 
-The corresponding broker policy fixes what may run:
+The corresponding broker policy fixes what may run. For the shipped sandbox,
+use a local action, for example:
 
 ```toml
-[actions."cluster-status"]
-program = "/usr/bin/kubectl"
-args = ["cluster-info"]
+[actions."local-report"]
+program = "/usr/local/bin/report"
+args = ["--summary"]
 timeout_ms = 3000
-server_env = ["KUBECONFIG"]
-cwd = "/home/stephan"
+cwd = "/home/stephan/reports"
 ```
 
 `server_env` values are read from the broker's environment and cannot be
@@ -89,7 +95,7 @@ broker's journal only when the action's policy sets `log_output = true`.
 ## Current implementation (integrated, operator-configured)
 
 What's implemented:
-- **Protocol** (crates/action-broker/src/protocol.rs)
+- **Protocol** (`crates/broker-protocol`)
   - `ActionRequest`: Daemon requests action execution with ID and timeout
   - `ActionResponse`: Broker returns success or error result
   - `ActionError`: Comprehensive error types (not found, blocked, timeout, etc.)
@@ -109,11 +115,14 @@ What's implemented:
   - Bounded output capture (stdout/stderr) with exit code tracking
   - Bounded concurrent execution (16 actions per broker process)
 
-- **IPC Layer** (crates/action-broker/src/ipc.rs)
+- **Client transport** (`crates/broker-client`)
+  - `BrokerClient`: Connect and send requests without pulling in the server
+    or executor implementation
+
+- **IPC server layer** (crates/action-broker/src/ipc.rs)
   - Unix domain sockets (AF_UNIX) for local-only communication
   - Line-delimited JSON for simplicity
   - `BrokerServer`: Listen and accept connections
-  - `BrokerClient`: Connect and send requests
   - Bounded client connections (64) so idle same-user clients cannot exhaust
     the broker's blocking request workers
 

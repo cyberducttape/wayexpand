@@ -194,8 +194,10 @@ def main() -> int:
         errors.append("Action Broker still uses the removed experimental feature gate")
     if "action-broker =" in daemon_manifest:
         errors.append("daemon should consume broker routing through the core crate")
-    if "action-broker =" not in core_manifest:
-        errors.append("core crate is missing the Action Broker runtime dependency")
+    if "wayexpand-broker-client =" not in core_manifest:
+        errors.append("core crate is missing the Action Broker client dependency")
+    if "action-broker =" in core_manifest:
+        errors.append("core crate must not depend on the Action Broker server/executor crate")
     if "wayexpand-action-broker" not in architecture or "normal workspace builds" not in architecture:
         errors.append("Action Broker architecture does not describe the current integrated binary")
     if "planned Action Broker" in threat_model or "wait for the planned Action Broker" in threat_model:

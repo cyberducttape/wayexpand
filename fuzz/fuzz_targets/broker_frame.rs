@@ -10,5 +10,5 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let mut reader = BufReader::with_capacity(usize::from(capacity).max(1), frame);
-    let _ = action_broker::decode_request_frame(&mut reader);
+    let _ = wayexpand_broker_client::decode_request_frame(&mut reader);
 });

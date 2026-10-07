@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-action-broker = { path = "../action-broker" }
+wayexpand-broker-client = { path = "../broker-client" }
 wayexpand-process-supervisor = { path = "../process-supervisor" }
 serde.workspace = true
 serde_json.workspace = true

@@ -14,6 +14,8 @@ members = [
     "crates/backend-selection",
     "crates/backend-ibus",
     "crates/action-broker",
+    "crates/broker-protocol",
+    "crates/broker-client",
     "crates/process-supervisor",
     "crates/build-info",
 ]

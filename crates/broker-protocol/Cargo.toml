@@ -1,0 +1,12 @@
+[package]
+name = "wayexpand-broker-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "WayExpand Action Broker wire protocol"
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+serde.workspace = true

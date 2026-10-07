@@ -128,7 +128,7 @@ fn run_broker_action(
             })
         })
         .ok_or_else(|| CommandError::WaitFailed("action broker socket is not configured".into()))?;
-    let mut client = action_broker::BrokerClient::connect(socket).map_err(|error| {
+    let mut client = wayexpand_broker_client::BrokerClient::connect(socket).map_err(|error| {
         CommandError::WaitFailed(format!("connecting to action broker: {error}"))
     })?;
     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -148,7 +148,7 @@ fn run_broker_action(
         })
         .collect();
     client
-        .send_request(&action_broker::ActionRequest {
+        .send_request(&wayexpand_broker_client::ActionRequest {
             action_id: action_id.to_owned(),
             timeout_ms: command.timeout_ms,
             inherit_env: false,
@@ -160,23 +160,25 @@ fn run_broker_action(
         .recv_response_until(deadline, shutdown)
         .map_err(|error| broker_command_error("receiving broker response", error))?
     {
-        action_broker::ActionResponse::Success(output) => broker_output_text(output),
-        action_broker::ActionResponse::Error(error) => {
+        wayexpand_broker_client::ActionResponse::Success(output) => broker_output_text(output),
+        wayexpand_broker_client::ActionResponse::Error(error) => {
             Err(CommandError::WaitFailed(error.to_string()))
         }
     }
 }
 
-fn broker_command_error(context: &str, error: action_broker::IpcError) -> CommandError {
+fn broker_command_error(context: &str, error: wayexpand_broker_client::IpcError) -> CommandError {
     match error {
-        action_broker::IpcError::DeadlineExceeded => CommandError::Timeout,
-        action_broker::IpcError::Cancelled => CommandError::StaleInput,
+        wayexpand_broker_client::IpcError::DeadlineExceeded => CommandError::Timeout,
+        wayexpand_broker_client::IpcError::Cancelled => CommandError::StaleInput,
         other if other.is_timeout() => CommandError::Timeout,
         other => CommandError::WaitFailed(format!("{context}: {other}")),
     }
 }
 
-fn broker_output_text(output: action_broker::ActionOutput) -> Result<String, CommandError> {
+fn broker_output_text(
+    output: wayexpand_broker_client::ActionOutput,
+) -> Result<String, CommandError> {
     // The broker deliberately keeps a successful protocol response when
     // output is bounded, but a text expansion must never inject an incomplete
     // stdout value as if it were complete. Stderr is diagnostic-only.
@@ -567,8 +569,11 @@ pub(super) fn run_form_helper(
 mod tests {
     use super::*;
 
-    fn output(stdout_truncated: bool, stderr_truncated: bool) -> action_broker::ActionOutput {
-        action_broker::ActionOutput {
+    fn output(
+        stdout_truncated: bool,
+        stderr_truncated: bool,
+    ) -> wayexpand_broker_client::ActionOutput {
+        wayexpand_broker_client::ActionOutput {
             exit_code: 0,
             stdout: "complete".into(),
             stderr: String::new(),

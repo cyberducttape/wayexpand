@@ -15,7 +15,7 @@ members = ["."]
 [dependencies]
 libfuzzer-sys = "0.4"
 wayexpand-core = { path = "../crates/core", features = ["fuzzing"] }
-action-broker = { path = "../crates/action-broker" }
+wayexpand-broker-client = { path = "../crates/broker-client" }
 wayexpand-backend-ibus = { path = "../crates/backend-ibus" }
 unicode-segmentation = "1"
 

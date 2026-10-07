@@ -33,8 +33,9 @@ pub use config::{ActionConfig, BrokerConfig};
 pub use executor::ActionExecutor;
 #[doc(hidden)]
 pub use ipc::decode_request_frame;
-pub use ipc::{BrokerClient, BrokerServer, IpcError};
+pub use ipc::{BrokerServer, IpcError};
 pub use protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse};
+pub use wayexpand_broker_client::BrokerClient;
 
 #[cfg(test)]
 mod tests {

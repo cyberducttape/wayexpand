@@ -14,6 +14,8 @@ categories.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+wayexpand-broker-protocol = { path = "../broker-protocol" }
+wayexpand-broker-client = { path = "../broker-client" }
 toml = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

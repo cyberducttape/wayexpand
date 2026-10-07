@@ -131,6 +131,8 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "wayexpand-broker-client",
+ "wayexpand-broker-protocol",
  "wayexpand-build-info",
  "wayexpand-process-supervisor",
 ]
@@ -4217,6 +4219,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayexpand-broker-client"
+version = "1.3.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "wayexpand-broker-protocol",
+]
+
+[[package]]
+name = "wayexpand-broker-protocol"
+version = "1.3.3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "wayexpand-build-info"
 version = "1.3.3"
 
@@ -4224,7 +4243,6 @@ version = "1.3.3"
 name = "wayexpand-core"
 version = "1.3.3"
 dependencies = [
- "action-broker",
  "criterion",
  "getrandom 0.4.3",
  "libc",
@@ -4238,6 +4256,7 @@ dependencies = [
  "unicode-general-category",
  "unicode-normalization",
  "unicode-segmentation",
+ "wayexpand-broker-client",
  "wayexpand-process-supervisor",
 ]
 
