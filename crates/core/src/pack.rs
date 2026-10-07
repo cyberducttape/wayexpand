@@ -2,11 +2,15 @@ use crate::Config;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Read},
+    io::{self, Read, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
+    process::{Command, Output},
+    thread,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MANIFEST_FILE: &str = "wayexpand-pack.toml";
 /// OpenSSH signature over [`pack_digest`], made with `wayexpand pack sign`.
@@ -14,6 +18,8 @@ pub const SIGNATURE_FILE: &str = "wayexpand-pack.sig";
 /// `ssh-keygen -Y` namespace for pack signatures.
 const SIGNATURE_NAMESPACE: &str = "wayexpand-pack";
 const SNIPPETS_DIR: &str = "snippets";
+const SIGNATURE_TOOL_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_SIGNATURE_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 use crate::limits::{
     MAX_PACK_BYTES, MAX_PACK_MANIFEST_BYTES as MAX_MANIFEST_BYTES,
     MAX_PACK_SNIPPET_FILES as MAX_SNIPPET_FILES,
@@ -374,23 +380,84 @@ pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
     Ok(digest)
 }
 
-fn run_ssh_keygen(args: &[&str], input: &str) -> Result<std::process::Output, PackError> {
-    use std::io::Write;
-    let mut child = std::process::Command::new("ssh-keygen")
+fn read_signature_tool_output<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    reader
+        .by_ref()
+        .take((MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut output)?;
+    if output.len() > MAX_SIGNATURE_TOOL_OUTPUT_BYTES {
+        return Err(io::Error::other(
+            "ssh-keygen output exceeded the safety limit",
+        ));
+    }
+    Ok(output)
+}
+
+fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
+    let mut command = Command::new("ssh-keygen");
+    configure_process_group(&mut command);
+    let mut child = command
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| PackError::SignatureTool(error.to_string()))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(input.as_bytes())
-            .map_err(|error| PackError::SignatureTool(error.to_string()))?;
-    }
-    child
-        .wait_with_output()
-        .map_err(|error| PackError::SignatureTool(error.to_string()))
+    let stdin = child.stdin.take();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| PackError::SignatureTool("ssh-keygen stdout was not captured".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| PackError::SignatureTool("ssh-keygen stderr was not captured".into()))?;
+    let stdout_reader = thread::spawn(|| read_signature_tool_output(stdout));
+    let stderr_reader = thread::spawn(|| read_signature_tool_output(stderr));
+    let mut supervisor = ChildSupervisor::new(child);
+    let input = input.as_bytes().to_owned();
+    let stdin_writer =
+        thread::spawn(move || stdin.map(|mut stdin| stdin.write_all(&input)).transpose());
+    let deadline = Instant::now() + SIGNATURE_TOOL_TIMEOUT;
+    let status = loop {
+        match supervisor.has_exited() {
+            Ok(true) => {
+                supervisor.kill_group();
+                break supervisor
+                    .reap()
+                    .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+            }
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(false) | Err(_) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                let _ = stdin_writer.join();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(PackError::SignatureTool(
+                    "ssh-keygen timed out or could not be monitored".into(),
+                ));
+            }
+        }
+    };
+    stdin_writer
+        .join()
+        .map_err(|_| PackError::SignatureTool("ssh-keygen stdin writer failed".into()))?
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| PackError::SignatureTool("ssh-keygen stdout reader failed".into()))?
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| PackError::SignatureTool("ssh-keygen stderr reader failed".into()))?
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 /// Sign a pack with an SSH private key, writing [`SIGNATURE_FILE`].
@@ -573,6 +640,18 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("wayexpand-pack-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn signature_tool_output_is_bounded() {
+        assert_eq!(
+            read_signature_tool_output(&b"ssh output"[..]).unwrap(),
+            b"ssh output"
+        );
+        assert!(
+            read_signature_tool_output(&vec![b'x'; MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1][..])
+                .is_err()
+        );
     }
 
     #[test]

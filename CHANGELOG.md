@@ -31,6 +31,9 @@ All notable changes to WayExpand are documented here.
 - **Bounded discovery:** the IBus registry availability probe caps output from
   `ibus list-engine` before inspecting it, preventing an untrusted or broken
   helper from causing unbounded allocation during setup checks.
+- **Pack-signing containment:** `ssh-keygen` used by pack signing and
+  verification now has a bounded output budget, a deadline, and process-group
+  cleanup on timeout or monitoring failure.
 
 Changes not yet released.
 
