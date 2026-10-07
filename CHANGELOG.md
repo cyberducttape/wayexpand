@@ -37,6 +37,9 @@ All notable changes to WayExpand are documented here.
 - **Sync containment:** Git operations used by `wayexpand sync` now have a
   bounded output budget, a 60-second deadline, and process-group cleanup so
   remote operations cannot hang the CLI indefinitely.
+- **GUI setup cleanup:** cancelling or timing out the graphical setup flow now
+  terminates the complete CLI process group, including any system setup helper
+  descendants.
 
 Changes not yet released.
 

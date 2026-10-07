@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml_edit = { version = "0.25.15", features = ["serde"] }
 wayexpand-core = { path = "../core" }
+wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }

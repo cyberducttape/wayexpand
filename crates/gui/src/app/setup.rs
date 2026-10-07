@@ -1,6 +1,7 @@
 //! First-run and backend setup: the guided setup task, turn-on button, and raw-input (evdev) setup.
 
 use crate::*;
+use wayexpand_process_supervisor::{configure_process_group, kill_process_group_by_pid};
 
 impl GuiApp {
     /// One-click setup: run `wayexpand setup --yes`, which configures only
@@ -24,7 +25,9 @@ impl GuiApp {
             .name("wayexpand-setup".into())
             .spawn(move || {
                 let result = (|| {
-                    let mut child = std::process::Command::new(&cli)
+                    let mut command = std::process::Command::new(&cli);
+                    configure_process_group(&mut command);
+                    let mut child = command
                         .args(["setup", "--yes"])
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::piped())
@@ -34,6 +37,7 @@ impl GuiApp {
                     let deadline = Instant::now() + SETUP_TIMEOUT;
                     loop {
                         if worker_cancel.load(Ordering::Acquire) {
+                            kill_process_group_by_pid(child.id());
                             let _ = child.kill();
                             let _ = child.wait();
                             return Err("Setup cancelled".to_owned());
@@ -46,6 +50,7 @@ impl GuiApp {
                             break;
                         }
                         if Instant::now() >= deadline {
+                            kill_process_group_by_pid(child.id());
                             let _ = child.kill();
                             let _ = child.wait();
                             return Err("Setup timed out after 30 seconds".to_owned());
