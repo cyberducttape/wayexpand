@@ -127,7 +127,10 @@ pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
         }
         "input-method" => enable_user_service("wayexpand-input-method.service")?,
         "evdev" => {
-            println!("Warning: evdev can observe global keyboard input and has no password-field signal.");
+            println!(
+                "Warning: evdev is an explicit compatibility fallback, not the recommended setup."
+            );
+            println!("It observes every keyboard event, including password fields; it has no password-field signal.");
             println!("Portal consent may be requested by libei; raw-input permissions are not changed by setup.");
             enable_user_service("wayexpand-evdev.service")?;
         }

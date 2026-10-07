@@ -48,7 +48,7 @@ pub struct PendingExpansionResult {
     pub(super) snippet_id: String,
     pub trigger: String,
     pub matched_text: String,
-    pub(super) template_text: String,
+    pub template_text: String,
     pub cursor_offset: Option<usize>,
     pub reinsert_after: Option<char>,
     pub(super) max_replacement_size: usize,

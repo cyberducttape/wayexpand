@@ -59,7 +59,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     println!();
     println!("Compatibility modes");
     println!("  Recommended         safest detected path; run doctor/certify for verification");
-    println!("  Maximum compatibility broad application coverage; may observe global input");
+    println!("  Maximum compatibility explicit evdev fallback; observes global input");
     println!("  Experimental         protocol paths whose key pass-through is not certified");
     println!();
     println!("Automatic recommendation: {}", automatic.label);

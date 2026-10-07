@@ -41,7 +41,7 @@
       "status": "experimental",
       "setup_backend": "evdev",
       "certification_targets": ["kde", "gnome"],
-      "setup_detail": "evdev capture with libei output; password-field awareness is unavailable"
+      "setup_detail": "explicit evdev compatibility fallback with libei output; observes global keyboard input and has no password-field awareness"
     },
     {
       "id": "sway-evdev-wlroots",
@@ -62,7 +62,7 @@
       "status": "experimental",
       "setup_backend": "evdev",
       "certification_targets": ["sway", "hyprland"],
-      "setup_detail": "evdev capture with wlroots virtual-keyboard output; password-field awareness is unavailable"
+      "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness"
     },
     {
       "id": "input-method-v2",

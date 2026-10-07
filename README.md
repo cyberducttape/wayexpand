@@ -100,8 +100,15 @@ Be precise about what works where:
   only on KDE Plasma (KWin). Elsewhere they fail closed and never expand.
 - **No compositor is certified yet** by automated end-to-end tests. Run
   `wayexpand doctor` on your own session before relying on a backend.
-- **evdev** (maximum compatibility) can observe typing in password fields.
-  Setup never grants keyboard-device access. Recommended mode configures the highest-ranked route that is available and allowed by policy: certified routes first, then input-method-v2 (when libei key pass-through is available), then IBus; it never automatically selects evdev or another globally observing path. Use an explicit maximum or experimental mode only after reviewing the security tradeoff.
+- **evdev** is an explicit compatibility fallback, never the normal or
+  recommended setup. It observes every keyboard event, including password
+  fields; the fact that WayExpand does not transmit password text does not
+  change that observation risk. Setup never grants keyboard-device access.
+  Recommended mode configures the highest-ranked route that is available and
+  allowed by policy: certified routes first, then input-method-v2 (when libei
+  key pass-through is available), then IBus; it never automatically selects
+  evdev or another globally observing path. Use evdev only after reviewing
+  the security tradeoff and explicitly choosing maximum compatibility.
 
 See the [support matrix](docs/SUPPORT_MATRIX.md) and
 [certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known
