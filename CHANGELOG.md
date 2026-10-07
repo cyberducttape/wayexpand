@@ -6,6 +6,22 @@ All notable changes to WayExpand are documented here.
 
 - Cache the editor preview's library snippet lookup by configuration revision, avoiding a full-library scan and clone after each edit while keeping dynamic template values fresh.
 - Preserve production `{{snippet:...}}` include validation in single-snippet editor previews without rebuilding the full trigger matcher.
+- **Production-readiness architecture:** split the Action Broker protocol and
+  client from its server/executor implementation; the packaged broker is
+  explicitly local-action-only because its systemd sandbox denies networking.
+  Frontends now route daemon controls through typed shared operations, and
+  daemon route status is parsed centrally by `wayexpand-core`.
+- **Structured diagnostics:** command failures expose stable error categories
+  for GUI, TUI, and doctor remediation without requiring display-string
+  parsing.
+- **Safer setup and maintainability:** experimental setup refuses unavailable
+  backend routes; engine, backend-selection, daemon socket, fleet discovery,
+  GUI localization, and related production modules were split along clearer
+  boundaries.
+- **CI and certification integrity:** concurrent stress coverage now includes
+  evdev, wlroots, backend selection, the CLI, and process supervision. Release
+  checks continue to require durable compositor evidence and do not claim
+  production certification without it.
 
 Changes not yet released.
 
