@@ -11,7 +11,7 @@ use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_selection::{
     probe_capabilities, recommended_route, Capabilities, RecommendedRoute,
 };
-use wayexpand_core::{discover_backends, Config, FleetConfig, CONTROL_STATUS_SCHEMA};
+use wayexpand_core::{discover_backends, Config, DaemonStatus, FleetConfig, CONTROL_STATUS_SCHEMA};
 
 const REQUEST_CAPACITY: usize = 8;
 const RESULT_CAPACITY: usize = 16;
@@ -136,67 +136,87 @@ impl DaemonCapabilities {
     }
 
     pub fn parse(response: &str) -> Option<Self> {
-        let mut schemas = response
-            .lines()
-            .filter_map(|line| line.strip_prefix("status_schema="));
-        let schema = schemas.next()?;
-        if schemas.next().is_some() || schema.parse::<u32>().ok() != Some(CONTROL_STATUS_SCHEMA) {
+        let status = DaemonStatus::parse(response);
+        if !status.field_is_unique("status_schema")
+            || status.status_schema() != Some(CONTROL_STATUS_SCHEMA)
+        {
             return None;
         }
 
         let mut capabilities = Self::default();
         let mut found = false;
-        for line in response.lines() {
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            match key {
-                "inject_insertion_mode" => {
-                    capabilities.injection_mode = match value {
-                        "ei_text" => Some("ei_text"),
-                        "libei keysym fallback" => Some("libei keysym fallback"),
-                        "wlroots virtual-keyboard key synthesis" => {
-                            Some("wlroots virtual-keyboard key synthesis")
-                        }
-                        "input-method-v2 text" => Some("input-method-v2 text"),
-                        _ => None,
-                    };
-                    found = true;
-                    continue;
+        if let Some(value) = status.field("inject_insertion_mode") {
+            capabilities.injection_mode = match value {
+                "ei_text" => Some("ei_text"),
+                "libei keysym fallback" => Some("libei keysym fallback"),
+                "wlroots virtual-keyboard key synthesis" => {
+                    Some("wlroots virtual-keyboard key synthesis")
                 }
-                "inject_max_text_chars" => {
-                    capabilities.injection_max_text_chars = value.parse().ok();
-                    found |= capabilities.injection_max_text_chars.is_some();
-                    continue;
-                }
-                "inject_expected_throughput_chars_per_sec" => {
-                    capabilities.injection_throughput_chars_per_sec = value.parse().ok();
-                    found |= capabilities.injection_throughput_chars_per_sec.is_some();
-                    continue;
-                }
-                _ => {}
-            }
-            let Ok(value) = value.parse::<bool>() else {
-                continue;
+                "input-method-v2 text" => Some("input-method-v2 text"),
+                _ => None,
             };
-            let slot = match key {
-                "capture_sensitive_focus" => &mut capabilities.capture_sensitive_focus,
-                "capture_exclusive" => &mut capabilities.capture_exclusive,
-                "capture_reliable_key_state" => &mut capabilities.capture_reliable_key_state,
-                "capture_key_passthrough" => &mut capabilities.capture_key_passthrough,
-                "capture_composition_aware" => &mut capabilities.capture_composition_aware,
-                "capture_local_compose_aware" => &mut capabilities.capture_local_compose_aware,
-                "capture_layout_aware" => &mut capabilities.capture_layout_aware,
-                "window_tracker_connected" => &mut capabilities.window_tracker_connected,
-                "window_identity_exact" => &mut capabilities.window_identity_exact,
-                "inject_atomic_replace" => &mut capabilities.inject_atomic_replace,
-                "inject_full_unicode" => &mut capabilities.inject_full_unicode,
-                "inject_cursor_reposition" => &mut capabilities.inject_cursor_reposition,
-                "inject_key_passthrough" => &mut capabilities.inject_key_passthrough,
-                _ => continue,
-            };
-            *slot = Some(value);
             found = true;
+        }
+        if let Some(value) = status.u64_field("inject_max_text_chars") {
+            capabilities.injection_max_text_chars = usize::try_from(value).ok();
+            found |= capabilities.injection_max_text_chars.is_some();
+        }
+        if let Some(value) = status.u64_field("inject_expected_throughput_chars_per_sec") {
+            capabilities.injection_throughput_chars_per_sec = u32::try_from(value).ok();
+            found |= capabilities.injection_throughput_chars_per_sec.is_some();
+        }
+        for (key, slot) in [
+            (
+                "capture_sensitive_focus",
+                &mut capabilities.capture_sensitive_focus,
+            ),
+            ("capture_exclusive", &mut capabilities.capture_exclusive),
+            (
+                "capture_reliable_key_state",
+                &mut capabilities.capture_reliable_key_state,
+            ),
+            (
+                "capture_key_passthrough",
+                &mut capabilities.capture_key_passthrough,
+            ),
+            (
+                "capture_composition_aware",
+                &mut capabilities.capture_composition_aware,
+            ),
+            (
+                "capture_local_compose_aware",
+                &mut capabilities.capture_local_compose_aware,
+            ),
+            (
+                "capture_layout_aware",
+                &mut capabilities.capture_layout_aware,
+            ),
+            (
+                "window_tracker_connected",
+                &mut capabilities.window_tracker_connected,
+            ),
+            (
+                "window_identity_exact",
+                &mut capabilities.window_identity_exact,
+            ),
+            (
+                "inject_atomic_replace",
+                &mut capabilities.inject_atomic_replace,
+            ),
+            ("inject_full_unicode", &mut capabilities.inject_full_unicode),
+            (
+                "inject_cursor_reposition",
+                &mut capabilities.inject_cursor_reposition,
+            ),
+            (
+                "inject_key_passthrough",
+                &mut capabilities.inject_key_passthrough,
+            ),
+        ] {
+            if let Some(value) = status.bool_field(key) {
+                *slot = Some(value);
+                found = true;
+            }
         }
         found.then_some(capabilities)
     }

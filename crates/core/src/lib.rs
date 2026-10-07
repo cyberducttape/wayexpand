@@ -13,6 +13,7 @@ mod backend;
 mod capabilities;
 mod config;
 mod daemon_client;
+mod daemon_status;
 mod engine;
 mod fleet;
 #[cfg(any(test, feature = "fuzzing"))]
@@ -41,6 +42,7 @@ pub use config::{
     OrganizationPolicy, Settings,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError};
+pub use daemon_status::DaemonStatus;
 pub use engine::{
     run_command, run_command_cancellable, CheckStatus, CommandError, CommandMetrics,
     CompletionNotifier, ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck,

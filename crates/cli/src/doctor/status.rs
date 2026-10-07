@@ -11,14 +11,11 @@ pub(crate) fn read_daemon_status() -> Result<String> {
 
 pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
     let mut object = serde_json::Map::new();
-    let mut lines = response.lines();
-    if let Some(state) = lines.next() {
-        object.insert("response".into(), state.into());
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if !status.response().is_empty() {
+        object.insert("response".into(), status.response().into());
     }
-    for line in lines {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
+    for (key, value) in status.fields() {
         let value = match value {
             "true" => serde_json::Value::Bool(true),
             "false" => serde_json::Value::Bool(false),
