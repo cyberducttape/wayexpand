@@ -30,12 +30,16 @@ jobs:
             # certification route: it cannot observe sensitive fields or make
             # replacement atomic. Validate the input-method route instead.
             backend: input-method-v2
+            production_required: true
           - compositor: gnome
-            backend: ibus
+            backend: input-method-v2
+            production_required: true
           - compositor: sway
             backend: evdev+wlroots
+            production_required: false
           - compositor: hyprland
             backend: evdev+wlroots
+            production_required: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,6 +91,7 @@ jobs:
             --log-dir "$RUNNER_TEMP/wayexpand-certification/driver-logs"
       - name: Collect machine-readable evidence
         if: always() && steps.build.outcome == 'success' && steps.metadata.outcome == 'success' && steps.driver.outcome != 'skipped'
+        continue-on-error: ${{ matrix.production_required != true }}
         env:
           COMPOSITOR: ${{ matrix.compositor }}
           BACKEND: ${{ matrix.backend }}
@@ -110,7 +115,7 @@ jobs:
           path: ${{ runner.temp }}/wayexpand-certification
           if-no-files-found: error
       - name: Require certified evidence
-        if: always()
+        if: always() && matrix.production_required == true
         env:
           EVIDENCE_FILE: ${{ runner.temp }}/wayexpand-certification/${{ matrix.compositor }}.json
         run: |

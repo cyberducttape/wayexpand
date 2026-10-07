@@ -115,18 +115,21 @@ the actual keymap and observed behavior.
 The workflow's backend column identifies the path a runner driver exercises;
 it does not mean that path is currently eligible for production certification.
 At present, IBus and both evdev paths are explicitly ineligible because they
-cannot meet the safety contract. Input-method-v2 is also ineligible until the
-live daemon demonstrates the complete capability contract above. Therefore
-the current workflow is a fail-closed candidate-path test, not evidence that
-any desktop is production-certified. The actual eligibility decision is made
-from the live daemon snapshot in each evidence artifact.
+cannot meet the safety contract. The workflow therefore runs
+input-method-v2 as the production-required path on KDE and GNOME, while Sway
+and Hyprland remain compatibility-only candidate jobs. Input-method-v2 is
+still ineligible until the live daemon demonstrates the complete capability
+contract above. Therefore the workflow is a fail-closed candidate-path test,
+and its release gate requires durable certification evidence only for routes
+that can satisfy the production safety contract. No desktop is production-
+certified until its required evidence exists and passes.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
-| KDE Plasma / KWin | input-method-v2; KWin window tracker available for app-filter scenarios | Candidate; requires live local dead-key/Compose tracking and the full input/output contract |
-| GNOME | IBus | Ineligible: IBus lacks atomic replacement, exact window identity, and composition awareness |
-| Sway | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |
-| Hyprland | evdev plus wlroots virtual keyboard | Ineligible: evdev lacks sensitive-field awareness and atomic replacement |
+| KDE Plasma / KWin | input-method-v2 (production-required); KWin window tracker available for app-filter scenarios | Production-required candidate; requires live local dead-key/Compose tracking and the full input/output contract |
+| GNOME | input-method-v2 (production-required); IBus remains a compatibility candidate | Input-method-v2 candidate; requires the complete live capability contract |
+| Sway | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
+| Hyprland | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
 
 The scenario contract still requires GTK and Qt clients, relevant password
 fields, and focus isolation on each desktop. Application-filter scenarios
