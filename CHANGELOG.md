@@ -47,6 +47,9 @@ All notable changes to WayExpand are documented here.
 - **GUI setup pipe cleanup:** when the setup CLI leader exits, inherited helper
   processes are terminated before GUI output collection, preventing a lingering
   descendant from keeping the worker blocked on `wait_with_output`.
+- **Tracker shutdown:** the KWin window-tracker reconnect backoff is now
+  interruptible, so daemon shutdown does not wait for the full 30-second retry
+  interval.
 
 Changes not yet released.
 

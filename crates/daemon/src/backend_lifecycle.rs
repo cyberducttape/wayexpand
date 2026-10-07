@@ -25,11 +25,18 @@ const TRACKER_STABLE_INTERVAL: Duration = Duration::from_secs(30);
 pub struct WindowTrackerHandle {
     pub receiver: mpsc::Receiver<Option<WindowContext>>,
     connected: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl WindowTrackerHandle {
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for WindowTrackerHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
     }
 }
 
@@ -70,13 +77,16 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
     let (sender, receiver) = mpsc::channel();
     let connected = Arc::new(AtomicBool::new(false));
     let supervisor_connected = Arc::clone(&connected);
+    let stop = Arc::new(AtomicBool::new(false));
+    let supervisor_stop = Arc::clone(&stop);
     match thread::Builder::new()
         .name("wayexpand-window-tracker-supervisor".into())
-        .spawn(move || supervise_kwin_window_tracker(sender, supervisor_connected))
+        .spawn(move || supervise_kwin_window_tracker(sender, supervisor_connected, supervisor_stop))
     {
         Ok(_) => Some(WindowTrackerHandle {
             receiver,
             connected,
+            stop,
         }),
         Err(error) => {
             warn!(%error, "could not start KWin window tracker supervisor");
@@ -88,10 +98,12 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
 fn supervise_kwin_window_tracker(
     sender: mpsc::Sender<Option<WindowContext>>,
     connected: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 ) {
     supervise_window_tracker(
         sender,
         connected,
+        stop,
         KwinWindowTracker::probe,
         KwinWindowTracker::new,
     );
@@ -100,6 +112,7 @@ fn supervise_kwin_window_tracker(
 fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     sender: mpsc::Sender<Option<WindowContext>>,
     connected: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
     mut probe: Probe,
     mut connect: Connect,
 ) where
@@ -111,6 +124,9 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
 {
     let mut backoff = ReconnectBackoff::default();
     loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
         connected.store(false, Ordering::Release);
         if sender.send(None).is_err() {
             return;
@@ -118,7 +134,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
 
         if let Err(error) = probe() {
             warn!(%error, "KWin window tracking unavailable; will reprobe");
-            if !wait_for_tracker_retry(&sender, backoff.after_failure(None)) {
+            if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
                 return;
             }
             continue;
@@ -128,7 +144,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             Ok(tracker) => tracker,
             Err(error) => {
                 warn!(%error, "KWin window tracker failed to connect; will retry");
-                if !wait_for_tracker_retry(&sender, backoff.after_failure(None)) {
+                if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
                     return;
                 }
                 continue;
@@ -169,14 +185,28 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             ?delay,
             "waiting before reconnecting the KWin window tracker"
         );
-        if !wait_for_tracker_retry(&sender, delay) {
+        if !wait_for_tracker_retry(&stop, &sender, delay) {
             return;
         }
     }
 }
 
-fn wait_for_tracker_retry(sender: &mpsc::Sender<Option<WindowContext>>, delay: Duration) -> bool {
-    thread::sleep(delay);
+fn wait_for_tracker_retry(
+    stop: &AtomicBool,
+    sender: &mpsc::Sender<Option<WindowContext>>,
+    delay: Duration,
+) -> bool {
+    let deadline = Instant::now() + delay;
+    while !stop.load(Ordering::Acquire) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        thread::sleep(remaining.min(Duration::from_millis(250)));
+    }
+    if stop.load(Ordering::Acquire) {
+        return false;
+    }
     // Sending also detects daemon shutdown: once its receiver is dropped,
     // the supervisor exits instead of continuing background probes.
     sender.send(None).is_ok()
@@ -296,8 +326,16 @@ mod tests {
         let connect = move || Ok::<_, &'static str>(trackers.pop_front().unwrap());
         let connected = Arc::new(AtomicBool::new(false));
         let supervisor_connected = Arc::clone(&connected);
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = Arc::clone(&stop);
         let supervisor = thread::spawn(move || {
-            supervise_window_tracker(sender, supervisor_connected, probe, connect);
+            supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                supervisor_stop,
+                probe,
+                connect,
+            );
         });
 
         let mut refreshed = false;
@@ -328,11 +366,14 @@ mod tests {
         };
         let connected = Arc::new(AtomicBool::new(false));
         let supervisor_connected = Arc::clone(&connected);
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = Arc::clone(&stop);
         let mut tracker = Some(tracker);
         let supervisor = thread::spawn(move || {
             supervise_window_tracker(
                 sender,
                 supervisor_connected,
+                supervisor_stop,
                 || Ok::<_, &'static str>(()),
                 || Ok::<_, &'static str>(tracker.take().unwrap()),
             );
@@ -360,6 +401,19 @@ mod tests {
             backoff.after_failure(None);
         }
         assert_eq!(backoff.current, TRACKER_MAX_BACKOFF);
+    }
+
+    #[test]
+    fn tracker_retry_stops_without_waiting_for_the_full_backoff() {
+        let (sender, _receiver) = mpsc::channel();
+        let stop = AtomicBool::new(true);
+        let started = Instant::now();
+        assert!(!wait_for_tracker_retry(
+            &stop,
+            &sender,
+            Duration::from_secs(30)
+        ));
+        assert!(started.elapsed() < Duration::from_millis(100));
     }
 
     #[test]
