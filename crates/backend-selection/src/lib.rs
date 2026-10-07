@@ -5,380 +5,29 @@
 //! WayExpand actually start? Keeping probing, policy, and explanation here
 //! prevents the user-facing answer from drifting away from daemon behavior.
 
-use serde::Deserialize;
-use std::{env, fmt, sync::OnceLock};
+use std::{env, fmt};
 use tracing::{debug, warn};
 use wayexpand_backend_evdev::readable_keyboard_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_wlroots::WlrootsInjector;
 
+mod routes;
+
+pub use routes::{
+    injection_status_label, plan_routes, recommended_mode_description, recommended_route,
+    route_allowed_by_policy, route_contract_for, setup_backend_allowed, PlannedRoute,
+    RecommendedRoute, RouteBackend, RouteContract, RoutePlan, RouteStanding,
+    SensitiveFieldSupport,
+};
+#[cfg(test)]
+use routes::{catalog_for_tests, route_rank};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InjectorBackend {
     None,
     Libei,
     Wlroots,
-}
-
-/// Backends that can appear in the checked-in route contract. Keeping this
-/// mapping here makes consumers exhaustive over the contract vocabulary
-/// instead of independently matching its string representation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteBackend {
-    IBus,
-    Evdev,
-    Libei,
-    WlrootsVirtualKeyboard,
-    InputMethodV2,
-}
-
-impl RouteBackend {
-    fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "ibus" => Self::IBus,
-            "evdev" => Self::Evdev,
-            "libei" => Self::Libei,
-            "wlroots-virtual-keyboard" => Self::WlrootsVirtualKeyboard,
-            "input-method-v2" => Self::InputMethodV2,
-            _ => return None,
-        })
-    }
-}
-
-/// A route that `setup --mode recommended` can configure without an expert
-/// backend override, as chosen by [`plan_routes`]. Raw evdev routes can never
-/// be recommended: they remain an explicit maximum-compatibility opt-in
-/// because they can observe password fields. Keep this in the shared
-/// selection crate so GUI copy, CLI setup, doctor, and certification describe
-/// the same topology.
-#[derive(Debug, Clone, Copy)]
-pub struct RecommendedRoute(&'static RouteContract);
-
-impl PartialEq for RecommendedRoute {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.id == other.0.id
-    }
-}
-
-impl Eq for RecommendedRoute {}
-
-/// Operator-facing route metadata shared by setup, diagnostics, GUI copy,
-/// and certification documentation. The data is maintained in the checked-in
-/// certification matrix so route guarantees cannot silently diverge between
-/// frontends.
-#[derive(Debug, Deserialize)]
-pub struct RouteContract {
-    pub id: String,
-    pub label: String,
-    pub capture: String,
-    pub injection: String,
-    pub sensitive_fields: bool,
-    pub sensitive_field_support: SensitiveFieldSupport,
-    pub atomic_replace: bool,
-    pub app_identity: String,
-    pub focus_tracking: bool,
-    pub status: String,
-    pub setup_backend: String,
-    pub setup_detail: String,
-}
-
-/// Separates an implemented safety mechanism from live compositor observation
-/// and reviewed certification evidence.
-#[derive(Debug, Deserialize)]
-pub struct SensitiveFieldSupport {
-    pub implemented: bool,
-    pub protocol_signal: String,
-    pub compositor_observation: String,
-    pub certified: bool,
-}
-
-impl RouteContract {
-    /// Whether reviewed certification evidence backs this route. Only then
-    /// may a frontend describe it as ready rather than merely running.
-    pub fn is_certified(&self) -> bool {
-        self.status == "certified"
-    }
-
-    pub fn capture_backend(&self) -> Option<RouteBackend> {
-        RouteBackend::parse(&self.capture)
-    }
-
-    pub fn injection_backend(&self) -> Option<RouteBackend> {
-        RouteBackend::parse(&self.injection)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct RouteCatalog {
-    recommended_description: String,
-    routes: Vec<RouteContract>,
-}
-
-static ROUTE_CATALOG: OnceLock<RouteCatalog> = OnceLock::new();
-
-fn route_catalog() -> &'static RouteCatalog {
-    ROUTE_CATALOG.get_or_init(|| {
-        serde_json::from_str(include_str!("../routes.json"))
-            .expect("checked-in certification route contract must be valid")
-    })
-}
-
-/// Exact operator-facing description of Recommended mode. Keep published
-/// documentation synchronized with this catalog value.
-pub fn recommended_mode_description() -> &'static str {
-    &route_catalog().recommended_description
-}
-
-/// Canonical status/catalog label for an output backend name. Selection and
-/// the CLI use the short spelling `wlroots`, while the injector and the route
-/// catalog name that output `wlroots-virtual-keyboard`. The daemon publishes
-/// this label so status consumers never see two spellings of one backend.
-pub fn injection_status_label(backend: &str) -> &str {
-    match backend {
-        "wlroots" => "wlroots-virtual-keyboard",
-        other => other,
-    }
-}
-
-/// Find the route contract represented by daemon status fields. The
-/// input-method daemon uses `source=input-method` while the contract names
-/// that capture path `input-method-v2`; keep that compatibility alias here so
-/// GUI and CLI consumers do not duplicate it.
-///
-/// Input-method-v2 captures and injects through one protocol object, so its
-/// route is identified by the source alone: status may carry the resolved
-/// pair's `none`, the canonical `input-method-v2`, or the libei key
-/// pass-through while that is reconnecting.
-pub fn route_contract_for(source: &str, injection: &str) -> Option<&'static RouteContract> {
-    let (capture, injection) = match source {
-        "input-method" | "input-method-v2" => ("input-method-v2", "input-method-v2"),
-        other => (other, injection_status_label(injection)),
-    };
-    route_catalog()
-        .routes
-        .iter()
-        .find(|route| route.capture == capture && route.injection == injection)
-}
-
-impl RecommendedRoute {
-    pub fn contract(self) -> &'static RouteContract {
-        self.0
-    }
-
-    /// The route contract's stable id (for example `ibus`).
-    pub fn id(self) -> &'static str {
-        &self.0.id
-    }
-}
-
-impl RecommendedRoute {
-    pub fn capture_label(self) -> &'static str {
-        &self.contract().capture
-    }
-
-    pub fn injection_label(self) -> &'static str {
-        &self.contract().injection
-    }
-
-    pub fn setup_backend(self) -> &'static str {
-        &self.contract().setup_backend
-    }
-}
-
-/// Where a route stands on this machine, from best to worst.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteStanding {
-    /// The planner's choice for Recommended mode.
-    Recommended,
-    /// Usable and allowed, but ranked below the recommended route.
-    Available,
-    /// Usable only after the user explicitly accepts global keyboard
-    /// visibility (raw evdev capture). Never recommended.
-    RequiresConsent,
-    /// The capabilities are present but organization policy forbids it.
-    BlockedByPolicy,
-    /// A required protocol, device, or service is missing.
-    Unavailable,
-}
-
-/// One route of a [`RoutePlan`] with its standing and the reason for it.
-#[derive(Debug, Clone, Copy)]
-pub struct PlannedRoute {
-    pub contract: &'static RouteContract,
-    pub standing: RouteStanding,
-    pub reason: &'static str,
-}
-
-/// Every catalog route ranked for this machine.
-#[derive(Debug, Clone)]
-pub struct RoutePlan {
-    pub routes: Vec<PlannedRoute>,
-}
-
-impl RoutePlan {
-    pub fn recommended(&self) -> Option<RecommendedRoute> {
-        self.routes
-            .iter()
-            .find(|route| route.standing == RouteStanding::Recommended)
-            .map(|route| RecommendedRoute(route.contract))
-    }
-}
-
-impl RouteContract {
-    /// Raw evdev capture observes every keystroke, including password fields.
-    pub fn requires_raw_input(&self) -> bool {
-        self.capture == "evdev"
-    }
-}
-
-/// Rank of a route among eligible candidates; lower is better. Certification
-/// evidence dominates: any certified route outranks every experimental one.
-/// Within the same evidence level, native text-input (input-method-v2) ranks
-/// above IBus, and raw-input routes come last (they need consent anyway).
-fn route_rank(route: &RouteContract) -> (bool, bool, u8) {
-    let kind = match route.capture.as_str() {
-        "input-method-v2" => 0,
-        "ibus" => 1,
-        _ => 2,
-    };
-    (route.requires_raw_input(), !route.is_certified(), kind)
-}
-
-/// Whether a route's protocols and services are present, judged from one
-/// capability snapshot (no portal dialog is triggered).
-fn route_availability(
-    route: &RouteContract,
-    capabilities: &Capabilities,
-    ibus_available: bool,
-) -> Result<(), &'static str> {
-    // libei can be reached through a direct EIS socket, or through the
-    // RemoteDesktop portal on desktops that provide it.
-    let libei_reachable = capabilities.has_direct_libei_socket
-        || matches!(
-            capabilities.compositor,
-            Compositor::KdePlasma | Compositor::Gnome
-        );
-    match route.id.as_str() {
-        "ibus" if ibus_available => Ok(()),
-        "ibus" => Err("the WayExpand IBus engine is not installed or IBus is unavailable"),
-        "input-method-v2" if !capabilities.has_input_method_v2 => {
-            Err("the compositor does not offer zwp_input_method_manager_v2")
-        }
-        // Without libei key pass-through the exclusive grab would swallow
-        // unsupported keys, so the daemon refuses to capture.
-        "input-method-v2" if !libei_reachable => {
-            Err("libei key pass-through is unavailable for the exclusive input-method grab")
-        }
-        "input-method-v2" => Ok(()),
-        _ if route.requires_raw_input() && !capabilities.has_dev_input => {
-            Err("no readable /dev/input keyboard")
-        }
-        "kde-evdev-libei" if !libei_reachable => Err("no libei/EIS path was detected"),
-        "sway-evdev-wlroots" if !capabilities.has_virtual_keyboard => {
-            Err("the compositor does not offer the wlroots virtual-keyboard protocol")
-        }
-        "kde-evdev-libei" | "sway-evdev-wlroots" => Ok(()),
-        _ => Err("this route is not known to the planner"),
-    }
-}
-
-/// Rank every catalog route for this machine: discover candidates from the
-/// capability snapshot, drop unavailable ones, apply organization policy
-/// (`allowed` receives the route contract), require consent for raw input,
-/// and order the rest by certification evidence and route kind. The best
-/// eligible route becomes the recommendation.
-pub fn plan_routes(
-    capabilities: &Capabilities,
-    ibus_available: bool,
-    allowed: impl Fn(&RouteContract) -> bool,
-) -> RoutePlan {
-    let mut routes: Vec<PlannedRoute> = route_catalog()
-        .routes
-        .iter()
-        .map(|contract| {
-            let (standing, reason) =
-                match route_availability(contract, capabilities, ibus_available) {
-                    Err(reason) => (RouteStanding::Unavailable, reason),
-                    Ok(()) if !allowed(contract) => (
-                        RouteStanding::BlockedByPolicy,
-                        "organization policy does not allow this route",
-                    ),
-                    Ok(()) if contract.requires_raw_input() => (
-                        RouteStanding::RequiresConsent,
-                        "raw keyboard capture needs explicit consent; never selected automatically",
-                    ),
-                    Ok(()) => (RouteStanding::Available, "available"),
-                };
-            PlannedRoute {
-                contract,
-                standing,
-                reason,
-            }
-        })
-        .collect();
-    let standing_rank = |standing: RouteStanding| match standing {
-        RouteStanding::Recommended | RouteStanding::Available => 0,
-        RouteStanding::RequiresConsent => 1,
-        RouteStanding::BlockedByPolicy => 2,
-        RouteStanding::Unavailable => 3,
-    };
-    routes.sort_by_key(|route| (standing_rank(route.standing), route_rank(route.contract)));
-    if let Some(best) = routes
-        .iter_mut()
-        .find(|route| route.standing == RouteStanding::Available)
-    {
-        best.standing = RouteStanding::Recommended;
-        best.reason = if best.contract.is_certified() {
-            "highest-ranked certified route"
-        } else {
-            "highest-ranked available route; experimental until certified"
-        };
-    }
-    RoutePlan { routes }
-}
-
-/// Whether organization policy allows a setup backend (`ibus`,
-/// `input-method`, or `evdev`). Shared by setup, doctor, and the GUI so the
-/// route planner applies one policy everywhere.
-pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backend: &str) -> bool {
-    match backend {
-        // IBus is governed under its own name and must also satisfy the
-        // policy's capability requirements, as the IBus service enforces.
-        "ibus" => {
-            let enforcement = policy.effective_enforcement_policy();
-            policy.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
-                && enforcement
-                    .capability_violation_for_source(
-                        wayexpand_backend_ibus::injector_capabilities(),
-                        wayexpand_backend_ibus::source_capabilities(),
-                    )
-                    .is_none()
-        }
-        "input-method" => policy.backend_allowed("input-method-v2"),
-        // The packaged setup path enables wayexpand-evdev.service, whose
-        // declared output is evdev + libei. Do not treat a wlroots-only
-        // policy as permission to activate that different service.
-        "evdev" => policy.backend_allowed("libei"),
-        _ => false,
-    }
-}
-
-/// [`plan_routes`] policy filter: a route is allowed when policy allows the
-/// backend that setup would configure for it.
-pub fn route_allowed_by_policy(
-    policy: &wayexpand_core::OrganizationPolicy,
-    route: &RouteContract,
-) -> bool {
-    setup_backend_allowed(policy, &route.setup_backend)
-}
-
-/// The recommended route from [`plan_routes`].
-pub fn recommended_route(
-    capabilities: &Capabilities,
-    ibus_available: bool,
-    allowed: impl Fn(&RouteContract) -> bool,
-) -> Option<RecommendedRoute> {
-    plan_routes(capabilities, ibus_available, allowed).recommended()
 }
 
 impl InjectorBackend {
@@ -1040,13 +689,11 @@ mod tests {
 
     #[test]
     fn certification_evidence_outranks_route_kind() {
-        let ibus = route_catalog()
-            .routes
+        let ibus = catalog_for_tests()
             .iter()
             .find(|r| r.id == "ibus")
             .unwrap();
-        let input_method = route_catalog()
-            .routes
+        let input_method = catalog_for_tests()
             .iter()
             .find(|r| r.id == "input-method-v2")
             .unwrap();
@@ -1095,7 +742,7 @@ mod tests {
 
     #[test]
     fn route_maturity_is_a_known_value_and_none_is_certified_yet() {
-        for route in &route_catalog().routes {
+        for route in catalog_for_tests() {
             assert!(
                 matches!(route.status.as_str(), "experimental" | "certified"),
                 "{} has unknown status {:?}",
