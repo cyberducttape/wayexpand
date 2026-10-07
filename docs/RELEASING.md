@@ -77,10 +77,13 @@ git push origin v<version>
 ```
 
 The release workflow runs the full CI verification suite (`ci.yml`) and
-requires the real compositor certification workflow to certify all four
-desktop targets at the exact release ref. Missing self-hosted drivers,
-incomplete backend capabilities, or unverified scenario cells block packaging
-and publishing. It then builds the Linux x86_64 binaries with the locked
+requires the real compositor certification workflow to run all four desktop
+target jobs at the exact release ref. KDE and GNOME must produce certified
+evidence for the production-required input-method-v2 route; Sway and Hyprland
+are compatibility-only jobs and remain explicitly ineligible for production
+certification. Missing self-hosted drivers, incomplete production-route
+capabilities, or unverified required scenario cells block packaging and
+publishing. It then builds the Linux x86_64 binaries with the locked
 dependency graph and publishes the end-user packages and source archives.
 When manually dispatched with a `launchpad_series` input, it also produces an
 unsigned Debian source package from the vendored archive targeted to that
