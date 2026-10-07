@@ -5,9 +5,8 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     os::unix::{
         fs::{FileTypeExt, MetadataExt, PermissionsExt},
-        io::AsRawFd,
     },
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -16,6 +15,14 @@ use std::{
     time::Duration,
 };
 use tracing::warn;
+
+use crate::socket_security::{
+    is_original_socket, is_owned_socket, secure_socket_path, validate_socket_parent,
+};
+#[cfg(test)]
+use crate::socket_security::socket_parent_mode_is_secure;
+#[cfg(target_os = "linux")]
+use crate::socket_security::open_socket_parent;
 
 /// Large enough for `insert ` plus a maximum-length (128 character) trigger.
 const MAX_COMMAND_BYTES: usize = 1024;
@@ -275,149 +282,6 @@ impl ControlServer {
             .map(|status| status.clone())
             .unwrap_or_default()
     }
-}
-
-#[cfg(target_os = "linux")]
-fn open_socket_parent(path: &Path) -> Result<(fs::File, PathBuf)> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("/"));
-    let root = rustix::fs::open(
-        "/",
-        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )?;
-    let relative = parent.strip_prefix("/").unwrap_or(parent);
-    let (directory, use_proc_fd_path) = match rustix::fs::openat2(
-        &root,
-        relative,
-        rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-        rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
-    ) {
-        Ok(directory) => (directory, true),
-        Err(error) if error == rustix::io::Errno::NOSYS => {
-            // Some systemd user-service sandboxes expose the filesystem but
-            // make openat2 unavailable. secure_socket_path() has already
-            // canonicalized and validated every ancestor, so retain the
-            // same ownership/mode checks and use the resolved path on those
-            // deployments instead of making the daemon impossible to start.
-            (
-                rustix::fs::open(
-                    parent,
-                    rustix::fs::OFlags::DIRECTORY
-                        | rustix::fs::OFlags::CLOEXEC
-                        | rustix::fs::OFlags::NOFOLLOW,
-                    rustix::fs::Mode::empty(),
-                )?,
-                false,
-            )
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let guard = fs::File::from(directory);
-    let name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("control socket path has no file name"))?;
-    let operation_path = if use_proc_fd_path {
-        PathBuf::from(format!(
-            "/proc/self/fd/{}/{}",
-            guard.as_raw_fd(),
-            name.to_string_lossy()
-        ))
-    } else {
-        path.to_path_buf()
-    };
-    Ok((guard, operation_path))
-}
-
-fn is_owned_socket(metadata: &std::fs::Metadata, uid: rustix::process::RawUid) -> bool {
-    metadata.file_type().is_socket() && metadata.uid() == uid
-}
-
-fn validate_socket_parent(path: &Path) -> Result<()> {
-    secure_socket_path(path).map(|_| ())
-}
-
-fn secure_socket_path(path: &Path) -> Result<PathBuf> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
-    let parent = parent.unwrap_or_else(|| Path::new("."));
-    let resolved_parent = fs::canonicalize(parent)
-        .with_context(|| format!("resolving control socket directory {}", parent.display()))?;
-    let current_uid = rustix::process::geteuid().as_raw();
-    let mut current = resolved_parent.as_path();
-    loop {
-        let metadata = fs::metadata(current)
-            .with_context(|| format!("checking control socket directory {}", current.display()))?;
-        if !metadata.is_dir() {
-            bail!(
-                "control socket parent {} is not a directory",
-                current.display()
-            );
-        }
-        // Skip ownership check for system directories (/, /home, /run, /run/user) where
-        // containerization may cause unexpected UID ownership. User-owned
-        // directories still validate strictly.
-        let is_system_dir = current == Path::new("/")
-            || current == Path::new("/home")
-            || current == Path::new("/run")
-            || current == Path::new("/run/user");
-        if !is_system_dir && metadata.uid() != current_uid && metadata.uid() != 0 {
-            bail!(
-                "control socket directory {} is not owned by the current user or root",
-                current.display()
-            );
-        }
-        let mode = metadata.mode() & 0o7777;
-        // Trust is determined by writeability, not ownership. A root-owned
-        // directory with group/other write bits is still replaceable by an
-        // unprivileged user and must be rejected unless sticky protection is
-        // present. Normal system directories (/run and /run/user) are 0755.
-        if !socket_parent_mode_is_secure(mode) {
-            bail!(
-                "control socket directory {} is writable by group or other users",
-                current.display()
-            );
-        }
-        // NOTE: We intentionally do NOT stop at the first user-owned directory.
-        // While a secure user-owned directory itself cannot be swapped
-        // (it requires write access to its parent), a world-writable,
-        // non-sticky parent directory can still allow another user to
-        // rename/replace that directory entry.
-        //
-        // Similarly, a root-owned world-writable parent can be exploited even
-        // if the child is root-owned or user-owned. We validate all ancestors
-        // up to "/" (filesystem root), accepting it as a terminal trust anchor
-        // since the filesystem itself is the trust boundary.
-        //
-        // In systemd private namespaces, uid 65534 (overflow) may appear;
-        // this is acceptable as validation is constrained to namespace boundary.
-        //
-        // On Linux, binding and stale-entry cleanup use an opened parent
-        // directory through /proc/self/fd, so later path operations cannot be
-        // redirected by swapping an ancestor after this validation.
-        if current == Path::new("/") {
-            break;
-        }
-        current = current.parent().unwrap_or_else(|| Path::new("/"));
-    }
-    let name = path
-        .file_name()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("control socket path has no file name"))?;
-    Ok(resolved_parent.join(name))
-}
-
-fn socket_parent_mode_is_secure(mode: u32) -> bool {
-    mode & 0o022 == 0 || mode & 0o1000 != 0
-}
-
-fn is_original_socket(
-    metadata: &std::fs::Metadata,
-    identity: (u64, u64),
-    uid: rustix::process::RawUid,
-) -> bool {
-    is_owned_socket(metadata, uid) && (metadata.dev(), metadata.ino()) == identity
 }
 
 impl Drop for ControlServer {

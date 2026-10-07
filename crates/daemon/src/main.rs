@@ -12,6 +12,7 @@ mod policy;
 mod reactor;
 mod reload;
 mod source_steps;
+mod socket_security;
 mod status;
 mod status_publisher;
 mod turn;
