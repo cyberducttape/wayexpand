@@ -184,7 +184,10 @@ fn route_availability(
     ibus_available: bool,
 ) -> Result<(), &'static str> {
     let libei_reachable = capabilities.has_direct_libei_socket
-        || matches!(capabilities.compositor, Compositor::KdePlasma | Compositor::Gnome);
+        || matches!(
+            capabilities.compositor,
+            Compositor::KdePlasma | Compositor::Gnome
+        );
     match route.id.as_str() {
         "ibus" if ibus_available => Ok(()),
         "ibus" => Err("the WayExpand IBus engine is not installed or IBus is unavailable"),
@@ -216,19 +219,24 @@ pub fn plan_routes(
         .routes
         .iter()
         .map(|contract| {
-            let (standing, reason) = match route_availability(contract, capabilities, ibus_available) {
-                Err(reason) => (RouteStanding::Unavailable, reason),
-                Ok(()) if !allowed(contract) => (
-                    RouteStanding::BlockedByPolicy,
-                    "organization policy does not allow this route",
-                ),
-                Ok(()) if contract.requires_raw_input() => (
-                    RouteStanding::RequiresConsent,
-                    "raw keyboard capture needs explicit consent; never selected automatically",
-                ),
-                Ok(()) => (RouteStanding::Available, "available"),
-            };
-            PlannedRoute { contract, standing, reason }
+            let (standing, reason) =
+                match route_availability(contract, capabilities, ibus_available) {
+                    Err(reason) => (RouteStanding::Unavailable, reason),
+                    Ok(()) if !allowed(contract) => (
+                        RouteStanding::BlockedByPolicy,
+                        "organization policy does not allow this route",
+                    ),
+                    Ok(()) if contract.requires_raw_input() => (
+                        RouteStanding::RequiresConsent,
+                        "raw keyboard capture needs explicit consent; never selected automatically",
+                    ),
+                    Ok(()) => (RouteStanding::Available, "available"),
+                };
+            PlannedRoute {
+                contract,
+                standing,
+                reason,
+            }
         })
         .collect();
     let standing_rank = |standing: RouteStanding| match standing {

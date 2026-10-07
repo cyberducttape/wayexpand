@@ -2,10 +2,8 @@ use anyhow::{bail, Context, Result};
 use std::{
     fs,
     io::{Read, Write},
+    os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     os::unix::net::{UnixListener, UnixStream},
-    os::unix::{
-        fs::{FileTypeExt, MetadataExt, PermissionsExt},
-    },
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -16,13 +14,13 @@ use std::{
 };
 use tracing::warn;
 
+#[cfg(target_os = "linux")]
+use crate::socket_security::open_socket_parent;
+#[cfg(test)]
+use crate::socket_security::socket_parent_mode_is_secure;
 use crate::socket_security::{
     is_original_socket, is_owned_socket, secure_socket_path, validate_socket_parent,
 };
-#[cfg(test)]
-use crate::socket_security::socket_parent_mode_is_secure;
-#[cfg(target_os = "linux")]
-use crate::socket_security::open_socket_parent;
 
 /// Large enough for `insert ` plus a maximum-length (128 character) trigger.
 const MAX_COMMAND_BYTES: usize = 1024;

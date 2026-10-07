@@ -14,14 +14,13 @@ use wayexpand_backend_wlroots::WlrootsInjector;
 
 mod routes;
 
+#[cfg(test)]
+use routes::{catalog_for_tests, route_rank};
 pub use routes::{
     injection_status_label, plan_routes, recommended_mode_description, recommended_route,
     route_allowed_by_policy, route_contract_for, setup_backend_allowed, PlannedRoute,
-    RecommendedRoute, RouteBackend, RouteContract, RoutePlan, RouteStanding,
-    SensitiveFieldSupport,
+    RecommendedRoute, RouteBackend, RouteContract, RoutePlan, RouteStanding, SensitiveFieldSupport,
 };
-#[cfg(test)]
-use routes::{catalog_for_tests, route_rank};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InjectorBackend {
@@ -689,10 +688,7 @@ mod tests {
 
     #[test]
     fn certification_evidence_outranks_route_kind() {
-        let ibus = catalog_for_tests()
-            .iter()
-            .find(|r| r.id == "ibus")
-            .unwrap();
+        let ibus = catalog_for_tests().iter().find(|r| r.id == "ibus").unwrap();
         let input_method = catalog_for_tests()
             .iter()
             .find(|r| r.id == "input-method-v2")
