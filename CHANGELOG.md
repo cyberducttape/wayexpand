@@ -40,6 +40,8 @@ All notable changes to WayExpand are documented here.
 - **GUI setup cleanup:** cancelling or timing out the graphical setup flow now
   terminates the complete CLI process group, including any system setup helper
   descendants.
+- **CLI setup containment:** direct `wayexpand setup` IBus and systemd helper
+  calls now have 30-second deadlines and process-group cleanup as well.
 
 Changes not yet released.
 

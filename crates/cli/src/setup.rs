@@ -1,6 +1,44 @@
 //! Guided setup: compatibility-mode selection, policy gates, backend configuration, and user-service enablement.
 
 use crate::*;
+use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::{Duration, Instant};
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
+
+const SETUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
+    let mut command = Command::new(program);
+    configure_process_group(&mut command);
+    let child = command
+        .args(arguments)
+        .spawn()
+        .map_err(|error| anyhow::anyhow!("could not start {program}: {error}"))?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let deadline = Instant::now() + SETUP_COMMAND_TIMEOUT;
+    loop {
+        match supervisor.has_exited() {
+            Ok(true) => {
+                supervisor.kill_group();
+                return supervisor
+                    .reap()
+                    .map_err(|error| anyhow::anyhow!("could not reap {program}: {error}"));
+            }
+            Ok(false) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(false) | Err(_) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                bail!(
+                    "{program} {} timed out or could not be monitored",
+                    arguments.join(" ")
+                );
+            }
+        }
+    }
+}
 
 pub(crate) struct SetupRecommendation {
     pub(crate) backend: String,
@@ -126,13 +164,11 @@ pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
                 bail!("WayExpand's IBus engine is not installed or IBus is unavailable")
             }
             println!("Configuring the WayExpand IBus engine for the current session...");
-            let restart = Command::new("ibus").arg("restart").status()?;
+            let restart = run_setup_command("ibus", &["restart"])?;
             if !restart.success() {
                 bail!("IBus restart failed; no WayExpand service was enabled")
             }
-            let select = Command::new("ibus")
-                .args(["engine", "wayexpand"])
-                .status()?;
+            let select = run_setup_command("ibus", &["engine", "wayexpand"])?;
             if !select.success() {
                 bail!("could not select the WayExpand IBus engine")
             }
@@ -158,16 +194,14 @@ pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
 }
 
 pub(crate) fn enable_user_service(service: &str) -> Result<()> {
-    let installed = Command::new("systemctl")
-        .args(["--user", "cat", service])
-        .status()?;
+    let installed = run_setup_command("systemctl", &["--user", "cat", service])?;
     if !installed.success() {
         bail!("user service {service} is not installed; run the WayExpand installer first")
     }
     let reload_arguments = ["--user", "daemon-reload"];
     let enable_arguments = ["--user", "enable", "--now", service];
     for arguments in [&reload_arguments[..], &enable_arguments[..]] {
-        let status = Command::new("systemctl").args(arguments).status()?;
+        let status = run_setup_command("systemctl", arguments)?;
         if !status.success() {
             bail!("systemd could not apply {service}; no further setup actions were taken")
         }
