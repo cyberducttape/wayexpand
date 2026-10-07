@@ -117,16 +117,76 @@ pub(super) fn continues_word_after(preceding: Option<char>, character: char) -> 
 /// Recases a rendered replacement to match the casing pattern of the typed
 /// trigger when `propagate_case` is enabled.
 pub(super) fn apply_case_style(typed: &str, text: &str) -> String {
-    let letters: Vec<char> = typed
-        .chars()
-        .filter(|character| character.is_alphabetic())
-        .collect();
-    match letters.as_slice() {
-        [] => text.to_owned(),
-        [single] if single.is_uppercase() => capitalize_first_letter(text),
-        letters if letters.iter().all(|character| character.is_uppercase()) => text.to_uppercase(),
-        [first, ..] if first.is_uppercase() => capitalize_first_letter(text),
-        _ => text.to_owned(),
+    match CaseStyle::classify(typed) {
+        CaseStyle::Lower | CaseStyle::Mixed => text.to_owned(),
+        CaseStyle::Upper => text.to_uppercase(),
+        CaseStyle::Title => capitalize_first_letter(text),
+    }
+}
+
+/// The casing shape of the alphabetic characters in a typed trigger.
+///
+/// Mixed-case names are deliberately kept unchanged: a trigger such as
+/// `iPhone` or `PowerShell` does not communicate a reliable recasing rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaseStyle {
+    Lower,
+    Upper,
+    Title,
+    Mixed,
+}
+
+impl CaseStyle {
+    fn classify(value: &str) -> Self {
+        let letters: Vec<char> = value
+            .chars()
+            .filter(|character| character.is_alphabetic())
+            .collect();
+        let Some(first) = letters.first().copied() else {
+            return Self::Mixed;
+        };
+        if letters.iter().all(|character| character.is_lowercase()) {
+            return Self::Lower;
+        }
+        if letters.iter().all(|character| character.is_uppercase()) {
+            // Preserve the historic one-letter behavior: `:A` is treated as
+            // a capitalized trigger rather than an all-caps word.
+            return if letters.len() == 1 {
+                Self::Title
+            } else {
+                Self::Upper
+            };
+        }
+        if first.is_uppercase()
+            && letters[1..]
+                .iter()
+                .all(|character| character.is_lowercase())
+        {
+            Self::Title
+        } else {
+            Self::Mixed
+        }
+    }
+}
+
+#[cfg(test)]
+mod case_style_tests {
+    use super::{apply_case_style, CaseStyle};
+
+    #[test]
+    fn classifies_simple_case_shapes() {
+        assert_eq!(CaseStyle::classify(":sig"), CaseStyle::Lower);
+        assert_eq!(CaseStyle::classify(":SIG"), CaseStyle::Upper);
+        assert_eq!(CaseStyle::classify(":Sig"), CaseStyle::Title);
+        assert_eq!(CaseStyle::classify(":A"), CaseStyle::Title);
+    }
+
+    #[test]
+    fn leaves_mixed_case_names_unclassified() {
+        for trigger in ["iPhone", "GitHub", "PowerShell", "eBay", "LaTeX"] {
+            assert_eq!(CaseStyle::classify(trigger), CaseStyle::Mixed, "{trigger}");
+            assert_eq!(apply_case_style(trigger, "replacement"), "replacement");
+        }
     }
 }
 

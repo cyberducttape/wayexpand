@@ -307,8 +307,10 @@ pub struct ExpansionConfig {
     pub enabled: bool,
     /// When the typed trigger is all-uppercase or capitalized, apply the
     /// same casing to the replacement before inserting it (e.g. typing
-    /// `SIG` instead of `sig` yields an uppercased replacement). Off by
-    /// default so existing configs keep behaving exactly as before.
+    /// `SIG` instead of `sig` yields an uppercased replacement). Mixed-case
+    /// triggers are left unchanged because they do not communicate a reliable
+    /// recasing rule. Off by default so existing configs keep behaving exactly
+    /// as before.
     #[serde(default)]
     pub propagate_case: bool,
 }
