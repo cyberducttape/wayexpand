@@ -19,7 +19,7 @@ All notable changes to WayExpand are documented here.
   connected or healthy.
 - **Safer setup and maintainability:** experimental setup refuses unavailable
   backend routes; engine, backend-selection, daemon socket, fleet discovery,
-  GUI localization, and related production modules were split along clearer
+  GUI localization, and IBus installation discovery were split along clearer
   boundaries.
 - **CI and certification integrity:** concurrent stress coverage now includes
   evdev, wlroots, backend selection, the CLI, and process supervision. Release
