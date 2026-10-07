@@ -15,6 +15,8 @@ jq -e '
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 2) and
   ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
+  ([.targets[] | select((.id == "kde" or .id == "gnome") and .production_certification_required == true)] | length == 2) and
+  ([.targets[] | select((.id == "sway" or .id == "hyprland") and .production_certification_required == false)] | length == 2) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
   ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and
@@ -43,6 +45,30 @@ grep -F -- 'backend: input-method-v2' "$workflow" >/dev/null
 grep -F -- 'production_required: true' "$workflow" >/dev/null
 grep -F -- 'production_required: false' "$workflow" >/dev/null
 grep -F -- 'backend: evdev+wlroots' "$workflow" >/dev/null
+python3 - "$matrix" "$workflow" <<'PY'
+import json
+import re
+import sys
+
+matrix_path, workflow_path = sys.argv[1:]
+matrix = json.load(open(matrix_path, encoding="utf-8"))
+workflow = open(workflow_path, encoding="utf-8").read()
+blocks = re.split(r"(?m)^\s*- compositor:\s*", workflow)[1:]
+workflow_flags = {}
+for block in blocks:
+    compositor, _, body = block.partition("\n")
+    match = re.search(r"(?m)^\s*production_required:\s*(true|false)\s*$", body)
+    if match:
+        workflow_flags[compositor.strip()] = match.group(1) == "true"
+
+for target in matrix["targets"]:
+    expected = target["production_certification_required"]
+    actual = workflow_flags.get(target["id"])
+    if actual != expected:
+        raise SystemExit(
+            f"workflow production_required for {target['id']} is {actual!r}; expected {expected!r}"
+        )
+PY
 if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
     printf '%s\n' 'certification workflow must not certify raw evdev' >&2
     exit 1
