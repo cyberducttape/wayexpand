@@ -65,6 +65,24 @@ pub(crate) fn setup_backend_for_mode(
             if !setup_backend_allowed(policy, "input-method") {
                 bail!("Experimental input-method-v2 mode is disallowed by organization policy")
             }
+            let plan = wayexpand_backend_selection::plan_routes(capabilities, false, |route| {
+                route.id == "input-method-v2" && route_allowed_by_policy(policy, route)
+            });
+            let route = plan
+                .routes
+                .iter()
+                .find(|route| route.contract.id == "input-method-v2")
+                .expect("route catalog must declare input-method-v2");
+            if !matches!(
+                route.standing,
+                wayexpand_backend_selection::RouteStanding::Available
+                    | wayexpand_backend_selection::RouteStanding::Recommended
+            ) {
+                bail!(
+                    "Experimental mode is unavailable for this compositor: {}",
+                    route.reason
+                )
+            }
             Ok("input-method".into())
         }
         other => bail!(

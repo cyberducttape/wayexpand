@@ -363,6 +363,12 @@ fn setup_modes_do_not_promote_unavailable_paths() {
         setup_backend_for_mode("experimental", &experimental, &policy).unwrap(),
         "input-method"
     );
+
+    let unsupported_compositor = wayexpand_backend_selection::Capabilities {
+        compositor: wayexpand_backend_selection::Compositor::Sway,
+        ..experimental
+    };
+    assert!(setup_backend_for_mode("experimental", &unsupported_compositor, &policy).is_err());
 }
 
 #[test]
