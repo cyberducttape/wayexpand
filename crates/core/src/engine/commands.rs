@@ -49,13 +49,33 @@ pub struct CommandMetrics {
     pub command_failure_total: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessWaitOperation {
+    Observe,
+    Reap,
+    TryWait,
+}
+
+impl std::fmt::Display for ProcessWaitOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Observe => "observing process status",
+            Self::Reap => "reaping process",
+            Self::TryWait => "checking process status",
+        })
+    }
+}
+
 /// Why a command-backed expansion's configured program did not produce usable
 /// output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandError {
     SpawnFailed,
     Timeout,
-    WaitFailed(String),
+    WaitFailed {
+        operation: ProcessWaitOperation,
+        reason: String,
+    },
     BrokerUnavailable {
         reason: String,
     },
@@ -88,7 +108,9 @@ impl std::fmt::Display for CommandError {
         match self {
             Self::SpawnFailed => write!(f, "could not start the program"),
             Self::Timeout => write!(f, "timed out before it produced output"),
-            Self::WaitFailed(error) => write!(f, "failed while obtaining process status: {error}"),
+            Self::WaitFailed { operation, reason } => {
+                write!(f, "failed while {operation}: {reason}")
+            }
             Self::BrokerUnavailable { reason } => {
                 write!(f, "action broker unavailable: {reason}")
             }

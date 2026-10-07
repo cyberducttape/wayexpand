@@ -19,7 +19,8 @@ use std::os::fd::OwnedFd;
 pub(super) use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 use super::{
-    CommandConfig, CommandEnvironment, CommandError, MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
+    CommandConfig, CommandEnvironment, CommandError, ProcessWaitOperation,
+    MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
 };
 
 const MAX_COMMAND_STDERR_BYTES: usize = 16 * 1024;
@@ -224,7 +225,10 @@ fn run_command_unix(
         }
         if guard
             .has_exited()
-            .map_err(|error| CommandError::WaitFailed(error.to_string()))?
+            .map_err(|error| CommandError::WaitFailed {
+                operation: ProcessWaitOperation::Observe,
+                reason: error.to_string(),
+            })?
         {
             // On Linux this observation uses waitid(WNOWAIT), so the
             // leader remains a zombie and its PID/PGID cannot be
@@ -232,9 +236,10 @@ fn run_command_unix(
             // after the group kill.
             thread::sleep(Duration::from_millis(10));
             guard.kill_group();
-            break guard
-                .reap()
-                .map_err(|error| CommandError::WaitFailed(error.to_string()))?;
+            break guard.reap().map_err(|error| CommandError::WaitFailed {
+                operation: ProcessWaitOperation::Reap,
+                reason: error.to_string(),
+            })?;
         }
         if Instant::now() < deadline {
             wait_for_command_event(
@@ -523,10 +528,10 @@ pub(super) fn run_form_helper(
     };
     let deadline = Instant::now() + FORM_TIMEOUT;
     let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| CommandError::WaitFailed(error.to_string()))?
-        {
+        if let Some(status) = child.try_wait().map_err(|error| CommandError::WaitFailed {
+            operation: ProcessWaitOperation::TryWait,
+            reason: error.to_string(),
+        })? {
             break status;
         }
         if shutdown.load(Ordering::Acquire) || Instant::now() >= deadline {
