@@ -481,7 +481,7 @@ impl App {
             .name("wayexpand-tui-status".into())
             .spawn(move || {
                 while request_receiver.recv().is_ok() {
-                    let paused = control_command("status")
+                    let paused = control_command(wayexpand_core::DaemonOperation::Status)
                         .ok()
                         .and_then(|status| paused_from_status(&status));
                     if result_sender.send(paused).is_err() {
@@ -700,8 +700,12 @@ fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
             code: KeyCode::Char('p'),
             ..
         } => {
-            let command = if app.paused { "resume" } else { "pause" };
-            match control_command(command) {
+            let operation = if app.paused {
+                wayexpand_core::DaemonOperation::Resume
+            } else {
+                wayexpand_core::DaemonOperation::Pause
+            };
+            match control_command(operation) {
                 Ok(_) => {
                     app.paused = !app.paused;
                     app.message = if app.paused {
@@ -939,13 +943,7 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     Ok(())
 }
 
-fn control_command(command: &str) -> Result<String> {
-    let operation = match command {
-        "status" => wayexpand_core::DaemonOperation::Status,
-        "pause" => wayexpand_core::DaemonOperation::Pause,
-        "resume" => wayexpand_core::DaemonOperation::Resume,
-        _ => anyhow::bail!("unsupported daemon control operation"),
-    };
+fn control_command(operation: wayexpand_core::DaemonOperation) -> Result<String> {
     wayexpand_core::DaemonClient::from_environment()?
         .execute(operation)
         .map_err(Into::into)

@@ -8,13 +8,17 @@ impl GuiApp {
             return;
         }
         let paused = !self.paused;
-        let command = if paused { "pause" } else { "resume" };
+        let daemon_operation = if paused {
+            wayexpand_core::DaemonOperation::Pause
+        } else {
+            wayexpand_core::DaemonOperation::Resume
+        };
         let Some(sender) = self.runtime_sender.as_ref() else {
             self.status = Status::error(self.strings.background_runtime_stopped());
             return;
         };
         match sender.try_send(runtime::Request::Control {
-            command: command.into(),
+            daemon_operation,
             operation: runtime::Operation::Pause { paused },
         }) {
             Ok(()) => {

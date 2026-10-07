@@ -566,7 +566,7 @@ fn picker_row(
 fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result<(), String> {
     let deadline = Instant::now() + FOCUS_RETURN_TIMEOUT;
     loop {
-        let current = crate::runtime::control_command("focus")
+        let current = crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
             .ok()
             .and_then(|response| focus_target_from_response(&response));
         if let Some(current) = current.and_then(|info| info.target) {
@@ -604,7 +604,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let config = loaded.config;
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
-    let focus_info = crate::runtime::control_command("focus")
+    let focus_info = crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
         .ok()
         .and_then(|response| focus_target_from_response(&response));
     let (target_focus, daemon_available, exact_identity_available) = picker_focus_state(focus_info);

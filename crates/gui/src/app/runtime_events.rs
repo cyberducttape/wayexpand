@@ -145,7 +145,7 @@ impl GuiApp {
                 if let Some(sender) = self.runtime_sender.as_ref() {
                     if sender
                         .try_send(runtime::Request::Control {
-                            command: "status".into(),
+                            daemon_operation: wayexpand_core::DaemonOperation::Status,
                             operation: runtime::Operation::Status,
                         })
                         .is_ok()

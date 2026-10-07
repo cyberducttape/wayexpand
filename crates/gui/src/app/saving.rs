@@ -273,7 +273,7 @@ impl GuiApp {
             return;
         };
         match sender.try_send(runtime::Request::Control {
-            command: "reload".into(),
+            daemon_operation: wayexpand_core::DaemonOperation::Reload,
             operation: runtime::Operation::Reload(status.clone()),
         }) {
             Ok(()) => {

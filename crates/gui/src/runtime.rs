@@ -22,7 +22,7 @@ pub(crate) enum Request {
         announce: bool,
     },
     Control {
-        command: String,
+        daemon_operation: wayexpand_core::DaemonOperation,
         operation: Operation,
     },
     ReloadConfig {
@@ -237,9 +237,12 @@ pub(crate) fn start() -> std::io::Result<(
         .spawn(move || {
             while let Ok(request) = control_receiver.recv() {
                 let completion = match request {
-                    Request::Control { command, operation } => Completion::Control {
+                    Request::Control {
+                        daemon_operation,
                         operation,
-                        result: control_command(&command),
+                    } => Completion::Control {
+                        operation,
+                        result: control_command(daemon_operation),
                     },
                     Request::ReloadConfig { path } => {
                         Completion::ConfigReloaded(Box::new(load_config_snapshot(path)))
@@ -355,7 +358,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         Err(error) => format!("invalid: {}", error.safe_summary()),
     };
     let protocol_probes = diagnostics::probe_protocols();
-    let daemon_response = control_command("status");
+    let daemon_response = control_command(wayexpand_core::DaemonOperation::Status);
     let daemon_reachable = Some(daemon_response.is_ok());
     let (daemon_status, daemon_capabilities, route_state, paused) = match daemon_response {
         Ok(response) => (
@@ -416,16 +419,9 @@ pub(crate) fn parse_paused(response: &str) -> Option<bool> {
     })
 }
 
-pub(crate) fn control_command(command: &str) -> anyhow::Result<String> {
-    let operation = match command {
-        "status" => wayexpand_core::DaemonOperation::Status,
-        "focus" => wayexpand_core::DaemonOperation::Focus,
-        "reload" => wayexpand_core::DaemonOperation::Reload,
-        "pause" => wayexpand_core::DaemonOperation::Pause,
-        "resume" => wayexpand_core::DaemonOperation::Resume,
-        "stop" => wayexpand_core::DaemonOperation::Stop,
-        _ => anyhow::bail!("unsupported daemon control operation"),
-    };
+pub(crate) fn control_command(
+    operation: wayexpand_core::DaemonOperation,
+) -> anyhow::Result<String> {
     wayexpand_core::DaemonClient::from_environment()?
         .execute(operation)
         .map_err(Into::into)
