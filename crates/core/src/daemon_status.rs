@@ -85,6 +85,9 @@ impl DaemonStatus {
     /// Parse the bounded set of lifecycle values understood by frontends.
     /// Unknown values remain unavailable so newer daemons fail closed in UI.
     pub fn route_state(&self) -> Option<DaemonRouteState> {
+        if !self.field_is_unique("state") {
+            return None;
+        }
         match self.field("state")? {
             "connected" | "running" => Some(DaemonRouteState::Connected),
             "reconnecting" => Some(DaemonRouteState::Reconnecting),
@@ -143,6 +146,10 @@ mod tests {
         assert_eq!(DaemonStatus::parse("running\n").route_state(), None);
         assert_eq!(
             DaemonStatus::parse("state=future-state\n").route_state(),
+            None
+        );
+        assert_eq!(
+            DaemonStatus::parse("state=connected\nstate=failed\n").route_state(),
             None
         );
     }
