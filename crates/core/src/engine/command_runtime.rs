@@ -20,8 +20,8 @@ pub(super) use wayexpand_process_supervisor::{configure_process_group, ChildSupe
 
 use super::{
     BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandConfig,
-    CommandEnvironment, CommandError, ProcessWaitOperation, MAX_COMMAND_OUTPUT_BYTES,
-    MINIMAL_COMMAND_PATH,
+    CommandEnvironment, CommandError, ProcessWaitFailure, ProcessWaitOperation,
+    MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
 };
 
 const MAX_COMMAND_STDERR_BYTES: usize = 16 * 1024;
@@ -251,7 +251,9 @@ fn run_command_unix(
             .has_exited()
             .map_err(|error| CommandError::WaitFailed {
                 operation: ProcessWaitOperation::Observe,
-                reason: error.to_string(),
+                reason: ProcessWaitFailure::Io {
+                    detail: error.to_string(),
+                },
             })?
         {
             // On Linux this observation uses waitid(WNOWAIT), so the
@@ -262,7 +264,9 @@ fn run_command_unix(
             guard.kill_group();
             break guard.reap().map_err(|error| CommandError::WaitFailed {
                 operation: ProcessWaitOperation::Reap,
-                reason: error.to_string(),
+                reason: ProcessWaitFailure::Io {
+                    detail: error.to_string(),
+                },
             })?;
         }
         if Instant::now() < deadline {
@@ -554,7 +558,9 @@ pub(super) fn run_form_helper(
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|error| CommandError::WaitFailed {
             operation: ProcessWaitOperation::TryWait,
-            reason: error.to_string(),
+            reason: ProcessWaitFailure::Io {
+                detail: error.to_string(),
+            },
         })? {
             break status;
         }

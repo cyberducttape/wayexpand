@@ -690,13 +690,15 @@ fn command_metrics_count_timeouts_and_failures() {
 fn command_wait_failures_are_not_reported_as_timeouts() {
     let error = CommandError::WaitFailed {
         operation: super::ProcessWaitOperation::Observe,
-        reason: "child status unavailable".into(),
+        reason: super::ProcessWaitFailure::Io {
+            detail: "child status unavailable".into(),
+        },
     };
 
     assert_ne!(error, CommandError::Timeout);
     assert_eq!(
         error.to_string(),
-        "failed while observing process status: child status unavailable"
+        "failed while observing process status: I/O error: child status unavailable"
     );
 }
 

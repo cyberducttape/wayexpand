@@ -67,6 +67,19 @@ impl std::fmt::Display for ProcessWaitOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessWaitFailure {
+    Io { detail: String },
+}
+
+impl std::fmt::Display for ProcessWaitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { detail } => write!(f, "I/O error: {detail}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrokerUnavailableReason {
     SocketNotConfigured,
     Connect { detail: String },
@@ -130,7 +143,7 @@ pub enum CommandError {
     Timeout,
     WaitFailed {
         operation: ProcessWaitOperation,
-        reason: String,
+        reason: ProcessWaitFailure,
     },
     BrokerUnavailable {
         reason: BrokerUnavailableReason,
