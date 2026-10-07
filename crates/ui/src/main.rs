@@ -15,7 +15,9 @@ use std::{
     time::Duration,
     time::Instant,
 };
-use wayexpand_core::{default_config_path, Config, ConfigRevision, ExpansionEngine, InputEvent};
+use wayexpand_core::{
+    default_config_path, Config, ConfigRevision, DaemonStatus, ExpansionEngine, InputEvent,
+};
 
 struct App {
     path: PathBuf,
@@ -481,7 +483,7 @@ impl App {
                 while request_receiver.recv().is_ok() {
                     let paused = control_command("status")
                         .ok()
-                        .map(|status| status.lines().any(|line| line == "paused=true"));
+                        .and_then(|status| paused_from_status(&status));
                     if result_sender.send(paused).is_err() {
                         break;
                     }
@@ -943,6 +945,10 @@ fn control_command(command: &str) -> Result<String> {
         .map_err(Into::into)
 }
 
+fn paused_from_status(response: &str) -> Option<bool> {
+    DaemonStatus::parse(response).bool_field("paused")
+}
+
 /// Present tags for editing as plain `a, b` text whenever that form parses
 /// back to exactly the same list, and as a JSON array only for tags it cannot
 /// represent (commas, surrounding whitespace, empty tags, newlines, or a
@@ -1144,6 +1150,15 @@ mod tests {
             std::env::temp_dir()
         );
     }
+
+    #[test]
+    fn tui_status_uses_the_shared_daemon_status_contract() {
+        assert_eq!(paused_from_status("running\npaused=true\n"), Some(true));
+        assert_eq!(paused_from_status("running\npaused=false\n"), Some(false));
+        assert_eq!(paused_from_status("running\npaused=maybe\n"), None);
+        assert_eq!(paused_from_status("running\nwarning: paused=true\n"), None);
+    }
+
     use std::fs;
 
     #[test]
