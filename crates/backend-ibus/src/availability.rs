@@ -2,12 +2,15 @@
 
 use std::{
     env, fs,
+    io::Read,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
+
+const MAX_IBUS_REGISTRY_OUTPUT_BYTES: usize = 64 * 1024;
 
 /// Return whether the installed IBus component can be discovered by setup.
 /// This is intentionally an installation/provisioning probe, not an
@@ -37,15 +40,16 @@ fn ibus_registry_contains_engine() -> bool {
     loop {
         match child.try_wait() {
             Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map(|output| {
-                        output.status.success()
-                            && String::from_utf8_lossy(&output.stdout)
-                                .lines()
-                                .any(|line| line.contains("wayexpand"))
-                    })
-                    .unwrap_or(false);
+                let Some(stdout) = child.stdout.take() else {
+                    return false;
+                };
+                let mut output = Vec::new();
+                let output_ok = stdout
+                    .take((MAX_IBUS_REGISTRY_OUTPUT_BYTES + 1) as u64)
+                    .read_to_end(&mut output)
+                    .is_ok();
+                let status_ok = child.wait().map(|status| status.success()).unwrap_or(false);
+                return output_ok && status_ok && registry_output_contains_engine(&output);
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) | Err(_) => {
@@ -55,6 +59,13 @@ fn ibus_registry_contains_engine() -> bool {
             }
         }
     }
+}
+
+fn registry_output_contains_engine(output: &[u8]) -> bool {
+    output.len() <= MAX_IBUS_REGISTRY_OUTPUT_BYTES
+        && String::from_utf8_lossy(output)
+            .lines()
+            .any(|line| line.contains("wayexpand"))
 }
 
 fn executable_in_path(name: &str) -> bool {
@@ -86,4 +97,18 @@ fn ibus_component_directories() -> Vec<PathBuf> {
     directories.push(PathBuf::from("/usr/local/share/ibus/component"));
     directories.push(PathBuf::from("/usr/share/ibus/component"));
     directories
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{registry_output_contains_engine, MAX_IBUS_REGISTRY_OUTPUT_BYTES};
+
+    #[test]
+    fn registry_output_is_bounded_and_requires_the_engine_name() {
+        assert!(registry_output_contains_engine(b"wayexpand\n"));
+        assert!(!registry_output_contains_engine(b"other-engine\n"));
+        assert!(!registry_output_contains_engine(
+            &[b'x'; MAX_IBUS_REGISTRY_OUTPUT_BYTES + 1]
+        ));
+    }
 }

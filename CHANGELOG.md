@@ -28,6 +28,9 @@ All notable changes to WayExpand are documented here.
 - **Failure containment:** secure libei portal-token persistence now reports a
   missing temporary file as an I/O error and cleans up instead of panicking in
   the desktop integration path.
+- **Bounded discovery:** the IBus registry availability probe caps output from
+  `ibus list-engine` before inspecting it, preventing an untrusted or broken
+  helper from causing unbounded allocation during setup checks.
 
 Changes not yet released.
 

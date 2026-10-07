@@ -202,9 +202,8 @@ pub(crate) fn store_portal_token_at(path: &Path, token: &str) -> std::io::Result
         )
     })?;
     let result = (|| -> std::io::Result<()> {
-        let mut file = file.ok_or_else(|| {
-            std::io::Error::other("portal token temporary file was not opened")
-        })?;
+        let mut file = file
+            .ok_or_else(|| std::io::Error::other("portal token temporary file was not opened"))?;
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(token.as_bytes())?;
         file.sync_all()?;
