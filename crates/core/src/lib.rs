@@ -44,11 +44,11 @@ pub use config::{
 pub use daemon_client::{DaemonClient, DaemonClientError};
 pub use daemon_status::DaemonStatus;
 pub use engine::{
-    run_command, run_command_cancellable, CheckStatus, CommandError, CommandMetrics,
-    CompletionNotifier, ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck,
-    Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError, PendingExpansionDispatch,
-    PendingExpansionResult, ProcessWaitOperation, TransactionOutcome, WindowContext,
-    MAX_WINDOW_INSTANCE_ID_BYTES,
+    run_command, run_command_cancellable, BrokerOperation, BrokerProtocolFailure,
+    BrokerUnavailableReason, CheckStatus, CommandError, CommandMetrics, CompletionNotifier,
+    ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck, Explanation, HotkeyError,
+    HotkeyResult, InputEvent, InsertError, PendingExpansionDispatch, PendingExpansionResult,
+    ProcessWaitOperation, TransactionOutcome, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};

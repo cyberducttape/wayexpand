@@ -10,7 +10,8 @@ pub mod transaction;
 mod undo;
 pub use async_runtime::CompletionNotifier;
 pub use commands::{
-    CommandError, CommandMetrics, ExpansionError, HotkeyError, HotkeyResult, ProcessWaitOperation,
+    BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandError, CommandMetrics,
+    ExpansionError, HotkeyError, HotkeyResult, ProcessWaitOperation,
 };
 pub use explain::{CheckStatus, ExplainCheck, Explanation};
 pub use insertion::InsertError;

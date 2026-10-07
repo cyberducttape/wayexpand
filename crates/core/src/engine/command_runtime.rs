@@ -19,8 +19,9 @@ use std::os::fd::OwnedFd;
 pub(super) use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 use super::{
-    CommandConfig, CommandEnvironment, CommandError, ProcessWaitOperation,
-    MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
+    BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandConfig,
+    CommandEnvironment, CommandError, ProcessWaitOperation, MAX_COMMAND_OUTPUT_BYTES,
+    MINIMAL_COMMAND_PATH,
 };
 
 const MAX_COMMAND_STDERR_BYTES: usize = 16 * 1024;
@@ -128,12 +129,14 @@ fn run_broker_action(
                     .into_os_string()
             })
         })
-        .ok_or_else(|| CommandError::BrokerUnavailable {
-            reason: "socket is not configured".into(),
+        .ok_or(CommandError::BrokerUnavailable {
+            reason: BrokerUnavailableReason::SocketNotConfigured,
         })?;
     let mut client = wayexpand_broker_client::BrokerClient::connect(socket).map_err(|error| {
         CommandError::BrokerUnavailable {
-            reason: error.to_string(),
+            reason: BrokerUnavailableReason::Connect {
+                detail: error.to_string(),
+            },
         }
     })?;
     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -142,7 +145,7 @@ fn run_broker_action(
     }
     client
         .set_io_timeout(remaining)
-        .map_err(|error| broker_command_error("setting broker I/O deadline", error))?;
+        .map_err(|error| broker_command_error(BrokerOperation::SetIoTimeout, error))?;
     let env_vars = command
         .pass_env
         .iter()
@@ -160,10 +163,10 @@ fn run_broker_action(
             env_vars,
             stdout_capture: true,
         })
-        .map_err(|error| broker_command_error("sending broker request", error))?;
+        .map_err(|error| broker_command_error(BrokerOperation::SendRequest, error))?;
     match client
         .recv_response_until(deadline, shutdown)
-        .map_err(|error| broker_command_error("receiving broker response", error))?
+        .map_err(|error| broker_command_error(BrokerOperation::ReceiveResponse, error))?
     {
         wayexpand_broker_client::ActionResponse::Success(output) => broker_output_text(output),
         wayexpand_broker_client::ActionResponse::Error(error) => {
@@ -172,14 +175,35 @@ fn run_broker_action(
     }
 }
 
-fn broker_command_error(context: &str, error: wayexpand_broker_client::IpcError) -> CommandError {
+fn broker_command_error(
+    operation: BrokerOperation,
+    error: wayexpand_broker_client::IpcError,
+) -> CommandError {
     match error {
         wayexpand_broker_client::IpcError::DeadlineExceeded => CommandError::Timeout,
         wayexpand_broker_client::IpcError::Cancelled => CommandError::StaleInput,
         other if other.is_timeout() => CommandError::Timeout,
-        other => CommandError::BrokerProtocol {
-            operation: context.to_owned(),
-            reason: other.to_string(),
+        wayexpand_broker_client::IpcError::ConnectionClosed => CommandError::BrokerProtocol {
+            operation,
+            reason: BrokerProtocolFailure::ConnectionClosed,
+        },
+        wayexpand_broker_client::IpcError::MessageTooLarge(size, limit) => {
+            CommandError::BrokerProtocol {
+                operation,
+                reason: BrokerProtocolFailure::MessageTooLarge { size, limit },
+            }
+        }
+        wayexpand_broker_client::IpcError::Json(error) => CommandError::BrokerProtocol {
+            operation,
+            reason: BrokerProtocolFailure::InvalidJson {
+                detail: error.to_string(),
+            },
+        },
+        wayexpand_broker_client::IpcError::Io(error) => CommandError::BrokerProtocol {
+            operation,
+            reason: BrokerProtocolFailure::Io {
+                detail: error.to_string(),
+            },
         },
     }
 }
@@ -615,14 +639,28 @@ mod tests {
     fn broker_ipc_failures_remain_structured() {
         assert_eq!(
             broker_command_error(
-                "receiving broker response",
+                BrokerOperation::ReceiveResponse,
                 wayexpand_broker_client::IpcError::ConnectionClosed,
             ),
             CommandError::BrokerProtocol {
-                operation: "receiving broker response".into(),
-                reason: "Connection closed".into(),
+                operation: BrokerOperation::ReceiveResponse,
+                reason: BrokerProtocolFailure::ConnectionClosed,
             }
         );
+    }
+
+    #[test]
+    fn broker_unavailability_preserves_the_missing_socket_reason() {
+        let error = CommandError::BrokerUnavailable {
+            reason: BrokerUnavailableReason::SocketNotConfigured,
+        };
+        assert!(matches!(
+            &error,
+            CommandError::BrokerUnavailable {
+                reason: BrokerUnavailableReason::SocketNotConfigured
+            }
+        ));
+        assert!(error.to_string().contains("socket is not configured"));
     }
 
     #[test]

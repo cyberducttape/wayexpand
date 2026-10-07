@@ -66,6 +66,62 @@ impl std::fmt::Display for ProcessWaitOperation {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrokerUnavailableReason {
+    SocketNotConfigured,
+    Connect { detail: String },
+}
+
+impl std::fmt::Display for BrokerUnavailableReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SocketNotConfigured => f.write_str("socket is not configured"),
+            Self::Connect { detail } => write!(f, "{detail}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerOperation {
+    SetIoTimeout,
+    SendRequest,
+    ReceiveResponse,
+}
+
+impl std::fmt::Display for BrokerOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SetIoTimeout => "setting broker I/O deadline",
+            Self::SendRequest => "sending broker request",
+            Self::ReceiveResponse => "receiving broker response",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrokerProtocolFailure {
+    ConnectionClosed,
+    MessageTooLarge { size: usize, limit: usize },
+    InvalidJson { detail: String },
+    Io { detail: String },
+}
+
+impl std::fmt::Display for BrokerProtocolFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConnectionClosed => f.write_str("connection closed"),
+            Self::MessageTooLarge { size, limit } => {
+                write!(
+                    f,
+                    "message is {size} bytes, exceeding the {limit}-byte limit"
+                )
+            }
+            Self::InvalidJson { detail } => write!(f, "invalid JSON: {detail}"),
+            Self::Io { detail } => write!(f, "I/O error: {detail}"),
+        }
+    }
+}
+
 /// Why a command-backed expansion's configured program did not produce usable
 /// output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,11 +133,11 @@ pub enum CommandError {
         reason: String,
     },
     BrokerUnavailable {
-        reason: String,
+        reason: BrokerUnavailableReason,
     },
     BrokerProtocol {
-        operation: String,
-        reason: String,
+        operation: BrokerOperation,
+        reason: BrokerProtocolFailure,
     },
     BrokerRejected(ActionError),
     NonZeroExit {
