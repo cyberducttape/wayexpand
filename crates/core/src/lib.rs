@@ -41,7 +41,7 @@ pub use config::{
     ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
-pub use daemon_client::{DaemonClient, DaemonClientError};
+pub use daemon_client::{DaemonClient, DaemonClientError, DaemonOperation};
 pub use daemon_status::DaemonStatus;
 pub use engine::{
     run_command, run_command_cancellable, BrokerOperation, BrokerProtocolFailure,

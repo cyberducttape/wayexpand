@@ -12,7 +12,16 @@ pub(crate) fn control_command(requested: &str, mut args: Args) -> Result<()> {
     if args.next().is_some() {
         usage_bail!("usage: wayexpand {requested} [--json]");
     }
-    let response = control_request(requested)?;
+    let operation = match requested {
+        "status" => wayexpand_core::DaemonOperation::Status,
+        "focus" => wayexpand_core::DaemonOperation::Focus,
+        "reload" => wayexpand_core::DaemonOperation::Reload,
+        "pause" => wayexpand_core::DaemonOperation::Pause,
+        "resume" => wayexpand_core::DaemonOperation::Resume,
+        "stop" => wayexpand_core::DaemonOperation::Stop,
+        _ => return Err(daemon_error("unknown daemon operation")),
+    };
+    let response = control_operation(operation)?;
     if requested_json {
         println!("{}", status_as_json(&response)?);
     } else {
@@ -31,7 +40,7 @@ pub(crate) fn insert_command(mut args: Args) -> Result<()> {
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         usage_bail!("a trigger cannot be empty or contain control characters");
     }
-    let response = control_request(&format!("insert {trigger}"))?;
+    let response = control_operation(wayexpand_core::DaemonOperation::Insert { trigger })?;
     if response.trim_end() != "insert scheduled" {
         return Err(daemon_error(format!(
             "daemon refused the insert: {}",

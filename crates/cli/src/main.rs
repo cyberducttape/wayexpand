@@ -264,10 +264,9 @@ fn help_text() -> String {
     help
 }
 
-/// Send one line to the daemon's control socket and return its reply.
-fn control_request(command: &str) -> Result<String> {
+fn control_operation(operation: wayexpand_core::DaemonOperation) -> Result<String> {
     wayexpand_core::DaemonClient::from_environment()
-        .and_then(|client| client.request(command))
+        .and_then(|client| client.execute(operation))
         .map_err(|error| daemon_error(error.to_string()))
 }
 

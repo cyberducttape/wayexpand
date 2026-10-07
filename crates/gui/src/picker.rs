@@ -571,11 +571,9 @@ fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result
             .and_then(|response| focus_target_from_response(&response));
         if let Some(current) = current.and_then(|info| info.target) {
             if focus_returned_to_target(&target_focus, &current) {
-                let response = crate::runtime::control_command(&format!(
-                    "insert-target {} {} {trigger}",
-                    current.generation, current.token
-                ))
-                .map_err(|error| error.to_string())?;
+                let response =
+                    crate::runtime::insert_target(current.generation, &current.token, trigger)
+                        .map_err(|error| error.to_string())?;
                 if response.trim_end() != "insert scheduled" {
                     return Err(format!(
                         "daemon refused the insert: {}",

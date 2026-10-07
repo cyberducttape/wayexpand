@@ -806,7 +806,7 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
                 crate::sync::sync(&path).map_err(|error| config_error(format!("{error:#}")))?;
             // A running daemon picks up the merged library (it validates
             // before switching, so a bad library never replaces a good one).
-            let _ = control_request("reload");
+            let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
             if requested_json {
                 println!(
                     "{}",

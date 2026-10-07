@@ -227,12 +227,10 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
 
     let mut daemon_unreachable = None;
     if !offline && app.is_none() && config_path.is_none() {
-        let request = if requested_json {
-            format!("explain-json {text}")
-        } else {
-            format!("explain {text}")
-        };
-        match control_request(&request) {
+        match control_operation(wayexpand_core::DaemonOperation::Explain {
+            text: text.clone(),
+            json: requested_json,
+        }) {
             Ok(response) if !response.starts_with("unknown command") => {
                 print!("{response}");
                 return Ok(());

@@ -940,8 +940,14 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
 }
 
 fn control_command(command: &str) -> Result<String> {
+    let operation = match command {
+        "status" => wayexpand_core::DaemonOperation::Status,
+        "pause" => wayexpand_core::DaemonOperation::Pause,
+        "resume" => wayexpand_core::DaemonOperation::Resume,
+        _ => anyhow::bail!("unsupported daemon control operation"),
+    };
     wayexpand_core::DaemonClient::from_environment()?
-        .request(command)
+        .execute(operation)
         .map_err(Into::into)
 }
 

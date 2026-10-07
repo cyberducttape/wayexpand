@@ -417,8 +417,27 @@ pub(crate) fn parse_paused(response: &str) -> Option<bool> {
 }
 
 pub(crate) fn control_command(command: &str) -> anyhow::Result<String> {
+    let operation = match command {
+        "status" => wayexpand_core::DaemonOperation::Status,
+        "focus" => wayexpand_core::DaemonOperation::Focus,
+        "reload" => wayexpand_core::DaemonOperation::Reload,
+        "pause" => wayexpand_core::DaemonOperation::Pause,
+        "resume" => wayexpand_core::DaemonOperation::Resume,
+        "stop" => wayexpand_core::DaemonOperation::Stop,
+        _ => anyhow::bail!("unsupported daemon control operation"),
+    };
     wayexpand_core::DaemonClient::from_environment()?
-        .request(command)
+        .execute(operation)
+        .map_err(Into::into)
+}
+
+pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyhow::Result<String> {
+    wayexpand_core::DaemonClient::from_environment()?
+        .execute(wayexpand_core::DaemonOperation::InsertTarget {
+            generation,
+            token: token.to_owned(),
+            trigger: trigger.to_owned(),
+        })
         .map_err(Into::into)
 }
 

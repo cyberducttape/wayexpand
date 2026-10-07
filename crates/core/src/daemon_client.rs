@@ -10,6 +10,9 @@ use std::{
 use thiserror::Error;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const CONTROL_MAX_COMMAND_BYTES: usize = 1024;
+const MAX_INSERT_TRIGGER_CHARS: usize = 128;
+const MAX_EXPLAIN_TEXT_CHARS: usize = 256;
 
 #[derive(Debug, Error)]
 pub enum DaemonClientError {
@@ -30,6 +33,35 @@ pub enum DaemonClientError {
     ResponseTooLarge,
     #[error("daemon returned a non-UTF-8 control response")]
     InvalidUtf8 { source: std::string::FromUtf8Error },
+    #[error("invalid daemon control operation: {reason}")]
+    InvalidOperation { reason: &'static str },
+}
+
+/// Typed operations supported by the daemon control socket.
+///
+/// Frontends should construct one of these operations instead of formatting
+/// protocol lines themselves. The client owns validation and wire encoding so
+/// limits and control-character rules cannot drift between CLI, TUI, and GUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonOperation {
+    Status,
+    Focus,
+    Reload,
+    Pause,
+    Resume,
+    Stop,
+    Insert {
+        trigger: String,
+    },
+    InsertTarget {
+        generation: u64,
+        token: String,
+        trigger: String,
+    },
+    Explain {
+        text: String,
+        json: bool,
+    },
 }
 
 /// Bounded client for the daemon control socket, shared by all frontends.
@@ -64,6 +96,16 @@ impl DaemonClient {
     }
 
     pub fn request(&self, command: &str) -> Result<String, DaemonClientError> {
+        if command.is_empty() || command.len() > CONTROL_MAX_COMMAND_BYTES {
+            return Err(DaemonClientError::InvalidOperation {
+                reason: "command is empty or exceeds the control limit",
+            });
+        }
+        if command.chars().any(char::is_control) {
+            return Err(DaemonClientError::InvalidOperation {
+                reason: "command contains control characters",
+            });
+        }
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|source| {
             DaemonClientError::Connect {
                 path: self.socket_path.clone(),
@@ -91,8 +133,70 @@ impl DaemonClient {
     }
 
     pub fn status(&self) -> Result<String, DaemonClientError> {
-        self.request("status")
+        self.execute(DaemonOperation::Status)
     }
+
+    pub fn execute(&self, operation: DaemonOperation) -> Result<String, DaemonClientError> {
+        let command = encode_operation(&operation)?;
+        self.request(&command)
+    }
+}
+
+fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientError> {
+    match operation {
+        DaemonOperation::Status => Ok("status".into()),
+        DaemonOperation::Focus => Ok("focus".into()),
+        DaemonOperation::Reload => Ok("reload".into()),
+        DaemonOperation::Pause => Ok("pause".into()),
+        DaemonOperation::Resume => Ok("resume".into()),
+        DaemonOperation::Stop => Ok("stop".into()),
+        DaemonOperation::Insert { trigger } => {
+            validate_text(trigger, MAX_INSERT_TRIGGER_CHARS, "insert trigger")?;
+            Ok(format!("insert {trigger}"))
+        }
+        DaemonOperation::InsertTarget {
+            generation,
+            token,
+            trigger,
+        } => {
+            if token.is_empty() || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(DaemonClientError::InvalidOperation {
+                    reason: "insert target token must be hexadecimal",
+                });
+            }
+            validate_text(trigger, MAX_INSERT_TRIGGER_CHARS, "insert trigger")?;
+            Ok(format!("insert-target {generation} {token} {trigger}"))
+        }
+        DaemonOperation::Explain { text, json } => {
+            validate_text(text, MAX_EXPLAIN_TEXT_CHARS, "explain text")?;
+            Ok(format!(
+                "explain{} {text}",
+                if *json { "-json" } else { "" }
+            ))
+        }
+    }
+}
+
+fn validate_text(
+    text: &str,
+    max_chars: usize,
+    name: &'static str,
+) -> Result<(), DaemonClientError> {
+    if !(1..=max_chars).contains(&text.chars().count()) {
+        return Err(DaemonClientError::InvalidOperation {
+            reason: if name == "insert trigger" {
+                "insert trigger must be 1-128 characters"
+            } else {
+                "explain text must be 1-256 characters"
+            },
+        });
+    }
+    if text.chars().any(char::is_control) {
+        return Err(DaemonClientError::InvalidOperation {
+            reason: "operation text contains control characters",
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -125,5 +229,41 @@ mod tests {
         server.join().expect("server thread");
         fs::remove_file(socket).expect("remove test socket");
         assert_eq!(response, "state=running\n");
+    }
+
+    #[test]
+    fn encodes_typed_operations_with_validation() {
+        assert_eq!(
+            encode_operation(&DaemonOperation::Explain {
+                text: "hello world".into(),
+                json: true,
+            })
+            .unwrap(),
+            "explain-json hello world"
+        );
+        assert_eq!(
+            encode_operation(&DaemonOperation::InsertTarget {
+                generation: 7,
+                token: "deadbeef".into(),
+                trigger: ":wave".into(),
+            })
+            .unwrap(),
+            "insert-target 7 deadbeef :wave"
+        );
+        assert!(matches!(
+            encode_operation(&DaemonOperation::Insert {
+                trigger: "bad\ntrigger".into(),
+            }),
+            Err(DaemonClientError::InvalidOperation { .. })
+        ));
+    }
+
+    #[test]
+    fn raw_requests_reject_control_characters() {
+        let client = DaemonClient::new("/does/not/exist");
+        assert!(matches!(
+            client.request("status\nstop"),
+            Err(DaemonClientError::InvalidOperation { .. })
+        ));
     }
 }
