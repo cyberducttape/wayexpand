@@ -2,6 +2,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The daemon's stable lifecycle state as reported by its control socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonRouteState {
+    Connected,
+    Reconnecting,
+    Starting,
+    PermissionRequired,
+    PortalRevoked,
+    Unsupported,
+    Degraded,
+    Failed,
+    Stopped,
+}
+
 /// The daemon status response split into its banner and stable fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonStatus {
@@ -68,6 +82,23 @@ impl DaemonStatus {
         self.field("status_schema")?.parse().ok()
     }
 
+    /// Parse the bounded set of lifecycle values understood by frontends.
+    /// Unknown values remain unavailable so newer daemons fail closed in UI.
+    pub fn route_state(&self) -> Option<DaemonRouteState> {
+        match self.field("state")? {
+            "connected" | "running" => Some(DaemonRouteState::Connected),
+            "reconnecting" => Some(DaemonRouteState::Reconnecting),
+            "starting" => Some(DaemonRouteState::Starting),
+            "permission_required" => Some(DaemonRouteState::PermissionRequired),
+            "portal_revoked" => Some(DaemonRouteState::PortalRevoked),
+            "unsupported" => Some(DaemonRouteState::Unsupported),
+            "degraded" => Some(DaemonRouteState::Degraded),
+            "failed" => Some(DaemonRouteState::Failed),
+            "stopped" => Some(DaemonRouteState::Stopped),
+            _ => None,
+        }
+    }
+
     pub fn field_is_unique(&self, key: &str) -> bool {
         !self.duplicate_fields.contains(key)
     }
@@ -81,7 +112,7 @@ impl DaemonStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::DaemonStatus;
+    use super::{DaemonRouteState, DaemonStatus};
 
     #[test]
     fn preserves_unknown_fields_and_typed_accessors() {
@@ -99,6 +130,20 @@ mod tests {
     fn ignores_diagnostic_lines_without_a_key_value_separator() {
         let status = DaemonStatus::parse("running\nwarning: reconnecting\nstate=degraded\n");
         assert_eq!(status.field("state"), Some("degraded"));
+        assert_eq!(status.route_state(), Some(DaemonRouteState::Degraded));
         assert_eq!(status.fields().count(), 1);
+    }
+
+    #[test]
+    fn route_state_requires_a_known_state_field() {
+        assert_eq!(
+            DaemonStatus::parse("state=running\n").route_state(),
+            Some(DaemonRouteState::Connected)
+        );
+        assert_eq!(DaemonStatus::parse("running\n").route_state(), None);
+        assert_eq!(
+            DaemonStatus::parse("state=future-state\n").route_state(),
+            None
+        );
     }
 }

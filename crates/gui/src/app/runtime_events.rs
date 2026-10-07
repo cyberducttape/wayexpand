@@ -99,8 +99,9 @@ impl GuiApp {
                                     runtime::DaemonCapabilities::parse(&response);
                                 self.daemon_status = response.trim().replace('\n', " · ");
                                 self.daemon_reachable = Some(true);
-                                self.route_state = runtime::parse_route_state(&response);
-                                if let Some(paused) = runtime::parse_paused(&response) {
+                                let status = wayexpand_core::DaemonStatus::parse(&response);
+                                self.route_state = status.route_state();
+                                if let Some(paused) = status.bool_field("paused") {
                                     self.paused = paused;
                                 }
                             }

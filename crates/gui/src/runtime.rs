@@ -90,18 +90,7 @@ pub(crate) struct DiagnosticsSnapshot {
     pub announce: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RouteState {
-    Connected,
-    Reconnecting,
-    Starting,
-    PermissionRequired,
-    PortalRevoked,
-    Unsupported,
-    Degraded,
-    Failed,
-    Stopped,
-}
+pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonCapabilities {
@@ -364,8 +353,8 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         Ok(response) => (
             response.trim().replace('\n', " · "),
             DaemonCapabilities::parse(&response),
-            parse_route_state(&response),
-            parse_paused(&response),
+            wayexpand_core::DaemonStatus::parse(&response).route_state(),
+            wayexpand_core::DaemonStatus::parse(&response).bool_field("paused"),
         ),
         Err(error) => (format!("Unavailable: {error}"), None, None, None),
     };
@@ -384,39 +373,10 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     }
 }
 
-pub(crate) fn parse_route_state(response: &str) -> Option<RouteState> {
-    response.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        if key != "state" {
-            return None;
-        }
-        Some(match value {
-            "connected" | "running" => RouteState::Connected,
-            "reconnecting" => RouteState::Reconnecting,
-            "starting" => RouteState::Starting,
-            "permission_required" => RouteState::PermissionRequired,
-            "portal_revoked" => RouteState::PortalRevoked,
-            "unsupported" => RouteState::Unsupported,
-            "degraded" => RouteState::Degraded,
-            "failed" => RouteState::Failed,
-            "stopped" => RouteState::Stopped,
-            _ => return None,
-        })
-    })
-}
-
 pub(crate) fn status_field(response: &str, key: &str) -> Option<String> {
-    response.lines().find_map(|line| {
-        let (field, value) = line.split_once('=')?;
-        (field == key).then(|| value.to_owned())
-    })
-}
-
-pub(crate) fn parse_paused(response: &str) -> Option<bool> {
-    response.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        (key == "paused").then(|| value == "true")
-    })
+    wayexpand_core::DaemonStatus::parse(response)
+        .field(key)
+        .map(str::to_owned)
 }
 
 pub(crate) fn control_command(
@@ -439,36 +399,8 @@ pub(crate) fn insert_target(generation: u64, token: &str, trigger: &str) -> anyh
 
 #[cfg(test)]
 mod tests {
-    use super::RouteState;
     #[test]
-    fn paused_state_parser_ignores_unrelated_status_lines() {
-        assert_eq!(
-            super::parse_paused("state=running\npaused=true\n"),
-            Some(true)
-        );
-        assert_eq!(super::parse_paused("paused=false\n"), Some(false));
-        assert_eq!(super::parse_paused("state=stopped\n"), None);
-    }
-
-    #[test]
-    fn connection_parser_requires_the_daemon_state_field() {
-        assert_eq!(
-            super::parse_route_state("state=connected\n"),
-            Some(RouteState::Connected)
-        );
-        assert_eq!(
-            super::parse_route_state("state=stopped\n"),
-            Some(RouteState::Stopped)
-        );
-        assert_eq!(super::parse_route_state("running\npaused=false\n"), None);
-        assert_eq!(
-            super::parse_route_state("state=running\n"),
-            Some(RouteState::Connected)
-        );
-        assert_eq!(
-            super::parse_route_state("state=reconnecting\n"),
-            Some(RouteState::Reconnecting)
-        );
+    fn status_field_uses_the_shared_daemon_parser() {
         assert_eq!(
             super::status_field("source=input-method\nbackend=input-method-v2\n", "backend"),
             Some("input-method-v2".into())
