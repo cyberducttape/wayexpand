@@ -10,16 +10,12 @@ use std::{
     env,
     io::{self, Read, Write},
     os::unix::fs::OpenOptionsExt,
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::mpsc::{self, Receiver, SyncSender},
     time::Duration,
     time::Instant,
 };
 use wayexpand_core::{default_config_path, Config, ConfigRevision, ExpansionEngine, InputEvent};
-
-const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 
 struct App {
     path: PathBuf,
@@ -942,25 +938,9 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
 }
 
 fn control_command(command: &str) -> Result<String> {
-    let path = env::var_os("WAYEXPAND_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-        })
-        .context("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")?;
-    let mut stream =
-        UnixStream::connect(&path).with_context(|| format!("connecting to {}", path.display()))?;
-    stream.set_read_timeout(Some(CONTROL_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONTROL_TIMEOUT))?;
-    writeln!(stream, "{command}")?;
-    let mut response = String::new();
-    stream
-        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-        .read_to_string(&mut response)?;
-    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-        anyhow::bail!("daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
-    }
-    Ok(response)
+    wayexpand_core::DaemonClient::from_environment()?
+        .request(command)
+        .map_err(Into::into)
 }
 
 /// Present tags for editing as plain `a, b` text whenever that form parses

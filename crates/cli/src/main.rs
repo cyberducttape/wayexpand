@@ -37,17 +37,13 @@ use setup::{
 };
 use std::{
     env, fs,
-    io::{self, Read, Write},
+    io::{self, Write},
     os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
-    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::Command,
-    time::Duration,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
@@ -270,35 +266,9 @@ fn help_text() -> String {
 
 /// Send one line to the daemon's control socket and return its reply.
 fn control_request(command: &str) -> Result<String> {
-    let path = std::env::var_os("WAYEXPAND_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-        })
-        .ok_or_else(|| daemon_error("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required"))?;
-    let mut stream = UnixStream::connect(&path)
-        .map_err(|error| daemon_error(format!("connecting to {}: {error}", path.display())))?;
-    stream
-        .set_read_timeout(Some(CONTROL_IO_TIMEOUT))
-        .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
-    stream
-        .set_write_timeout(Some(CONTROL_IO_TIMEOUT))
-        .map_err(|error| daemon_error(format!("configuring daemon socket: {error}")))?;
-    writeln!(stream, "{command}")
-        .map_err(|error| daemon_error(format!("sending daemon command: {error}")))?;
-    let mut response = Vec::with_capacity(MAX_CONTROL_RESPONSE_BYTES);
-    stream
-        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)
-        .map_err(|error| daemon_error(format!("reading daemon response: {error}")))?;
-    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-        return Err(daemon_error(format!(
-            "daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes"
-        )));
-    }
-    let response = String::from_utf8(response)
-        .map_err(|_| daemon_error("daemon returned a non-UTF-8 control response"))?;
-    Ok(response)
+    wayexpand_core::DaemonClient::from_environment()
+        .and_then(|client| client.request(command))
+        .map_err(|error| daemon_error(error.to_string()))
 }
 
 fn print_help() {

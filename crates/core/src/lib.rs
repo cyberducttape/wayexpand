@@ -12,6 +12,7 @@ compile_error!("wayexpand-core currently requires a Unix target");
 mod backend;
 mod capabilities;
 mod config;
+mod daemon_client;
 mod engine;
 mod fleet;
 #[cfg(any(test, feature = "fuzzing"))]
@@ -39,6 +40,7 @@ pub use config::{
     ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
+pub use daemon_client::{DaemonClient, DaemonClientError};
 pub use engine::{
     run_command, run_command_cancellable, CheckStatus, CommandError, CommandMetrics,
     CompletionNotifier, ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck,

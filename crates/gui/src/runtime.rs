@@ -1,15 +1,10 @@
 //! Bounded background runtime for daemon control, desktop probes, and config I/O.
 
 use crate::{diagnostics, status::Status};
-use anyhow::Context;
 use std::{
-    env,
-    io::{Read, Write},
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::mpsc::{self, Receiver, SyncSender},
     thread,
-    time::Duration,
 };
 use toml_edit::DocumentMut;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
@@ -20,8 +15,6 @@ use wayexpand_core::{discover_backends, Config, FleetConfig, CONTROL_STATUS_SCHE
 
 const REQUEST_CAPACITY: usize = 8;
 const RESULT_CAPACITY: usize = 16;
-const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
-const MAX_CONTROL_RESPONSE_BYTES: usize = wayexpand_core::CONTROL_MAX_RESPONSE_BYTES;
 
 pub(crate) enum Request {
     Diagnostics {
@@ -404,25 +397,9 @@ pub(crate) fn parse_paused(response: &str) -> Option<bool> {
 }
 
 pub(crate) fn control_command(command: &str) -> anyhow::Result<String> {
-    let path = env::var_os("WAYEXPAND_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-        })
-        .context("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")?;
-    let mut stream =
-        UnixStream::connect(&path).with_context(|| format!("connecting to {}", path.display()))?;
-    stream.set_read_timeout(Some(CONTROL_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONTROL_TIMEOUT))?;
-    writeln!(stream, "{command}")?;
-    let mut response = Vec::new();
-    stream
-        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)?;
-    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-        anyhow::bail!("daemon control response exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
-    }
-    String::from_utf8(response).context("daemon returned a non-UTF-8 control response")
+    wayexpand_core::DaemonClient::from_environment()?
+        .request(command)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

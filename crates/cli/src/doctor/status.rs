@@ -4,25 +4,9 @@ use super::broker::broker_diagnostics;
 use crate::*;
 
 pub(crate) fn read_daemon_status() -> Result<String> {
-    let path = env::var_os("WAYEXPAND_SOCKET")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("wayexpand.sock"))
-        })
-        .context("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")?;
-    let mut stream = UnixStream::connect(&path)
-        .with_context(|| format!("connecting to daemon socket {}", path.display()))?;
-    stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
-    writeln!(stream, "status")?;
-    let mut response = Vec::with_capacity(MAX_CONTROL_RESPONSE_BYTES);
-    stream
-        .take((MAX_CONTROL_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)?;
-    if response.len() > MAX_CONTROL_RESPONSE_BYTES {
-        bail!("daemon status exceeded {MAX_CONTROL_RESPONSE_BYTES} bytes");
-    }
-    String::from_utf8(response).context("daemon status is not valid UTF-8")
+    wayexpand_core::DaemonClient::from_environment()?
+        .status()
+        .map_err(Into::into)
 }
 
 pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
