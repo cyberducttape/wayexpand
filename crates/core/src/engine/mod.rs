@@ -1,3 +1,4 @@
+mod async_runtime;
 pub mod command_runtime;
 mod commands;
 pub mod expansion;
@@ -7,6 +8,7 @@ pub mod matching;
 mod state;
 pub mod transaction;
 mod undo;
+pub use async_runtime::CompletionNotifier;
 pub use commands::{CommandError, CommandMetrics, ExpansionError, HotkeyError, HotkeyResult};
 pub use explain::{CheckStatus, ExplainCheck, Explanation};
 pub use insertion::InsertError;
@@ -19,6 +21,10 @@ pub use transaction::TransactionOutcome;
 use matching::GlobPattern;
 use state::NormalizedWindowContext;
 
+use async_runtime::{
+    notify_completion, send_completion_or_shutdown, AsyncCommandCompletion, AsyncCommandJob,
+    AsyncCommandRuntime, AsyncHotkeyCompletion, FormOrigin,
+};
 use command_runtime::{
     configure_command_environment, configure_process_group, run_command_with_shutdown,
     ChildSupervisor, CommandMetricsState, QueueSendError,
@@ -36,7 +42,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc, Mutex, RwLock,
     },
-    thread::{self, JoinHandle},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -182,150 +188,6 @@ impl ClipboardTriggers {
 struct CommandCacheEntry {
     expires_at: Instant,
     value: String,
-}
-
-/// Wakeup callback for asynchronous expansion completions. It runs on a
-/// worker thread and must only signal the host; draining happens on the host
-/// through [`ExpansionEngine::drain_completed_commands`].
-pub type CompletionNotifier = Arc<dyn Fn() + Send + Sync>;
-
-fn notify_completion(notifier: &RwLock<Option<CompletionNotifier>>) {
-    let notifier = match notifier.read() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    };
-    if let Some(notifier) = notifier {
-        notifier();
-    }
-}
-
-struct AsyncCommandRuntime {
-    command_sender: mpsc::SyncSender<AsyncCommandJob>,
-    hotkey_sender: mpsc::SyncSender<HotkeyResult>,
-    receiver: mpsc::Receiver<AsyncCommandCompletion>,
-    hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
-    expansion_metrics: Arc<CommandMetricsState>,
-    hotkey_metrics: Arc<CommandMetricsState>,
-    shutdown: Arc<AtomicBool>,
-    command_workers: Vec<JoinHandle<()>>,
-    hotkey_worker: Option<JoinHandle<()>>,
-}
-
-/// Send a worker completion without making runtime shutdown dependent on a
-/// receiver draining the old configuration's queue. Normal operation keeps
-/// backpressure when the bounded completion channel is full; once shutdown is
-/// requested, the completion can be discarded because the owning engine is
-/// being replaced and must not wait indefinitely for stale output.
-fn send_completion_or_shutdown<T>(
-    sender: &mpsc::SyncSender<T>,
-    mut completion: T,
-    shutdown: &AtomicBool,
-) -> bool {
-    loop {
-        if shutdown.load(Ordering::Acquire) {
-            return false;
-        }
-        match sender.try_send(completion) {
-            Ok(()) => return true,
-            Err(mpsc::TrySendError::Disconnected(_)) => return false,
-            Err(mpsc::TrySendError::Full(value)) => {
-                completion = value;
-                thread::sleep(Duration::from_millis(5));
-            }
-        }
-    }
-}
-
-impl Drop for AsyncCommandRuntime {
-    fn drop(&mut self) {
-        // Stop accepting queued work and cancel any child currently running
-        // on either worker before joining. Reloads happen on the daemon's
-        // input loop, so waiting for an old command's normal timeout here
-        // would briefly freeze capture and control handling.
-        self.shutdown.store(true, Ordering::Release);
-        for worker in self.command_workers.drain(..) {
-            let _ = worker.join();
-        }
-        if let Some(worker) = self.hotkey_worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-impl AsyncCommandRuntime {
-    fn try_send_command(&self, job: AsyncCommandJob) -> Result<(), QueueSendError> {
-        self.try_send(&self.command_sender, job, &self.expansion_metrics)
-    }
-
-    fn try_send_hotkey(&self, action: HotkeyResult) -> Result<(), QueueSendError> {
-        self.try_send(&self.hotkey_sender, action, &self.hotkey_metrics)
-    }
-
-    fn try_send<T>(
-        &self,
-        sender: &mpsc::SyncSender<T>,
-        job: T,
-        metrics: &CommandMetricsState,
-    ) -> Result<(), QueueSendError> {
-        metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
-        match sender.try_send(job) {
-            Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
-                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
-                Err(QueueSendError::Full)
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
-                Err(QueueSendError::Disconnected)
-            }
-        }
-    }
-}
-
-enum AsyncCommandJob {
-    Expansion {
-        config_index: usize,
-        generation: u64,
-        additional_max_size: usize,
-        command: CommandConfig,
-        result: ExpansionResult,
-    },
-    Form {
-        config_index: usize,
-        additional_max_size: usize,
-        template: String,
-        fields: Arc<Vec<crate::FormField>>,
-        context: crate::TemplateContext,
-        title: String,
-        origin: FormOrigin,
-        result: ExpansionResult,
-    },
-}
-
-/// Where a form snippet was triggered, so its result is only applied after
-/// focus returns there.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FormOrigin {
-    app_id: Option<String>,
-    instance_id: String,
-}
-
-struct AsyncCommandCompletion {
-    config_index: usize,
-    generation: u64,
-    cache_ms: u64,
-    additional_max_size: usize,
-    result: ExpansionResult,
-    output: Result<String, CommandError>,
-    /// Set for form jobs, which are checked by origin instead of generation.
-    form: Option<FormOrigin>,
-}
-
-struct AsyncHotkeyCompletion {
-    action: HotkeyResult,
-    output: Result<(), HotkeyError>,
 }
 
 impl ExpansionEngine {
