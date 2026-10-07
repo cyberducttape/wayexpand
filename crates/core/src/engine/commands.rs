@@ -139,7 +139,9 @@ impl std::fmt::Display for BrokerProtocolFailure {
 /// output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandError {
-    SpawnFailed,
+    SpawnFailed {
+        detail: String,
+    },
     Timeout,
     WaitFailed {
         operation: ProcessWaitOperation,
@@ -175,7 +177,7 @@ pub enum CommandError {
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SpawnFailed => write!(f, "could not start the program"),
+            Self::SpawnFailed { detail } => write!(f, "could not start the program: {detail}"),
             Self::Timeout => write!(f, "timed out before it produced output"),
             Self::WaitFailed { operation, reason } => {
                 write!(f, "failed while {operation}: {reason}")

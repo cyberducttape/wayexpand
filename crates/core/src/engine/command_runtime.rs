@@ -99,9 +99,11 @@ pub(super) fn run_command_with_shutdown(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_process_group(&mut process);
-        let mut child = process.spawn().map_err(|_| CommandError::SpawnFailed)?;
-        let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
-        let stderr = child.stderr.take().ok_or(CommandError::SpawnFailed)?;
+        let mut child = process.spawn().map_err(|error| CommandError::SpawnFailed {
+            detail: error.to_string(),
+        })?;
+        let stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
+        let stderr = child.stderr.take().ok_or(CommandError::OutputChannelLost)?;
         run_command_unix(child, stdout, stderr, command.timeout_ms, shutdown)
     }
 
@@ -533,8 +535,10 @@ pub(super) fn run_form_helper(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| CommandError::SpawnFailed)?;
-    let stdout = child.stdout.take().ok_or(CommandError::SpawnFailed)?;
+        .map_err(|error| CommandError::SpawnFailed {
+            detail: error.to_string(),
+        })?;
+    let stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
     // Drain stdout concurrently so a large answer cannot block the helper.
     let reader = match thread::Builder::new()
         .name("wayexpand-form-output".into())
