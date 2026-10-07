@@ -105,7 +105,7 @@ hung driver into a pass or lose the evidence for cells that were not run.
 
 The checked-in target and scenario contract is
 [`tests/certification/compositor-matrix.json`](../tests/certification/compositor-matrix.json).
-CI validates that all four required desktop targets and all thirty-six scenarios
+CI validates that all four required desktop targets and all forty-five scenarios
 remain present, rejects evidence that pairs a compositor with a backend
 outside its declared certification paths, and requires the layout profiles
 `us`, `de`, `fr`, `altgr`, and `multi-layout-switching` from certification
