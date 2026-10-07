@@ -14,6 +14,9 @@ All notable changes to WayExpand are documented here.
 - **Structured diagnostics:** command failures expose stable error categories
   for GUI, TUI, and doctor remediation without requiring display-string
   parsing.
+- **Fail-closed daemon status:** ambiguous duplicate route-state fields are
+  rejected instead of allowing a conflicting status response to appear
+  connected or healthy.
 - **Safer setup and maintainability:** experimental setup refuses unavailable
   backend routes; engine, backend-selection, daemon socket, fleet discovery,
   GUI localization, and related production modules were split along clearer
