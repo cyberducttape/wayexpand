@@ -179,6 +179,11 @@ jobs:
           - wayexpand-backend-ibus
           - wayexpand-backend-input-method
           - wayexpand-backend-libei
+          - wayexpand-backend-evdev
+          - wayexpand-backend-wlroots
+          - wayexpand-backend-selection
+          - wayexpand
+          - wayexpand-process-supervisor
     env:
       # The default lane deliberately serializes tests that share desktop
       # state. This lane is the complementary race detector: packages here
