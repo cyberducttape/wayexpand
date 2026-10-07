@@ -150,10 +150,13 @@ the sandbox forbids.
 Do not relax the daemon unit or use a wrapper script to bypass this boundary.
 There is no supported SRE command path in the current direct-command model.
 Named actions are routed through the Action Broker when configured with
-`action = "..."`. The broker provides policy-controlled execution and bounded
-output, but does not itself provide network isolation; harden its service unit
-for networked or credentialed workflows. Enable it only after creating and
-reviewing the broker policy:
+`action = "..."`. The packaged 1.x broker is a local-action broker: its service
+unit denies IP networking and permits only `AF_UNIX`. It provides
+policy-controlled execution and bounded output for local actions, but it is not
+a supported networked or credentialed workflow boundary. Do not weaken the
+whole service to enable `kubectl`, cloud, Vault, or similar actions; those need
+a separately reviewed per-action sandbox profile in a future release. Enable
+the broker only after creating and reviewing a local-action policy:
 
 ```sh
 systemctl --user daemon-reload

@@ -205,31 +205,20 @@ What could be added:
 require_absolute_paths = true
 strict_env = true
 
-# Action: List Kubernetes resources
-[actions."k8s_get_pods"]
-program = "/usr/bin/kubectl"
-args = ["get", "pods"]
-timeout_ms = 10000
-server_env = ["KUBECONFIG", "HOME"]
-enabled = true
-
-# Action: AWS CLI identity check
-[actions."aws_sts_identity"]
-program = "/usr/bin/aws"
-args = ["sts", "get-caller-identity"]
-timeout_ms = 5000
-client_forward_env = ["AWS_PROFILE", "AWS_REGION"]
-enabled = true
-
-# Action: Local file operations (no network)
-[actions."file_stat"]
-program = "/usr/bin/stat"
+# Action: Local report (no network)
+[actions."local-report"]
+program = "/usr/local/bin/report"
 args = []
 timeout_ms = 2000
-server_env = ["HOME"]
-cwd = "/home/user"
+cwd = "/home/user/reports"
 enabled = true
 ```
+
+The packaged 1.x service is intentionally local-only: `IPAddressDeny=any` and
+`RestrictAddressFamilies=AF_UNIX` prevent networked actions. Do not configure
+`kubectl`, AWS, cloud, Vault, or other network-dependent programs in this
+catalog and do not weaken the whole service to make one action work. Such
+actions require a future per-action OS sandbox profile and a separate review.
 
 ### Daemon routing configuration
 
