@@ -15,8 +15,9 @@ mod undo;
 mod usage;
 pub use async_runtime::CompletionNotifier;
 pub use commands::{
-    BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandError, CommandMetrics,
-    ExpansionError, HotkeyError, HotkeyResult, ProcessWaitFailure, ProcessWaitOperation,
+    BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandError,
+    CommandErrorKind, CommandMetrics, ExpansionError, HotkeyError, HotkeyResult,
+    ProcessWaitFailure, ProcessWaitOperation,
 };
 pub use explain::{CheckStatus, ExplainCheck, Explanation};
 pub use insertion::InsertError;

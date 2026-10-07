@@ -174,6 +174,58 @@ pub enum CommandError {
     IncompleteOutput,
 }
 
+/// Stable high-level classification for UI and diagnostics.
+///
+/// The full [`CommandError`] retains operation details, broker reasons, exit
+/// status, and bounded stderr. Consumers that only need remediation guidance
+/// can use this projection instead of parsing display strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandErrorKind {
+    Spawn,
+    Timeout,
+    ProcessWait,
+    BrokerUnavailable,
+    BrokerProtocol,
+    BrokerRejected,
+    NonZeroExit,
+    OutputTooLarge,
+    Policy,
+    StaleInput,
+    WindowIdentity,
+    QueueFull,
+    WorkerUnavailable,
+    InvalidOutput,
+    OutputChannel,
+    IncompleteOutput,
+}
+
+impl CommandError {
+    /// Return the stable category of this failure without discarding its
+    /// detailed context or requiring callers to inspect display text.
+    pub fn kind(&self) -> CommandErrorKind {
+        match self {
+            Self::SpawnFailed { .. } => CommandErrorKind::Spawn,
+            Self::Timeout => CommandErrorKind::Timeout,
+            Self::WaitFailed { .. } => CommandErrorKind::ProcessWait,
+            Self::BrokerUnavailable { .. } => CommandErrorKind::BrokerUnavailable,
+            Self::BrokerProtocol { .. } => CommandErrorKind::BrokerProtocol,
+            Self::BrokerRejected(_) => CommandErrorKind::BrokerRejected,
+            Self::NonZeroExit { .. } => CommandErrorKind::NonZeroExit,
+            Self::OutputTooLarge | Self::PolicyOutputTooLarge { .. } => {
+                CommandErrorKind::OutputTooLarge
+            }
+            Self::PolicyBlocked => CommandErrorKind::Policy,
+            Self::StaleInput => CommandErrorKind::StaleInput,
+            Self::WindowIdentityUnavailable => CommandErrorKind::WindowIdentity,
+            Self::QueueFull => CommandErrorKind::QueueFull,
+            Self::WorkerUnavailable => CommandErrorKind::WorkerUnavailable,
+            Self::InvalidUtf8 => CommandErrorKind::InvalidOutput,
+            Self::OutputChannelLost => CommandErrorKind::OutputChannel,
+            Self::IncompleteOutput => CommandErrorKind::IncompleteOutput,
+        }
+    }
+}
+
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -227,3 +279,33 @@ impl std::fmt::Display for CommandError {
 }
 
 impl std::error::Error for CommandError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_error_kind_preserves_remediation_categories() {
+        assert_eq!(
+            CommandError::BrokerUnavailable {
+                reason: BrokerUnavailableReason::SocketNotConfigured,
+            }
+            .kind(),
+            CommandErrorKind::BrokerUnavailable
+        );
+        assert_eq!(
+            CommandError::WaitFailed {
+                operation: ProcessWaitOperation::Reap,
+                reason: ProcessWaitFailure::Io {
+                    detail: "waitid failed".into(),
+                },
+            }
+            .kind(),
+            CommandErrorKind::ProcessWait
+        );
+        assert_eq!(
+            CommandError::PolicyOutputTooLarge { size: 9, limit: 8 }.kind(),
+            CommandErrorKind::OutputTooLarge
+        );
+    }
+}
