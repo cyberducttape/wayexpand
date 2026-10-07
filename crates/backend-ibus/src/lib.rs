@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tracing::{error, warn};
+use tracing::warn;
 use wayexpand_core::{
     CompletionNotifier, Config, ExpansionEngine, InjectorCapabilities, InputEvent,
     InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch,
@@ -45,6 +45,7 @@ use availability::component_file_present_in;
 pub use availability::engine_available;
 mod text;
 use text::{keysym_to_char, replacement_actions, SurroundingText};
+mod policy;
 
 /// Whether an IBus content type must disable capture. Password and PIN
 /// purposes, the private and hidden-text hints, and any purpose newer than
@@ -137,7 +138,7 @@ impl IbusEngineAdapter {
     }
 
     fn build(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
-        apply_policy_to_engine(&mut engine, &policy);
+        policy::apply_to_engine(&mut engine, &policy);
         // Keep IBus key handling non-blocking for broker actions. Direct
         // programs are still rejected by the backend-specific gate below.
         let _ = engine.enable_async_commands();
@@ -158,10 +159,7 @@ impl IbusEngineAdapter {
     /// Verify policy requirements against the real IBus capability profile,
     /// as the daemon does for its negotiated source and injector.
     fn check_capabilities(policy: &OrganizationPolicy) -> Option<String> {
-        let violation = policy
-            .capability_violation_for_source(injector_capabilities(), source_capabilities())?;
-        policy_blocks(policy, Some(violation.clone()), "route capability check")
-            .then_some(violation)
+        policy::capability_block(policy, injector_capabilities(), source_capabilities())
     }
 
     /// Why safe-mode policy has disabled expansion for this route, if it has.
@@ -267,7 +265,7 @@ impl IbusEngineAdapter {
                 result.command_backed,
                 IBUS_BACKEND_NAME,
             );
-            if policy_blocks(&self.policy, violation, "completed expansion") {
+            if policy::blocks(&self.policy, violation, "completed expansion") {
                 self.engine.restore_deferred_match(&result.matched_text);
                 continue;
             }
@@ -300,7 +298,7 @@ impl IbusEngineAdapter {
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
         }
-        apply_policy_to_engine(&mut engine, &self.policy);
+        policy::apply_to_engine(&mut engine, &self.policy);
         self.engine = engine;
         Ok(())
     }
@@ -360,7 +358,7 @@ impl IbusEngineAdapter {
 
         // Pre-flight policy check: prevents side effects (e.g., command execution)
         // before policy approval. Post-execution checks happen after engine.process().
-        if policy_blocks(
+        if policy::blocks(
             &self.policy,
             wayexpand_core::pre_flight_check(&self.policy),
             "pre-flight check",
@@ -419,7 +417,7 @@ impl IbusEngineAdapter {
 
             if let Some(command) = &pending_result.command {
                 if command.action.is_none()
-                    && policy_blocks(
+                    && policy::blocks(
                         &self.policy,
                         self.policy.command_path_violation(&command.program),
                         "command path",
@@ -438,7 +436,7 @@ impl IbusEngineAdapter {
                 has_command,
                 IBUS_BACKEND_NAME,
             );
-            if policy_blocks(&self.policy, violation, "expansion (pre-execution)") {
+            if policy::blocks(&self.policy, violation, "expansion (pre-execution)") {
                 self.engine
                     .restore_deferred_match(&pending_result.matched_text);
                 policy_blocked = true;
@@ -518,40 +516,6 @@ impl IbusEngineAdapter {
             actions,
         }
     }
-}
-
-/// Enforce an organization-policy violation: safe mode logs an error and
-/// blocks (returns true); audit mode logs a warning and lets the operation
-/// proceed. `what` names the checked operation in the log line.
-fn policy_blocks(policy: &OrganizationPolicy, violation: Option<String>, what: &str) -> bool {
-    let Some(violation) = violation else {
-        return false;
-    };
-    if policy.safe_mode {
-        error!(
-            audit_prefix = %policy.audit_prefix,
-            violation = %violation,
-            "IBus {what} blocked by organization policy"
-        );
-        true
-    } else {
-        warn!(
-            audit_prefix = %policy.audit_prefix,
-            violation = %violation,
-            "IBus {what} violates organization policy; audit mode permits it"
-        );
-        false
-    }
-}
-
-fn apply_policy_to_engine(engine: &mut ExpansionEngine, policy: &OrganizationPolicy) {
-    let enforcement = policy.effective_enforcement_policy();
-    // IBus runs outside the hardened wayexpand.service boundary. Direct
-    // executable commands remain disabled here, but managed Action Broker
-    // requests cross a separate authenticated Unix-socket boundary and are
-    // allowed to fail closed if that broker is unavailable.
-    engine.set_direct_commands_disabled(true);
-    engine.set_title_matching_disabled(enforcement.disable_title_matching);
 }
 
 #[cfg(test)]
