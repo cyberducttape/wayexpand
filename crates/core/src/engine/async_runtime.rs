@@ -1,9 +1,11 @@
-use super::{CommandError, CommandMetricsState, ExpansionResult, HotkeyError, HotkeyResult};
+use super::{
+    CommandError, CommandMetricsState, ExpansionEngine, ExpansionResult, HotkeyError, HotkeyResult,
+};
 use crate::CommandConfig;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc, Arc, Mutex, RwLock,
     },
     thread,
     thread::JoinHandle,
@@ -75,6 +77,241 @@ impl Drop for AsyncCommandRuntime {
 }
 
 impl AsyncCommandRuntime {
+    pub(super) fn start(
+        shared_input_generation: Arc<AtomicU64>,
+        completion_notifier: Arc<RwLock<Option<CompletionNotifier>>>,
+        expansion_metrics: Arc<CommandMetricsState>,
+        hotkey_metrics: Arc<CommandMetricsState>,
+    ) -> Option<Self> {
+        let (command_sender, command_receiver) =
+            mpsc::sync_channel::<AsyncCommandJob>(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (hotkey_sender, hotkey_receiver) =
+            mpsc::sync_channel::<HotkeyResult>(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (completion_sender, completion_receiver) =
+            mpsc::sync_channel(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let (hotkey_completion_sender, hotkey_completion_receiver) =
+            mpsc::sync_channel(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let command_receiver = Arc::new(Mutex::new(command_receiver));
+        let mut command_workers = Vec::with_capacity(super::ASYNC_COMMAND_WORKER_COUNT);
+        for worker_index in 0..super::ASYNC_COMMAND_WORKER_COUNT {
+            let command_shutdown = Arc::clone(&shutdown);
+            let worker_metrics = Arc::clone(&expansion_metrics);
+            let worker_receiver = Arc::clone(&command_receiver);
+            let worker_completion_sender = completion_sender.clone();
+            let worker_input_generation = Arc::clone(&shared_input_generation);
+            let worker_notifier = Arc::clone(&completion_notifier);
+            let command_worker = thread::Builder::new()
+                .name(format!("wayexpand-expansion-worker-{worker_index}"))
+                .spawn(move || {
+                    while !command_shutdown.load(Ordering::Acquire) {
+                        let received = match worker_receiver.lock() {
+                            Ok(receiver) => receiver.recv_timeout(Duration::from_millis(50)),
+                            Err(poisoned) => poisoned
+                                .into_inner()
+                                .recv_timeout(Duration::from_millis(50)),
+                        };
+                        let job = match received {
+                            Ok(job) => job,
+                            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        };
+                        if command_shutdown.load(Ordering::Acquire) {
+                            worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                            break;
+                        }
+                        worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
+                        let (config_index, generation, additional_max_size, command, result) =
+                            match job {
+                                AsyncCommandJob::Expansion {
+                                    config_index,
+                                    generation,
+                                    additional_max_size,
+                                    command,
+                                    result,
+                                } => (
+                                    config_index,
+                                    generation,
+                                    additional_max_size,
+                                    command,
+                                    result,
+                                ),
+                                AsyncCommandJob::Form {
+                                    config_index,
+                                    additional_max_size,
+                                    template,
+                                    fields,
+                                    mut context,
+                                    title,
+                                    origin,
+                                    mut result,
+                                } => {
+                                    worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+                                    let output = match super::command_runtime::run_form_helper(
+                                        &title,
+                                        &fields,
+                                        &command_shutdown,
+                                    ) {
+                                        Ok(values) => {
+                                            context.fields = Arc::new(values);
+                                            match crate::render_template_with_cursor(
+                                                &template, &context,
+                                            ) {
+                                                Ok((text, cursor_offset)) => {
+                                                    result.cursor_offset = cursor_offset;
+                                                    Ok(text)
+                                                }
+                                                Err(_) => Err(CommandError::IncompleteOutput),
+                                            }
+                                        }
+                                        Err(error) => Err(error),
+                                    };
+                                    worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                                    if !send_completion_or_shutdown(
+                                        &worker_completion_sender,
+                                        AsyncCommandCompletion {
+                                            config_index,
+                                            generation: 0,
+                                            cache_ms: 0,
+                                            additional_max_size,
+                                            result,
+                                            output,
+                                            form: Some(origin),
+                                        },
+                                        &command_shutdown,
+                                    ) {
+                                        break;
+                                    }
+                                    notify_completion(&worker_notifier);
+                                    continue;
+                                }
+                            };
+                        let cache_ms = command.cache_ms;
+                        if worker_input_generation.load(Ordering::Acquire) != generation {
+                            if !send_completion_or_shutdown(
+                                &worker_completion_sender,
+                                AsyncCommandCompletion {
+                                    config_index,
+                                    generation,
+                                    cache_ms,
+                                    additional_max_size,
+                                    result,
+                                    output: Err(CommandError::StaleInput),
+                                    form: None,
+                                },
+                                &command_shutdown,
+                            ) {
+                                break;
+                            }
+                            notify_completion(&worker_notifier);
+                            continue;
+                        }
+                        worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
+                        let output = super::command_runtime::run_command_with_shutdown(
+                            &command,
+                            Some(&command_shutdown),
+                        );
+                        worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
+                        if let Err(error) = &output {
+                            worker_metrics.record_error(matches!(error, CommandError::Timeout));
+                        }
+                        if !send_completion_or_shutdown(
+                            &worker_completion_sender,
+                            AsyncCommandCompletion {
+                                config_index,
+                                generation,
+                                cache_ms,
+                                additional_max_size,
+                                result,
+                                output,
+                                form: None,
+                            },
+                            &command_shutdown,
+                        ) {
+                            break;
+                        }
+                        notify_completion(&worker_notifier);
+                    }
+                });
+            match command_worker {
+                Ok(worker) => command_workers.push(worker),
+                Err(_) => {
+                    shutdown.store(true, Ordering::Release);
+                    drop(command_sender);
+                    for worker in command_workers {
+                        let _ = worker.join();
+                    }
+                    return None;
+                }
+            }
+        }
+        let hotkey_shutdown = Arc::clone(&shutdown);
+        let worker_hotkey_metrics = Arc::clone(&hotkey_metrics);
+        let hotkey_worker = thread::Builder::new()
+            .name("wayexpand-hotkey-worker".into())
+            .spawn(move || {
+                while !hotkey_shutdown.load(Ordering::Acquire) {
+                    let action = match hotkey_receiver.recv_timeout(Duration::from_millis(50)) {
+                        Ok(action) => action,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    if hotkey_shutdown.load(Ordering::Acquire) {
+                        worker_hotkey_metrics
+                            .queue_depth
+                            .fetch_sub(1, Ordering::Relaxed);
+                        break;
+                    }
+                    worker_hotkey_metrics
+                        .queue_depth
+                        .fetch_sub(1, Ordering::Relaxed);
+                    worker_hotkey_metrics
+                        .in_flight
+                        .fetch_add(1, Ordering::Relaxed);
+                    let output = ExpansionEngine::execute_hotkey_with_shutdown(
+                        &action,
+                        Some(&hotkey_shutdown),
+                    );
+                    worker_hotkey_metrics
+                        .in_flight
+                        .fetch_sub(1, Ordering::Relaxed);
+                    if let Err(error) = &output {
+                        worker_hotkey_metrics
+                            .record_error(matches!(error, HotkeyError::Timeout(_)));
+                    }
+                    if !send_completion_or_shutdown(
+                        &hotkey_completion_sender,
+                        AsyncHotkeyCompletion { action, output },
+                        &hotkey_shutdown,
+                    ) {
+                        break;
+                    }
+                }
+            });
+        let hotkey_worker = match hotkey_worker {
+            Ok(worker) => worker,
+            Err(_) => {
+                shutdown.store(true, Ordering::Release);
+                drop(command_sender);
+                for worker in command_workers {
+                    let _ = worker.join();
+                }
+                return None;
+            }
+        };
+        Some(Self {
+            command_sender,
+            hotkey_sender,
+            receiver: completion_receiver,
+            hotkey_receiver: hotkey_completion_receiver,
+            expansion_metrics,
+            hotkey_metrics,
+            shutdown,
+            command_workers,
+            hotkey_worker: Some(hotkey_worker),
+        })
+    }
+
     pub(super) fn try_send_command(
         &self,
         job: AsyncCommandJob,

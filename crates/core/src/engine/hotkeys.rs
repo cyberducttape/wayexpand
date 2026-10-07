@@ -1,4 +1,8 @@
+use super::command_runtime::{
+    configure_command_environment, configure_process_group, ChildSupervisor,
+};
 use super::*;
+use std::{sync::atomic::AtomicBool, thread};
 
 impl ExpansionEngine {
     /// Queue a hotkey action for bounded asynchronous execution. The caller

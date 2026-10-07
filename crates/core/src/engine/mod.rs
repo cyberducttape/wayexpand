@@ -29,15 +29,9 @@ use cache::{ClipboardTriggers, CommandCacheEntry};
 use matching::GlobPattern;
 use state::NormalizedWindowContext;
 
-use async_runtime::{
-    notify_completion, send_completion_or_shutdown, AsyncCommandCompletion, AsyncCommandJob,
-    AsyncCommandRuntime, AsyncHotkeyCompletion, FormOrigin,
-};
-use command_runtime::{
-    configure_command_environment, configure_process_group, run_command_with_shutdown,
-    ChildSupervisor, CommandMetricsState, QueueSendError,
-};
+use async_runtime::{AsyncCommandJob, AsyncCommandRuntime, FormOrigin};
 pub use command_runtime::{run_command, run_command_cancellable};
+use command_runtime::{CommandMetricsState, QueueSendError};
 
 use crate::{
     AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig,
@@ -47,10 +41,9 @@ use std::{
     collections::VecDeque,
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
     },
-    thread,
     time::{Duration, Instant},
 };
 
@@ -378,261 +371,15 @@ impl ExpansionEngine {
         if self.async_commands.is_some() {
             return true;
         }
-        let (command_sender, command_receiver) =
-            mpsc::sync_channel::<AsyncCommandJob>(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let (hotkey_sender, hotkey_receiver) =
-            mpsc::sync_channel::<HotkeyResult>(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let (completion_sender, completion_receiver) =
-            mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let (hotkey_completion_sender, hotkey_completion_receiver) =
-            mpsc::sync_channel(ASYNC_COMMAND_QUEUE_CAPACITY);
-        let expansion_metrics = Arc::clone(&self.expansion_metrics);
-        let hotkey_metrics = Arc::clone(&self.hotkey_metrics);
-        let shared_input_generation = Arc::clone(&self.shared_input_generation);
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let command_receiver = Arc::new(Mutex::new(command_receiver));
-        let mut command_workers = Vec::with_capacity(ASYNC_COMMAND_WORKER_COUNT);
-        for worker_index in 0..ASYNC_COMMAND_WORKER_COUNT {
-            let command_shutdown = Arc::clone(&shutdown);
-            let worker_metrics = Arc::clone(&expansion_metrics);
-            let worker_receiver = Arc::clone(&command_receiver);
-            let worker_completion_sender = completion_sender.clone();
-            let worker_input_generation = Arc::clone(&shared_input_generation);
-            let worker_notifier = Arc::clone(&self.completion_notifier);
-            let command_worker = thread::Builder::new()
-                .name(format!("wayexpand-expansion-worker-{worker_index}"))
-                .spawn(move || {
-                    while !command_shutdown.load(Ordering::Acquire) {
-                        let received = {
-                            match worker_receiver.lock() {
-                                Ok(receiver) => receiver.recv_timeout(Duration::from_millis(50)),
-                                Err(poisoned) => {
-                                    // A worker must not turn a recoverable
-                                    // receiver-poisoning event into a cascade
-                                    // that takes down every remaining worker.
-                                    poisoned
-                                        .into_inner()
-                                        .recv_timeout(Duration::from_millis(50))
-                                }
-                            }
-                        };
-                        let job = match received {
-                            Ok(job) => job,
-                            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        };
-                        // A runtime can be dropped during a configuration reload
-                        // while work is still buffered in the channel. Do not
-                        // start another external command after shutdown begins;
-                        // only the command already executing at the boundary may
-                        // finish under its existing timeout.
-                        if command_shutdown.load(Ordering::Acquire) {
-                            worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                            break;
-                        }
-                        worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                        let (config_index, generation, additional_max_size, command, result) =
-                            match job {
-                                AsyncCommandJob::Expansion {
-                                    config_index,
-                                    generation,
-                                    additional_max_size,
-                                    command,
-                                    result,
-                                } => (
-                                    config_index,
-                                    generation,
-                                    additional_max_size,
-                                    command,
-                                    result,
-                                ),
-                                AsyncCommandJob::Form {
-                                    config_index,
-                                    additional_max_size,
-                                    template,
-                                    fields,
-                                    mut context,
-                                    title,
-                                    origin,
-                                    mut result,
-                                } => {
-                                    // Forms are not stale when the user types:
-                                    // that typing is the form. Capture stays
-                                    // suspended until the completion is drained.
-                                    worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
-                                    let output = match command_runtime::run_form_helper(
-                                        &title,
-                                        &fields,
-                                        &command_shutdown,
-                                    ) {
-                                        Ok(values) => {
-                                            context.fields = Arc::new(values);
-                                            match crate::render_template_with_cursor(
-                                                &template, &context,
-                                            ) {
-                                                Ok((text, cursor_offset)) => {
-                                                    result.cursor_offset = cursor_offset;
-                                                    Ok(text)
-                                                }
-                                                Err(_) => Err(CommandError::IncompleteOutput),
-                                            }
-                                        }
-                                        Err(error) => Err(error),
-                                    };
-                                    worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                                    if !send_completion_or_shutdown(
-                                        &worker_completion_sender,
-                                        AsyncCommandCompletion {
-                                            config_index,
-                                            generation: 0,
-                                            cache_ms: 0,
-                                            additional_max_size,
-                                            result,
-                                            output,
-                                            form: Some(origin),
-                                        },
-                                        &command_shutdown,
-                                    ) {
-                                        break;
-                                    }
-                                    notify_completion(&worker_notifier);
-                                    continue;
-                                }
-                            };
-                        let cache_ms = command.cache_ms;
-                        // Input can move while this job waits in the bounded
-                        // queue. Reject it before spawning the child so stale
-                        // command side effects never happen after queued work
-                        // has become irrelevant.
-                        if worker_input_generation.load(Ordering::Acquire) != generation {
-                            if !send_completion_or_shutdown(
-                                &worker_completion_sender,
-                                AsyncCommandCompletion {
-                                    config_index,
-                                    generation,
-                                    cache_ms,
-                                    additional_max_size,
-                                    result,
-                                    output: Err(CommandError::StaleInput),
-                                    form: None,
-                                },
-                                &command_shutdown,
-                            ) {
-                                break;
-                            }
-                            notify_completion(&worker_notifier);
-                            continue;
-                        }
-                        worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
-                        let output = run_command_with_shutdown(&command, Some(&command_shutdown));
-                        worker_metrics.in_flight.fetch_sub(1, Ordering::Relaxed);
-                        if let Err(error) = &output {
-                            worker_metrics.record_error(matches!(error, CommandError::Timeout));
-                        }
-                        if !send_completion_or_shutdown(
-                            &worker_completion_sender,
-                            AsyncCommandCompletion {
-                                config_index,
-                                generation,
-                                cache_ms,
-                                additional_max_size,
-                                result,
-                                output,
-                                form: None,
-                            },
-                            &command_shutdown,
-                        ) {
-                            break;
-                        }
-                        notify_completion(&worker_notifier);
-                    }
-                });
-            match command_worker {
-                Ok(worker) => command_workers.push(worker),
-                Err(_) => {
-                    shutdown.store(true, Ordering::Release);
-                    drop(command_sender);
-                    for worker in command_workers {
-                        let _ = worker.join();
-                    }
-                    return false;
-                }
-            }
-        }
-        let hotkey_shutdown = Arc::clone(&shutdown);
-        let worker_hotkey_metrics = Arc::clone(&hotkey_metrics);
-        let hotkey_worker = thread::Builder::new()
-            .name("wayexpand-hotkey-worker".into())
-            .spawn(move || {
-                while !hotkey_shutdown.load(Ordering::Acquire) {
-                    let action = match hotkey_receiver.recv_timeout(Duration::from_millis(50)) {
-                        Ok(action) => action,
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    };
-                    // Match expansion workers: a hotkey still waiting in the
-                    // old runtime must not acquire new side effects after a
-                    // reload has requested shutdown.
-                    if hotkey_shutdown.load(Ordering::Acquire) {
-                        worker_hotkey_metrics
-                            .queue_depth
-                            .fetch_sub(1, Ordering::Relaxed);
-                        break;
-                    }
-                    worker_hotkey_metrics
-                        .queue_depth
-                        .fetch_sub(1, Ordering::Relaxed);
-                    worker_hotkey_metrics
-                        .in_flight
-                        .fetch_add(1, Ordering::Relaxed);
-                    let output =
-                        Self::execute_hotkey_with_shutdown(&action, Some(&hotkey_shutdown));
-                    worker_hotkey_metrics
-                        .in_flight
-                        .fetch_sub(1, Ordering::Relaxed);
-                    if let Err(error) = &output {
-                        worker_hotkey_metrics
-                            .record_error(matches!(error, HotkeyError::Timeout(_)));
-                    }
-                    if !send_completion_or_shutdown(
-                        &hotkey_completion_sender,
-                        AsyncHotkeyCompletion { action, output },
-                        &hotkey_shutdown,
-                    ) {
-                        break;
-                    }
-                }
-            });
-        // Bind the worker here rather than testing `is_err()` and unwrapping
-        // at the struct literal below, which would silently become a panic if
-        // anything were ever inserted between the two.
-        let hotkey_worker = match hotkey_worker {
-            Ok(worker) => worker,
-            Err(_) => {
-                // The command worker has already started, but async mode is
-                // not usable without both workers. Close its queue and join it
-                // before falling back, otherwise every partial startup leaks a
-                // thread until the process exits (especially harmful during
-                // reloads or under a tight systemd TasksMax).
-                shutdown.store(true, Ordering::Release);
-                drop(command_sender);
-                for worker in command_workers {
-                    let _ = worker.join();
-                }
-                return false;
-            }
+        let Some(runtime) = AsyncCommandRuntime::start(
+            Arc::clone(&self.shared_input_generation),
+            Arc::clone(&self.completion_notifier),
+            Arc::clone(&self.expansion_metrics),
+            Arc::clone(&self.hotkey_metrics),
+        ) else {
+            return false;
         };
-        self.async_commands = Some(AsyncCommandRuntime {
-            command_sender,
-            hotkey_sender,
-            receiver: completion_receiver,
-            hotkey_receiver: hotkey_completion_receiver,
-            expansion_metrics,
-            hotkey_metrics,
-            shutdown,
-            command_workers,
-            hotkey_worker: Some(hotkey_worker),
-        });
+        self.async_commands = Some(runtime);
         true
     }
 

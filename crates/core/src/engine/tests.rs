@@ -1,6 +1,12 @@
 use std::os::unix::fs::PermissionsExt;
+use std::{
+    sync::{atomic::AtomicBool, mpsc},
+    thread,
+};
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::async_runtime::send_completion_or_shutdown;
+use super::command_runtime::run_command_with_shutdown;
 use super::*;
 use crate::MatchMode;
 
