@@ -6,6 +6,7 @@ mod diagnostics;
 mod dialogs;
 mod editor;
 mod editor_preview;
+mod first_run;
 mod import;
 mod library;
 mod runtime_events;
