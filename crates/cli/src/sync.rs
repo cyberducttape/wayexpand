@@ -9,12 +9,16 @@
 //! leave an invalid library is rolled back to the local version.
 
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{bail, Context, Result};
 use wayexpand_core::Config;
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 /// Track only the library; everything else in the directory stays local.
 const GITIGNORE: &str = "\
@@ -25,6 +29,8 @@ const GITIGNORE: &str = "\
 !snippets.d/
 !snippets.d/*.toml
 ";
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_GIT_OUTPUT_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SyncReport {
@@ -36,14 +42,65 @@ pub(crate) struct SyncReport {
 }
 
 fn git(directory: &Path, args: &[&str]) -> Result<Output> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    configure_process_group(&mut command);
+    let mut child = command
         .arg("-C")
         .arg(directory)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
-        .output()
-        .context("could not run git; is it installed?")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("could not run git; is it installed?")?;
+    let stdout = child.stdout.take().context("git stdout was not captured")?;
+    let stderr = child.stderr.take().context("git stderr was not captured")?;
+    let stdout_reader = thread::spawn(|| read_git_output(stdout));
+    let stderr_reader = thread::spawn(|| read_git_output(stderr));
+    let mut supervisor = ChildSupervisor::new(child);
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let status = loop {
+        match supervisor.has_exited() {
+            Ok(true) => {
+                supervisor.kill_group();
+                break supervisor.reap().context("could not reap git")?;
+            }
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(false) | Err(_) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                bail!("git {} timed out or could not be monitored", args.join(" "));
+            }
+        }
+    };
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("git stdout reader failed"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("git stderr reader failed"))??;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn read_git_output<R: Read>(mut reader: R) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    reader
+        .by_ref()
+        .take((MAX_GIT_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut output)?;
+    if output.len() > MAX_GIT_OUTPUT_BYTES {
+        return Err(std::io::Error::other(
+            "git output exceeded the safety limit",
+        ));
+    }
+    Ok(output)
 }
 
 fn git_ok(directory: &Path, args: &[&str]) -> Result<String> {
@@ -267,6 +324,12 @@ mod tests {
         )
         .expect("configure test Git user email");
         (directory, config_path)
+    }
+
+    #[test]
+    fn git_output_is_bounded() {
+        assert_eq!(read_git_output(&b"git output"[..]).unwrap(), b"git output");
+        assert!(read_git_output(&vec![b'x'; MAX_GIT_OUTPUT_BYTES + 1][..]).is_err());
     }
 
     #[test]

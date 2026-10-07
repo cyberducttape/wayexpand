@@ -34,6 +34,9 @@ All notable changes to WayExpand are documented here.
 - **Pack-signing containment:** `ssh-keygen` used by pack signing and
   verification now has a bounded output budget, a deadline, and process-group
   cleanup on timeout or monitoring failure.
+- **Sync containment:** Git operations used by `wayexpand sync` now have a
+  bounded output budget, a 60-second deadline, and process-group cleanup so
+  remote operations cannot hang the CLI indefinitely.
 
 Changes not yet released.
 

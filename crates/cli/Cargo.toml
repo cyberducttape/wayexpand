@@ -18,6 +18,7 @@ toml.workspace = true
 rustix.workspace = true
 unicode-segmentation = "1"
 wayexpand-core = { path = "../core" }
+wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
