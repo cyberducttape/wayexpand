@@ -23,6 +23,7 @@
 //! ```
 
 pub mod audit;
+mod child_process;
 pub mod config;
 pub mod executor;
 pub mod ipc;
