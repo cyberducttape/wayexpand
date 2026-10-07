@@ -1,6 +1,7 @@
 //! Action Broker health: socket, service, and audit status.
 
 use super::files::existing_control_socket_is_healthy;
+use crate::setup::run_setup_command;
 use crate::*;
 
 pub(crate) fn broker_socket_path() -> Option<PathBuf> {
@@ -26,15 +27,16 @@ pub(crate) fn broker_health_status(socket: Option<&Path>) -> Option<serde_json::
 }
 
 pub(crate) fn broker_service_active() -> bool {
-    Command::new("systemctl")
-        .args([
+    run_setup_command(
+        "systemctl",
+        &[
             "--user",
             "is-active",
             "--quiet",
             "wayexpand-action-broker.service",
-        ])
-        .status()
-        .is_ok_and(|status| status.success())
+        ],
+    )
+    .is_ok_and(|status| status.success())
 }
 
 pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {

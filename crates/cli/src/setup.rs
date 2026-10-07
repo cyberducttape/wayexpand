@@ -8,7 +8,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const SETUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
+pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
     let mut command = Command::new(program);
     configure_process_group(&mut command);
     let child = command

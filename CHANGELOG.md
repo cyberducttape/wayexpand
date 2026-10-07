@@ -42,6 +42,8 @@ All notable changes to WayExpand are documented here.
   descendants.
 - **CLI setup containment:** direct `wayexpand setup` IBus and systemd helper
   calls now have 30-second deadlines and process-group cleanup as well.
+- **Bounded broker diagnostics:** `wayexpand doctor` now uses the same deadline
+  and process-group cleanup when checking the broker's systemd service.
 
 Changes not yet released.
 
