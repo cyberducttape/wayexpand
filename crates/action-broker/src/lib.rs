@@ -26,6 +26,7 @@ pub mod audit;
 pub mod config;
 pub mod executor;
 pub mod ipc;
+mod path_security;
 pub mod protocol;
 
 pub use audit::{policy_hash, AuditEvent, AuditHealth, AuditLogger, CallerIdentity};
