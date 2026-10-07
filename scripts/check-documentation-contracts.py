@@ -107,7 +107,9 @@ def main() -> int:
     recommended_description = route_catalog.get("recommended_description")
     if not isinstance(recommended_description, str) or not recommended_description:
         errors.append("backend route catalog is missing recommended_description")
-    elif recommended_description not in (ROOT / "README.md").read_text(encoding="utf-8"):
+    elif re.sub(r"\s+", " ", recommended_description).strip() not in re.sub(
+        r"\s+", " ", (ROOT / "README.md").read_text(encoding="utf-8")
+    ).strip():
         errors.append("README Recommended-mode safety description is out of sync with routes.json")
 
     generated_matrix_check = subprocess.run(
