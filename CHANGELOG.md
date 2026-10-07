@@ -25,6 +25,9 @@ All notable changes to WayExpand are documented here.
   evdev, wlroots, backend selection, the CLI, and process supervision. Release
   checks continue to require durable compositor evidence and do not claim
   production certification without it.
+- **Failure containment:** secure libei portal-token persistence now reports a
+  missing temporary file as an I/O error and cleans up instead of panicking in
+  the desktop integration path.
 
 Changes not yet released.
 
