@@ -50,6 +50,9 @@ All notable changes to WayExpand are documented here.
 - **Tracker shutdown:** the KWin window-tracker reconnect backoff is now
   interruptible, so daemon shutdown does not wait for the full 30-second retry
   interval.
+- **GUI sync containment:** Library → Sync now bounds its child process,
+  output capture, deadline, and process-group cleanup instead of bypassing the
+  CLI Git safety controls.
 
 Changes not yet released.
 
