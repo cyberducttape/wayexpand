@@ -44,7 +44,7 @@ mod availability;
 use availability::component_file_present_in;
 pub use availability::engine_available;
 mod text;
-use text::{keysym_to_char, replacement_actions};
+use text::{keysym_to_char, replacement_actions, SurroundingText};
 
 /// Whether an IBus content type must disable capture. Password and PIN
 /// purposes, the private and hidden-text hints, and any purpose newer than
@@ -109,53 +109,6 @@ pub struct IbusKeyResult {
     /// the client process the original key event.
     pub handled: bool,
     pub actions: Vec<IbusAction>,
-}
-
-/// The client's text around the cursor as last reported through
-/// `SetSurroundingText`, advanced locally by the edits this engine emits.
-/// Positions are in Unicode scalar values, as IBus reports them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SurroundingText {
-    text: Vec<char>,
-    cursor: usize,
-    anchor: usize,
-}
-
-impl SurroundingText {
-    /// Whether `expected` is exactly the text before a collapsed cursor.
-    fn ends_with_at_cursor(&self, expected: &str) -> bool {
-        if self.cursor != self.anchor || self.cursor > self.text.len() {
-            return false;
-        }
-        let expected: Vec<char> = expected.chars().collect();
-        self.text[..self.cursor].ends_with(&expected)
-    }
-
-    /// Apply an emitted action. Returns false when the model can no longer
-    /// describe the client, so the caller drops it.
-    fn apply(&mut self, action: &IbusAction) -> bool {
-        if self.cursor != self.anchor || self.cursor > self.text.len() {
-            return false;
-        }
-        match action {
-            IbusAction::DeleteSurroundingText { nchars } => {
-                let count = *nchars as usize;
-                let Some(start) = self.cursor.checked_sub(count) else {
-                    return false;
-                };
-                self.text.drain(start..self.cursor);
-                self.cursor = start;
-            }
-            IbusAction::CommitText(text) => {
-                let inserted: Vec<char> = text.chars().collect();
-                let count = inserted.len();
-                self.text.splice(self.cursor..self.cursor, inserted);
-                self.cursor += count;
-            }
-        }
-        self.anchor = self.cursor;
-        true
-    }
 }
 
 /// Core-backed IBus engine state.
@@ -246,11 +199,7 @@ impl IbusEngineAdapter {
         self.surrounding = (self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
             && cursor <= text.len()
             && anchor <= text.len())
-        .then_some(SurroundingText {
-            text,
-            cursor,
-            anchor,
-        });
+        .then_some(SurroundingText::new(text, cursor, anchor));
     }
 
     /// Forget the surrounding-text model; replacements are refused until the
