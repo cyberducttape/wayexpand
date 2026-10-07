@@ -44,6 +44,9 @@ All notable changes to WayExpand are documented here.
   calls now have 30-second deadlines and process-group cleanup as well.
 - **Bounded broker diagnostics:** `wayexpand doctor` now uses the same deadline
   and process-group cleanup when checking the broker's systemd service.
+- **GUI setup pipe cleanup:** when the setup CLI leader exits, inherited helper
+  processes are terminated before GUI output collection, preventing a lingering
+  descendant from keeping the worker blocked on `wait_with_output`.
 
 Changes not yet released.
 

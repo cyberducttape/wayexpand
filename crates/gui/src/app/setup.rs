@@ -47,6 +47,12 @@ impl GuiApp {
                             .map_err(|error| error.to_string())?
                             .is_some()
                         {
+                            // A setup helper may outlive the CLI leader while
+                            // retaining this worker's stdout/stderr pipes.
+                            // Close that inherited-pipe path before collecting
+                            // output, otherwise wait_with_output could block
+                            // after the leader has already exited.
+                            kill_process_group_by_pid(child.id());
                             break;
                         }
                         if Instant::now() >= deadline {
