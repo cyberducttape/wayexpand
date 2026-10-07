@@ -4,6 +4,7 @@
 //! command-facing data contracts separate from the engine state machine.
 
 use crate::{CommandConfig, InjectorError, KeyChord};
+use wayexpand_broker_client::ActionError;
 
 use super::MAX_COMMAND_OUTPUT_BYTES;
 
@@ -55,6 +56,14 @@ pub enum CommandError {
     SpawnFailed,
     Timeout,
     WaitFailed(String),
+    BrokerUnavailable {
+        reason: String,
+    },
+    BrokerProtocol {
+        operation: String,
+        reason: String,
+    },
+    BrokerRejected(ActionError),
     NonZeroExit {
         code: Option<i32>,
         stderr: Option<String>,
@@ -80,6 +89,13 @@ impl std::fmt::Display for CommandError {
             Self::SpawnFailed => write!(f, "could not start the program"),
             Self::Timeout => write!(f, "timed out before it produced output"),
             Self::WaitFailed(error) => write!(f, "failed while obtaining process status: {error}"),
+            Self::BrokerUnavailable { reason } => {
+                write!(f, "action broker unavailable: {reason}")
+            }
+            Self::BrokerProtocol { operation, reason } => {
+                write!(f, "action broker {operation} failed: {reason}")
+            }
+            Self::BrokerRejected(error) => write!(f, "action broker rejected the action: {error}"),
             Self::NonZeroExit { code, stderr } => {
                 match code {
                     Some(code) => write!(f, "exited with status {code}")?,

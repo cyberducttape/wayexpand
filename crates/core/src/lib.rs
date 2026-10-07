@@ -73,3 +73,4 @@ pub use usage::{
     trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk, UsageEvent, UsageLine, UsageReport,
     UsageStats,
 };
+pub use wayexpand_broker_client::ActionError;

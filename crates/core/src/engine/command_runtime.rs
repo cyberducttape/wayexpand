@@ -127,9 +127,13 @@ fn run_broker_action(
                     .into_os_string()
             })
         })
-        .ok_or_else(|| CommandError::WaitFailed("action broker socket is not configured".into()))?;
+        .ok_or_else(|| CommandError::BrokerUnavailable {
+            reason: "socket is not configured".into(),
+        })?;
     let mut client = wayexpand_broker_client::BrokerClient::connect(socket).map_err(|error| {
-        CommandError::WaitFailed(format!("connecting to action broker: {error}"))
+        CommandError::BrokerUnavailable {
+            reason: error.to_string(),
+        }
     })?;
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining.is_zero() {
@@ -162,7 +166,7 @@ fn run_broker_action(
     {
         wayexpand_broker_client::ActionResponse::Success(output) => broker_output_text(output),
         wayexpand_broker_client::ActionResponse::Error(error) => {
-            Err(CommandError::WaitFailed(error.to_string()))
+            Err(CommandError::BrokerRejected(error))
         }
     }
 }
@@ -172,7 +176,10 @@ fn broker_command_error(context: &str, error: wayexpand_broker_client::IpcError)
         wayexpand_broker_client::IpcError::DeadlineExceeded => CommandError::Timeout,
         wayexpand_broker_client::IpcError::Cancelled => CommandError::StaleInput,
         other if other.is_timeout() => CommandError::Timeout,
-        other => CommandError::WaitFailed(format!("{context}: {other}")),
+        other => CommandError::BrokerProtocol {
+            operation: context.to_owned(),
+            reason: other.to_string(),
+        },
     }
 }
 
@@ -597,5 +604,30 @@ mod tests {
             broker_output_text(output(false, true)),
             Ok("complete".into())
         );
+    }
+
+    #[test]
+    fn broker_ipc_failures_remain_structured() {
+        assert_eq!(
+            broker_command_error(
+                "receiving broker response",
+                wayexpand_broker_client::IpcError::ConnectionClosed,
+            ),
+            CommandError::BrokerProtocol {
+                operation: "receiving broker response".into(),
+                reason: "Connection closed".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn broker_rejections_remain_structured() {
+        let error = wayexpand_broker_client::ActionError::ActionBlocked {
+            action_id: "local-report".into(),
+            reason: "disabled by policy".into(),
+        };
+        let command_error = CommandError::BrokerRejected(error.clone());
+        assert_eq!(command_error, CommandError::BrokerRejected(error));
+        assert!(command_error.to_string().contains("disabled by policy"));
     }
 }
