@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   exact-surrounding-text Fcitx5 bridge when explicitly enabled. Missing bridges
   preserve existing behavior; sensitive, mismatched, unknown, and uncertain
   bridge outcomes fail closed before any raw erase.
+- **Authoring interoperability:** `wayexpand schema` exposes a versioned,
+  machine-readable TOML configuration shape for editors and integrations while
+  leaving semantic validation in the shared `validate` path.
 - **Synchronization integrity:** `wayexpand sync` and daemon reloads now share
   full-library validation for `snippets.d/*.toml`, validate rebased remote
   content before promotion, reliably stage deletion of the final snippet, and
