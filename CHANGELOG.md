@@ -82,6 +82,9 @@ All notable changes to WayExpand are documented here.
   period keep a `{{cursor}}` marker at its intended position, and results with
   several folded delimiters release their deferred-match reservation instead
   of reviving an already-applied trigger.
+- **Evdev output recovery:** a retryable injection failure on the evdev path
+  (or while applying completed commands) now retires the output route and
+  reconnects instead of ending the daemon's event loop.
 
 Changes not yet released.
 

@@ -216,32 +216,17 @@ impl Daemon {
                             self.active_backend,
                         )
                     } else {
-                        let pending = self.config.engine.process_deferred(event);
-                        let results = dispatch_pending_results(
+                        // The outcome is a value: the injector is restored
+                        // below and failures reach the recovery match, never
+                        // an early return out of the event loop.
+                        apply_deferred_evdev_event(
                             &mut self.config.engine,
-                            pending,
+                            event,
+                            backend.as_mut(),
+                            &mut self.evdev,
                             &self.policy,
                             self.active_backend,
-                        );
-                        if results.is_empty() {
-                            Ok(())
-                        } else {
-                            let gating = apply_evdev_gating(results, &mut self.evdev);
-                            restore_abandoned_results(&mut self.config.engine, gating.abandoned);
-                            apply_results(
-                                &mut self.config.engine,
-                                gating.results,
-                                Some(backend.as_mut()),
-                                &self.policy,
-                                self.active_backend,
-                            )?;
-                            replay_evdev_follow_up(
-                                &mut self.config.engine,
-                                gating.follow_up,
-                                &self.policy,
-                                self.active_backend,
-                            )
-                        }
+                        )
                     };
                     self.injector = Some(backend);
                     result
@@ -256,44 +241,12 @@ impl Daemon {
                 };
                 match result {
                     Ok(()) => self.reconnect_delay = Duration::from_millis(250),
-                    Err(error) if error.expansion_rejected() => {
-                        warn!(
-                            error = %error,
-                            trigger_chars = error.result.trigger.chars().count(),
-                            insert_bytes = error.result.insert.len(),
-                            "evdev rejected expansion; continuing"
-                        );
-                        self.reconnect_delay = Duration::from_millis(250);
+                    Err(error) => {
+                        if error.expansion_rejected() {
+                            self.reconnect_delay = Duration::from_millis(250);
+                        }
+                        self.recover_from_output_error(*error)?;
                     }
-                    Err(error) if error.retryable() => {
-                        warn!(
-                            error = %error,
-                            trigger_chars = error.result.trigger.chars().count(),
-                            insert_bytes = error.result.insert.len(),
-                            "evdev output failed; current expansion is not replayed"
-                        );
-                        self.retire_output_injector();
-                        process_event(
-                            &mut self.config.engine,
-                            InputEvent::EndOfInput,
-                            None,
-                            &self.policy,
-                            self.active_backend,
-                        )?;
-                        self.connection_state = "reconnecting";
-                        set_daemon_status(
-                            &mut self.status_publisher,
-                            &self.control,
-                            self.active_source,
-                            self.active_backend,
-                            self.connection_state,
-                            &self.path,
-                            self.config.healthy(),
-                        );
-                        self.output_retry_at = Some(Instant::now());
-                        self.output_retry_delay = Duration::from_millis(250);
-                    }
-                    Err(error) => return Err(error.into()),
                 }
             }
             Ok(None) => {}

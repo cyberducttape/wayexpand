@@ -270,6 +270,34 @@ pub(crate) fn absorb_evdev_delimiter(results: &mut [ExpansionResult], character:
     }
 }
 
+/// Match a non-key evdev event, gate its results on the physical key state,
+/// and inject them. Failures are returned, not propagated past the caller,
+/// which must restore its injector before classifying them for recovery.
+pub(crate) fn apply_deferred_evdev_event(
+    engine: &mut ExpansionEngine,
+    event: InputEvent,
+    backend: &mut dyn TextInjector,
+    evdev: &mut Option<EvdevSource>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> std::result::Result<(), Box<EventError>> {
+    let pending = engine.process_deferred(event);
+    let results = dispatch_pending_results(engine, pending, policy, active_backend);
+    if results.is_empty() {
+        return Ok(());
+    }
+    let gating = apply_evdev_gating(results, evdev);
+    restore_abandoned_results(engine, gating.abandoned);
+    apply_results(
+        engine,
+        gating.results,
+        Some(backend),
+        policy,
+        active_backend,
+    )?;
+    replay_evdev_follow_up(engine, gating.follow_up, policy, active_backend)
+}
+
 /// Replay input captured during evdev gating through the matcher. The focused
 /// application receives these events through non-exclusive capture already;
 /// this keeps the engine's buffer and boundary state in sync without applying

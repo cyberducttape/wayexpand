@@ -23,7 +23,7 @@ use anyhow::Result;
 use args::parse_args;
 use control::{ControlServer, FocusSnapshot};
 use events::{
-    apply_evdev_gating, apply_results, dispatch_pending_results, process_event,
+    apply_deferred_evdev_event, apply_evdev_gating, apply_results, process_event,
     replay_evdev_follow_up, restore_abandoned_results, EvdevGatingOutcome,
 };
 use focus::{drain_pending_window_events, focus_token, publish_focus_snapshot, FocusState};

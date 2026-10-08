@@ -1,5 +1,5 @@
 use super::*;
-use crate::events::{absorb_evdev_delimiter, evdev_release_is_safe};
+use crate::events::{absorb_evdev_delimiter, apply_deferred_evdev_event, evdev_release_is_safe};
 use crate::input_loop::libei_policy_blocks;
 use crate::output_loop::connect_output_backend;
 use std::io::{BufReader, Cursor};
@@ -389,6 +389,32 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
     assert_eq!(results[0].insert, "alpha");
     assert_eq!(results[1].matched_text, ":b ");
     assert_eq!(results[1].insert, "beta ");
+}
+
+#[test]
+fn evdev_retryable_injection_failure_is_returned_for_recovery() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"alpha\"\n").unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let policy = wayexpand_core::OrganizationPolicy::default();
+    let mut injector = FailingInjector;
+    let mut evdev = None;
+
+    let error = apply_deferred_evdev_event(
+        &mut engine,
+        InputEvent::Text(":a".into()),
+        &mut injector,
+        &mut evdev,
+        &policy,
+        "failing-test",
+    )
+    .expect_err("the injector failure must be reported to the caller");
+
+    // A retryable failure is classified by the daemon's recovery path,
+    // which retires the route and reconnects instead of exiting.
+    assert!(error.retryable());
+    assert!(!error.expansion_rejected());
+    assert_eq!(error.result.trigger, ":a");
 }
 
 #[test]

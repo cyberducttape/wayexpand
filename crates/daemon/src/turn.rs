@@ -150,7 +150,9 @@ impl Daemon {
                         self.active_backend,
                     );
                     self.injector = Some(backend);
-                    result?;
+                    if let Err(error) = result {
+                        self.recover_from_output_error(*error)?;
+                    }
                 } else {
                     apply_results(
                         &mut self.config.engine,
@@ -405,6 +407,52 @@ impl Daemon {
                 Err(error) => return Err(anyhow::Error::new(error)),
             }
         }
+        Ok(())
+    }
+
+    /// Classify a failed expansion transaction from the injector route:
+    /// rejected expansions are skipped, retryable backend failures retire the
+    /// output actor and schedule a reconnect, and only permanent failures end
+    /// the event loop. The expansion is never replayed.
+    pub(crate) fn recover_from_output_error(&mut self, error: EventError) -> Result<()> {
+        if error.expansion_rejected() {
+            warn!(
+                error = %error,
+                trigger_chars = error.result.trigger.chars().count(),
+                insert_bytes = error.result.insert.len(),
+                "output backend rejected expansion; continuing"
+            );
+            return Ok(());
+        }
+        if !error.retryable() {
+            return Err(error.into());
+        }
+        warn!(
+            error = %error,
+            trigger_chars = error.result.trigger.chars().count(),
+            insert_bytes = error.result.insert.len(),
+            "output failed; current expansion is not replayed"
+        );
+        self.retire_output_injector();
+        process_event(
+            &mut self.config.engine,
+            InputEvent::EndOfInput,
+            None,
+            &self.policy,
+            self.active_backend,
+        )?;
+        self.connection_state = "reconnecting";
+        set_daemon_status(
+            &mut self.status_publisher,
+            &self.control,
+            self.active_source,
+            self.active_backend,
+            self.connection_state,
+            &self.path,
+            self.config.healthy(),
+        );
+        self.output_retry_at = Some(Instant::now());
+        self.output_retry_delay = Duration::from_millis(250);
         Ok(())
     }
 
