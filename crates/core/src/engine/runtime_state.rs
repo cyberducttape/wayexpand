@@ -99,6 +99,7 @@ impl ExpansionEngine {
         self.set_completion_notifier(previous.completion_notifier());
         self.set_clipboard_reader(previous.clipboard_reader());
         self.set_clipboard_prefetch(previous.clipboard_prefetch());
+        self.set_form_replacement_guarantee(previous.form_replacement_guarantee());
     }
 
     /// Whether a snippet form is open (capture is suspended meanwhile).

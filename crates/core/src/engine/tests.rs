@@ -4510,6 +4510,7 @@ replacement = "Hi {{field:name}}, ticket {{field:id=OPS-1}} is {{choice:Open|Res
 "#;
 
 fn queue_form(engine: &mut ExpansionEngine) {
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);
     engine.set_current_window(Some(crate::WindowContext {
         app_id: Some("org.example.Mail".into()),
         title: Some("Inbox".into()),
@@ -4618,6 +4619,39 @@ fn a_form_is_not_opened_when_the_backend_cannot_identify_the_exact_window() {
     assert_eq!(pending.len(), 1);
     let result = engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0);
     assert_eq!(result, Err(CommandError::WindowIdentityUnavailable));
+    assert!(!engine.is_form_open());
+}
+
+#[test]
+fn a_form_is_not_opened_when_the_route_cannot_verify_the_trigger_at_the_cursor() {
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::BestEffort);
+    engine.set_current_window(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: Some("toplevel-mail-1".into()),
+    }));
+    let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
+    assert_eq!(pending.len(), 1);
+    let result = engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0);
+    assert_eq!(result, Err(CommandError::FormTargetUnverifiable));
+    assert!(!engine.is_form_open());
+}
+
+#[test]
+fn a_form_result_is_dropped_when_the_route_loses_cursor_verification() {
+    let _helper = FakeFormHelper::new(
+        "route-downgraded",
+        r#"sleep 0.2; printf '{"field:name":"Ada","field:id":"x","choice:Open|Resolved":"Open"}'"#,
+    );
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    assert!(engine.enable_async_commands());
+    queue_form(&mut engine);
+    // Focus returns to the exact origin window, but the caret may have been
+    // moved there; a best-effort route would erase at the new position.
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::BestEffort);
+    assert!(wait_for_completion(&mut engine).is_empty());
     assert!(!engine.is_form_open());
 }
 

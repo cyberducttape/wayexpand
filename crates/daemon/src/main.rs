@@ -486,6 +486,7 @@ fn main() -> Result<()> {
         }
         daemon.publish_status(metrics);
         daemon.recover_output()?;
+        daemon.declare_form_replacement_guarantee();
         if daemon.input_method_mode {
             match daemon.input_method_step(poll_interval)? {
                 Step::Next => continue,

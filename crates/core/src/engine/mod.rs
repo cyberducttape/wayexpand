@@ -133,6 +133,12 @@ pub struct ExpansionEngine {
     usage_events: VecDeque<crate::UsageEvent>,
     /// A snippet form is open; capture is suspended until it completes.
     form_active: bool,
+    /// What the host's current output route guarantees about erasing the
+    /// trigger. A form completes after focus has left and returned, so the
+    /// caret may have moved (a mouse click is invisible to every capture
+    /// backend); forms are opened and applied only when the route refuses to
+    /// replace unless the trigger is still at the cursor.
+    form_replacement_guarantee: crate::ReplacementGuarantee,
 }
 
 impl ExpansionEngine {
@@ -256,6 +262,7 @@ impl ExpansionEngine {
             clipboard_prefetch_armed: false,
             usage_events: VecDeque::new(),
             form_active: false,
+            form_replacement_guarantee: crate::ReplacementGuarantee::Unsupported,
         })
     }
 
@@ -414,6 +421,7 @@ impl ExpansionEngine {
                 if self.sensitive_focus
                     || self.user_paused
                     || !returned_to_origin
+                    || !self.form_target_verifiable()
                     || (limit > 0 && output.len() > limit)
                     || (completion.additional_max_size > 0
                         && output.len() > completion.additional_max_size)
@@ -647,6 +655,10 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::WindowIdentityUnavailable);
         };
+        if !self.form_target_verifiable() {
+            self.restore_deferred_match(&matched_text);
+            return Err(CommandError::FormTargetUnverifiable);
+        }
         let Some(runtime) = self.async_commands.as_ref() else {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::WorkerUnavailable);
@@ -679,6 +691,20 @@ impl ExpansionEngine {
         }
         self.form_active = true;
         Ok(PendingExpansionDispatch::Queued)
+    }
+
+    /// Declare the current output route's replacement guarantee. Hosts must
+    /// keep this current; the default refuses every form.
+    pub fn set_form_replacement_guarantee(&mut self, guarantee: crate::ReplacementGuarantee) {
+        self.form_replacement_guarantee = guarantee;
+    }
+
+    pub fn form_replacement_guarantee(&self) -> crate::ReplacementGuarantee {
+        self.form_replacement_guarantee
+    }
+
+    fn form_target_verifiable(&self) -> bool {
+        self.form_replacement_guarantee >= crate::ReplacementGuarantee::VerifiedSurroundingText
     }
 
     /// Restore a deferred trigger when its result will not be injected. The

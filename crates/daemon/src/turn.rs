@@ -112,6 +112,7 @@ impl Daemon {
 
     /// Apply command-backed expansions whose commands have finished.
     pub(crate) fn apply_completed_commands(&mut self) -> Result<()> {
+        self.declare_form_replacement_guarantee();
         let completed_commands = self.config.engine.drain_completed_commands();
         if !completed_commands.is_empty() {
             // Apply evdev safety gating: ensure physical key-up was processed
@@ -405,6 +406,24 @@ impl Daemon {
             }
         }
         Ok(())
+    }
+
+    /// Tell the engine what the live output route guarantees about erasing
+    /// the trigger, so snippet forms are opened and applied only on routes
+    /// that verify the trigger is still at the cursor.
+    pub(crate) fn declare_form_replacement_guarantee(&mut self) {
+        let guarantee = if self.input_method_mode {
+            self.input_method
+                .as_ref()
+                .map(|source| TextInjector::capabilities(source).replacement_guarantee)
+        } else {
+            self.injector
+                .as_ref()
+                .map(|backend| backend.capabilities().replacement_guarantee)
+        };
+        self.config
+            .engine
+            .set_form_replacement_guarantee(guarantee.unwrap_or_default());
     }
 
     /// Cancel the current serialized actor and retain its liveness state until

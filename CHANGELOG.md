@@ -73,6 +73,11 @@ All notable changes to WayExpand are documented here.
 - **Sync commit isolation (security):** `wayexpand sync` commits only the exact
   allowlisted library paths, leaving unrelated staged files untouched, and
   refuses to push when outgoing history touches anything outside the library.
+- **Form cursor safety:** snippet forms are opened, and their results applied,
+  only on output routes that verify the trigger is still at the cursor
+  (`verified` or `atomic`). On best-effort routes (evdev with libei or wlroots)
+  form snippets are refused and the trigger is left in place, since a click
+  could have moved the caret while the form was open.
 
 Changes not yet released.
 

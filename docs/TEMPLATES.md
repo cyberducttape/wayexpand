@@ -104,6 +104,15 @@ toplevel window and not into a password field. A backend that cannot provide a
 bounded, exact window identity refuses to open the form; it will not guess based
 on app ID or title, since multiple windows can share both.
 
+Returning to the right window does not prove the caret is still after the
+trigger: a click inside that window can move it, and no capture backend can see
+mouse input. Forms therefore open, and their results are applied, only on output
+routes whose replacement guarantee is `verified` or `atomic` (they refuse to
+erase unless the trigger is at the cursor). On `best-effort` routes such as
+evdev with libei or wlroots virtual-keyboard output, form snippets are refused
+and the trigger is left in place. Input-method-v2 routes are `atomic`; the
+`minimum_replacement_guarantee` organization policy uses the same levels.
+
 The form is the `wayexpand-gui --form` window; under systemd the daemon starts
 it with `systemd-run --user` so it runs outside the daemon's sandbox. Form
 snippets cannot run commands and cannot be included in other snippets. The IBus

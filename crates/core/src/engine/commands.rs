@@ -166,6 +166,9 @@ pub enum CommandError {
     },
     StaleInput,
     WindowIdentityUnavailable,
+    /// The output route cannot verify that the trigger is still at the cursor,
+    /// so a form completed later could erase text somewhere else.
+    FormTargetUnverifiable,
     PolicyBlocked,
     QueueFull,
     WorkerUnavailable,
@@ -216,7 +219,9 @@ impl CommandError {
             }
             Self::PolicyBlocked => CommandErrorKind::Policy,
             Self::StaleInput => CommandErrorKind::StaleInput,
-            Self::WindowIdentityUnavailable => CommandErrorKind::WindowIdentity,
+            Self::WindowIdentityUnavailable | Self::FormTargetUnverifiable => {
+                CommandErrorKind::WindowIdentity
+            }
             Self::QueueFull => CommandErrorKind::QueueFull,
             Self::WorkerUnavailable => CommandErrorKind::WorkerUnavailable,
             Self::InvalidUtf8 => CommandErrorKind::InvalidOutput,
@@ -264,6 +269,10 @@ impl std::fmt::Display for CommandError {
             Self::WindowIdentityUnavailable => write!(
                 f,
                 "cannot open a snippet form because this backend does not provide an exact window identity"
+            ),
+            Self::FormTargetUnverifiable => write!(
+                f,
+                "cannot open a snippet form because the output route cannot verify the trigger at the cursor"
             ),
             Self::PolicyBlocked => write!(f, "command execution is disabled by policy"),
             Self::QueueFull => write!(f, "command queue is full"),
