@@ -59,6 +59,28 @@ pub struct OutputFailure {
     pub retryable: bool,
 }
 
+/// Observable lifetime state for a serialized output worker. A cancelled
+/// worker can still be inside a backend call; callers must wait for this state
+/// to become stopped before reconnecting the same output route.
+#[derive(Clone, Debug)]
+pub struct OutputWorkerState {
+    running: Arc<AtomicBool>,
+}
+
+impl OutputWorkerState {
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+}
+
+struct WorkerRunningGuard(Arc<AtomicBool>);
+
+impl Drop for WorkerRunningGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 /// Shut down an injector without allowing a broken portal implementation to
 /// hold up daemon termination indefinitely. Keeping this policy next to the
 /// output actor makes all backend shutdown paths use the same deadline.
@@ -133,6 +155,11 @@ struct AsyncInjector {
 }
 
 type Completion = SyncSender<Result<(), InjectorError>>;
+type AsyncInjectorHandle = (
+    Box<dyn TextInjector>,
+    Receiver<OutputFailure>,
+    OutputWorkerState,
+);
 
 impl AsyncInjector {
     /// Submit one operation and wait for the worker to acknowledge it.
@@ -195,7 +222,7 @@ fn enqueue_command(
 /// drained by the daemon reactor so worker failures trigger normal recovery.
 pub fn spawn_async_injector(
     backend: Box<dyn TextInjector>,
-) -> std::result::Result<(Box<dyn TextInjector>, Receiver<OutputFailure>), OutputConnectError> {
+) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
     let capabilities = backend.capabilities();
     let name = backend.name();
     let status_detail = backend.status_detail();
@@ -204,9 +231,14 @@ pub fn spawn_async_injector(
     let worker_failure_sender = failure_sender.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
+    let worker_state = OutputWorkerState {
+        running: Arc::new(AtomicBool::new(true)),
+    };
+    let worker_running = Arc::clone(&worker_state.running);
     let worker = thread::Builder::new()
         .name("wayexpand-output".into())
         .spawn(move || {
+            let _worker_running = WorkerRunningGuard(worker_running);
             let mut backend = backend;
             while let Ok(command) = receiver.recv() {
                 if worker_cancel.load(Ordering::Acquire) {
@@ -265,15 +297,24 @@ pub fn spawn_async_injector(
         name,
         status_detail,
     };
-    Ok((Box::new(injector), failure_receiver))
+    Ok((Box::new(injector), failure_receiver, worker_state))
 }
 
 impl TextInjector for AsyncInjector {
     fn shutdown(mut self: Box<Self>) {
-        let _ = self.sender.send(OutputCommand::Shutdown);
-        if let Some(worker) = self.failures.take() {
-            let _ = worker.join();
-        }
+        // Cancellation is advisory while a backend call is in progress, so
+        // shutdown must never wait for that call. Closing the sender also
+        // wakes a worker that is waiting for its next command when the
+        // bounded queue cannot accept the sentinel.
+        self.cancel.store(true, Ordering::Release);
+        let _ = self.sender.try_send(OutputCommand::Shutdown);
+        let sender = std::mem::replace(&mut self.sender, sync_channel(0).0);
+        drop(sender);
+        // Dropping the join handle deliberately detaches a worker that is
+        // still inside a compositor/portal operation. Its liveness remains
+        // observable through worker_state, and recovery will not reconnect
+        // until that state reports stopped.
+        let _ = self.failures.take();
     }
 
     fn name(&self) -> &'static str {
@@ -444,7 +485,7 @@ fn next_retry_delay(delay: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
     struct SlowInjector {
         calls: Arc<Mutex<Vec<String>>>,
@@ -497,13 +538,39 @@ mod tests {
         }
     }
 
+    struct BlockingShutdownInjector {
+        started: Arc<AtomicBool>,
+        release: Arc<AtomicBool>,
+    }
+
+    impl TextInjector for BlockingShutdownInjector {
+        fn shutdown(self: Box<Self>) {
+            self.started.store(true, Ordering::Release);
+            while !self.release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        fn name(&self) -> &'static str {
+            "blocking-shutdown-test"
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn serialized_output_waits_for_backend_completion() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let backend = SlowInjector {
             calls: Arc::clone(&calls),
         };
-        let (mut injector, failures) = spawn_async_injector(Box::new(backend)).unwrap();
+        let (mut injector, failures, _) = spawn_async_injector(Box::new(backend)).unwrap();
         let started = std::time::Instant::now();
         injector.replace(":a", "replacement").unwrap();
         assert!(started.elapsed() >= Duration::from_millis(70));
@@ -543,7 +610,7 @@ mod tests {
 
     #[test]
     fn backend_failure_is_returned_to_the_transaction_caller() {
-        let (mut injector, failures) = spawn_async_injector(Box::new(FailingInjector)).unwrap();
+        let (mut injector, failures, _) = spawn_async_injector(Box::new(FailingInjector)).unwrap();
         let error = injector
             .replace(":a", "replacement")
             .expect_err("backend failure must not be reported as queue admission success");
@@ -554,5 +621,42 @@ mod tests {
             .expect("worker failure should be reported");
         assert_eq!(failure.message, "simulated backend failure");
         assert!(failure.retryable);
+    }
+
+    #[test]
+    fn shutdown_does_not_join_a_worker_stuck_in_backend_teardown() {
+        let started = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let (injector, _, worker_state) =
+            spawn_async_injector(Box::new(BlockingShutdownInjector {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }))
+            .unwrap();
+
+        let started_at = std::time::Instant::now();
+        injector.shutdown();
+        assert!(
+            started_at.elapsed() < Duration::from_secs(1),
+            "shutdown must not wait for backend teardown"
+        );
+
+        for _ in 0..100 {
+            if started.load(Ordering::Acquire) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(started.load(Ordering::Acquire));
+        assert!(worker_state.is_running());
+
+        release.store(true, Ordering::Release);
+        for _ in 0..100 {
+            if !worker_state.is_running() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("worker did not report termination after backend teardown");
     }
 }

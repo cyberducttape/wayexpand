@@ -272,7 +272,7 @@ impl Daemon {
                             insert_bytes = error.result.insert.len(),
                             "evdev output failed; current expansion is not replayed"
                         );
-                        drop(self.injector.take());
+                        self.retire_output_injector();
                         process_event(
                             &mut self.config.engine,
                             InputEvent::EndOfInput,
@@ -388,7 +388,7 @@ impl Daemon {
                                 insert_bytes = error.result.insert.len(),
                                 "output session failed; current expansion is not replayed"
                             );
-                            drop(self.injector.take());
+                            self.retire_output_injector();
                             let _ = process_event(
                                 &mut self.config.engine,
                                 InputEvent::EndOfInput,

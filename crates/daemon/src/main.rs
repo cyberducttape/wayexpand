@@ -33,6 +33,7 @@ use input_loop::{
 };
 use output_loop::{
     connect_output_backend, connect_output_with_retry, shutdown_injector, spawn_async_injector,
+    OutputWorkerState,
 };
 use reload::ReloadableConfig;
 use signal_hook::{
@@ -144,6 +145,8 @@ struct Daemon {
     output_retry_at: Option<Instant>,
     output_retry_delay: Duration,
     output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
+    output_worker: Option<OutputWorkerState>,
+    retiring_output_workers: Vec<OutputWorkerState>,
     stdin_closed: bool,
     logged_queue_rejections: u64,
     waker: waker::Waker,
@@ -339,6 +342,7 @@ fn main() -> Result<()> {
     let output_retry_at: Option<Instant> = None;
     let output_retry_delay = Duration::from_millis(250);
     let mut output_failures = None;
+    let mut output_worker = None;
     let injector: Option<Box<dyn TextInjector>> = if input_method.is_some() {
         None
     } else {
@@ -358,9 +362,10 @@ fn main() -> Result<()> {
                     anyhow::bail!("output backend startup cancelled while stopping")
                 };
                 if evdev_mode && backend == "libei" {
-                    let (injector, failures) = spawn_async_injector(injector)
+                    let (injector, failures, worker_state) = spawn_async_injector(injector)
                         .map_err(|error| anyhow::anyhow!("{error}"))?;
                     output_failures = Some(failures);
+                    output_worker = Some(worker_state);
                     Some(injector)
                 } else {
                     Some(injector)
@@ -455,6 +460,8 @@ fn main() -> Result<()> {
         output_retry_at,
         output_retry_delay,
         output_failures,
+        output_worker,
+        retiring_output_workers: Vec::new(),
         stdin_closed,
         logged_queue_rejections,
         waker,

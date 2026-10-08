@@ -75,7 +75,7 @@ impl Daemon {
                 error = %failure.message,
                 "serialized output worker failed"
             );
-            drop(self.injector.take());
+            self.retire_output_injector();
             process_event(
                 &mut self.config.engine,
                 InputEvent::EndOfInput,
@@ -248,6 +248,24 @@ impl Daemon {
                     };
                     if let Err(error) = outcome {
                         warn!(%error, "requested snippet insert failed");
+                        if error.retryable() {
+                            // A timed-out or partially applied picker insert
+                            // has an unknown outcome. Retire this actor and
+                            // wait for its worker to stop before reconnecting;
+                            // never submit another request to it or replay
+                            // this insert against a new focused window.
+                            self.retire_output_injector();
+                            let _ = process_event(
+                                &mut self.config.engine,
+                                InputEvent::EndOfInput,
+                                None,
+                                &self.policy,
+                                self.active_backend,
+                            );
+                            self.connection_state = "reconnecting";
+                            self.output_retry_at = Some(Instant::now());
+                            self.output_retry_delay = Duration::from_millis(250);
+                        }
                     }
                     replay_evdev_follow_up(
                         &mut self.config.engine,
@@ -321,6 +339,15 @@ impl Daemon {
 
     /// Make at most one output reconnect attempt per turn.
     pub(crate) fn recover_output(&mut self) -> Result<()> {
+        self.retiring_output_workers
+            .retain(OutputWorkerState::is_running);
+        if !self.retiring_output_workers.is_empty() {
+            // The previous actor may still be inside an uninterruptible
+            // compositor/portal call. Do not create a replacement route until
+            // its backend resources and any uncertain operation are retired.
+            self.output_retry_at = Some(Instant::now() + Duration::from_millis(50));
+            return Ok(());
+        }
         // Output recovery is deliberately one attempt per reactor turn. A
         // portal or compositor outage must not park control, reload, status,
         // or shutdown handling inside an exponential-backoff sleep.
@@ -339,9 +366,10 @@ impl Daemon {
                 Ok(backend) => {
                     if self.evdev_mode && self.backend_name == "libei" {
                         match spawn_async_injector(backend) {
-                            Ok((backend, failures)) => {
+                            Ok((backend, failures, worker_state)) => {
                                 self.injector = Some(backend);
                                 self.output_failures = Some(failures);
+                                self.output_worker = Some(worker_state);
                             }
                             Err(error) => {
                                 self.output_retry_at =
@@ -377,6 +405,17 @@ impl Daemon {
             }
         }
         Ok(())
+    }
+
+    /// Cancel the current serialized actor and retain its liveness state until
+    /// the worker has completed backend shutdown. This prevents recovery from
+    /// overlapping an uncertain operation with a newly connected backend.
+    pub(crate) fn retire_output_injector(&mut self) {
+        if self.injector.take().is_some() {
+            if let Some(worker) = self.output_worker.take() {
+                self.retiring_output_workers.push(worker);
+            }
+        }
     }
 
     /// Answer a pending `explain` request from the live engine state, adding
