@@ -125,6 +125,27 @@ missing completion event is evidence that backend or portal teardown blocked;
 it must be investigated before certification. Do not include typed secrets or
 replacement text in soak logs.
 
+### Exact service-limit validation
+
+The packaged capture units enforce `MemoryMax=256M`, `TasksMax=32`, and
+`LimitNOFILE=64`. Validate those limits with the same isolated workload inside
+a transient user service:
+
+```sh
+systemd-run --user --wait --pipe --collect \
+  --property=MemoryMax=256M --property=TasksMax=32 --property=LimitNOFILE=64 \
+  env SOAK_SECONDS=300 SOAK_SAMPLE_INTERVAL_SECONDS=5 \
+      SOAK_RESTART_INTERVAL_SECONDS=60 scripts/soak-daemon.sh
+```
+
+During the run, saturate command workers, issue concurrent status/explain
+requests, trigger reload storms, and exercise restarts. Confirm that input
+processing remains bounded, overloaded control requests return structured
+errors, and resource failures are visible in logs or status rather than
+silently dropping expansions. Repeat on the actual packaged units when testing
+a release; a transient service validates limits, not backend permissions or
+compositor behavior.
+
 ## Certification evidence
 
 Compositor-independent CI cannot certify real keyboard behavior. Release

@@ -15,7 +15,8 @@ use std::{
 };
 use tracing::{error, info, warn};
 use wayexpand_core::{
-    Config, ConfigError, ExpansionEngine, FleetConfig, FleetError, OrganizationPolicy,
+    limits::MAX_CONFIG_BYTES, Config, ConfigError, ExpansionEngine, FleetConfig, FleetError,
+    OrganizationPolicy,
 };
 
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
@@ -68,7 +69,7 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
     let change_time = metadata.ctime();
     let change_time_nsec = metadata.ctime_nsec();
     let mut contents = Vec::new();
-    file.take(16 * 1024 * 1024 + 1)
+    file.take(MAX_CONFIG_BYTES as u64 + 1)
         .read_to_end(&mut contents)
         .ok()?;
     let fingerprint = stable_content_fingerprint(&contents);
@@ -358,8 +359,30 @@ fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
     paths.sort();
     for path in paths {
         path.hash(&mut hasher);
-        if let Ok(contents) = fs::read(&path) {
-            contents.hash(&mut hasher);
+        match fs::metadata(&path) {
+            Ok(metadata) if metadata.len() <= MAX_CONFIG_BYTES as u64 => {
+                // Keep the integrity probe subject to the same ceiling as
+                // configuration loading. A malformed or unexpectedly large
+                // fleet file must not turn a periodic keyboard-loop check
+                // into an unbounded allocation/read.
+                match fs::File::open(&path).and_then(|file| {
+                    let mut contents = Vec::new();
+                    file.take(MAX_CONFIG_BYTES as u64 + 1)
+                        .read_to_end(&mut contents)?;
+                    Ok(contents)
+                }) {
+                    Ok(contents) if contents.len() <= MAX_CONFIG_BYTES => {
+                        contents.hash(&mut hasher)
+                    }
+                    _ => b"unreadable-or-over-limit".hash(&mut hasher),
+                }
+            }
+            Ok(metadata) => {
+                b"over-limit".hash(&mut hasher);
+                metadata.len().hash(&mut hasher);
+                metadata.modified().ok().hash(&mut hasher);
+            }
+            Err(_) => b"unreadable".hash(&mut hasher),
         }
     }
     hasher.finish()

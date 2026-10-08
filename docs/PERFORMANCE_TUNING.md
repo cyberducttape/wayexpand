@@ -15,6 +15,7 @@ The important limits are:
 | Expansions | — | 10,000 | Prevents unbounded config/matcher growth |
 | Replacement text | — | 1 MiB | Bounds injection and command output handling |
 | Config file | — | 16 MiB | Prevents oversized reloads |
+| Fleet source file | — | 16 MiB per source; 16 MiB aggregate pack ceiling | Bounds integrity scans and fleet parsing |
 
 The matcher limit is measured in characters, not kilobytes. A 128-character
 default is usually enough for short triggers; it is not a 1 KB replacement
@@ -95,3 +96,23 @@ cargo bench --locked -p wayexpand-core --bench matcher
 
 The benchmark measures matching itself; it does not certify a compositor or
 input backend.
+
+Fleet integrity checks use bounded reads and the same 16 MiB per-source ceiling
+as normal configuration loading. Large snippet libraries should be split into
+validated layers rather than placed in one oversized source. Measure repeated
+atomic saves with a representative library and record reload latency separately
+from trigger-to-output latency.
+
+To validate the shipped service limits with the isolated workload, run it inside
+a transient user service:
+
+```sh
+systemd-run --user --wait --pipe --collect \
+  --property=MemoryMax=256M --property=TasksMax=32 --property=LimitNOFILE=64 \
+  env SOAK_SECONDS=300 SOAK_SAMPLE_INTERVAL_SECONDS=5 \
+      SOAK_RESTART_INTERVAL_SECONDS=60 scripts/soak-daemon.sh
+```
+
+The run should include worker saturation, reloads, control requests, and
+restarts while verifying that status remains responsive and resource failures
+are reported explicitly.
