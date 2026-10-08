@@ -220,6 +220,32 @@ fn is_library_path(path: &str) -> bool {
             .is_some_and(|name| !name.contains('/') && name.ends_with(".toml") && name != ".toml")
 }
 
+/// Refuse a tree unless every entry is an allowlisted library path stored as
+/// an ordinary file blob (not a symlink, submodule, or other special mode).
+fn verify_library_tree(directory: &Path, revision: &str) -> Result<()> {
+    let listing = git_ok_raw(directory, &["ls-tree", "-r", "-z", "--full-tree", revision])?;
+    let mut foreign = Vec::new();
+    for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
+        // `<mode> <type> <object>\t<path>`
+        let (header, path) = entry
+            .split_once('\t')
+            .context("git ls-tree reported an unexpected entry")?;
+        let mode = header.split(' ').next().unwrap_or_default();
+        if !matches!(mode, "100644" | "100755") || !is_library_path(path) {
+            foreign.push(path.to_owned());
+        }
+    }
+    if foreign.is_empty() {
+        return Ok(());
+    }
+    foreign.sort_unstable();
+    bail!(
+        "refusing to sync: the remote library contains entries that are not plain snippet \
+         library files ({}); your local library is unchanged",
+        foreign.join(", ")
+    )
+}
+
 /// Refuse to push history that touches anything outside the library, such as
 /// files committed by hand or by an older release. `base` is the remote tip;
 /// without one, the whole history would be published and is checked.
@@ -287,11 +313,13 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     .status
     .success();
     if remote_has_branch {
-        let pull = git(
-            &directory,
-            &["pull", "--quiet", "--rebase", &remote, &branch],
-        )?;
-        if !pull.status.success() {
+        // Fetch first and inspect the remote tree before anything from it is
+        // checked out: a remote must not be able to place arbitrary files,
+        // symlinks, or submodules in the configuration directory.
+        git_ok(&directory, &["fetch", "--quiet", &remote, &branch])?;
+        verify_library_tree(&directory, "FETCH_HEAD")?;
+        let rebase = git(&directory, &["rebase", "--quiet", "FETCH_HEAD"])?;
+        if !rebase.status.success() {
             let _ = git(&directory, &["rebase", "--abort"]);
             restrict_library_permissions(&directory);
             bail!(
@@ -323,8 +351,12 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
 /// world-writable to load, so pulled files are made private.
 fn restrict_library_permissions(directory: &Path) {
     use std::os::unix::fs::PermissionsExt;
+    // Never follow a symlink: chmod through one changes its target, which
+    // can be any file the user owns.
     let private = |path: &Path| {
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file()) {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
     };
     private(&directory.join("expansions.toml"));
     if let Ok(entries) = std::fs::read_dir(directory.join("snippets.d")) {
@@ -456,6 +488,108 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(directory);
         let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    /// Publish `files` (path, contents, symlink target) from a second clone so
+    /// they arrive at `directory` through the remote.
+    fn push_from_another_clone(remote_url: &str, files: &[(&str, &str, bool)]) {
+        let clone = test_directory();
+        let output = Command::new("git")
+            .args(["clone", "--quiet", remote_url])
+            .arg(&clone)
+            .output()
+            .expect("clone remote");
+        assert!(output.status.success());
+        git_ok(&clone, &["config", "user.name", "Remote"]).expect("configure clone");
+        git_ok(&clone, &["config", "user.email", "remote@example.invalid"])
+            .expect("configure clone");
+        for (path, contents, symlink) in files {
+            let target = clone.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).expect("create parent");
+            if *symlink {
+                std::os::unix::fs::symlink(contents, &target).expect("create symlink");
+            } else {
+                std::fs::write(&target, contents).expect("write file");
+            }
+            git_ok(&clone, &["add", "--force", path]).expect("stage remote file");
+        }
+        git_ok(&clone, &["commit", "--quiet", "-m", "remote change"]).expect("commit");
+        git_ok(&clone, &["push", "--quiet"]).expect("push remote change");
+        let _ = std::fs::remove_dir_all(clone);
+    }
+
+    #[test]
+    fn sync_refuses_remote_symlinks_and_foreign_files_before_checkout() {
+        for (path, contents, symlink) in [
+            ("snippets.d/evil.toml", "/etc/passwd", true),
+            ("autostart.sh", "#!/bin/sh\n", false),
+        ] {
+            let (directory, config_path) = prepare_repository();
+            let remote_directory = test_directory();
+            std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+            git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+            let remote_url = remote_directory.display().to_string();
+            init(&config_path, Some(&remote_url)).expect("initialize library");
+            assert!(sync(&config_path).expect("initial sync").pushed);
+            push_from_another_clone(&remote_url, &[(path, contents, symlink)]);
+
+            let error = sync(&config_path).expect_err("unsafe remote content is refused");
+            assert!(format!("{error:#}").contains(path), "{error:#}");
+            assert!(
+                std::fs::symlink_metadata(directory.join(path)).is_err(),
+                "{path} must not be checked out"
+            );
+            let _ = std::fs::remove_dir_all(directory);
+            let _ = std::fs::remove_dir_all(remote_directory);
+        }
+    }
+
+    #[test]
+    fn sync_rebases_onto_a_remote_library_change() {
+        let (directory, config_path) = prepare_repository();
+        let remote_directory = test_directory();
+        std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+        git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+        let remote_url = remote_directory.display().to_string();
+        init(&config_path, Some(&remote_url)).expect("initialize library");
+        assert!(sync(&config_path).expect("initial sync").pushed);
+        push_from_another_clone(
+            &remote_url,
+            &[(
+                "snippets.d/team.toml",
+                "[[expansion]]\ntrigger = \";team\"\nreplacement = \"ok\"\n",
+                false,
+            )],
+        );
+
+        let report = sync(&config_path).expect("library-only remote change syncs");
+
+        assert!(report.pulled && report.pushed);
+        assert!(directory.join("snippets.d/team.toml").is_file());
+        let _ = std::fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    #[test]
+    fn permission_repair_never_follows_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = test_directory();
+        std::fs::create_dir_all(directory.join("snippets.d")).expect("create snippets.d");
+        let script = directory.join("script.sh");
+        std::fs::write(&script, "#!/bin/sh\n").expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("make script executable");
+        std::os::unix::fs::symlink(&script, directory.join("snippets.d/from-remote.toml"))
+            .expect("create symlink");
+
+        restrict_library_permissions(&directory);
+
+        let mode = std::fs::metadata(&script)
+            .expect("stat script")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

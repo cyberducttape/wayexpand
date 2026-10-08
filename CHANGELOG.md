@@ -88,6 +88,9 @@ All notable changes to WayExpand are documented here.
 - **Special-file safety in fleet scans:** fleet discovery ignores FIFOs,
   devices, and directories named `*.toml`, and integrity probes never open a
   non-regular file, so a FIFO can no longer block the keyboard loop.
+- **Sync remote verification (security):** sync fetches and refuses a remote
+  tree containing symlinks, submodules, or files outside the library before
+  checking anything out, and permission repair never follows symlinks.
 
 Changes not yet released.
 
