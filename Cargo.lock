@@ -4179,6 +4179,8 @@ name = "wayexpand-backend-libei"
 version = "1.3.3"
 dependencies = [
  "ashpd",
+ "async-io",
+ "futures-lite",
  "libc",
  "reis",
  "rustix 1.1.5",
@@ -4188,6 +4190,7 @@ dependencies = [
  "wayexpand-core",
  "xkbcommon-rs",
  "xkeysym",
+ "zbus",
 ]
 
 [[package]]

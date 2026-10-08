@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Optional Fcitx5 integration:** the libei route can now use a compatible,
+  exact-surrounding-text Fcitx5 bridge when explicitly enabled. Missing bridges
+  preserve existing behavior; sensitive, mismatched, unknown, and uncertain
+  bridge outcomes fail closed before any raw erase.
 - **Synchronization integrity:** `wayexpand sync` and daemon reloads now share
   full-library validation for `snippets.d/*.toml`, validate rebased remote
   content before promotion, reliably stage deletion of the final snippet, and

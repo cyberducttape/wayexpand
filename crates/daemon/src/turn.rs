@@ -364,6 +364,7 @@ impl Daemon {
             match connect_output_backend(
                 self.backend_name,
                 self.config.engine.libei_token_persistence(),
+                self.config.engine.fcitx5_direct_commit(),
                 self.portal_token_path.as_deref(),
             ) {
                 Ok(backend) => {

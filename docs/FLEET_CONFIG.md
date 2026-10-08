@@ -73,7 +73,7 @@ disallowed packs are retained and reported as audit-only policy violations.
 |--------|-------------------|-------|
 | Expansion trigger | Hard error, rejected | Fail-closed: prevents accidental overwrites. Use distinct trigger names. |
 | Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
-| Settings (`max_buffer_chars`, `undo_chord`, `font_scale`, `libei_token_persistence`) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins; disallowed pack settings are filtered before precedence is resolved. |
+| Settings (`max_buffer_chars`, `undo_chord`, `font_scale`, `libei_token_persistence`, `fcitx5_direct_commit`) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins; disallowed pack settings are filtered before precedence is resolved. |
 | Organization policy | Root policy only | `/etc/wayexpand/policy.toml` is the administrator security-policy source. |
 | Curated packs | Filtered by root policy in safe mode | `allowed_packs` restricts which packs are active in daemon fleet mode only when enforcement is enabled. |
 | Base config | Prepended first (lowest priority) | Base config expansions/hotkeys precede fleet layers. Base settings only override if fleet has no settings. |

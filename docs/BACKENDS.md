@@ -55,6 +55,22 @@ queuing erase events.
 Handshake and initial device discovery use explicit bounded polling; an
 unresponsive EIS endpoint cannot hold daemon startup indefinitely.
 
+### Optional Fcitx5 direct commit
+
+Set `settings.fcitx5_direct_commit = true` to let the libei injector use a
+compatible Fcitx5 D-Bus bridge when one is already installed. The bridge
+verifies the exact UTF-8 suffix at the input context cursor and performs the
+delete/commit through Fcitx5; when surrounding text is unavailable it may use
+only its short-lived, input-context-bound fallback permit. WayExpand does not
+start, install, or compile the bridge, and silently keeps the ordinary libei
+route when no bridge is present.
+
+Bridge refusals for selections, mismatches, password fields, sensitive hints,
+unknown statuses, and transport failures are fail-closed. In particular,
+WayExpand never follows an uncertain D-Bus result with raw backspaces. The
+option is disabled by default and does not make libei claim atomic replacement
+or sensitive-field awareness.
+
 **Character insertion latency (ei_keyboard fallback):**
 When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
 synthesizes individual key presses for each character. To ensure reliability

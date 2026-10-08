@@ -157,6 +157,10 @@ pub struct Settings {
     /// absolute `WAYEXPAND_PORTAL_TOKEN_PATH` override explicitly.
     #[serde(default = "default_libei_persistence")]
     pub libei_token_persistence: bool,
+    /// Use an installed Fcitx5 direct-commit bridge when the libei route is
+    /// active. The bridge is optional and disabled by default.
+    #[serde(default)]
+    pub fcitx5_direct_commit: bool,
     /// Environment variables snippets may read with `{{env:NAME}}`. Only
     /// names listed here are readable; any other name is a config error.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -222,6 +226,7 @@ impl Default for Settings {
             undo_chord: None,
             font_scale: FontScale::Normal,
             libei_token_persistence: true,
+            fcitx5_direct_commit: false,
             template_env: Vec::new(),
             allow_clipboard: false,
             usage_stats: true,
@@ -536,7 +541,11 @@ impl Config {
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .map(|entry| entry.path())
-            .filter(|entry| entry.extension().is_some_and(|extension| extension == "toml"))
+            .filter(|entry| {
+                entry
+                    .extension()
+                    .is_some_and(|extension| extension == "toml")
+            })
             .collect::<Vec<_>>();
         files.sort();
         for file in files {

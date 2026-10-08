@@ -263,6 +263,7 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let policy = load_policy()?;
+    Config::validate_library_files(&path).map_err(|error| config_load_error(&path, error))?;
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
     let (config, policy_violations) = if merged {
         let fleet =

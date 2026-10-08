@@ -49,6 +49,7 @@ use xkbcommon_rs::{Context, Keymap as XkbKeymap};
 
 mod connection;
 mod events;
+mod fcitx5;
 mod keymap;
 mod portal_token;
 mod unicode;
@@ -176,12 +177,15 @@ pub struct LibeiInjector {
     return_keycode: u32,
     tab_keycode: u32,
     _portal: Option<PortalKeepalive>,
+    fcitx5: Option<fcitx5::Client>,
 }
 
 /// Controls how the RemoteDesktop portal session is restored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibeiOptions {
     pub persist_portal_token: bool,
+    /// Enable the optional Fcitx5 exact surrounding-text bridge.
+    pub fcitx5_direct_commit: bool,
     /// Token path selected by the service. `None` keeps the standalone XDG
     /// default used by CLI/library callers.
     pub portal_token_path: Option<PathBuf>,
@@ -191,6 +195,7 @@ impl Default for LibeiOptions {
     fn default() -> Self {
         Self {
             persist_portal_token: true,
+            fcitx5_direct_commit: false,
             portal_token_path: None,
         }
     }
@@ -222,6 +227,7 @@ impl LibeiInjector {
     /// Portal use is deliberately explicit because it may display a consent
     /// dialog and grants desktop input-control capability for the session.
     pub fn connect(options: LibeiOptions) -> Result<Self, LibeiError> {
+        let fcitx5_direct_commit = options.fcitx5_direct_commit;
         let (stream, portal) = if let Some(socket) = std::env::var_os("LIBEI_SOCKET") {
             let socket = PathBuf::from(socket);
             let socket = if socket.is_relative() {
@@ -329,6 +335,7 @@ impl LibeiInjector {
             return_keycode,
             tab_keycode,
             _portal: portal,
+            fcitx5: fcitx5_direct_commit.then(fcitx5::Client::connect).flatten(),
         })
     }
 
@@ -691,7 +698,13 @@ impl TextInjector for LibeiInjector {
     }
 
     fn status_detail(&self) -> &'static str {
-        self.mode.status_detail()
+        match (&self.mode, self.fcitx5.is_some()) {
+            (TextMode::Text(_), true) => "ei_text (UTF-8 insertion) + Fcitx5 direct commit",
+            (TextMode::Keysym(_), true) => {
+                "ei_keyboard keysym fallback (12ms key pacing) + Fcitx5 direct commit"
+            }
+            (_, false) => self.mode.status_detail(),
+        }
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
@@ -735,6 +748,19 @@ impl TextInjector for LibeiInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
+        if let Some(client) = &self.fcitx5 {
+            match client.replace(trigger, text) {
+                fcitx5::ReplaceResult::Committed => return Ok(()),
+                fcitx5::ReplaceResult::FallbackAllowed(_) => {}
+                fcitx5::ReplaceResult::Blocked(message) => {
+                    return Err(InjectorError {
+                        backend: BACKEND_NAME,
+                        message: format!("Fcitx5 direct replacement blocked: {message}"),
+                        retryable: false,
+                    })
+                }
+            }
+        }
         self.send_backspaces_unflushed(erase_grapheme_count(trigger));
         if matches!(self.mode, TextMode::Keysym(_)) {
             // Send the erase on its own and let it land before typing: in

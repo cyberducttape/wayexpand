@@ -39,6 +39,12 @@ impl ExpansionEngine {
         self.config.settings.libei_token_persistence
     }
 
+    /// Whether the optional Fcitx5 surrounding-text bridge may be used by
+    /// the libei output route.
+    pub fn fcitx5_direct_commit(&self) -> bool {
+        self.config.settings.fcitx5_direct_commit
+    }
+
     /// Applies the administrator's command-execution decision before command
     /// jobs are queued. This is separate from the config-owned organization
     /// policy because the daemon also loads `/etc/wayexpand/policy.toml`.

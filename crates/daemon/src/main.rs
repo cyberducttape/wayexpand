@@ -33,7 +33,7 @@ use input_loop::{
 };
 use output_loop::{
     connect_output_backend, connect_output_with_retry, shutdown_injector, spawn_async_injector,
-    OutputWorkerState,
+    OutputConnectOptions, OutputWorkerState,
 };
 use reload::ReloadableConfig;
 use signal_hook::{
@@ -355,8 +355,11 @@ fn main() -> Result<()> {
                     backend,
                     &path,
                     config.healthy(),
-                    config.engine.libei_token_persistence(),
-                    portal_token_path.as_deref(),
+                    OutputConnectOptions {
+                        persist_portal_token: config.engine.libei_token_persistence(),
+                        fcitx5_direct_commit: config.engine.fcitx5_direct_commit(),
+                        portal_token_path: portal_token_path.as_deref(),
+                    },
                 )?
                 else {
                     anyhow::bail!("output backend startup cancelled while stopping")

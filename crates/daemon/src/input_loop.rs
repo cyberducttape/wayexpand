@@ -104,6 +104,7 @@ pub fn connect_input_method_session(
     let key_injector = match connect_output_backend(
         "libei",
         persist_portal_token,
+        false,
         portal_token_path,
     ) {
         Ok(key_injector) => key_injector,

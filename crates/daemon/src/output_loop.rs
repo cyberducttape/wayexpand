@@ -400,6 +400,7 @@ impl std::error::Error for OutputConnectError {}
 pub fn connect_output_backend(
     name: &str,
     persist_portal_token: bool,
+    fcitx5_direct_commit: bool,
     portal_token_path_arg: Option<&Path>,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
     match name {
@@ -411,6 +412,7 @@ pub fn connect_output_backend(
             }),
         "libei" => LibeiInjector::connect(LibeiOptions {
             persist_portal_token,
+            fcitx5_direct_commit,
             portal_token_path: portal_token_path_arg.map(Path::to_path_buf),
         })
         .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
@@ -425,6 +427,13 @@ pub fn connect_output_backend(
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct OutputConnectOptions<'a> {
+    pub persist_portal_token: bool,
+    pub fcitx5_direct_commit: bool,
+    pub portal_token_path: Option<&'a Path>,
+}
+
 /// Connect to an output backend with exponential backoff retry.
 pub fn connect_output_with_retry(
     control: &control::ControlServer,
@@ -432,13 +441,17 @@ pub fn connect_output_with_retry(
     backend: &str,
     config_path: &Path,
     config_healthy: bool,
-    persist_portal_token: bool,
-    portal_token_path_arg: Option<&Path>,
+    options: OutputConnectOptions<'_>,
 ) -> Result<Option<Box<dyn TextInjector>>> {
     let status_backend = wayexpand_backend_selection::injection_status_label(backend);
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        match connect_output_backend(backend, persist_portal_token, portal_token_path_arg) {
+        match connect_output_backend(
+            backend,
+            options.persist_portal_token,
+            options.fcitx5_direct_commit,
+            options.portal_token_path,
+        ) {
             Ok(injector) => {
                 status::set_daemon_status_with_mode(
                     control,

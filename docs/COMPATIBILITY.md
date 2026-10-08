@@ -632,6 +632,11 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   accepted values are `small`, `normal`, `large`, `extra-large`, and `huge`.
 - `Settings::libei_token_persistence` (bool, default `true`) — persist the
   libei portal restoration token; set to `false` to request fresh consent.
+- `Settings::fcitx5_direct_commit` (bool, default `false`) — when the libei
+  route is active and a compatible Fcitx5 bridge is installed, use exact
+  surrounding-text replacement and the bridge's context-bound fallback. The
+  bridge is optional; unknown or transport-failed results fail closed rather
+  than issuing an unverified raw erase.
 - `ExpansionConfig::command` (optional, default absent) — bounded direct
   command configuration for an expansion.
 - `CommandConfig::args` (array, default empty), `cache_ms` (integer, default

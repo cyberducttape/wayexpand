@@ -574,7 +574,7 @@ fn reconnect_backoff_is_bounded() {
 
 #[test]
 fn unsupported_output_backend_fails_without_retry() {
-    let error = match connect_output_backend("unknown", true, None) {
+    let error = match connect_output_backend("unknown", true, false, None) {
         Ok(_) => panic!("unknown backend unexpectedly connected"),
         Err(error) => error,
     };
