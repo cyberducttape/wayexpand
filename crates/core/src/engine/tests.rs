@@ -2907,6 +2907,28 @@ fn cancelling_a_running_command_returns_without_waiting_for_timeout() {
 
 #[test]
 #[cfg(unix)]
+fn continuously_readable_stdout_still_observes_the_command_deadline() {
+    let command = CommandConfig {
+        action: None,
+        program: "/bin/sh".to_string(),
+        args: vec!["-c".to_string(), "yes x".to_string()],
+        timeout_ms: 1,
+        cache_ms: 0,
+        environment: CommandEnvironment::Minimal,
+        pass_env: vec![],
+    };
+    let started = Instant::now();
+    let result = run_command(&command);
+
+    assert_eq!(result, Err(CommandError::Timeout));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "continuously readable stdout bypassed the command deadline"
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn command_rejects_output_when_descendant_keeps_stdout_open() {
     let pid_file = format!(
         "/tmp/wayexpand-incomplete-output-{}.pid",

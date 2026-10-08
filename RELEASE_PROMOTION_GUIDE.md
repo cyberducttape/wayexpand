@@ -166,3 +166,36 @@ distribution plan:
 - [ ] GitHub release is marked as the latest stable release
 - [ ] Package repositories are promoted according to the release plan
 - [ ] Installation and upgrade instructions are smoke-tested
+
+## Desktop certification gate
+
+Do not promote a compositor backend to a production-supported route based only
+on unit tests, a successful protocol probe, or a matcher preview. Before a
+release claims desktop support, attach real-session evidence for each claimed
+route covering native Wayland and XWayland clients, exact deletion/insertion
+with punctuation and Unicode, rapid typing, focus changes during pending
+expansions, layout/dead-key/Compose changes, compositor restart and recovery,
+password-field handling, and ordinary application shortcuts.
+
+The minimum KDE/KWin matrix is Konsole, Kate, Firefox, Chromium, and a GTK
+application. The corresponding GNOME, Sway, and Hyprland routes require their
+own sessions and client evidence. Record the compositor version, selected
+capture/output backends, layout, client, and whether the result was successful,
+failed, partial, or unknown. Until that evidence exists, keep the route marked
+experimental or not certified in `docs/SUPPORT_MATRIX.md`.
+
+evdev remains an explicit, experimental compatibility fallback. It has no
+sensitive-field signal, does not automatically follow compositor layout
+changes, and cannot provide atomic replacement because capture is non-exclusive.
+It must not be presented as a universal production fallback.
+
+## Command trust gate
+
+Direct command snippets are shell-free but are still executable programs with
+the desktop user's permissions. Process-group cleanup and the daemon service
+sandbox are defense in depth, not a complete containment boundary: a trusted
+command can detach a child or use any capability still available to its service.
+Imported packs strip commands and hotkey actions by default; restoring an
+executable snippet is an explicit trust decision. Use named Action Broker
+actions only with a reviewed allowlist and hardened broker policy, and do not
+treat same-user broker IPC as an OS security boundary.

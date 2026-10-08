@@ -244,7 +244,7 @@ fn run_command_unix(
             return Err(CommandError::StaleInput);
         }
         if !stdout_eof {
-            stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
+            stdout_eof = read_available_stdout(&mut stdout, &mut bytes, Some(deadline), shutdown)?;
         }
         if !stderr_eof {
             stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
@@ -285,7 +285,7 @@ fn run_command_unix(
     };
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
-        stdout_eof = read_available_stdout(&mut stdout, &mut bytes)?;
+        stdout_eof = read_available_stdout(&mut stdout, &mut bytes, None, None)?;
         stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
         if !stdout_eof || !stderr_eof {
             wait_for_command_event(&stdout, &stderr, None, drain_deadline, false)?;
@@ -416,9 +416,17 @@ fn poll_fds(
 fn read_available_stdout(
     stdout: &mut ChildStdout,
     bytes: &mut Vec<u8>,
+    deadline: Option<Instant>,
+    shutdown: Option<&AtomicBool>,
 ) -> Result<bool, CommandError> {
     let mut buffer = [0_u8; 8192];
-    loop {
+    for _ in 0..STDOUT_READS_PER_DRAIN {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(CommandError::StaleInput);
+        }
+        if deadline.is_some_and(|limit| Instant::now() >= limit) {
+            return Err(CommandError::Timeout);
+        }
         match stdout.read(&mut buffer) {
             Ok(0) => return Ok(true),
             Ok(count) => {
@@ -431,10 +439,14 @@ fn read_available_stdout(
             Err(_) => return Err(CommandError::OutputChannelLost),
         }
     }
+    Ok(false)
 }
 
 #[cfg(unix)]
 const STDERR_READS_PER_DRAIN: usize = 64;
+
+#[cfg(unix)]
+const STDOUT_READS_PER_DRAIN: usize = 64;
 
 #[cfg(unix)]
 fn read_available_stderr(
