@@ -76,7 +76,12 @@ pub(super) fn discover_layer_files(
                 source,
             })
         })?;
-        if entry.file_name().to_string_lossy().ends_with(".toml") {
+        // Only regular files (directly or through a symlink, as the loader
+        // follows them) are snippet layers; a FIFO or device named `*.toml`
+        // must never reach a reader.
+        if entry.file_name().to_string_lossy().ends_with(".toml")
+            && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.file_type().is_file())
+        {
             files.push(entry.path());
         }
     }

@@ -48,30 +48,44 @@ struct FileStamp {
     fingerprint: u64,
 }
 
-fn file_stamp(path: &Path) -> Option<FileStamp> {
-    // Open nonblocking and validate the resulting descriptor. The metadata
-    // check above is only an optimization; a path can be replaced between
-    // that check and the open, and a FIFO must never stall the reload loop.
+/// Read a configuration file for an integrity probe with the loader's
+/// contract: symlinks are followed like the loader does, but only a regular
+/// file of at most `MAX_CONFIG_BYTES` is ever read. A FIFO, socket, or device
+/// node (directly or through a symlink) is never opened by path, and the
+/// nonblocking descriptor is re-checked in case the path was swapped.
+fn read_regular_config_file(path: &Path) -> Option<(fs::Metadata, Vec<u8>)> {
+    let preliminary = fs::metadata(path).ok()?;
+    if !preliminary.file_type().is_file() || preliminary.len() > MAX_CONFIG_BYTES as u64 {
+        return None;
+    }
     let descriptor = rustix::fs::open(
         path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOCTTY,
         rustix::fs::Mode::empty(),
     )
     .ok()?;
     let file = fs::File::from(descriptor);
     let metadata = file.metadata().ok()?;
-    if !metadata.file_type().is_file() {
+    if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES as u64 {
         return None;
     }
+    let mut contents = Vec::new();
+    file.take(MAX_CONFIG_BYTES as u64 + 1)
+        .read_to_end(&mut contents)
+        .ok()?;
+    (contents.len() <= MAX_CONFIG_BYTES).then_some((metadata, contents))
+}
+
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let (metadata, contents) = read_regular_config_file(path)?;
     let modified = metadata.modified().ok()?;
     let length = metadata.len();
     let inode = metadata.ino();
     let change_time = metadata.ctime();
     let change_time_nsec = metadata.ctime_nsec();
-    let mut contents = Vec::new();
-    file.take(MAX_CONFIG_BYTES as u64 + 1)
-        .read_to_end(&mut contents)
-        .ok()?;
     let fingerprint = stable_content_fingerprint(&contents);
     Some(FileStamp {
         modified,
@@ -359,30 +373,21 @@ fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
     paths.sort();
     for path in paths {
         path.hash(&mut hasher);
-        match fs::metadata(&path) {
-            Ok(metadata) if metadata.len() <= MAX_CONFIG_BYTES as u64 => {
-                // Keep the integrity probe subject to the same ceiling as
-                // configuration loading. A malformed or unexpectedly large
-                // fleet file must not turn a periodic keyboard-loop check
-                // into an unbounded allocation/read.
-                match fs::File::open(&path).and_then(|file| {
-                    let mut contents = Vec::new();
-                    file.take(MAX_CONFIG_BYTES as u64 + 1)
-                        .read_to_end(&mut contents)?;
-                    Ok(contents)
-                }) {
-                    Ok(contents) if contents.len() <= MAX_CONFIG_BYTES => {
-                        contents.hash(&mut hasher)
-                    }
-                    _ => b"unreadable-or-over-limit".hash(&mut hasher),
+        // This probe runs periodically on the keyboard loop: a FIFO, device,
+        // or oversized file must neither block it nor force a large read.
+        // Such a file still changes the signature (by type, size and time),
+        // so the reload that follows reports it through the loader.
+        match read_regular_config_file(&path) {
+            Some((_, contents)) => contents.hash(&mut hasher),
+            None => match fs::metadata(&path) {
+                Ok(metadata) => {
+                    b"rejected".hash(&mut hasher);
+                    metadata.file_type().is_file().hash(&mut hasher);
+                    metadata.len().hash(&mut hasher);
+                    metadata.modified().ok().hash(&mut hasher);
                 }
-            }
-            Ok(metadata) => {
-                b"over-limit".hash(&mut hasher);
-                metadata.len().hash(&mut hasher);
-                metadata.modified().ok().hash(&mut hasher);
-            }
-            Err(_) => b"unreadable".hash(&mut hasher),
+                Err(_) => b"unreadable".hash(&mut hasher),
+            },
         }
     }
     hasher.finish()
@@ -451,7 +456,40 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// Writes a fixture with an explicit private mode. Relying on the
+    #[test]
+    fn fleet_signature_never_blocks_on_a_fifo_named_like_a_layer() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-fleet-fifo-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let fifo = root.join("hang.toml");
+        let link = root.join("link.toml");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let paths = vec![fifo.clone(), link.clone()];
+        thread::spawn(move || {
+            let _ = done.send(fleet_signature_for(paths));
+        });
+        // Without a writer, a blocking open of the FIFO never returns.
+        assert!(
+            finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "fleet integrity probe blocked on a FIFO"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Writes a fixture with an explicit private mode.    /// Writes a fixture with an explicit private mode. Relying on the
     /// ambient umask fails under a default of 002 (Debian/Ubuntu
     /// user-private-group setups), where the file lands group-writable 0664
     /// and `Config::load` correctly refuses to load it.

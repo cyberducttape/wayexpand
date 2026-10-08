@@ -624,6 +624,32 @@ mod tests {
     }
 
     #[test]
+    fn layer_discovery_skips_special_files_named_like_layers() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-fleet-discovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("real.toml"), "").unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(root.join("hang.toml"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::os::unix::fs::symlink(root.join("hang.toml"), root.join("link.toml")).unwrap();
+        std::fs::create_dir(root.join("dir.toml")).unwrap();
+
+        let files = discover_layer_files(&root, false).unwrap();
+
+        assert_eq!(files, vec![root.join("real.toml")]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn layer_defaults() {
         assert_eq!(Layer::Organization.name(), "organization");
         assert_eq!(Layer::User.name(), "user");

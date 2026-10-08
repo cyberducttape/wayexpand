@@ -85,6 +85,9 @@ All notable changes to WayExpand are documented here.
 - **Evdev output recovery:** a retryable injection failure on the evdev path
   (or while applying completed commands) now retires the output route and
   reconnects instead of ending the daemon's event loop.
+- **Special-file safety in fleet scans:** fleet discovery ignores FIFOs,
+  devices, and directories named `*.toml`, and integrity probes never open a
+  non-regular file, so a FIFO can no longer block the keyboard loop.
 
 Changes not yet released.
 
