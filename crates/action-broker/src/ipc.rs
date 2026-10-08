@@ -144,6 +144,24 @@ impl BrokerServer {
                 )
                 .into());
             }
+            // Connecting is the ownership test. Never unlink a path while a
+            // live broker is accepting it: a second same-user daemon must be
+            // rejected instead of stealing the first daemon's endpoint.
+            match UnixStream::connect(path) {
+                Ok(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AddrInUse,
+                        "another broker is already listening on this socket",
+                    )
+                    .into())
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                    ) => {}
+                Err(error) => return Err(error.into()),
+            }
             let identity = (metadata.dev(), metadata.ino());
             let current = std::fs::symlink_metadata(path)?;
             if !current.file_type().is_socket()
@@ -489,10 +507,18 @@ mod bounded_frame_tests {
 mod tests {
     use super::*;
     use crate::protocol::ActionOutput;
-    use std::thread;
+    use std::{
+        thread,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn test_socket(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("wayexpand-ipc-test-{}", std::process::id()));
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("wayexpand-ipc-test-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         dir.join(name)
@@ -508,6 +534,11 @@ mod tests {
 
         // Socket file exists
         assert!(socket_path.exists());
+        let second = BrokerServer::bind(&socket_path);
+        assert!(matches!(
+            second,
+            Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::AddrInUse
+        ));
     }
 
     #[test]

@@ -26,6 +26,7 @@ unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
 unicode-general-category.workspace = true
 getrandom.workspace = true
+semver.workspace = true
 
 [features]
 # Exposes the engine state-machine checker to the fuzz crate.

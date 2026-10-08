@@ -101,6 +101,8 @@ pub enum PackError {
     InvalidConfig(String),
     #[error("pack requires WayExpand {required} or newer")]
     RequiresNewerVersion { required: String },
+    #[error("pack manifest has invalid semantic version `{0}`")]
+    InvalidVersion(String),
     #[error("pack uses the `{0}` capability without declaring it")]
     UndeclaredCapability(String),
     #[error("pack calls Action Broker action `{0}` that is not in allowed_actions")]
@@ -172,6 +174,8 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
         }
     }
     if let Some(required) = &manifest.min_wayexpand_version {
+        semver::Version::parse(required)
+            .map_err(|_| PackError::InvalidVersion(required.clone()))?;
         if version_is_newer(required, env!("CARGO_PKG_VERSION")) {
             return Err(PackError::RequiresNewerVersion {
                 required: required.clone(),
@@ -183,14 +187,13 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
 
 /// Whether dotted version `required` is newer than `current`.
 fn version_is_newer(required: &str, current: &str) -> bool {
-    let parse = |version: &str| -> Vec<u64> {
-        version
-            .split(['.', '-', '+'])
-            .take(3)
-            .map(|part| part.parse().unwrap_or(0))
-            .collect()
+    let Ok(required) = semver::Version::parse(required) else {
+        return true;
     };
-    parse(required) > parse(current)
+    let Ok(current) = semver::Version::parse(current) else {
+        return true;
+    };
+    required > current
 }
 
 fn read_snippet_configs(path: &Path) -> Result<(Vec<(PathBuf, Config)>, usize), PackError> {
@@ -695,6 +698,23 @@ mod tests {
         assert!(matches!(
             inspect_pack(&path),
             Err(PackError::FileTooLarge { .. })
+        ));
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn invalid_minimum_version_is_rejected() {
+        let path = test_pack_path();
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(path.join(SNIPPETS_DIR)).unwrap();
+        fs::write(
+            path.join(MANIFEST_FILE),
+            "format_version = 1\nid = \"demo\"\nversion = \"1.0.0\"\nname = \"Demo\"\npublisher = \"Test\"\nmin_wayexpand_version = \"future\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::InvalidVersion(version)) if version == "future"
         ));
         fs::remove_dir_all(path).unwrap();
     }

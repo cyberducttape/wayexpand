@@ -129,8 +129,7 @@ fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
 }
 
 fn validate_library(config_path: &Path) -> Result<()> {
-    Config::load(config_path)
-        .map(|_| ())
+    Config::validate_library_files(config_path)
         .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))
 }
 
@@ -174,11 +173,22 @@ pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathB
 
 fn commit_library(directory: &Path, message: &str) -> Result<bool> {
     let mut paths = vec![".gitignore", "expansions.toml"];
-    if directory.join("snippets.d").is_dir() {
-        paths.push("snippets.d");
+    paths.push("snippets.d");
+    // `-A` is essential here: if the final snippets.d file is deleted, the
+    // directory disappears and therefore cannot be selected by an existence
+    // check. Git still understands the pathspec and stages the deletion.
+    let mut add = vec!["add", "-A", "--"];
+    for path in paths {
+        let present = directory.join(path).exists();
+        let tracked = !present
+            && git_ok(directory, &["ls-files", "--", path]).is_ok_and(|output| !output.is_empty());
+        if present || tracked {
+            add.push(path);
+        }
     }
-    let mut add = vec!["add", "--"];
-    add.extend(paths.iter().filter(|path| directory.join(path).exists()));
+    if add.len() == 3 {
+        return Ok(false);
+    }
     git_ok(directory, &add)?;
     // The index may already hold unrelated staged files. Commit only the
     // exact library paths that changed, so nothing else can be published.
@@ -359,7 +369,11 @@ fn restrict_library_permissions(directory: &Path) {
         }
     };
     private(&directory.join("expansions.toml"));
-    if let Ok(entries) = std::fs::read_dir(directory.join("snippets.d")) {
+    let snippets = directory.join("snippets.d");
+    if std::fs::symlink_metadata(&snippets).is_ok_and(|metadata| metadata.file_type().is_dir()) {
+        let _ = std::fs::set_permissions(&snippets, std::fs::Permissions::from_mode(0o700));
+    }
+    if let Ok(entries) = std::fs::read_dir(snippets) {
         for entry in entries.flatten() {
             if entry
                 .path()
@@ -440,6 +454,58 @@ mod tests {
     fn git_output_is_bounded() {
         assert_eq!(read_git_output(&b"git output"[..]).unwrap(), b"git output");
         assert!(read_git_output(&vec![b'x'; MAX_GIT_OUTPUT_BYTES + 1][..]).is_err());
+    }
+
+    #[test]
+    fn validation_includes_snippet_layers() {
+        let (directory, config_path) = prepare_repository();
+        let snippets = directory.join("snippets.d");
+        std::fs::create_dir(&snippets).expect("create snippets directory");
+        std::fs::set_permissions(
+            &snippets,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .expect("restrict snippets directory");
+        let invalid = snippets.join("broken.toml");
+        std::fs::write(&invalid, "this is not valid toml = [").expect("write invalid snippet");
+        std::fs::set_permissions(
+            &invalid,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict invalid snippet");
+        assert!(validate_library(&config_path).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn deleting_last_snippet_is_staged_as_a_git_deletion() {
+        let (directory, _config_path) = prepare_repository();
+        let snippets = directory.join("snippets.d");
+        std::fs::create_dir(&snippets).expect("create snippets directory");
+        std::fs::set_permissions(
+            &snippets,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .expect("restrict snippets directory");
+        let snippet = snippets.join("old.toml");
+        std::fs::write(
+            &snippet,
+            "[[expansion]]\ntrigger = \";old\"\nreplacement = \"x\"\n",
+        )
+        .expect("write snippet");
+        std::fs::set_permissions(
+            &snippet,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict snippet");
+        commit_library(&directory, "add snippet").expect("commit snippet");
+        std::fs::remove_file(snippet).expect("delete snippet");
+        std::fs::remove_dir(snippets).expect("delete empty snippets directory");
+        assert!(commit_library(&directory, "remove snippet").expect("commit deletion"));
+        let tracked = git_ok(&directory, &["ls-tree", "-r", "--name-only", "HEAD"])
+            .expect("list tracked files");
+        assert!(!tracked.lines().any(|path| path == "snippets.d/old.toml"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

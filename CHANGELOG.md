@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Synchronization integrity:** `wayexpand sync` and daemon reloads now share
+  full-library validation for `snippets.d/*.toml`, validate rebased remote
+  content before promotion, reliably stage deletion of the final snippet, and
+  reject malformed compatibility versions in pack manifests.
+- **Broker singleton safety:** a second same-user action broker now refuses to
+  start while the existing Unix socket is live; stale owned sockets remain
+  recoverable without unlinking an active endpoint.
 - Cache the editor preview's library snippet lookup by configuration revision, avoiding a full-library scan and clone after each edit while keeping dynamic template values fresh.
 - Preserve production `{{snippet:...}}` include validation in single-snippet editor previews without rebuilding the full trigger matcher.
 - **Production-readiness architecture:** split the Action Broker protocol and

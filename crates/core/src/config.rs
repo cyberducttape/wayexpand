@@ -506,6 +506,54 @@ fn default_enabled() -> bool {
 pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
 impl Config {
+    /// Validate the primary configuration and every portable layer file next
+    /// to it. Synchronization and daemon reloads use this same preflight so a
+    /// malformed `snippets.d/*.toml` file cannot be promoted unnoticed.
+    pub fn validate_library_files(path: impl AsRef<Path>) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        Self::load(path)?;
+        let Some(directory) = path.parent() else {
+            return Ok(());
+        };
+        let snippets = directory.join("snippets.d");
+        let entries = match fs::read_dir(&snippets) {
+            Ok(entries) => entries,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: snippets.display().to_string(),
+                    source,
+                })
+            }
+        };
+        let mut files = entries
+            .map(|entry| {
+                entry.map_err(|source| ConfigError::Read {
+                    path: snippets.display().to_string(),
+                    source,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|entry| entry.path())
+            .filter(|entry| entry.extension().is_some_and(|extension| extension == "toml"))
+            .collect::<Vec<_>>();
+        files.sort();
+        for file in files {
+            let metadata = fs::symlink_metadata(&file).map_err(|source| ConfigError::Read {
+                path: file.display().to_string(),
+                source,
+            })?;
+            if !metadata.file_type().is_file() {
+                return Err(ConfigError::NotRegular {
+                    path: file.display().to_string(),
+                });
+            }
+            Self::load(file)?;
+        }
+        Ok(())
+    }
+
     /// Static snippet replacements by trigger and alias, for
     /// `{{snippet:TRIGGER}}`. Command-backed and disabled snippets are not
     /// includable. Each snippet's replacement is stored once and shared by
