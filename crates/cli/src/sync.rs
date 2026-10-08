@@ -115,6 +115,19 @@ fn git_ok(directory: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Like `git_ok`, but keeps the output untrimmed for `-z` path lists.
+fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
+    let output = git(directory, args)?;
+    if !output.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout).context("git reported a non-UTF-8 path")
+}
+
 fn validate_library(config_path: &Path) -> Result<()> {
     Config::load(config_path)
         .map(|_| ())
@@ -167,14 +180,78 @@ fn commit_library(directory: &Path, message: &str) -> Result<bool> {
     let mut add = vec!["add", "--"];
     add.extend(paths.iter().filter(|path| directory.join(path).exists()));
     git_ok(directory, &add)?;
-    let staged = git(directory, &["diff", "--cached", "--quiet"])?;
-    if staged.status.success() {
+    // The index may already hold unrelated staged files. Commit only the
+    // exact library paths that changed, so nothing else can be published.
+    let staged = git_ok_raw(
+        directory,
+        &[
+            "diff",
+            "--cached",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            "--",
+            ".gitignore",
+            "expansions.toml",
+            "snippets.d",
+        ],
+    )?;
+    let library_paths: Vec<String> = staged
+        .split('\0')
+        .filter(|path| is_library_path(path))
+        .map(|path| format!(":(literal){path}"))
+        .collect();
+    if library_paths.is_empty() {
         return Ok(false);
     }
-    git_ok(directory, &["commit", "--quiet", "-m", message]).context(
+    let mut commit = vec!["commit", "--quiet", "--only", "-m", message, "--"];
+    commit.extend(library_paths.iter().map(String::as_str));
+    git_ok(directory, &commit).context(
         "could not commit; set git user.name and user.email (globally or in the library repository)",
     )?;
     Ok(true)
+}
+
+/// Paths `wayexpand sync` is allowed to commit and publish.
+fn is_library_path(path: &str) -> bool {
+    matches!(path, ".gitignore" | "expansions.toml")
+        || path
+            .strip_prefix("snippets.d/")
+            .is_some_and(|name| !name.contains('/') && name.ends_with(".toml") && name != ".toml")
+}
+
+/// Refuse to push history that touches anything outside the library, such as
+/// files committed by hand or by an older release. `base` is the remote tip;
+/// without one, the whole history would be published and is checked.
+fn verify_outgoing_paths(directory: &Path, base: Option<&str>) -> Result<()> {
+    let range = base.map_or_else(|| "HEAD".to_owned(), |base| format!("{base}..HEAD"));
+    let touched = git_ok_raw(
+        directory,
+        &[
+            "log",
+            "--format=",
+            "--name-only",
+            "--no-renames",
+            "-m",
+            "-z",
+            &range,
+        ],
+    )?;
+    let mut foreign: Vec<&str> = touched
+        .split(['\0', '\n'])
+        .filter(|path| !path.is_empty() && !is_library_path(path))
+        .collect();
+    if foreign.is_empty() {
+        return Ok(());
+    }
+    foreign.sort_unstable();
+    foreign.dedup();
+    bail!(
+        "refusing to push: outgoing commits change files outside the snippet library ({}); \
+         remove them from the history in {}",
+        foreign.join(", "),
+        directory.display()
+    )
 }
 
 /// Commit local changes, rebase onto the remote, re-validate, and push.
@@ -233,6 +310,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
             bail!("remote changes would make the {error:#}; kept the local library");
         }
     }
+    verify_outgoing_paths(&directory, remote_has_branch.then_some("FETCH_HEAD"))?;
     git_ok(
         &directory,
         &["push", "--quiet", "--set-upstream", &remote, &branch],
@@ -330,6 +408,65 @@ mod tests {
     fn git_output_is_bounded() {
         assert_eq!(read_git_output(&b"git output"[..]).unwrap(), b"git output");
         assert!(read_git_output(&vec![b'x'; MAX_GIT_OUTPUT_BYTES + 1][..]).is_err());
+    }
+
+    #[test]
+    fn library_commit_excludes_unrelated_staged_files() {
+        let (directory, config_path) = prepare_repository();
+        // Bypass the managed .gitignore the way a user's own tooling might.
+        std::fs::write(directory.join("private.txt"), "secret").expect("write private file");
+        git_ok(&directory, &["add", "--force", "private.txt"]).expect("stage private file");
+
+        init(&config_path, None).expect("initialize library");
+
+        let committed = git_ok(&directory, &["show", "--name-only", "--format=", "HEAD"])
+            .expect("list committed files");
+        assert!(committed.lines().any(|path| path == "expansions.toml"));
+        assert!(!committed.lines().any(|path| path == "private.txt"));
+        let still_staged =
+            git_ok(&directory, &["diff", "--cached", "--name-only"]).expect("list staged files");
+        assert_eq!(still_staged, "private.txt");
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_refuses_to_push_history_outside_the_library() {
+        let (directory, config_path) = prepare_repository();
+        let remote_directory = test_directory();
+        std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+        git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+        let remote_url = remote_directory.display().to_string();
+        init(&config_path, Some(&remote_url)).expect("initialize library");
+        assert!(
+            sync(&config_path)
+                .expect("library-only history syncs")
+                .pushed
+        );
+        let published = git_ok(&remote_directory, &["rev-parse", "HEAD"]).expect("remote tip");
+        std::fs::write(directory.join("private.txt"), "secret").expect("write private file");
+        git_ok(&directory, &["add", "--force", "private.txt"]).expect("stage private file");
+        git_ok(&directory, &["commit", "--quiet", "-m", "manual"]).expect("manual commit");
+
+        let error = sync(&config_path).expect_err("foreign history must not be pushed");
+        assert!(format!("{error:#}").contains("private.txt"));
+        assert_eq!(
+            git_ok(&remote_directory, &["rev-parse", "HEAD"]).expect("remote tip"),
+            published,
+            "the foreign commit must not reach the remote"
+        );
+        let _ = std::fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    #[test]
+    fn library_path_allowlist_is_exact() {
+        assert!(is_library_path("expansions.toml"));
+        assert!(is_library_path(".gitignore"));
+        assert!(is_library_path("snippets.d/work.toml"));
+        assert!(!is_library_path("snippets.d/nested/work.toml"));
+        assert!(!is_library_path("snippets.d/run.sh"));
+        assert!(!is_library_path("portal-token"));
+        assert!(!is_library_path("expansions.toml.bak"));
     }
 
     #[test]

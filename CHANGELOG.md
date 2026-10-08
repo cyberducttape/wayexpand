@@ -70,6 +70,9 @@ All notable changes to WayExpand are documented here.
 - **Control busy responses delivered:** the daemon now drains the unread
   request before replying `error=busy`; previously Linux reported a connection
   reset and clients saw a generic read error instead of the typed `Busy` error.
+- **Sync commit isolation (security):** `wayexpand sync` commits only the exact
+  allowlisted library paths, leaving unrelated staged files untouched, and
+  refuses to push when outgoing history touches anything outside the library.
 
 Changes not yet released.
 
