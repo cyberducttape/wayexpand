@@ -245,6 +245,17 @@ Searches expansions by trigger, description, and tags.
 
 ---
 
+### `wayexpand schema`
+
+Prints the stable, machine-readable TOML configuration shape for editor and
+authoring integrations. `schema_version` changes only when the top-level
+contract changes; `Config` remains authoritative for defaults and validation.
+
+**Stability:** 🔒 **Stable** — schema version and type/field names are stable;
+new fields may be added compatibly.
+
+---
+
 ### `wayexpand doctor --json [config]`
 
 Diagnostic output suitable for health checks and monitoring systems.

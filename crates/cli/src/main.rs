@@ -11,8 +11,8 @@ use anyhow::{bail, Context, Error, Result};
 use backup::{create_backup, default_backup_destination};
 use commands::config::{
     backup_command, edit_command, fleet_command, import_command, list_command, pack_command,
-    preview_command, search_command, set_enabled_command, set_mode_command, stats_command,
-    sync_command, test_command, test_hotkey_command, validate_command,
+    preview_command, schema_command, search_command, set_enabled_command, set_mode_command,
+    stats_command, sync_command, test_command, test_hotkey_command, validate_command,
 };
 use commands::daemon::{control_command, insert_command};
 use commands::system::{
@@ -100,6 +100,7 @@ fn run() -> Result<()> {
         Some("preview") => preview_command(args)?,
         Some("list") => list_command(args)?,
         Some("search") => search_command(args)?,
+        Some("schema") => schema_command(args)?,
         Some("validate") => validate_command(args)?,
         Some("import") => import_command(args)?,
         Some("pack") => pack_command(args)?,
@@ -172,6 +173,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "search <query> [--json] [config]",
                 "Search triggers, descriptions, and tags",
+            ),
+            (
+                "schema",
+                "Print the stable configuration schema for authoring tools",
             ),
             (
                 "test <text> [--json] [config]",

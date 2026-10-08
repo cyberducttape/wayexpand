@@ -331,6 +331,48 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+/// Print the stable machine-readable configuration shape used by authoring
+/// tools. This is intentionally descriptive; Config remains authoritative for
+/// defaults, limits, and unknown-field rejection.
+pub(crate) fn schema_command(mut args: Args) -> Result<()> {
+    if args.next().is_some() {
+        usage_bail!("usage: wayexpand schema");
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "format": "toml",
+            "root": {
+                "expansion": { "type": "array", "items": "ExpansionConfig" },
+                "hotkey": { "type": "array", "items": "HotkeyConfig" },
+                "settings": { "type": "Settings" },
+                "organization": { "type": "OrganizationPolicy" }
+            },
+            "types": {
+                "ExpansionConfig": {
+                    "required": ["trigger", "replacement"],
+                    "fields": ["id", "trigger", "replacement", "description", "tags", "category", "enabled", "match_mode", "aliases", "app_filter", "propagate_case", "command"]
+                },
+                "HotkeyConfig": {
+                    "required": ["chord", "command"],
+                    "fields": ["chord", "description", "command", "enabled"]
+                },
+                "Settings": {
+                    "fields": ["max_buffer_chars", "undo_chord", "font_scale", "libei_token_persistence", "fcitx5_direct_commit", "template_env", "allow_clipboard", "usage_stats"]
+                },
+                "CommandConfig": {
+                    "fields": ["action", "program", "args", "timeout_ms", "cache_ms", "environment", "pass_env"]
+                },
+                "OrganizationPolicy": {
+                    "fields": ["safe_mode", "disable_commands", "disable_hotkeys", "require_absolute_commands", "disable_title_matching", "allow_weak_app_filters", "require_atomic_replace", "minimum_replacement_guarantee", "require_sensitive_focus", "max_replacement_size", "allowed_backends", "allowed_packs", "require_signed_packs", "pack_signers_file", "disable_clipboard", "disable_template_env", "audit_prefix"]
+                }
+            }
+        }))?
+    );
+    Ok(())
+}
+
 pub(crate) fn import_command(mut args: Args) -> Result<()> {
     let format = args
         .next()
