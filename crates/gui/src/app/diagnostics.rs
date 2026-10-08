@@ -77,7 +77,22 @@ impl GuiApp {
                 });
             });
         });
+        ui.label(
+            RichText::new(self.strings.live_test_boundary())
+                .small()
+                .color(palette.muted),
+        );
         if let Some(capabilities) = self.daemon_capabilities {
+            if capabilities.capture_sensitive_focus != Some(true) {
+                theme::card(ui, palette, |ui| {
+                    ui.colored_label(palette.danger, self.strings.sensitive_field_warning());
+                });
+            }
+            if capabilities.inject_atomic_replace != Some(true) {
+                theme::card(ui, palette, |ui| {
+                    ui.colored_label(palette.warning, self.strings.uncertain_output_warning());
+                });
+            }
             theme::card(ui, palette, |ui| {
                 ui.label(self.strings.active_route());
                 ui.label(

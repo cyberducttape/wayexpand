@@ -47,6 +47,36 @@ captured reference run is in [`docs/BENCHMARKS.md`](BENCHMARKS.md).
 Record the compositor, desktop session, keyboard layout, and output of
 `wayexpand doctor` for every integration run.
 
+## Threat-oriented release gate
+
+The automated suite is not a substitute for the following security-focused
+checks. Run these before promoting a backend or publishing a release:
+
+- race configuration reads against atomic rename and rapid saves, including an
+  invalid intermediate file; the active snapshot must remain valid and must not
+  be reported as the content from a different revision;
+- replace configuration and portal-token paths with symlinks or untrusted
+  ancestors during load/save, and verify that ownership and permission checks
+  refuse the operation;
+- feed malformed, truncated, oversized, and unexpected broker frames, and
+  verify bounded failure without command execution;
+- cancel commands and portal operations at their deadlines, then verify no
+  delayed output is applied after focus changes or recovery;
+- exercise same-user control-socket clients, including stale sockets and a
+  saturated worker pool, and verify structured errors without input/data-plane
+  degradation;
+- use hostile snippet packs (invalid paths, duplicate IDs, oversized content,
+  unsafe commands, and malformed metadata) and verify fail-closed import and
+  activation;
+- revoke portal consent and restart the compositor during an active expansion;
+  the result must be reported as failed or uncertain, never silently replayed.
+
+For every backend, record separately whether capture, sensitive-field
+protection, window identity, and injection were actually exercised. A protocol
+probe, matcher preview, or installed component is availability evidence only;
+it is not evidence that live keyboard capture and output injection work in a
+real client. Perform the final check in a temporary non-sensitive text field.
+
 ## Long-duration lifecycle soak
 
 The daemon uses bounded blocking polls and real worker threads rather than an

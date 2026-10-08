@@ -54,8 +54,41 @@ impl Strings {
 
     pub fn run_compatibility_test(&self) -> &'static str {
         match self.lang {
-            Language::English => "Run compatibility checks",
-            Language::German => "Kompatibilitätsprüfung ausführen",
+            Language::English => "Run protocol checks",
+            Language::German => "Protokollprüfungen ausführen",
+        }
+    }
+
+    pub fn live_test_boundary(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "These checks verify protocol and capability availability, not live typing in another application. Use a temporary, non-sensitive text field to verify the selected route before relying on it."
+            }
+            Language::German => {
+                "Diese Prüfungen verifizieren Protokoll- und Fähigkeitsverfügbarkeit, nicht das Live-Tippen in einer anderen Anwendung. Prüfe den ausgewählten Weg vor dem Einsatz in einem temporären, nicht sensiblen Textfeld."
+            }
+        }
+    }
+
+    pub fn sensitive_field_warning(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Sensitive-field protection is unavailable on this route. Do not use it for passwords or other secrets."
+            }
+            Language::German => {
+                "Der Schutz sensibler Felder ist auf diesem Weg nicht verfügbar. Nicht für Passwörter oder andere Geheimnisse verwenden."
+            }
+        }
+    }
+
+    pub fn uncertain_output_warning(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Output is not guaranteed atomic. A timeout or backend failure can leave an uncertain result; avoid retrying into a different focused window until the field is checked."
+            }
+            Language::German => {
+                "Die Ausgabe ist nicht garantiert atomar. Ein Timeout oder Backendfehler kann ein ungewisses Ergebnis hinterlassen; nicht in ein anderes fokussiertes Fenster wiederholen, bevor das Feld geprüft wurde."
+            }
         }
     }
 
