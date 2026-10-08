@@ -33,6 +33,8 @@ pub enum DaemonClientError {
     ResponseTooLarge,
     #[error("daemon returned a non-UTF-8 control response")]
     InvalidUtf8 { source: std::string::FromUtf8Error },
+    #[error("daemon control plane is busy; retry the request")]
+    Busy,
     #[error("invalid daemon control operation: {reason}")]
     InvalidOperation { reason: &'static str },
 }
@@ -129,7 +131,12 @@ impl DaemonClient {
         if response.len() > CONTROL_MAX_RESPONSE_BYTES {
             return Err(DaemonClientError::ResponseTooLarge);
         }
-        String::from_utf8(response).map_err(|source| DaemonClientError::InvalidUtf8 { source })
+        let response = String::from_utf8(response)
+            .map_err(|source| DaemonClientError::InvalidUtf8 { source })?;
+        if response == "error=busy\nretryable=true\n" {
+            return Err(DaemonClientError::Busy);
+        }
+        Ok(response)
     }
 
     pub fn status(&self) -> Result<String, DaemonClientError> {
@@ -229,6 +236,29 @@ mod tests {
         server.join().expect("server thread");
         fs::remove_file(socket).expect("remove test socket");
         assert_eq!(response, "state=running\n");
+    }
+
+    #[test]
+    fn converts_machine_readable_busy_response_to_a_typed_error() {
+        let socket =
+            std::env::temp_dir().join(format!("wayexpand-busy-{}.sock", std::process::id()));
+        let _ = fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).expect("bind test socket");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test client");
+            let mut command = [0_u8; 7];
+            stream.read_exact(&mut command).expect("read command");
+            stream
+                .write_all(b"error=busy\nretryable=true\n")
+                .expect("write busy response");
+        });
+
+        assert!(matches!(
+            DaemonClient::new(&socket).status(),
+            Err(DaemonClientError::Busy)
+        ));
+        server.join().expect("server thread");
+        fs::remove_file(socket).expect("remove test socket");
     }
 
     #[test]

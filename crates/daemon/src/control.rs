@@ -6,7 +6,7 @@ use std::{
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -26,11 +26,16 @@ use crate::socket_security::{
 const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
+const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 
 pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
     pub stop_requested: Arc<AtomicBool>,
     pub pause_requested: Arc<AtomicBool>,
+    /// Number of accepted connections rejected because all request workers
+    /// were occupied. This is deliberately separate from reactor metrics so
+    /// control-plane overload cannot consume keyboard data-plane capacity.
+    control_rejected_total: Arc<AtomicU64>,
     /// A snippet trigger to insert at the cursor (quick-insert picker,
     /// `wayexpand insert`). Only the latest request is kept: an insert is a one-shot
     /// user action and a stale queued one must never fire later.
@@ -79,6 +84,7 @@ impl ControlServer {
             reload_requested: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             pause_requested: Arc::new(AtomicBool::new(false)),
+            control_rejected_total: Arc::new(AtomicU64::new(0)),
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain_requested: Arc::new(Mutex::new(None)),
@@ -148,6 +154,7 @@ impl ControlServer {
         let reload_requested = Arc::new(AtomicBool::new(false));
         let stop_requested = Arc::new(AtomicBool::new(false));
         let pause_requested = Arc::new(AtomicBool::new(false));
+        let control_rejected_total = Arc::new(AtomicU64::new(0));
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
         let explain_requested = Arc::new(Mutex::new(None));
@@ -163,6 +170,7 @@ impl ControlServer {
         let status_flag = Arc::clone(&status);
         let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let active_requests_for_listener = Arc::clone(&active_requests);
+        let rejected_for_listener = Arc::clone(&control_rejected_total);
         thread::Builder::new()
             .name("wayexpand-control-listener".into())
             .spawn(move || {
@@ -184,9 +192,11 @@ impl ControlServer {
                         |active| (active < CONTROL_WORKERS).then_some(active + 1),
                     );
                     if admitted.is_err() {
-                        // Keep control-plane concurrency bounded. A busy or
-                        // malicious same-user client can be dropped without
-                        // delaying the accept loop or keyboard data plane.
+                        // Keep control-plane concurrency bounded. Return a
+                        // structured response so clients can distinguish
+                        // overload from a dead daemon, and count it without
+                        // involving the reactor or keyboard data plane.
+                        reject_busy(stream, &rejected_for_listener);
                         continue;
                     }
                     let active_requests = Arc::clone(&active_requests_for_listener);
@@ -213,6 +223,7 @@ impl ControlServer {
             reload_requested,
             stop_requested,
             pause_requested,
+            control_rejected_total,
             insert_requested,
             focus_snapshot,
             explain_requested,
@@ -284,6 +295,13 @@ impl ControlServer {
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
+        let rejected = self.control_rejected_total.load(Ordering::Relaxed);
+        if rejected > 0 {
+            tracing::info!(
+                control_rejected_total = rejected,
+                "control socket stopped after rejecting busy requests"
+            );
+        }
         if let (Some(path), Some(identity)) = (&self.path, self.socket_identity) {
             if let Ok(metadata) = fs::symlink_metadata(path) {
                 let uid = rustix::process::geteuid().as_raw();
@@ -306,6 +324,16 @@ struct Flags {
     explain: Arc<Mutex<Option<ExplainRequest>>>,
     status: Arc<Mutex<String>>,
     waker: crate::waker::WakerSlot,
+}
+
+fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
+    let total = rejected_total.fetch_add(1, Ordering::Relaxed) + 1;
+    warn!(
+        control_rejected_total = total,
+        "control request rejected: worker pool busy"
+    );
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
+    let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
 }
 
 /// The trigger of an `insert <trigger>` request, taken verbatim: a
@@ -672,6 +700,17 @@ mod tests {
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn overloaded_control_request_gets_machine_readable_busy_response() {
+        let rejected = AtomicU64::new(0);
+        let (mut client, server) = UnixStream::pair().unwrap();
+        reject_busy(server, &rejected);
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert_eq!(response, "error=busy\nretryable=true\n");
+        assert_eq!(rejected.load(Ordering::Acquire), 1);
     }
 
     #[test]
