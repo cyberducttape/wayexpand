@@ -11,6 +11,7 @@ use thiserror::Error;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_MAX_COMMAND_BYTES: usize = 1024;
+const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 const MAX_INSERT_TRIGGER_CHARS: usize = 128;
 const MAX_EXPLAIN_TEXT_CHARS: usize = 256;
 
@@ -124,19 +125,27 @@ impl DaemonClient {
             .map_err(|source| DaemonClientError::Send { source })?;
 
         let mut response = Vec::with_capacity(CONTROL_MAX_RESPONSE_BYTES);
-        stream
+        if let Err(source) = stream
             .take((CONTROL_MAX_RESPONSE_BYTES + 1) as u64)
             .read_to_end(&mut response)
-            .map_err(|source| DaemonClientError::Read { source })?;
+        {
+            // An overloaded daemon replies without reading the request, so
+            // the kernel may report a reset after delivering the full busy
+            // response. Only that exact response is accepted after an error.
+            if source.kind() == std::io::ErrorKind::ConnectionReset
+                && response == CONTROL_BUSY_RESPONSE
+            {
+                return Err(DaemonClientError::Busy);
+            }
+            return Err(DaemonClientError::Read { source });
+        }
         if response.len() > CONTROL_MAX_RESPONSE_BYTES {
             return Err(DaemonClientError::ResponseTooLarge);
         }
-        let response = String::from_utf8(response)
-            .map_err(|source| DaemonClientError::InvalidUtf8 { source })?;
-        if response == "error=busy\nretryable=true\n" {
+        if response == CONTROL_BUSY_RESPONSE {
             return Err(DaemonClientError::Busy);
         }
-        Ok(response)
+        String::from_utf8(response).map_err(|source| DaemonClientError::InvalidUtf8 { source })
     }
 
     pub fn status(&self) -> Result<String, DaemonClientError> {
@@ -246,8 +255,15 @@ mod tests {
         let listener = UnixListener::bind(&socket).expect("bind test socket");
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept test client");
-            let mut command = [0_u8; 7];
-            stream.read_exact(&mut command).expect("read command");
+            // Wait for the request to be queued but leave it unread, so the
+            // close produces the ECONNRESET a real overloaded peer can cause.
+            let mut readable = libc::pollfd {
+                fd: std::os::fd::AsRawFd::as_raw_fd(&stream),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: `readable` is a valid pollfd for a live descriptor.
+            assert_eq!(unsafe { libc::poll(&mut readable, 1, 2_000) }, 1);
             stream
                 .write_all(b"error=busy\nretryable=true\n")
                 .expect("write busy response");

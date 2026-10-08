@@ -332,8 +332,18 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
         control_rejected_total = total,
         "control request rejected: worker pool busy"
     );
+    // Closing a Unix stream with unread request bytes makes the kernel report
+    // ECONNRESET to the peer, which would hide the busy response behind a
+    // generic read error. Discard whatever the client already sent, without
+    // ever blocking the accept loop.
+    if stream.set_nonblocking(true).is_ok() {
+        let mut discard = [0_u8; MAX_COMMAND_BYTES + 1];
+        let _ = stream.read(&mut discard);
+        let _ = stream.set_nonblocking(false);
+    }
     let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
     let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
+    let _ = stream.shutdown(std::net::Shutdown::Write);
 }
 
 /// The trigger of an `insert <trigger>` request, taken verbatim: a
@@ -706,6 +716,8 @@ mod tests {
     fn overloaded_control_request_gets_machine_readable_busy_response() {
         let rejected = AtomicU64::new(0);
         let (mut client, server) = UnixStream::pair().unwrap();
+        // An unread request must not turn the close into a connection reset.
+        client.write_all(b"status\n").unwrap();
         reject_busy(server, &rejected);
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();

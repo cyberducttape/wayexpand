@@ -67,6 +67,9 @@ All notable changes to WayExpand are documented here.
   can no longer starve its own deadline or cancellation checks.
 - **Bounded fleet integrity scans:** the periodic fleet signature reads each
   layer through the configuration size limit.
+- **Control busy responses delivered:** the daemon now drains the unread
+  request before replying `error=busy`; previously Linux reported a connection
+  reset and clients saw a generic read error instead of the typed `Busy` error.
 
 Changes not yet released.
 
