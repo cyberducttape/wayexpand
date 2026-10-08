@@ -2,7 +2,11 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-doctor-test.XXXXXX")
+# Config paths are intentionally owner-checked. Keep the temporary tree under
+# the checked-out project so the test does not create an untrusted ancestor
+# when a runner's /tmp is owned by a non-root account.
+test_tmp_root="$project_dir"
+test_root=$(mktemp -d "$test_tmp_root/wayexpand-doctor-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 
 config_path="$test_root/expansions.toml"
