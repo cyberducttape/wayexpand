@@ -368,6 +368,7 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
             reinsert_after: None,
             command_backed: false,
             undoable: true,
+            folded_suffix_chars: 0,
         },
         ExpansionResult {
             snippet_id: String::new(),
@@ -378,6 +379,7 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
             reinsert_after: None,
             command_backed: false,
             undoable: true,
+            folded_suffix_chars: 0,
         },
     ];
 
@@ -387,6 +389,29 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
     assert_eq!(results[0].insert, "alpha");
     assert_eq!(results[1].matched_text, ":b ");
     assert_eq!(results[1].insert, "beta ");
+}
+
+#[test]
+fn evdev_absorbed_delimiters_keep_the_cursor_marker_position() {
+    let mut results = vec![ExpansionResult {
+        snippet_id: String::new(),
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "AB".into(),
+        cursor_offset: Some(1),
+        reinsert_after: Some(' '),
+        command_backed: false,
+        undoable: false,
+        folded_suffix_chars: 0,
+    }];
+
+    absorb_evdev_delimiter(&mut results, '.');
+
+    assert_eq!(results[0].matched_text, ":x .");
+    assert_eq!(results[0].insert, "AB .");
+    assert_eq!(results[0].reinsert_after, None);
+    assert_eq!(results[0].cursor_offset, Some(3));
+    assert_eq!(results[0].folded_suffix_chars, 2);
 }
 
 #[cfg(unix)]

@@ -77,6 +77,7 @@ impl ExpansionEngine {
             reinsert_after: None,
             command_backed: false,
             undoable: false,
+            folded_suffix_chars: 0,
         })
     }
 }

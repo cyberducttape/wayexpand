@@ -78,6 +78,10 @@ All notable changes to WayExpand are documented here.
   (`verified` or `atomic`). On best-effort routes (evdev with libei or wlroots)
   form snippets are refused and the trigger is left in place, since a click
   could have moved the caret while the form was open.
+- **Evdev delimiter folding:** delimiters absorbed during the evdev quiet
+  period keep a `{{cursor}}` marker at its intended position, and results with
+  several folded delimiters release their deferred-match reservation instead
+  of reviving an already-applied trigger.
 
 Changes not yet released.
 

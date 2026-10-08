@@ -550,6 +550,7 @@ impl ExpansionEngine {
             reinsert_after: pending.reinsert_after,
             command_backed,
             undoable: pending.undoable,
+            folded_suffix_chars: 0,
         })
     }
 
@@ -613,6 +614,7 @@ impl ExpansionEngine {
             reinsert_after: pending.reinsert_after,
             command_backed: true,
             undoable: pending.undoable,
+            folded_suffix_chars: 0,
         };
         let job = AsyncCommandJob::Expansion {
             config_index: pending.config_index,
@@ -680,6 +682,7 @@ impl ExpansionEngine {
                 reinsert_after: pending.reinsert_after,
                 command_backed: false,
                 undoable: pending.undoable,
+                folded_suffix_chars: 0,
             },
         };
         if let Err(error) = runtime.try_send_command(job) {
@@ -730,8 +733,32 @@ impl ExpansionEngine {
         Some(self.deferred_matches.remove(index))
     }
 
+    /// The text this result reserved when it was matched, before a host folded
+    /// any later-typed characters into it.
+    fn reserved_text(result: &ExpansionResult) -> &str {
+        let end = result
+            .matched_text
+            .char_indices()
+            .rev()
+            .nth(result.folded_suffix_chars.saturating_sub(1))
+            .filter(|_| result.folded_suffix_chars > 0)
+            .map_or(result.matched_text.len(), |(index, _)| index);
+        &result.matched_text[..end]
+    }
+
     fn release_deferred_match_for_result(&mut self, result: &ExpansionResult) {
-        self.take_deferred_reservation(&result.matched_text);
+        self.take_deferred_reservation(Self::reserved_text(result));
+    }
+
+    /// Restore a deferred result that will not be injected, including any
+    /// characters a host folded into it: they are already in the target.
+    pub fn restore_deferred_result(&mut self, result: &ExpansionResult) {
+        if self
+            .take_deferred_reservation(Self::reserved_text(result))
+            .is_some()
+        {
+            self.restore_buffered(&result.matched_text);
+        }
     }
 
     fn restore_deferred_matches(&mut self) {
@@ -799,6 +826,7 @@ impl ExpansionEngine {
             cursor_offset: plan.cursor_offset,
             reinsert_after,
             undoable: true,
+            folded_suffix_chars: 0,
         }
     }
 
@@ -862,6 +890,7 @@ impl ExpansionEngine {
                         reinsert_after,
                         command_backed: true,
                         undoable: true,
+                        folded_suffix_chars: 0,
                     },
                 };
                 if runtime.try_send_command(job).is_err() {

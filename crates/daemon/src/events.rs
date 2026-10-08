@@ -264,11 +264,9 @@ pub(crate) fn absorb_evdev_delimiter(results: &mut [ExpansionResult], character:
         // the transaction before appending the follow-up character. This
         // preserves the exact order already present in the application.
         if let Some(first) = result.reinsert_after.take() {
-            result.matched_text.push(first);
-            result.insert.push(first);
+            result.fold_typed_suffix(first);
         }
-        result.matched_text.push(character);
-        result.insert.push(character);
+        result.fold_typed_suffix(character);
     }
 }
 
@@ -293,7 +291,7 @@ pub(crate) fn restore_abandoned_results(
     results: Vec<ExpansionResult>,
 ) {
     for result in results {
-        engine.restore_deferred_match(&result.matched_text);
+        engine.restore_deferred_result(&result);
     }
 }
 
@@ -314,7 +312,7 @@ pub(crate) fn apply_results(
             active_backend,
         ) {
             // In safe_mode, block the expansion
-            engine.restore_deferred_match(&result.matched_text);
+            engine.restore_deferred_result(&result);
             continue;
         }
 
@@ -329,7 +327,7 @@ pub(crate) fn apply_results(
                     warn!(%source, "expansion applied but cursor repositioning failed");
                 }
                 wayexpand_core::TransactionOutcome::NotApplied { .. } => {
-                    engine.restore_deferred_match(&result.matched_text);
+                    engine.restore_deferred_result(&result);
                     return Err(Box::new(EventError {
                         result,
                         source: inject_result,
@@ -350,7 +348,7 @@ pub(crate) fn apply_results(
                 "expansion injected"
             );
         } else {
-            engine.restore_deferred_match(&result.matched_text);
+            engine.restore_deferred_result(&result);
             info!(
                 trigger_chars = result.trigger.chars().count(),
                 matched_chars = result.matched_text.chars().count(),

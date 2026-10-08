@@ -1195,6 +1195,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
@@ -1225,6 +1226,7 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
         reinsert_after: Some('—'),
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
@@ -1250,6 +1252,7 @@ fn apply_allows_zero_cursor_offset_without_cursor_support() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
@@ -1273,6 +1276,7 @@ fn apply_rejects_unrepresentable_unicode_before_output() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = CapabilityInjector {
         calls: Vec::new(),
@@ -1301,6 +1305,7 @@ fn apply_erases_before_inserting() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
     assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
@@ -1341,6 +1346,7 @@ fn apply_uses_atomic_backend_operation_when_available() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = AtomicInjector { calls: Vec::new() };
     assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
@@ -1358,6 +1364,7 @@ fn apply_replaces_typed_trigger_and_commits_terminator() {
         reinsert_after: Some(' '),
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
     assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
@@ -1410,6 +1417,7 @@ fn cursor_failure_is_reported_after_replacement_is_applied() {
         reinsert_after: None,
         command_backed: false,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     let outcome = ExpansionEngine::apply(&mut CursorFailingInjector, &result);
     assert!(matches!(
@@ -3195,6 +3203,77 @@ fn deferred_rollback_restores_an_absorbed_delimiter_with_the_trigger() {
     assert_eq!(restored.matched_text, ":sig ");
 }
 
+fn ready_deferred_result(engine: &mut ExpansionEngine, text: &str) -> ExpansionResult {
+    let pending = engine
+        .process_deferred(InputEvent::Text(text.into()))
+        .pop()
+        .unwrap();
+    match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+        PendingExpansionDispatch::Ready(result) => result,
+        PendingExpansionDispatch::Queued => panic!("plain snippets are ready immediately"),
+    }
+}
+
+#[test]
+fn folding_typed_delimiters_keeps_the_cursor_inside_the_replacement() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":x"
+        replacement = "A{{cursor}}B"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut result = ready_deferred_result(&mut engine, ":x");
+    assert_eq!(result.cursor_offset, Some(1));
+    result.fold_typed_suffix(' ');
+    result.fold_typed_suffix('.');
+    assert_eq!(result.matched_text, ":x .");
+    assert_eq!(result.insert, "AB .");
+    // Still between A and B: three characters left of the end.
+    assert_eq!(result.cursor_offset, Some(3));
+}
+
+#[test]
+fn applying_a_result_with_two_folded_delimiters_releases_its_reservation() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":x"
+        replacement = "done"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut result = ready_deferred_result(&mut engine, ":x");
+    result.fold_typed_suffix(' ');
+    result.fold_typed_suffix('.');
+    engine.commit_applied_expansion(&result);
+    // A leaked reservation would be put back into the matcher buffer before
+    // the next event, reviving an already-applied trigger.
+    engine.process_deferred(InputEvent::Text("q".into()));
+    assert_eq!(engine.buffer_len_for_checks(), 1);
+}
+
+#[test]
+fn restoring_a_result_with_folded_delimiters_restores_the_typed_text() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":x"
+        replacement = "done"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut result = ready_deferred_result(&mut engine, ":x");
+    result.fold_typed_suffix(' ');
+    result.fold_typed_suffix('.');
+    engine.restore_deferred_result(&result);
+    assert_eq!(engine.buffer_len_for_checks(), 4);
+}
+
 #[test]
 fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
     let config = Config::parse(
@@ -3598,6 +3677,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
             reinsert_after: None,
             command_backed: true,
             undoable: true,
+            folded_suffix_chars: 0,
         };
         assert!(engine
             .async_commands
@@ -3633,6 +3713,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
         reinsert_after: None,
         command_backed: true,
         undoable: true,
+        folded_suffix_chars: 0,
     };
     assert!(engine
         .async_commands

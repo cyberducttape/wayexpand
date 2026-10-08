@@ -41,6 +41,26 @@ pub struct ExpansionResult {
     pub reinsert_after: Option<char>,
     pub command_backed: bool,
     pub undoable: bool,
+    /// Characters a host appended to `matched_text` and `insert` after the
+    /// engine produced this result (see [`ExpansionResult::fold_typed_suffix`]).
+    /// Lets the engine find this result's deferred reservation without
+    /// depending on the edited display text.
+    pub folded_suffix_chars: usize,
+}
+
+impl ExpansionResult {
+    /// Fold a character the user already typed into the target after the
+    /// trigger into this transaction: it is erased with the trigger and typed
+    /// again after the replacement. A requested cursor position stays at the
+    /// same place inside the replacement.
+    pub fn fold_typed_suffix(&mut self, character: char) {
+        self.matched_text.push(character);
+        self.insert.push(character);
+        self.folded_suffix_chars += 1;
+        if let Some(offset) = self.cursor_offset.as_mut() {
+            *offset += 1;
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
