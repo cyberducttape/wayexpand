@@ -673,25 +673,33 @@ impl TextInjector for LibeiInjector {
 
     fn capabilities(&self) -> InjectorCapabilities {
         let keysym_fallback = matches!(self.mode, TextMode::Keysym(_));
+        let direct_commit = self.fcitx5.is_some();
         InjectorCapabilities {
-            insertion_mode: if keysym_fallback {
+            insertion_mode: if direct_commit {
+                "Fcitx5 direct commit (libei fallback available)"
+            } else if keysym_fallback {
                 "libei keysym fallback"
             } else {
                 "ei_text"
             },
-            max_text_chars: if keysym_fallback {
+            // Direct Fcitx5 commits are bounded by validate_text/MAX_TEXT_BYTES,
+            // not by the paced keysym fallback's three-second budget. If the
+            // bridge declines because there is no focused Fcitx context, the
+            // replace method still applies ensure_representable before any raw
+            // erase, so this optimistic capability cannot make fallback unsafe.
+            max_text_chars: if keysym_fallback && !direct_commit {
                 MAX_KEYSYM_FALLBACK_CHARS
             } else {
                 0
             },
-            expected_throughput_chars_per_sec: keysym_fallback.then_some(83),
+            expected_throughput_chars_per_sec: (keysym_fallback && !direct_commit).then_some(83),
             // Even a single ei_text flush can fail after the target has
             // processed part of the transaction; libei has no rollback
             // primitive for arbitrary application text.
             atomic_replace: false,
             // Backspaces are sent without seeing the target's text.
             replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
-            full_unicode: matches!(self.mode, TextMode::Text(_)),
+            full_unicode: direct_commit || matches!(self.mode, TextMode::Text(_)),
             cursor_reposition: true,
             key_passthrough: true,
         }
@@ -728,8 +736,9 @@ impl TextInjector for LibeiInjector {
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
-        // Synchronized before the representability check below, so that
-        // check (and the trigger erase it guards) uses the current layout.
+        // Synchronize before any replacement attempt. In keysym mode this
+        // refreshes the layout used by the fallback; the Fcitx5 path itself
+        // uses the focused input context rather than this keymap.
         self.sync_server_state().map_err(|error| InjectorError {
             backend: BACKEND_NAME,
             message: error.to_string(),
@@ -740,14 +749,6 @@ impl TextInjector for LibeiInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        // Checked before erasing the trigger: if the replacement cannot be
-        // typed, the trigger should not be removed either.
-        self.ensure_representable(text)
-            .map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: error.to_string(),
-                retryable: error.is_retryable(),
-            })?;
         if let Some(client) = &self.fcitx5 {
             match client.replace(trigger, text) {
                 fcitx5::ReplaceResult::Committed => return Ok(()),
@@ -761,6 +762,15 @@ impl TextInjector for LibeiInjector {
                 }
             }
         }
+        // Only the ordinary libei route needs the active-keymap check. Do it
+        // after the optional direct commit attempt so a keysym-only EIS
+        // device can still commit Unicode through Fcitx5.
+        self.ensure_representable(text)
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })?;
         self.send_backspaces_unflushed(erase_grapheme_count(trigger));
         if matches!(self.mode, TextMode::Keysym(_)) {
             // Send the erase on its own and let it land before typing: in

@@ -7,7 +7,10 @@ All notable changes to WayExpand are documented here.
 - **Optional Fcitx5 integration:** the libei route can now use a compatible,
   exact-surrounding-text Fcitx5 bridge when explicitly enabled. Missing bridges
   preserve existing behavior; sensitive, mismatched, unknown, and uncertain
-  bridge outcomes fail closed before any raw erase.
+  bridge outcomes fail closed before any raw erase. Unicode replacements now
+  reach the bridge even when the negotiated EIS device only provides the
+  layout-dependent keysym fallback; the paced fallback limits still apply when
+  the bridge declines because no Fcitx context is focused.
 - **Authoring interoperability:** `wayexpand schema` exposes a versioned,
   machine-readable TOML configuration shape for editors and integrations while
   leaving semantic validation in the shared `validate` path.

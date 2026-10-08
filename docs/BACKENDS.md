@@ -69,7 +69,11 @@ Bridge refusals for selections, mismatches, password fields, sensitive hints,
 unknown statuses, and transport failures are fail-closed. In particular,
 WayExpand never follows an uncertain D-Bus result with raw backspaces. The
 option is disabled by default and does not make libei claim atomic replacement
-or sensitive-field awareness.
+or sensitive-field awareness. When the EIS device only exposes its
+layout-dependent keysym fallback, Unicode replacements are attempted through
+the bridge first; if it reports that no Fcitx input context is focused, the
+ordinary fallback's representability and pacing limits are applied before any
+raw erase.
 
 **Character insertion latency (ei_keyboard fallback):**
 When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
