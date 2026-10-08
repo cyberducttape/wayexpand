@@ -495,6 +495,16 @@ fn expand_user_path_with_home(value: &str, home: Option<&std::ffi::OsStr>) -> Pa
     }
 }
 
+/// Load the bundled application icon for every native window, including the
+/// picker and generated form dialogs. Keeping this in one place prevents
+/// secondary GUI surfaces from falling back to the toolkit's generic icon.
+pub(crate) fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!(
+        "../../../assets/icon/hicolor/256x256/apps/wayexpand.png"
+    ))
+    .expect("bundled app icon is a valid PNG")
+}
+
 fn main() -> Result<()> {
     if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
         println!(
@@ -523,10 +533,7 @@ fn main() -> Result<()> {
     app.start_runtime()?;
     let saved_dark_mode = load_gui_prefs().dark_mode;
     let colorpack = app.colorpack;
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!(
-        "../../../assets/icon/hicolor/256x256/apps/wayexpand.png"
-    ))
-    .expect("bundled app icon is a valid PNG");
+    let icon = app_icon();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])

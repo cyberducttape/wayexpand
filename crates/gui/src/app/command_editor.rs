@@ -25,16 +25,16 @@ impl GuiApp {
             }
             ui.add_enabled_ui(draft.command_enabled, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Execution type");
+                    ui.label(self.strings.execution_type());
                     if ui
-                        .radio(!draft.command_action_mode, "Direct executable")
+                        .radio(!draft.command_action_mode, self.strings.direct_executable())
                         .clicked()
                     {
                         draft.command_action_mode = false;
                         draft.command_action.clear();
                     }
                     if ui
-                        .radio(draft.command_action_mode, "Managed action")
+                        .radio(draft.command_action_mode, self.strings.managed_action())
                         .clicked()
                     {
                         draft.command_action_mode = true;
@@ -44,11 +44,11 @@ impl GuiApp {
                 });
                 if draft.command_action_mode {
                     ui.horizontal(|ui| {
-                        ui.label("Action");
+                        ui.label(self.strings.action());
                         let action_ids = broker_action_ids();
                         egui::ComboBox::from_id_salt("broker_action_id")
                             .selected_text(if draft.command_action.is_empty() {
-                                "Select or type an action"
+                                self.strings.select_or_type_action()
                             } else {
                                 &draft.command_action
                             })
@@ -68,7 +68,7 @@ impl GuiApp {
                         ui.add(
                             TextEdit::singleline(&mut draft.command_action)
                                 .margin(theme::FIELD_MARGIN)
-                                .hint_text("cluster-status")
+                                .hint_text(self.strings.action_hint())
                                 .desired_width(240.0),
                         );
                     });
@@ -111,27 +111,41 @@ impl GuiApp {
                                         (ui.available_width() - 108.0).max(MIN_FIELD_WIDTH),
                                     ),
                             );
-                            if ui
-                                .small_button("↑")
-                                .on_hover_text(self.strings.move_up())
-                                .clicked()
-                                && index > 0
-                            {
+                            let move_up =
+                                ui.small_button("↑").on_hover_text(self.strings.move_up());
+                            move_up.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    self.strings.move_up(),
+                                )
+                            });
+                            if move_up.clicked() && index > 0 {
                                 move_arg = Some((index, index - 1));
                             }
-                            if ui
-                                .small_button("↓")
-                                .on_hover_text(self.strings.move_down())
-                                .clicked()
-                                && index + 1 < draft.command_args.len()
-                            {
+                            let move_down =
+                                ui.small_button("↓").on_hover_text(self.strings.move_down());
+                            move_down.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    self.strings.move_down(),
+                                )
+                            });
+                            if move_down.clicked() && index + 1 < draft.command_args.len() {
                                 move_arg = Some((index, index + 1));
                             }
-                            if ui
+                            let remove_argument = ui
                                 .small_button("×")
-                                .on_hover_text(self.strings.remove_argument())
-                                .clicked()
-                            {
+                                .on_hover_text(self.strings.remove_argument());
+                            remove_argument.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    self.strings.remove_argument(),
+                                )
+                            });
+                            if remove_argument.clicked() {
                                 remove_arg = Some(index);
                             }
                         });
@@ -178,11 +192,17 @@ impl GuiApp {
                                 .margin(theme::FIELD_MARGIN)
                                 .desired_width((ui.available_width() - 38.0).max(MIN_FIELD_WIDTH)),
                         );
-                        if ui
+                        let remove_environment = ui
                             .small_button("×")
-                            .on_hover_text(self.strings.remove_environment_variable())
-                            .clicked()
-                        {
+                            .on_hover_text(self.strings.remove_environment_variable());
+                        remove_environment.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                self.strings.remove_environment_variable(),
+                            )
+                        });
+                        if remove_environment.clicked() {
                             remove_env = Some(index);
                         }
                     });

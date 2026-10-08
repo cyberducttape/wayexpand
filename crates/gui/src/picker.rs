@@ -613,7 +613,8 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
             .with_title("WayExpand — Insert snippet")
             .with_app_id("io.github.cyberducttape.WayExpand.Picker")
             .with_inner_size([640.0, 440.0])
-            .with_min_inner_size([420.0, 260.0]),
+            .with_min_inner_size([420.0, 260.0])
+            .with_icon(crate::app_icon()),
         ..Default::default()
     };
     eframe::run_native(

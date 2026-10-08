@@ -174,7 +174,8 @@ pub(crate) fn run(spec_json: &str) -> anyhow::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Fill in snippet")
             .with_app_id("io.github.cyberducttape.WayExpand.Form")
-            .with_inner_size([520.0, height.min(720.0)]),
+            .with_inner_size([520.0, height.min(720.0)])
+            .with_icon(crate::app_icon()),
         ..Default::default()
     };
     eframe::run_native(

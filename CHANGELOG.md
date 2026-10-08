@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **GUI polish:** localized the command editor's execution/action controls in
+  German mode and added descriptive accessibility metadata to its move/remove
+  buttons, so icon-only controls are understandable to assistive technology.
 - **Project polish:** refreshed the public README with a concise status table
   and safer first-run commands, added repository-wide editor conventions,
   default code ownership, and privacy-aware feature/support issue forms.

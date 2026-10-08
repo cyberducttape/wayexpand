@@ -240,6 +240,48 @@ impl Strings {
         }
     }
 
+    pub fn execution_type(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Execution type",
+            Language::German => "Ausführungsart",
+        }
+    }
+
+    pub fn direct_executable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Direct executable",
+            Language::German => "Direktes Programm",
+        }
+    }
+
+    pub fn managed_action(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Managed action",
+            Language::German => "Verwaltete Aktion",
+        }
+    }
+
+    pub fn action(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Action",
+            Language::German => "Aktion",
+        }
+    }
+
+    pub fn select_or_type_action(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Select or type an action",
+            Language::German => "Aktion auswählen oder eingeben",
+        }
+    }
+
+    pub fn action_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "cluster-status",
+            Language::German => "cluster-status",
+        }
+    }
+
     pub fn command_checkbox(&self) -> &'static str {
         match self.lang {
             Language::English => "Run a direct program when this snippet matches",
