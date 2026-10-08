@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a focused improvement to WayExpand
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. Do not include private snippet text,
+        credentials, typed content, or sensitive diagnostics.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What are you trying to do, and what is difficult today?
+      placeholder: I want to ... because ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful behavior or interface change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workaround or competing approach are you using now?
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Area
+      options:
+        - CLI or configuration
+        - GUI or picker
+        - Backend or compositor support
+        - Snippet authoring or migration
+        - Packaging or documentation
+        - Other
+    validations:
+      required: true
+

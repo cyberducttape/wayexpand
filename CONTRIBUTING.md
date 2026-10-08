@@ -67,6 +67,11 @@ shellcheck scripts/*.sh
 
 4. **Reference issues** — Link related issues in your PR description
 
+5. **Keep support claims evidence-based** — If a change affects a backend,
+   compositor, installer, or certification result, update the relevant support
+   matrix and include the exact environment and command used to obtain the
+   evidence. A passing unit test does not establish compositor certification.
+
 ## Development Guide
 
 Detailed development policy and workflows are in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).

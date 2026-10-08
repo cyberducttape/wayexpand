@@ -1,0 +1,40 @@
+name: Support question
+description: Ask for help configuring or troubleshooting WayExpand
+title: "support: "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste triggers, replacements, credentials, or raw keyboard logs.
+        Redact paths and private text from diagnostics before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: WayExpand version or commit
+      placeholder: 1.3.3 or a commit SHA
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop session
+      placeholder: KDE Plasma 6.x, GNOME, Sway, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Diagnostic output
+      description: Paste sanitized output from `wayexpand doctor --json` and `wayexpand status --json`.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What happened?
+      description: Include expected and observed behavior without private text.
+    validations:
+      required: true
+

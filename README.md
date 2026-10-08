@@ -39,22 +39,46 @@ local, offline, no account, no telemetry.
 - **Brings your library along.** Import Espanso YAML, edit in the GUI, the
   terminal UI, or plain TOML, and roll out team snippets with fleet policy.
 
+### Project status at a glance
+
+| Area | Current status |
+| --- | --- |
+| Configuration, CLI, and JSON contracts | Stable and regression-tested |
+| Linux architectures | x86_64 and aarch64 build paths |
+| Desktop integration | Wayland backends available; compositor support varies |
+| Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
+| Distribution packages | Build and release workflows exist; check the release page for published artifacts |
+
 ## Install
 
-**There is currently no published production binary/package release.** The
-public [v1.3.3 release](https://github.com/cyberducttape/wayexpand/releases/tag/v1.3.3)
-has no downloadable assets, and the [Ubuntu PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa)
-currently has no published WayExpand binaries. Release artifacts remain gated
-on real compositor certification; see the [support matrix](docs/SUPPORT_MATRIX.md)
-before deploying.
+For local evaluation or development, install from source. Published binaries
+and packages are only supported when they are present on the [GitHub Releases
+page](https://github.com/cyberducttape/wayexpand/releases); do not infer
+availability from the release workflow alone. Review the [support
+matrix](docs/SUPPORT_MATRIX.md) before deploying desktop integration.
 
-For local evaluation or development, install from source (Rust 1.95+ required):
+For a source installation (Rust 1.95+ required):
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
 wayexpand-gui
+```
+
+Then create a first snippet from the terminal:
+
+```sh
+wayexpand setup
+wayexpand-ui
+```
+
+Verify the selected desktop route before typing into another application:
+
+```sh
+wayexpand doctor
+wayexpand status --json
+wayexpand test ';;hello'
 ```
 
 The release workflow is configured to attach `.deb`, `.rpm`, and architecture

@@ -1,0 +1,28 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - dependencies
+    authors:
+      - dependabot
+  categories:
+    - title: "Breaking changes"
+      labels:
+        - breaking-change
+    - title: "User-visible improvements"
+      labels:
+        - enhancement
+        - feature
+    - title: "Bug fixes and reliability"
+      labels:
+        - bug
+        - fix
+    - title: "Documentation and maintenance"
+      labels:
+        - documentation
+        - chore
+        - refactor
+    - title: "Other changes"
+      labels:
+        - "*"
+

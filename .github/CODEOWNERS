@@ -1,0 +1,4 @@
+# Default review owner. Security-sensitive changes still require explicit
+# maintainer review through SECURITY.md.
+* @cyberducttape
+

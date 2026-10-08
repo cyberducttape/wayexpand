@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Project polish:** refreshed the public README with a concise status table
+  and safer first-run commands, added repository-wide editor conventions,
+  default code ownership, and privacy-aware feature/support issue forms.
 - **Optional Fcitx5 integration:** the libei route can now use a compatible,
   exact-surrounding-text Fcitx5 bridge when explicitly enabled. Missing bridges
   preserve existing behavior; sensitive, mismatched, unknown, and uncertain
