@@ -337,8 +337,15 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
     // generic read error. Discard whatever the client already sent, without
     // ever blocking the accept loop.
     if stream.set_nonblocking(true).is_ok() {
-        let mut discard = [0_u8; MAX_COMMAND_BYTES + 1];
-        let _ = stream.read(&mut discard);
+        let mut discard = [0_u8; 1024];
+        loop {
+            match stream.read(&mut discard) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(_) => break,
+            }
+        }
         let _ = stream.set_nonblocking(false);
     }
     let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
@@ -716,8 +723,11 @@ mod tests {
     fn overloaded_control_request_gets_machine_readable_busy_response() {
         let rejected = AtomicU64::new(0);
         let (mut client, server) = UnixStream::pair().unwrap();
-        // An unread request must not turn the close into a connection reset.
-        client.write_all(b"status\n").unwrap();
+        // An unread, oversized request must not turn the close into a
+        // connection reset.
+        client
+            .write_all(&vec![b'x'; MAX_COMMAND_BYTES * 4])
+            .unwrap();
         reject_busy(server, &rejected);
         let mut response = String::new();
         client.read_to_string(&mut response).unwrap();
