@@ -53,6 +53,20 @@ All notable changes to WayExpand are documented here.
 - **GUI sync containment:** Library → Sync now bounds its child process,
   output capture, deadline, and process-group cleanup instead of bypassing the
   CLI Git safety controls.
+- **Output worker retirement:** a timed-out serialized output worker is retired
+  without joining it, and output recovery waits until that worker has stopped
+  before reconnecting, so an uncertain operation never overlaps a new route.
+- **Bounded reloads and control overload:** configuration reloads verify a
+  stable source revision across atomic renames with bounded retries, reload
+  notifications are coalesced, and an overloaded control socket answers
+  `error=busy` (counted separately from the keyboard data plane).
+- **Backend safety diagnostics:** the GUI diagnostics page states that checks
+  verify protocol availability, not live typing, and warns when a route lacks
+  sensitive-field protection or atomic output.
+- **Bounded command stdout:** a command whose stdout is continuously readable
+  can no longer starve its own deadline or cancellation checks.
+- **Bounded fleet integrity scans:** the periodic fleet signature reads each
+  layer through the configuration size limit.
 
 Changes not yet released.
 
