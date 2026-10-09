@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- User installer version directories now use the built binary's full version
+  identity, so installs from newer development commits cannot reuse stale
+  files merely because the Cargo package version is unchanged.
 - Systemd unit CI now creates dummy executables at the versioned installer's
   active `current/bin` path, keeping service validation aligned with installs.
 - GUI command previews now distinguish local direct execution (outside both

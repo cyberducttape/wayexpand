@@ -57,11 +57,6 @@ if [ -z "$cargo_bin" ]; then
 fi
 bin_dir="$HOME/.local/bin"
 library_dir="$HOME/.local/lib/wayexpand"
-version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$project_dir/Cargo.toml" | head -n 1)
-if [ -z "$version" ]; then
-    printf '%s\n' 'error: could not determine the WayExpand version from Cargo.toml' >&2
-    exit 1
-fi
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
@@ -102,6 +97,21 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand-ui \
     -p wayexpand-gui \
     -p wayexpand-backend-ibus
+
+# Development builds intentionally retain the package version and encode the
+# source commit in the binary version. Use that complete build identity for
+# the immutable install directory; package version alone would cause every
+# install from a newer commit to reuse stale binaries and service assets.
+version=$(
+    "$target_dir/release/wayexpand" --version |
+        sed -n 's/^wayexpand \([A-Za-z0-9.+~-][A-Za-z0-9.+~-]*\) (commit [A-Za-z0-9._-]*)$/\1/p'
+)
+case "$version" in
+    ''|*[!A-Za-z0-9.+~-]*)
+        printf '%s\n' 'error: could not determine a safe WayExpand build identity' >&2
+        exit 1
+        ;;
+esac
 
 if [ "$enable_service" -eq 1 ]; then
     validation_path=
