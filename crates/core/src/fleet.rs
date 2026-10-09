@@ -253,6 +253,26 @@ impl FleetConfig {
         Ok(merged)
     }
 
+    /// Validate the portable library represented by the primary config and
+    /// its adjacent `snippets.d` directory. This excludes machine-local
+    /// organization layers and installed packs, while using the same merge
+    /// rules as the daemon's fleet loader.
+    pub fn validate_library(base: Config, directory: impl AsRef<Path>) -> Result<(), FleetError> {
+        let mut merger = ConfigMerger::new();
+        merger.add_config(
+            base,
+            Provenance {
+                file: "expansions.toml".into(),
+                layer: "base".into(),
+            },
+        )?;
+        merger.load_layer_named(
+            directory.as_ref().join("snippets.d"),
+            Layer::User.name().into(),
+        )?;
+        merger.merge().map(|_| ())
+    }
+
     fn apply_base_and_policy(
         mut fleet: Self,
         base: Config,
@@ -456,6 +476,38 @@ impl ConfigMerger {
         Ok(())
     }
 
+    fn add_config(&mut self, config: Config, provenance: Provenance) -> Result<(), FleetError> {
+        for expansion in config.expansion {
+            self.add_expansion(expansion, provenance.clone())?;
+        }
+        for hotkey in config.hotkey {
+            if self.hotkeys.contains_key(&hotkey.chord) {
+                let existing = &self.hotkeys[&hotkey.chord].1;
+                return Err(FleetError::DuplicateHotkey {
+                    chord: hotkey.chord.clone(),
+                    message: format!(
+                        "hotkey chord '{}' in {} conflicts with existing definition",
+                        hotkey.chord, provenance.file
+                    ),
+                    existing_file: existing.file.clone(),
+                });
+            }
+            self.hotkeys
+                .insert(hotkey.chord.clone(), (hotkey, provenance.clone()));
+            self.stats.total_hotkeys += 1;
+        }
+        if !config.settings.is_default() {
+            if !self.settings.is_empty() {
+                eprintln!(
+                    "warning: settings from {} override previous layer",
+                    provenance.file
+                );
+            }
+            self.settings.push((config.settings, provenance));
+        }
+        Ok(())
+    }
+
     fn load_layer(&mut self, dir: impl AsRef<Path>, layer: Layer) -> Result<(), FleetError> {
         self.load_layer_named(dir, layer.name().to_string())
     }
@@ -501,42 +553,7 @@ impl ConfigMerger {
             let config = Config::load(&path).map_err(FleetError::Config)?;
             reject_embedded_policy(&config, &path)?;
             self.stats.total_files_loaded += 1;
-
-            // Merge expansions (check for duplicates)
-            for expansion in &config.expansion {
-                self.add_expansion(expansion.clone(), provenance.clone())?;
-            }
-
-            // Merge hotkeys (check for duplicates)
-            for hotkey in &config.hotkey {
-                if self.hotkeys.contains_key(&hotkey.chord) {
-                    let existing = &self.hotkeys[&hotkey.chord].1;
-                    return Err(FleetError::DuplicateHotkey {
-                        chord: hotkey.chord.clone(),
-                        message: format!(
-                            "hotkey chord '{}' in {} conflicts with existing definition",
-                            hotkey.chord, provenance.file
-                        ),
-                        existing_file: existing.file.clone(),
-                    });
-                }
-                self.hotkeys
-                    .insert(hotkey.chord.clone(), (hotkey.clone(), provenance.clone()));
-                self.stats.total_hotkeys += 1;
-            }
-
-            // Settings (last one wins, with warning on conflict)
-            if !config.settings.is_default() {
-                if !self.settings.is_empty() {
-                    // Settings already defined, later one wins (log this)
-                    eprintln!(
-                        "warning: settings from {} override previous layer",
-                        provenance.file
-                    );
-                }
-                self.settings
-                    .push((config.settings.clone(), provenance.clone()));
-            }
+            self.add_config(config, provenance)?;
         }
 
         self.stats

@@ -635,6 +635,42 @@ mod tests {
     }
 
     #[test]
+    fn validation_rejects_duplicate_base_and_layer_entries() {
+        let (directory, config_path) = prepare_repository();
+        std::fs::write(
+            &config_path,
+            "[[expansion]]\ntrigger = \";duplicate\"\nreplacement = \"base\"\n",
+        )
+        .expect("write base snippet");
+        std::fs::set_permissions(
+            &config_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict base snippet");
+        let snippets = directory.join("snippets.d");
+        std::fs::create_dir(&snippets).expect("create snippets directory");
+        std::fs::set_permissions(
+            &snippets,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .expect("restrict snippets directory");
+        let duplicate = snippets.join("duplicate.toml");
+        std::fs::write(
+            &duplicate,
+            "[[expansion]]\ntrigger = \";duplicate\"\nreplacement = \"layer\"\n",
+        )
+        .expect("write duplicate layer");
+        std::fs::set_permissions(
+            &duplicate,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict duplicate layer");
+
+        assert!(validate_library(&config_path).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn sync_validation_refuses_symlinked_layers() {
         use std::os::unix::fs::PermissionsExt;
         let (directory, config_path) = prepare_repository();

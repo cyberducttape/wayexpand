@@ -264,7 +264,12 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
         .unwrap_or_else(default_config_path);
     let policy = load_policy()?;
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
-    Config::validate_layer_files(&path).map_err(|error| config_load_error(&path, error))?;
+    Config::validate_library_files(&path).map_err(|error| {
+        config_error(format!(
+            "library configuration invalid: {}",
+            error.safe_summary()
+        ))
+    })?;
     let (config, policy_violations) = if merged {
         let fleet =
             FleetConfig::load_standard_with_base_and_policy(config, &policy).map_err(|error| {

@@ -511,13 +511,14 @@ fn default_enabled() -> bool {
 pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
 impl Config {
-    /// Validate the primary configuration and every portable layer file next
-    /// to it, so a malformed `snippets.d/*.toml` file cannot be synchronized
-    /// or reported valid unnoticed.
-    pub fn validate_library_files(path: impl AsRef<Path>) -> Result<(), ConfigError> {
+    /// Validate and merge the primary configuration with every portable layer
+    /// file next to it, so malformed files and cross-file collisions cannot be
+    /// synchronized or reported valid unnoticed.
+    pub fn validate_library_files(path: impl AsRef<Path>) -> Result<(), crate::FleetError> {
         let path = path.as_ref();
-        Self::load(path)?;
-        Self::validate_layer_files(path)
+        let base = Self::load(path).map_err(crate::FleetError::Config)?;
+        let directory = path.parent().unwrap_or_else(|| Path::new("."));
+        crate::FleetConfig::validate_library(base, directory)
     }
 
     /// Validate each `snippets.d/*.toml` layer next to the configuration at
