@@ -15,10 +15,43 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  runner-preflight:
+    name: Certification runner preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Require online compositor runners
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runners_json="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100")"
+          missing=()
+          for compositor in kde gnome sway hyprland; do
+            if ! jq -e --arg compositor "$compositor" '
+              any(.[].runners[];
+                .status == "online"
+                and (([.labels[].name] | index("wayexpand-certification")) != null)
+                and (([.labels[].name] | index($compositor)) != null))
+            ' <<<"$runners_json" >/dev/null; then
+              missing+=("$compositor")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing online self-hosted certification runners: ${missing[*]}" >&2
+            echo 'Register runners with labels: wayexpand-certification plus each compositor label (kde, gnome, sway, hyprland).' >&2
+            exit 1
+          fi
+          echo 'All required compositor certification runners are online.'
+
   certify:
     name: "${{ matrix.compositor }} certification"
+    needs: runner-preflight
     runs-on: [self-hosted, wayexpand-certification, "${{ matrix.compositor }}"]
     timeout-minutes: 90
     strategy:

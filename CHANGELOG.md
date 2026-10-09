@@ -34,6 +34,8 @@ All notable changes to WayExpand are documented here.
   preserving lease and divergence checks.
 - Launchpad SSH authorization probes now have explicit connection and overall
   timeouts, preventing an unreachable service from hanging synchronization.
+- Compositor certification now performs a hosted runner-capacity preflight and
+  fails fast with the missing runner labels instead of remaining queued.
 - **Fail-closed certification and rollback:** production input-method
   certification now requires a healthy doctor result, and uninstall refuses to
   remove binaries while any managed user service cannot be stopped or remains
