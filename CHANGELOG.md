@@ -9,6 +9,7 @@ All notable changes to WayExpand are documented here.
 - Installer upgrades now validate existing libraries before replacing installed files.
 - Bounded pack-signature subprocess input and output teardown after timeout or inherited pipes.
 - Bounded GUI setup subprocess teardown and removed its PID-reuse process-group race.
+- Guided setup now fails closed if its input-method route catalog is inconsistent.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing

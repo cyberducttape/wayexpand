@@ -106,11 +106,13 @@ pub(crate) fn setup_backend_for_mode(
             let plan = wayexpand_backend_selection::plan_routes(capabilities, false, |route| {
                 route.id == "input-method-v2" && route_allowed_by_policy(policy, route)
             });
-            let route = plan
+            let Some(route) = plan
                 .routes
                 .iter()
                 .find(|route| route.contract.id == "input-method-v2")
-                .expect("route catalog must declare input-method-v2");
+            else {
+                bail!("input-method-v2 route is missing from the backend catalog")
+            };
             if !matches!(
                 route.standing,
                 wayexpand_backend_selection::RouteStanding::Available
