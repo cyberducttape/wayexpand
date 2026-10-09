@@ -333,6 +333,19 @@ mod tests {
             .unwrap(),
             "insert-target 7 deadbeef :wave"
         );
+        assert_eq!(
+            encode_operation(&DaemonOperation::ClearUsageStats {
+                path: PathBuf::from("/tmp/wayexpand usage-stats.json"),
+            })
+            .unwrap(),
+            "stats-clear /tmp/wayexpand usage-stats.json"
+        );
+        assert!(matches!(
+            encode_operation(&DaemonOperation::ClearUsageStats {
+                path: PathBuf::from("/tmp/stats\nstop"),
+            }),
+            Err(DaemonClientError::InvalidOperation { .. })
+        ));
         assert!(matches!(
             encode_operation(&DaemonOperation::Insert {
                 trigger: "bad\ntrigger".into(),

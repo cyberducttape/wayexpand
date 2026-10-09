@@ -9,7 +9,7 @@ All notable changes to WayExpand are documented here.
   stats files are created exclusively without following symlinks. When the
   daemon is running, clears are serialized through its writer and discard
   pre-clear queued counters without blocking input processing; a failed file
-  clear retains the writer's buffered counters for a later retry.
+  clear retains both writer- and reactor-buffered counters for a later retry.
 - Added `wayexpand support-bundle`, an allowlisted diagnostic summary that
   excludes configuration paths, snippet contents, credentials, and raw errors;
   optional output files are private and non-overwriting, while diagnostic

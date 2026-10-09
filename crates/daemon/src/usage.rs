@@ -49,20 +49,29 @@ pub struct UsageRecorder {
     sender: Option<SyncSender<UsageMessage>>,
     pending: UsageStats,
     pending_generation: u64,
-    generation: Arc<Mutex<u64>>,
+    generation: Arc<Mutex<UsageGeneration>>,
     worker: Option<JoinHandle<()>>,
     worker_done: Option<Receiver<()>>,
 }
 
 enum UsageMessage {
     Batch(UsageStats),
-    Clear(mpsc::SyncSender<std::io::Result<bool>>),
+    Clear(
+        mpsc::SyncSender<std::io::Result<bool>>,
+        Arc<Mutex<UsageGeneration>>,
+    ),
+}
+
+#[derive(Default)]
+struct UsageGeneration {
+    value: u64,
+    clear_pending: bool,
 }
 
 #[derive(Clone)]
 pub struct UsageClearHandle {
     sender: SyncSender<UsageMessage>,
-    generation: Arc<Mutex<u64>>,
+    generation: Arc<Mutex<UsageGeneration>>,
     path: PathBuf,
 }
 
@@ -80,12 +89,19 @@ impl UsageClearHandle {
                 .generation
                 .lock()
                 .map_err(|_| std::io::Error::other("usage clear generation lock poisoned"))?;
+            if generation.clear_pending {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "another usage statistics clear is in progress",
+                ));
+            }
+            generation.clear_pending = true;
             self.sender
-                .try_send(UsageMessage::Clear(reply))
+                .try_send(UsageMessage::Clear(reply, Arc::clone(&self.generation)))
                 .map_err(|error| {
+                    generation.clear_pending = false;
                     std::io::Error::new(std::io::ErrorKind::WouldBlock, error.to_string())
                 })?;
-            *generation = generation.wrapping_add(1);
         }
         result
             .recv_timeout(Duration::from_secs(2))
@@ -96,7 +112,7 @@ impl UsageClearHandle {
 impl UsageRecorder {
     pub fn new(path: PathBuf) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
-        let generation = Arc::new(Mutex::new(0));
+        let generation = Arc::new(Mutex::new(UsageGeneration::default()));
         let (done_sender, done_receiver) = mpsc::channel();
         let worker_path = path.clone();
         let worker = thread::Builder::new()
@@ -142,10 +158,10 @@ impl UsageRecorder {
     /// the worker or the filesystem.
     pub fn collect(&mut self, engine: &mut ExpansionEngine) {
         if let Ok(generation) = self.generation.lock() {
-            if self.pending_generation != *generation {
+            if self.pending_generation != generation.value {
                 let dropped = event_count(&self.pending);
                 self.pending = UsageStats::default();
-                self.pending_generation = *generation;
+                self.pending_generation = generation.value;
                 record_rejections(dropped);
             }
         }
@@ -170,10 +186,13 @@ impl UsageRecorder {
         let Ok(generation) = self.generation.lock() else {
             return;
         };
-        if self.pending_generation != *generation {
+        if generation.clear_pending {
+            return;
+        }
+        if self.pending_generation != generation.value {
             let dropped = event_count(&self.pending);
             self.pending = UsageStats::default();
-            self.pending_generation = *generation;
+            self.pending_generation = generation.value;
             record_rejections(dropped);
             return;
         }
@@ -192,8 +211,8 @@ impl UsageRecorder {
                 );
             }
             Err(
-                TrySendError::Full(UsageMessage::Clear(_))
-                | TrySendError::Disconnected(UsageMessage::Clear(_)),
+                TrySendError::Full(UsageMessage::Clear(..))
+                | TrySendError::Disconnected(UsageMessage::Clear(..)),
             ) => unreachable!("only usage batches are enqueued here"),
         }
     }
@@ -279,10 +298,16 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
             Ok(UsageMessage::Batch(batch)) => {
                 pending.merge(&batch);
             }
-            Ok(UsageMessage::Clear(reply)) => {
+            Ok(UsageMessage::Clear(reply, generation)) => {
                 let result = clear_pending(&path, &mut pending);
                 if result.is_err() {
                     FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                }
+                if let Ok(mut generation) = generation.lock() {
+                    generation.clear_pending = false;
+                    if result.is_ok() {
+                        generation.value = generation.value.wrapping_add(1);
+                    }
                 }
                 let _ = reply.send(result);
             }
@@ -411,7 +436,7 @@ mod tests {
         recorder.clear_handle().unwrap().clear(&path).unwrap();
         assert!(UsageStats::load(&path).snippets.is_empty());
 
-        recorder.pending_generation = *recorder.generation.lock().unwrap();
+        recorder.pending_generation = recorder.generation.lock().unwrap().value;
         recorder.pending.record(&event("after-clear"));
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
@@ -439,6 +464,28 @@ mod tests {
         assert!(clear_pending(&directory, &mut pending).is_err());
         assert_eq!(pending.snippets["retained"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn failed_daemon_clear_preserves_reactor_pending_events_and_generation() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-daemon-failure-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        let mut recorder = UsageRecorder::new(path.clone());
+        recorder.pending.record(&event("retained"));
+
+        assert!(recorder.clear_handle().unwrap().clear(&path).is_err());
+        assert_eq!(recorder.generation.lock().unwrap().value, 0);
+        assert_eq!(recorder.pending.snippets["retained"].count, 1);
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -472,7 +519,7 @@ mod tests {
             sender: Some(sender),
             pending: pending.clone(),
             pending_generation: 0,
-            generation: Arc::new(Mutex::new(0)),
+            generation: Arc::new(Mutex::new(UsageGeneration::default())),
             worker: None,
             worker_done: None,
         };
