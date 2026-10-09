@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
 - Bounded pack-signature subprocess input and output teardown after timeout or inherited pipes.
 - Bounded GUI setup subprocess teardown and removed its PID-reuse process-group race.
 - Guided setup now fails closed if its input-method route catalog is inconsistent.
+- Control-socket teardown now wakes and joins its listener thread instead of
+  leaving an accept loop alive after the server is dropped.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing

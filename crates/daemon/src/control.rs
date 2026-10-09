@@ -10,6 +10,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
+    thread::JoinHandle,
     time::Duration,
 };
 use tracing::warn;
@@ -51,6 +52,7 @@ pub struct ControlServer {
     waker: crate::waker::WakerSlot,
     path: Option<PathBuf>,
     socket_identity: Option<(u64, u64)>,
+    listener: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +96,7 @@ impl ControlServer {
             waker: Arc::default(),
             path: None,
             socket_identity: None,
+            listener: None,
         }
     }
 
@@ -173,11 +176,17 @@ impl ControlServer {
         let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let active_requests_for_listener = Arc::clone(&active_requests);
         let rejected_for_listener = Arc::clone(&control_rejected_total);
-        thread::Builder::new()
+        let listener = thread::Builder::new()
             .name("wayexpand-control-listener".into())
             .spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(stream) = stream else { break };
+                    // A connection made by ControlServer::drop only wakes
+                    // accept so the listener can terminate. Do not admit it
+                    // as a request after shutdown has been published.
+                    if stop_flag.load(Ordering::Acquire) {
+                        break;
+                    }
                     let flags = Flags {
                         reload: Arc::clone(&reload_flag),
                         stop: Arc::clone(&stop_flag),
@@ -233,6 +242,7 @@ impl ControlServer {
             waker,
             path: Some(path),
             socket_identity,
+            listener: Some(listener),
         })
     }
 
@@ -297,6 +307,16 @@ impl ControlServer {
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
+        self.stop_requested.store(true, Ordering::Release);
+        // `incoming()` blocks in accept. A local connection wakes it so the
+        // listener can observe stop_requested and exit before the socket is
+        // removed. The connection is intentionally otherwise empty.
+        if let Some(path) = &self.path {
+            let _ = UnixStream::connect(path);
+        }
+        if let Some(listener) = self.listener.take() {
+            let _ = listener.join();
+        }
         let rejected = self.control_rejected_total.load(Ordering::Relaxed);
         if rejected > 0 {
             tracing::info!(
