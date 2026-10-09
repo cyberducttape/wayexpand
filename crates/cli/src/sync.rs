@@ -12,7 +12,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Read,
     os::fd::AsRawFd,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread,
@@ -51,9 +51,22 @@ impl SyncLock {
             .write(true)
             .truncate(false)
             .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(&path)
             .with_context(|| format!("could not open sync lock {}", path.display()))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.nlink() != 1
+        {
+            bail!("sync lock has an unsafe type, owner, or link count");
+        }
+        // Tighten permissions through the already-verified descriptor rather
+        // than chmod'ing a path that could be swapped for a symlink.
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        if file.metadata()?.permissions().mode() & 0o777 != 0o600 {
+            bail!("sync lock permissions could not be made private");
+        }
         let deadline = Instant::now() + SYNC_LOCK_TIMEOUT;
         loop {
             // SAFETY: flock only operates on this owned lock descriptor.
@@ -1169,6 +1182,41 @@ mod tests {
         let error = verify_library_tree(&directory, "HEAD", "expansions.toml")
             .expect_err("outgoing tree must reject symlink modes");
         assert!(format!("{error:#}").contains("expansions.toml"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_lock_refuses_symlinks_without_changing_the_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = test_directory();
+        std::fs::create_dir_all(&directory).expect("create lock directory");
+        let target = directory.join("unrelated-file");
+        std::fs::write(&target, "leave this alone").expect("create target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644))
+            .expect("make target readable");
+        symlink(&target, directory.join(".wayexpand-sync.lock")).expect("create lock symlink");
+
+        assert!(SyncLock::acquire(&directory).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"leave this alone");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_lock_is_private_and_regular() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = test_directory();
+        std::fs::create_dir_all(&directory).expect("create lock directory");
+        let lock = SyncLock::acquire(&directory).expect("acquire new sync lock");
+        let metadata = lock.0.metadata().expect("stat lock descriptor");
+        assert!(metadata.file_type().is_file());
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        drop(lock);
         let _ = std::fs::remove_dir_all(directory);
     }
 

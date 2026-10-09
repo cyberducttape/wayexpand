@@ -63,6 +63,8 @@ All notable changes to WayExpand are documented here.
   inherited-pipe and malformed-output paths, preventing orphaned GUI helpers.
 - Git synchronization now serializes the complete repository transaction,
   preventing concurrent callers from interleaving fetch, rebase, and rollback.
+- Git sync lock acquisition now rejects symlinks, special files, foreign
+  owners, and hard-linked targets before locking or changing permissions.
 - Runtime diagnostics now distinguish a connected window tracker from an exact
   focused-window identity, preventing false app-filter readiness reports.
 - Daemon startup now preserves an existing control socket when its ownership
