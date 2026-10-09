@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Usage-stat clears and daemon flushes now share a bounded interprocess lock,
+  preventing a concurrent flush from resurrecting cleared history; temporary
+  stats files are created exclusively without following symlinks.
 - Added `wayexpand support-bundle`, an allowlisted diagnostic summary that
   excludes configuration paths, snippet contents, credentials, and raw errors;
   optional output files are private and non-overwriting, while diagnostic

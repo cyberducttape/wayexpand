@@ -9,8 +9,12 @@ use std::{
     collections::BTreeMap,
     fs,
     io::Write,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::{
+        fd::AsRawFd,
+        unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +26,70 @@ use crate::limits::MAX_USAGE_FILE_BYTES;
 const MAX_DAILY_ENTRIES: usize = 400;
 const MAX_SNIPPET_ENTRIES: usize = 20_000;
 const SECONDS_PER_DAY: u64 = 86_400;
+const USAGE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
+struct UsageLock(fs::File);
+
+impl UsageLock {
+    fn acquire(path: &Path) -> std::io::Result<Self> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new(USAGE_FILE));
+        let lock_path = parent.join(format!(".{}.wayexpand.lock", name.to_string_lossy()));
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&lock_path)?;
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.permissions().mode() & 0o777 != 0o600
+            || metadata.nlink() != 1
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "usage statistics lock has unsafe type, owner, or permissions",
+            ));
+        }
+
+        let deadline = Instant::now() + USAGE_LOCK_TIMEOUT;
+        loop {
+            // SAFETY: `file` owns a live descriptor for the lock file.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                return Ok(Self(file));
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::EWOULDBLOCK)
+                && error.raw_os_error() != Some(libc::EAGAIN)
+            {
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "timed out waiting for usage statistics lock",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for UsageLock {
+    fn drop(&mut self) {
+        // SAFETY: this descriptor is owned by the guard and holds the lock.
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
 
 /// One applied expansion, as recorded by the engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,21 +197,59 @@ impl UsageStats {
 
     /// Write atomically with mode 0600.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let _lock = UsageLock::acquire(path)?;
+        self.save_locked(path)
+    }
+
+    /// Merge pending daemon counters with the current file under one lock, so
+    /// concurrent `stats --clear` cannot race a load/merge/save cycle.
+    pub fn merge_and_save(path: &Path, delta: &UsageStats) -> std::io::Result<()> {
+        let _lock = UsageLock::acquire(path)?;
+        let mut current = Self::load(path);
+        current.merge(delta);
+        current.save_locked(path)
+    }
+
+    /// Clear the statistics file while excluding concurrent daemon flushes.
+    pub fn clear(path: &Path) -> std::io::Result<bool> {
+        let _lock = UsageLock::acquire(path)?;
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn save_locked(&self, path: &Path) -> std::io::Result<()> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let temporary = parent.join(format!(".{USAGE_FILE}.{}.tmp", std::process::id()));
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary = parent.join(format!(".{USAGE_FILE}.{}.{nonce}.tmp", std::process::id()));
         let bytes = serde_json::to_vec(self).map_err(std::io::Error::other)?;
         {
             let mut file = fs::OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .mode(0o600)
+                .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
                 .open(&temporary)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
+            if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+                drop(file);
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
+            }
         }
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
-        fs::rename(&temporary, path)
+        if let Err(error) = fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Summarize statistics against the current library.
@@ -196,6 +302,87 @@ impl UsageStats {
             unused_90_days: unused,
             trigger_risks: trigger_risks(config),
         }
+    }
+}
+
+#[cfg(test)]
+mod locking_tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    fn event(id: &str) -> UsageEvent {
+        UsageEvent {
+            snippet_id: id.into(),
+            typed_chars: 1,
+            inserted_chars: 3,
+            unix_timestamp: 1_700_000_000,
+        }
+    }
+
+    #[test]
+    fn concurrent_clear_and_flush_never_resurrect_pre_clear_statistics() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-race-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(USAGE_FILE);
+        let mut before_clear = UsageStats::default();
+        before_clear.record(&event("old"));
+        before_clear.save(&path).unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let clear_path = path.clone();
+        let clear_barrier = Arc::clone(&barrier);
+        let clear = std::thread::spawn(move || {
+            clear_barrier.wait();
+            UsageStats::clear(&clear_path).unwrap();
+        });
+
+        let flush_path = path.clone();
+        let flush_barrier = Arc::clone(&barrier);
+        let flush = std::thread::spawn(move || {
+            let mut delta = UsageStats::default();
+            delta.record(&event("new"));
+            flush_barrier.wait();
+            UsageStats::merge_and_save(&flush_path, &delta).unwrap();
+        });
+        barrier.wait();
+        clear.join().unwrap();
+        flush.join().unwrap();
+
+        let after_race = UsageStats::load(&path);
+        assert!(!after_race.snippets.contains_key("old"));
+        if let Some(new_usage) = after_race.snippets.get("new") {
+            assert_eq!(new_usage.count, 1);
+        }
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn usage_lock_refuses_symlinks_without_touching_the_target() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-lock-symlink-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(USAGE_FILE);
+        let victim = directory.join("victim");
+        fs::write(&victim, b"do not modify").unwrap();
+        let lock_path = directory.join(format!(".{USAGE_FILE}.wayexpand.lock"));
+        std::os::unix::fs::symlink(&victim, &lock_path).unwrap();
+
+        assert!(UsageStats::clear(&path).is_err());
+        assert_eq!(fs::read(&victim).unwrap(), b"do not modify");
+        let _ = fs::remove_dir_all(directory);
     }
 }
 

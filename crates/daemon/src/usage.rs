@@ -234,10 +234,7 @@ fn event_count(stats: &UsageStats) -> u64 {
 
 fn flush_pending(path: &std::path::Path, pending: &mut UsageStats) -> bool {
     let started = Instant::now();
-    // Reload on every flush so a concurrent `stats --clear` is respected.
-    let mut stats = UsageStats::load(path);
-    stats.merge(pending);
-    match stats.save(path) {
+    match UsageStats::merge_and_save(path, pending) {
         Ok(()) => *pending = UsageStats::default(),
         Err(error) => {
             FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);

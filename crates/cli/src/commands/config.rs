@@ -745,11 +745,9 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
         .unwrap_or_else(default_config_path);
     let stats_path = wayexpand_core::usage_stats_path(&path);
     if clear {
-        match std::fs::remove_file(&stats_path) {
-            Ok(()) => println!("local usage statistics cleared"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                println!("no local usage statistics to clear")
-            }
+        match wayexpand_core::UsageStats::clear(&stats_path) {
+            Ok(true) => println!("local usage statistics cleared"),
+            Ok(false) => println!("no local usage statistics to clear"),
             Err(error) => {
                 return Err(config_error(format!(
                     "could not clear {}: {error}",
