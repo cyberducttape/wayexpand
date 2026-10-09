@@ -285,9 +285,6 @@ impl FleetConfig {
             .find(|(_, provenance)| settings_source_allowed(provenance, policy))
             .map(|(settings, _)| settings.clone())
             .unwrap_or_default();
-        let base_expansions = base.expansion.len();
-        let base_hotkeys = base.hotkey.len();
-
         // Packs that must be signed but do not verify against a trusted,
         // root-owned signers file.
         let unsigned_packs: BTreeMap<String, String> = if policy.require_signed_packs {
@@ -423,7 +420,9 @@ impl FleetConfig {
         // status output cannot describe entries that are no longer active.
         fleet.stats.total_expansions = fleet.config.expansion.len();
         fleet.stats.total_hotkeys = fleet.config.hotkey.len();
-        fleet.stats.total_files_loaded += usize::from(base_expansions > 0 || base_hotkeys > 0);
+        // The primary configuration is always one loaded source file, even
+        // when it contains only settings or is intentionally empty.
+        fleet.stats.total_files_loaded += 1;
         fleet
             .stats
             .layers_applied
@@ -795,6 +794,17 @@ mod tests {
         assert_eq!(merged.config.expansion.len(), 1);
         assert_eq!(merged.config.expansion[0].trigger, ":new");
         assert_eq!(merged.config.expansion[0].replacement, "after");
+    }
+
+    #[test]
+    fn base_file_is_counted_when_it_only_contains_settings() {
+        let base = Config::parse("[settings]\nmax_buffer_chars = 256\n").unwrap();
+        let fleet = ConfigMerger::new().merge().unwrap();
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, base, &OrganizationPolicy::default())
+                .unwrap();
+        assert_eq!(merged.stats.total_files_loaded, 1);
     }
 
     #[test]

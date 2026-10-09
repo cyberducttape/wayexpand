@@ -29,6 +29,8 @@ All notable changes to WayExpand are documented here.
   `snippets.d`, catching duplicate triggers and hotkeys before daemon reload.
 - Daemon fleet composition now applies the same stable-ID update semantics when
   layering fleet snippets over the primary configuration.
+- Fleet status statistics now count the primary configuration file even when it
+  contains only settings, keeping loaded-file diagnostics accurate.
 - Added concurrent Action Broker startup coverage to ensure only one process can
   own a socket and failed starters cannot replace the active endpoint.
 
