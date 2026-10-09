@@ -26,6 +26,8 @@ All notable changes to WayExpand are documented here.
 - **Bounded audit shutdown:** broker teardown no longer blocks waiting for a
   flush sentinel when the audit queue is full; queued events still drain after
   the sender closes.
+- **Private audit-file creation:** the broker requests mode `0600` while
+  creating audit files, closing the permissive-umask exposure window.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit

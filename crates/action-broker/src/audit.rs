@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
@@ -189,7 +190,11 @@ struct AuditWriter {
 
 impl AuditWriter {
     fn open(path: &Path) -> io::Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         Ok(Self {
             path: path.to_owned(),
@@ -250,6 +255,7 @@ impl AuditWriter {
         self.file = OpenOptions::new()
             .create(true)
             .append(true)
+            .mode(0o600)
             .open(&self.path)?;
         std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
         Ok(())
