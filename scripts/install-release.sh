@@ -70,6 +70,14 @@ case "$state_home" in
         ;;
 esac
 
+config_path="$config_dir/expansions.toml"
+if [ "$enable_service" -eq 1 ] && { [ -e "$config_path" ] || [ -L "$config_path" ]; }; then
+    # Validate before replacing any installed files. An upgrade must not leave
+    # a mixed-version installation behind when the existing library is invalid.
+    printf '%s\n' "Validating existing configuration before upgrade: $config_path"
+    "$release_dir/bin/wayexpand" validate "$config_path"
+fi
+
 install -d -m 0700 "$state_dir"
 chmod 0700 "$state_dir"
 
@@ -114,7 +122,6 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     fi
 done
 
-config_path="$config_dir/expansions.toml"
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
 elif [ -f "$release_dir/expansions.toml" ]; then

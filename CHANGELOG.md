@@ -6,6 +6,7 @@ All notable changes to WayExpand are documented here.
 
 - Added regression coverage for atomic, private Action Broker health-file publication.
 - Prevented GUI Git-sync timeouts from hanging on blocking output-reader joins.
+- Installer upgrades now validate existing libraries before replacing installed files.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing

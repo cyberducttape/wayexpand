@@ -117,6 +117,35 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 
+# An enabled upgrade validates the existing library before replacing any
+# installed files. A failed preflight must preserve the current daemon binary.
+printf '%s\n' 'existing invalid configuration' >"$test_root/config/wayexpand/expansions.toml"
+printf '%s\n' 'installed-daemon-sentinel' >"$test_root/home/.local/bin/wayexpand-daemon"
+cat >"$release_dir/bin/wayexpand" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = validate ]; then
+    exit 1
+fi
+exit 0
+EOF
+chmod 0755 "$release_dir/bin/wayexpand"
+if PATH="$stub_bin:$PATH" \
+    HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/install-release.sh" --enable --service=wayexpand-input-method.service \
+    >/dev/null 2>&1; then
+    printf '%s\n' 'installer accepted an invalid configuration during upgrade' >&2
+    exit 1
+fi
+grep -Fx 'installed-daemon-sentinel' "$test_root/home/.local/bin/wayexpand-daemon" >/dev/null
+
+# Restore the successful fake CLI for the remaining stop/uninstall tests.
+cat >"$release_dir/bin/wayexpand" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$release_dir/bin/wayexpand"
+
 # A failed stop must fail closed before any executable is removed. This guards
 # the rollback invariant that an active capture/injection process is never
 # left running with its installed files silently deleted.
