@@ -22,6 +22,9 @@ All notable changes to WayExpand are documented here.
   preventing concurrent callers from interleaving fetch, rebase, and rollback.
 - Runtime diagnostics now distinguish a connected window tracker from an exact
   focused-window identity, preventing false app-filter readiness reports.
+- Daemon startup now preserves an existing control socket when its ownership
+  check fails for a non-stale error, instead of unlinking a potentially active
+  endpoint.
 - Added concurrent Action Broker startup coverage to ensure only one process can
   own a socket and failed starters cannot replace the active endpoint.
 

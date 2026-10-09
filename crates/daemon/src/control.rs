@@ -31,6 +31,13 @@ const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 /// Reads of at most 1 KiB used to discard an overloaded client's request.
 const BUSY_DRAIN_READS: usize = 16;
 
+fn is_stale_socket_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+    )
+}
+
 pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
     pub stop_requested: Arc<AtomicBool>,
@@ -116,7 +123,7 @@ impl ControlServer {
                     "another WayExpand daemon is already using {}",
                     path.display()
                 ),
-                Err(_) => {
+                Err(error) if is_stale_socket_error(&error) => {
                     let owner = rustix::process::geteuid().as_raw();
                     if !is_owned_socket(&metadata, owner) {
                         if !metadata.file_type().is_socket() {
@@ -142,6 +149,14 @@ impl ControlServer {
                     }
                     fs::remove_file(&operation_path)
                         .with_context(|| format!("removing stale socket {}", path.display()))?
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "checking whether control socket {} is active",
+                            path.display()
+                        )
+                    })
                 }
             }
         }
@@ -778,6 +793,22 @@ mod tests {
         let metadata = fs::metadata(&regular).unwrap();
         assert!(!is_owned_socket(&metadata, uid));
         fs::remove_file(regular).unwrap();
+    }
+
+    #[test]
+    fn only_refused_or_missing_connections_are_stale_socket_errors() {
+        assert!(is_stale_socket_error(&std::io::Error::from(
+            std::io::ErrorKind::ConnectionRefused,
+        )));
+        assert!(is_stale_socket_error(&std::io::Error::from(
+            std::io::ErrorKind::NotFound,
+        )));
+        assert!(!is_stale_socket_error(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )));
+        assert!(!is_stale_socket_error(&std::io::Error::from(
+            std::io::ErrorKind::Other,
+        )));
     }
 
     #[test]
