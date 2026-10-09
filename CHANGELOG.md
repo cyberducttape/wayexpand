@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Bounded helper supervision:** action-broker output draining now yields to
+  action deadlines, form cancellation terminates process groups and transient
+  systemd units without an unbounded reader join, and IBus discovery drains
+  registry output while monitoring the child process.
 - **GUI polish:** localized the command editor's execution/action controls in
   German mode and added descriptive accessibility metadata to its move/remove
   buttons, so icon-only controls are understandable to assistive technology.

@@ -8,6 +8,7 @@ use std::os::fd::AsRawFd;
 use wayexpand_process_supervisor::ChildSupervisor;
 
 pub const MAX_STREAM_OUTPUT_BYTES: usize = crate::protocol::MAX_OUTPUT_BYTES / 2;
+const READS_PER_DRAIN: usize = 64;
 
 #[derive(Debug)]
 pub enum ChildRunError {
@@ -41,10 +42,17 @@ fn read_available<R: Read>(
     stream: &mut R,
     bytes: &mut Vec<u8>,
     limit: usize,
+    deadline: Instant,
 ) -> Result<ReadAvailable, std::io::Error> {
     let mut buffer = [0_u8; 8192];
     let mut truncated = false;
-    loop {
+    for _ in 0..READS_PER_DRAIN {
+        if Instant::now() >= deadline {
+            return Ok(ReadAvailable {
+                eof: false,
+                truncated,
+            });
+        }
         match stream.read(&mut buffer) {
             Ok(0) => {
                 return Ok(ReadAvailable {
@@ -69,6 +77,10 @@ fn read_available<R: Read>(
             Err(error) => return Err(error),
         }
     }
+    Ok(ReadAvailable {
+        eof: false,
+        truncated,
+    })
 }
 
 #[cfg(unix)]
@@ -103,6 +115,7 @@ pub fn run_child_unix(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
+                deadline,
             )
             .map_err(ChildRunError::Io)?;
             stdout_eof = result.eof;
@@ -113,6 +126,7 @@ pub fn run_child_unix(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
+                deadline,
             )
             .map_err(ChildRunError::Io)?;
             stderr_eof = result.eof;
@@ -139,6 +153,7 @@ pub fn run_child_unix(
                 stdout.as_mut().expect("stdout exists while not at EOF"),
                 &mut stdout_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
+                drain_deadline,
             )
             .map_err(ChildRunError::Io)?;
             stdout_eof = result.eof;
@@ -149,6 +164,7 @@ pub fn run_child_unix(
                 stderr.as_mut().expect("stderr exists while not at EOF"),
                 &mut stderr_bytes,
                 MAX_STREAM_OUTPUT_BYTES,
+                drain_deadline,
             )
             .map_err(ChildRunError::Io)?;
             stderr_eof = result.eof;
@@ -216,4 +232,32 @@ fn bounded_read_stream<R: Read>(stream: Option<R>) -> Vec<u8> {
         .read_to_end(&mut buf);
     buf.truncate(MAX_STREAM_OUTPUT_BYTES);
     buf
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use wayexpand_process_supervisor::configure_process_group;
+
+    #[test]
+    fn continuous_output_cannot_starve_the_action_deadline() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "yes wayexpand"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn continuous-output child");
+        let stdout = child.stdout.take().expect("child stdout");
+        let started = Instant::now();
+        let result = run_child_unix(child, Some(stdout), None, Duration::from_millis(50));
+        assert!(matches!(result, Err(ChildRunError::Timeout)));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "continuous output starved the timeout: {:?}",
+            started.elapsed()
+        );
+    }
 }

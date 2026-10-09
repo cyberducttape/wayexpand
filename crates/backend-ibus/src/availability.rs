@@ -3,6 +3,7 @@
 use std::{
     env, fs,
     io::Read,
+    os::fd::AsRawFd,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     process::{Command, Stdio},
@@ -11,6 +12,48 @@ use std::{
 };
 
 const MAX_IBUS_REGISTRY_OUTPUT_BYTES: usize = 64 * 1024;
+const IBUS_REGISTRY_READS_PER_DRAIN: usize = 64;
+
+#[derive(Default)]
+struct RegistryDrain {
+    truncated: bool,
+}
+
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn drain_registry_output(
+    stdout: &mut impl Read,
+    output: &mut Vec<u8>,
+) -> Result<RegistryDrain, std::io::Error> {
+    let mut buffer = [0_u8; 8192];
+    let mut result = RegistryDrain::default();
+    for _ in 0..IBUS_REGISTRY_READS_PER_DRAIN {
+        match stdout.read(&mut buffer) {
+            Ok(0) => {
+                return Ok(result);
+            }
+            Ok(count) => {
+                output.extend_from_slice(&buffer[..count]);
+                if output.len() > MAX_IBUS_REGISTRY_OUTPUT_BYTES {
+                    result.truncated = true;
+                    return Ok(result);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Ok(result);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(result)
+}
 
 /// Return whether the installed IBus component can be discovered by setup.
 /// This is intentionally an installation/provisioning probe, not an
@@ -36,20 +79,33 @@ fn ibus_registry_contains_engine() -> bool {
     else {
         return false;
     };
+    let Some(mut stdout) = child.stdout.take() else {
+        return false;
+    };
+    if set_nonblocking(&stdout).is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    }
     let deadline = Instant::now() + Duration::from_millis(500);
+    let mut output = Vec::new();
     loop {
+        let drain = match drain_registry_output(&mut stdout, &mut output) {
+            Ok(drain) => drain,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        };
+        if drain.truncated {
+            let _ = child.kill();
+            let _ = child.wait();
+            return false;
+        }
         match child.try_wait() {
-            Ok(Some(_)) => {
-                let Some(stdout) = child.stdout.take() else {
-                    return false;
-                };
-                let mut output = Vec::new();
-                let output_ok = stdout
-                    .take((MAX_IBUS_REGISTRY_OUTPUT_BYTES + 1) as u64)
-                    .read_to_end(&mut output)
-                    .is_ok();
-                let status_ok = child.wait().map(|status| status.success()).unwrap_or(false);
-                return output_ok && status_ok && registry_output_contains_engine(&output);
+            Ok(Some(status)) => {
+                return status.success() && registry_output_contains_engine(&output)
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) | Err(_) => {
@@ -101,7 +157,15 @@ fn ibus_component_directories() -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{registry_output_contains_engine, MAX_IBUS_REGISTRY_OUTPUT_BYTES};
+    use std::{
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+
+    use super::{
+        drain_registry_output, registry_output_contains_engine, set_nonblocking,
+        MAX_IBUS_REGISTRY_OUTPUT_BYTES,
+    };
 
     #[test]
     fn registry_output_is_bounded_and_requires_the_engine_name() {
@@ -110,5 +174,31 @@ mod tests {
         assert!(!registry_output_contains_engine(
             &[b'x'; MAX_IBUS_REGISTRY_OUTPUT_BYTES + 1]
         ));
+    }
+
+    #[test]
+    fn registry_drain_yields_for_continuous_output() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "yes wayexpand"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        set_nonblocking(&stdout).unwrap();
+        let mut output = Vec::new();
+        let started = Instant::now();
+        let mut drain = super::RegistryDrain::default();
+        while output.is_empty() && started.elapsed() < Duration::from_secs(1) {
+            drain = drain_registry_output(&mut stdout, &mut output).unwrap();
+            if output.is_empty() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!output.is_empty());
+        assert!(!drain.truncated || output.len() > MAX_IBUS_REGISTRY_OUTPUT_BYTES);
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

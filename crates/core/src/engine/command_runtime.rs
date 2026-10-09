@@ -505,27 +505,116 @@ use crate::limits::{MAX_FORM_OUTPUT_BYTES, MAX_FORM_VALUE_BYTES};
 /// it (tests, custom installs). Under systemd the GUI is started through
 /// `systemd-run --user` so it runs outside the daemon's sandbox, whose
 /// memory, task, and W^X limits a graphical client cannot live with.
-fn form_helper_command() -> (String, Vec<String>) {
+struct FormHelperCommand {
+    program: String,
+    args: Vec<String>,
+    transient_unit: Option<String>,
+}
+
+static FORM_UNIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+fn form_helper_command() -> FormHelperCommand {
     if let Some(program) = std::env::var_os("WAYEXPAND_FORM_HELPER") {
-        return (program.to_string_lossy().into_owned(), Vec::new());
+        return FormHelperCommand {
+            program: program.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            transient_unit: None,
+        };
     }
     if std::env::var_os("INVOCATION_ID").is_some() {
-        return (
-            "systemd-run".into(),
-            [
+        let unit = format!(
+            "wayexpand-form-{}-{}.service",
+            std::process::id(),
+            FORM_UNIT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        );
+        return FormHelperCommand {
+            program: "systemd-run".into(),
+            args: [
                 "--user",
                 "--quiet",
                 "--wait",
                 "--pipe",
                 "--collect",
+                "--unit",
+                &unit,
                 "--",
                 "wayexpand-gui",
             ]
             .map(String::from)
             .to_vec(),
-        );
+            transient_unit: Some(unit),
+        };
     }
-    ("wayexpand-gui".into(), Vec::new())
+    FormHelperCommand {
+        program: "wayexpand-gui".into(),
+        args: Vec::new(),
+        transient_unit: None,
+    }
+}
+
+const FORM_OUTPUT_READS_PER_DRAIN: usize = 64;
+
+#[cfg(unix)]
+fn read_available_form_output(
+    stdout: &mut ChildStdout,
+    bytes: &mut Vec<u8>,
+    shutdown: Option<&AtomicBool>,
+) -> Result<bool, CommandError> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..FORM_OUTPUT_READS_PER_DRAIN {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Err(CommandError::StaleInput);
+        }
+        match stdout.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                bytes.extend_from_slice(&buffer[..count]);
+                if bytes.len() > MAX_FORM_OUTPUT_BYTES {
+                    return Err(CommandError::OutputTooLarge);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(_) => return Err(CommandError::OutputChannelLost),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(unix)]
+fn stop_transient_form_unit(unit: Option<&str>) {
+    let Some(unit) = unit else {
+        return;
+    };
+    let Ok(mut stop) = Command::new("systemctl")
+        .args(["--user", "stop", "--no-block", unit])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    let deadline = Instant::now() + Duration::from_millis(100);
+    loop {
+        match stop.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+            Ok(None) | Err(_) => {
+                let _ = stop.kill();
+                let _ = stop.wait();
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn terminate_form_helper(guard: &mut ChildSupervisor, unit: Option<&str>) {
+    // systemd-run owns a separate transient cgroup; stopping the wrapper
+    // alone does not guarantee that a GUI descendant releases the pipe.
+    stop_transient_form_unit(unit);
+    guard.kill_group();
+    let _ = guard.reap();
 }
 
 /// Show a form for `fields` and return the entered values by field key.
@@ -538,52 +627,59 @@ pub(super) fn run_form_helper(
     shutdown: &AtomicBool,
 ) -> Result<std::collections::HashMap<String, String>, CommandError> {
     let spec = serde_json::json!({ "title": title, "fields": fields }).to_string();
-    let (program, mut args) = form_helper_command();
+    let helper = form_helper_command();
+    let FormHelperCommand {
+        program,
+        mut args,
+        transient_unit,
+    } = helper;
     args.push("--form".into());
     args.push(spec);
-    let mut child = Command::new(program)
+    let mut process = Command::new(program);
+    process
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| CommandError::SpawnFailed {
-            detail: error.to_string(),
-        })?;
-    let stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
-    // Drain stdout concurrently so a large answer cannot block the helper.
-    let reader = match thread::Builder::new()
-        .name("wayexpand-form-output".into())
-        .spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout
-                .take(MAX_FORM_OUTPUT_BYTES as u64 + 1)
-                .read_to_end(&mut bytes);
-            bytes
-        }) {
-        Ok(reader) => reader,
-        Err(_) => {
-            // Without a drain worker the helper could block forever on a full
-            // pipe. Terminate it before returning a recoverable worker error.
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CommandError::WorkerUnavailable);
-        }
-    };
+        .stderr(Stdio::null());
+    configure_process_group(&mut process);
+    let mut child = process.spawn().map_err(|error| CommandError::SpawnFailed {
+        detail: error.to_string(),
+    })?;
+    let mut stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
+    let mut guard = ChildSupervisor::new(child);
+    set_nonblocking_stdout(&stdout)?;
+    let mut bytes = Vec::new();
+    let mut stdout_eof = false;
     let deadline = Instant::now() + FORM_TIMEOUT;
     let status = loop {
-        if let Some(status) = child.try_wait().map_err(|error| CommandError::WaitFailed {
-            operation: ProcessWaitOperation::TryWait,
-            reason: ProcessWaitFailure::Io {
-                detail: error.to_string(),
-            },
-        })? {
-            break status;
+        if !stdout_eof {
+            stdout_eof = match read_available_form_output(&mut stdout, &mut bytes, Some(shutdown)) {
+                Ok(eof) => eof,
+                Err(error) => {
+                    terminate_form_helper(&mut guard, transient_unit.as_deref());
+                    return Err(error);
+                }
+            };
+        }
+        if guard
+            .has_exited()
+            .map_err(|error| CommandError::WaitFailed {
+                operation: ProcessWaitOperation::TryWait,
+                reason: ProcessWaitFailure::Io {
+                    detail: error.to_string(),
+                },
+            })?
+        {
+            guard.kill_group();
+            break guard.reap().map_err(|error| CommandError::WaitFailed {
+                operation: ProcessWaitOperation::Reap,
+                reason: ProcessWaitFailure::Io {
+                    detail: error.to_string(),
+                },
+            })?;
         }
         if shutdown.load(Ordering::Acquire) || Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = reader.join();
+            terminate_form_helper(&mut guard, transient_unit.as_deref());
             return Err(if shutdown.load(Ordering::Acquire) {
                 CommandError::StaleInput
             } else {
@@ -592,7 +688,16 @@ pub(super) fn run_form_helper(
         }
         thread::sleep(Duration::from_millis(50));
     };
-    let bytes = reader.join().map_err(|_| CommandError::OutputChannelLost)?;
+    let drain_deadline = Instant::now() + Duration::from_millis(100);
+    while !stdout_eof && Instant::now() < drain_deadline {
+        stdout_eof = read_available_form_output(&mut stdout, &mut bytes, None)?;
+        if !stdout_eof {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    if !stdout_eof {
+        return Err(CommandError::IncompleteOutput);
+    }
     if !status.success() {
         // Cancelled: the trigger stays as typed.
         return Err(CommandError::StaleInput);

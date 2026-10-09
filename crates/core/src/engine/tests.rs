@@ -1,6 +1,9 @@
 use std::os::unix::fs::PermissionsExt;
 use std::{
-    sync::{atomic::AtomicBool, mpsc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -4646,6 +4649,31 @@ fn a_cancelled_form_leaves_the_trigger_alone() {
     queue_form(&mut engine);
     assert!(wait_for_completion(&mut engine).is_empty());
     assert!(!engine.is_form_open());
+}
+
+#[test]
+fn cancelling_a_form_does_not_wait_for_a_descendant_holding_stdout() {
+    let _helper = FakeFormHelper::new(
+        "descendant-stdout",
+        r#"sleep 30 & while :; do sleep 1; done"#,
+    );
+    let fields = crate::form_fields("{{field:name}}").unwrap();
+    let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+    let worker_shutdown = std::sync::Arc::clone(&shutdown);
+    let (sender, receiver) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let result =
+            super::command_runtime::run_form_helper("Test", &fields, worker_shutdown.as_ref());
+        sender.send(result).unwrap();
+    });
+
+    thread::sleep(Duration::from_millis(100));
+    shutdown.store(true, Ordering::Release);
+    let result = receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("form cancellation should not wait for inherited stdout");
+    assert!(matches!(result, Err(CommandError::StaleInput)));
+    worker.join().unwrap();
 }
 
 #[test]
