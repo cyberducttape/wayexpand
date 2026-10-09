@@ -98,6 +98,8 @@ jobs:
               rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
               "$workflow_file"
           done < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
+      - name: Validate Launchpad synchronization safety
+        run: bash scripts/test-launchpad-sync-workflow.sh
 
   supply-chain:
     name: Security Audit
