@@ -13,6 +13,10 @@ if [ -z "$version" ]; then
 fi
 
 remote_url=$(git -C "$project_dir" remote get-url "$remote")
+remote_ref="refs/heads/$branch"
+ssh_command=${GIT_SSH_COMMAND:-ssh -F /dev/null}
+remote_commit=$(GIT_SSH_COMMAND="$ssh_command" git -C "$project_dir" ls-remote "$remote_url" "$remote_ref" \
+    | awk -v ref="$remote_ref" '$2 == ref { print $1; exit }')
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-launchpad-branch.XXXXXXXX")
 cleanup() {
     rm -rf "$tmpdir"
@@ -31,8 +35,9 @@ git -C "$project_dir" archive HEAD | tar --extract --directory "$tmpdir/source"
     git add -A
     git add -f .cargo/config.toml vendor
     git commit --quiet -m "Publish vendored Launchpad source for ${version}"
-    GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -F /dev/null}" \
-        git push --force "$remote_url" "HEAD:refs/heads/$branch"
+    lease="--force-with-lease=${remote_ref}:${remote_commit}"
+    GIT_SSH_COMMAND="$ssh_command" \
+        git push "$lease" "$remote_url" "HEAD:$remote_ref"
 )
 
 printf 'Published %s to %s (%s)\n' "$branch" "$remote" "$remote_url"

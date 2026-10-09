@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - **Safer Launchpad synchronization:** sync runs are serialized, and version-tag
   checkouts can no longer overwrite the Launchpad `main` branch.
+- Launchpad vendored-branch publication now uses an explicit remote lease and
+  refuses to overwrite a concurrent branch update.
 - **Fail-closed certification and rollback:** production input-method
   certification now requires a healthy doctor result, and uninstall refuses to
   remove binaries while any managed user service cannot be stopped or remains
