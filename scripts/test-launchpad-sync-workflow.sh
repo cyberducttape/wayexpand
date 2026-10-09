@@ -15,6 +15,7 @@ grep -F -- 'for attempt in 1 2 3; do' "$workflow" >/dev/null
 grep -F -- 'push_status=$?' "$workflow" >/dev/null
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
+grep -F -- 'timeout-minutes: 30' "$workflow" >/dev/null
 grep -F -- "$main_guard" "$workflow" >/dev/null
 grep -F -- "$tag_message" "$workflow" >/dev/null
 grep -F -- "$main_lease" "$workflow" >/dev/null

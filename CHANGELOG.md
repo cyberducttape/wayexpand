@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
 - **Release certification secret forwarding:** release builds now inherit the
   configured compositor-runner token when calling the reusable certification
   workflow, so tag releases can reach the runner-capacity preflight.
+- **Bounded Launchpad synchronization:** the mirror job now has a workflow-level
+  timeout in addition to its bounded SSH and push operations.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit
