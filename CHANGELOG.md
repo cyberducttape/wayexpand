@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added `wayexpand support-bundle`, an allowlisted diagnostic summary that
+  excludes configuration paths, snippet contents, credentials, and raw errors;
+  optional output files are private and non-overwriting.
 - User installer version directories now use the built binary's full version
   identity, so installs from newer development commits cannot reuse stale
   files merely because the Cargo package version is unchanged.

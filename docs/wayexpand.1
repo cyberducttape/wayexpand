@@ -51,6 +51,11 @@ from the configuration and organization policy. Replacement text is never shown.
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
+.B support-bundle [--output FILE]
+Write a redacted support report. The report excludes config paths, snippet
+contents, credentials, and detailed error strings. A file is created with mode
+0600 and is never overwritten; without --output, JSON is written to stdout.
+.TP
 .B fleet status [--json]
 Show the merged fleet configuration layers and their provenance.
 .TP

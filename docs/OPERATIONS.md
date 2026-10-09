@@ -463,3 +463,16 @@ wayexpand status --json
 
 The control socket is user-owned and mode `0600`; do not expose it through a
 shared filesystem or proxy it over a network.
+
+To share a diagnostic artifact with support or attach it to a fleet ticket,
+generate the allowlisted report:
+
+```sh
+wayexpand support-bundle --output wayexpand-support.json
+```
+
+The file is created with mode `0600` and is never overwritten. The report
+contains health and backend capability summaries, but deliberately excludes
+configuration paths, snippet triggers and replacements, policy contents,
+credentials, and raw error strings. Review it before sharing; desktop and
+backend metadata can still identify the general workstation environment.

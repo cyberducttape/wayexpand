@@ -28,6 +28,7 @@ use doctor::files::{print_config_diagnostics, print_control_socket_diagnostics};
 use doctor::json::print_json_diagnostics;
 use doctor::policy::{load_policy, print_capabilities_diagnostics, print_policy_diagnostics};
 use doctor::status::status_as_json;
+use doctor::support::support_bundle;
 use errors::{
     config_error, config_load_error, daemon_error, exit_code_for, normalize_error, usage_error,
 };
@@ -41,6 +42,7 @@ use std::{
     os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::Command,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -114,6 +116,7 @@ fn run() -> Result<()> {
         Some("stats") => stats_command(args)?,
         Some("sync") => sync_command(args)?,
         Some("certify") => certify_command(args)?,
+        Some("support-bundle") => support_bundle(args)?,
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
         Some("fleet") => fleet_command(args)?,
@@ -226,6 +229,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("backend", "Show backend availability"),
             ("explain-backend", "Explain automatic backend selection"),
             ("certify [--json]", "Run local compatibility certification"),
+            (
+                "support-bundle [--output FILE]",
+                "Write redacted diagnostic JSON for support",
+            ),
             (
                 "fleet status [--json]",
                 "Show merged fleet configuration status",
