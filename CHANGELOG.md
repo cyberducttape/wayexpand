@@ -18,6 +18,8 @@ All notable changes to WayExpand are documented here.
   preventing a mixed snippet snapshot from becoming active during an edit.
 - Form-helper failures now stop their transient systemd unit, including
   inherited-pipe and malformed-output paths, preventing orphaned GUI helpers.
+- Git synchronization now serializes the complete repository transaction,
+  preventing concurrent callers from interleaving fetch, rebase, and rollback.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing

@@ -9,8 +9,10 @@
 //! leave an invalid library is rolled back to the local version.
 
 use std::{
+    fs::{self, File, OpenOptions},
     io::Read,
     os::fd::AsRawFd,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread,
@@ -32,6 +34,59 @@ const GITIGNORE: &str = "\
 ";
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_GIT_OUTPUT_BYTES: usize = 128 * 1024;
+const SYNC_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Serialize the complete sync transaction, not just individual Git
+/// commands. Git's index lock does not cover fetch/rebase/validation/reset as
+/// one unit, so two callers could otherwise interleave and publish the wrong
+/// repository state.
+struct SyncLock(File);
+
+impl SyncLock {
+    fn acquire(directory: &Path) -> Result<Self> {
+        let path = directory.join(".wayexpand-sync.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("could not open sync lock {}", path.display()))?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        let deadline = Instant::now() + SYNC_LOCK_TIMEOUT;
+        loop {
+            // SAFETY: flock only operates on this owned lock descriptor.
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if result == 0 {
+                return Ok(Self(file));
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(error).context("could not acquire sync lock");
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "another WayExpand synchronization is already running in {}",
+                    directory.display()
+                );
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+impl Drop for SyncLock {
+    fn drop(&mut self) {
+        // Closing the descriptor also releases the lock; explicitly unlocking
+        // makes the ownership contract clear and keeps the operation harmless
+        // if the implementation later retains the file for diagnostics.
+        // SAFETY: the descriptor belongs to this lock instance.
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SyncReport {
@@ -222,6 +277,7 @@ pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathB
         .parent()
         .context("configuration path has no directory")?
         .to_path_buf();
+    let _lock = SyncLock::acquire(&directory)?;
     validate_library(config_path)?;
     if !directory.join(".git").exists() {
         git_ok(&directory, &["init", "--quiet"])?;
@@ -369,6 +425,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     if !directory.join(".git").exists() {
         bail!("the library is not a Git repository yet; run `wayexpand sync init [--remote URL]`");
     }
+    let _lock = SyncLock::acquire(&directory)?;
     validate_library(config_path)?;
     let committed = commit_library(&directory, "Sync WayExpand library")?;
     let remote = remote(&directory)?;
