@@ -93,4 +93,26 @@ XDG_CONFIG_HOME="$test_root/config" \
 "$project_dir/scripts/install-user.sh"
 
 cmp -s "$config_path" "$test_root/expected-config.toml"
+
+# Enabled upgrades validate before replacing installed files. Keep a sentinel
+# binary when the existing library is rejected by the preflight.
+printf '%s\n' 'invalid existing library' >"$config_path"
+printf '%s\n' 'installed-daemon-sentinel' >"$test_root/home/.local/bin/wayexpand-daemon"
+stub_bin="$test_root/stub-bin"
+mkdir -p "$stub_bin"
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$stub_bin/systemctl"
+if PATH="$stub_bin:$PATH" \
+    HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$project_dir/scripts/install-user.sh" --enable --service=wayexpand-input-method.service \
+    >/dev/null 2>&1; then
+    printf '%s\n' 'user installer accepted an invalid configuration during upgrade' >&2
+    exit 1
+fi
+grep -Fx 'installed-daemon-sentinel' "$test_root/home/.local/bin/wayexpand-daemon" >/dev/null
+
 printf '%s\n' "user installer test passed"

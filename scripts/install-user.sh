@@ -76,8 +76,7 @@ case "$target_dir" in
     *) target_dir="$project_dir/$target_dir" ;;
 esac
 
-install -d -m 0700 "$state_dir"
-chmod 0700 "$state_dir"
+config_path="$config_dir/expansions.toml"
 
 printf '%s\n' "Building WayExpand release binaries..."
 CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
@@ -88,6 +87,26 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand-ui \
     -p wayexpand-gui \
     -p wayexpand-backend-ibus
+
+if [ "$enable_service" -eq 1 ]; then
+    validation_path=
+    if [ -e "$config_path" ] || [ -L "$config_path" ]; then
+        validation_path="$config_path"
+        printf '%s\n' "Validating existing configuration before upgrade: $config_path"
+    elif [ -f "$project_dir/expansions.toml" ]; then
+        validation_path="$project_dir/expansions.toml"
+        printf '%s\n' "Validating bundled configuration before installation: $validation_path"
+    else
+        printf '%s\n' 'error: --enable requires an existing configuration or bundled expansions.toml' >&2
+        exit 1
+    fi
+    # Validate before replacing any installed files. An upgrade must not leave
+    # a mixed-version installation behind when the active library is invalid.
+    "$target_dir/release/wayexpand" validate "$validation_path"
+fi
+
+install -d -m 0700 "$state_dir"
+chmod 0700 "$state_dir"
 
 install -Dm755 "$target_dir/release/wayexpand-daemon" \
     "$bin_dir/wayexpand-daemon"
@@ -128,7 +147,6 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
         "$icon_base/$size/apps/wayexpand.png"
 done
 
-config_path="$config_dir/expansions.toml"
 if [ -e "$config_path" ] || [ -L "$config_path" ]; then
     printf '%s\n' "Keeping existing configuration: $config_path"
 else
