@@ -509,7 +509,7 @@ fn main() -> Result<()> {
     }
     warn!("input stream ended; daemon stopping");
     daemon.usage.collect(&mut daemon.config.engine);
-    daemon.usage.flush();
+    daemon.usage.request_shutdown();
     // Backends get an explicit teardown opportunity. The bounded wait keeps
     // systemd stop independent from a broken portal implementation, while
     // still allowing libei to close its portal session and Tokio runtime
@@ -517,6 +517,7 @@ fn main() -> Result<()> {
     if let Some(injector) = daemon.injector.take() {
         shutdown_injector(injector);
     }
+    daemon.usage.wait_for_shutdown();
     Ok(())
 }
 

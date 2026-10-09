@@ -244,13 +244,32 @@ fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
 }
 
 fn validate_library(config_path: &Path) -> Result<()> {
-    Config::validate_library_files(config_path)
-        .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))?;
-    // Git would commit a symlink as a link, which the remote tree check on
-    // every other machine refuses; require plain files in the library.
+    let primary = library_primary_name(config_path)?;
+    if matches!(
+        primary,
+        ".gitignore" | ".git" | ".wayexpand-sync.lock" | "snippets.d"
+    ) {
+        bail!("library primary filename conflicts with a reserved library path");
+    }
+    if !std::fs::symlink_metadata(config_path).is_ok_and(|metadata| metadata.file_type().is_file())
+    {
+        bail!("library is invalid: primary configuration is not a plain file");
+    }
     let directory = config_path
         .parent()
         .context("configuration path has no directory")?;
+    let gitignore = directory.join(".gitignore");
+    if let Ok(metadata) = std::fs::symlink_metadata(&gitignore) {
+        if !metadata.file_type().is_file() {
+            bail!("library is invalid: .gitignore is not a plain file");
+        }
+    }
+    let snippets = directory.join("snippets.d");
+    if let Ok(metadata) = std::fs::symlink_metadata(&snippets) {
+        if !metadata.file_type().is_dir() {
+            bail!("library is invalid: snippets.d is not a plain directory");
+        }
+    }
     for file in Config::layer_files(directory)
         .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))?
     {
@@ -261,6 +280,10 @@ fn validate_library(config_path: &Path) -> Result<()> {
             );
         }
     }
+    // Validate only after rejecting symlinks for every path Git may stage;
+    // the regular fleet loader intentionally follows layer symlinks.
+    Config::validate_library_files(config_path)
+        .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))?;
     Ok(())
 }
 
@@ -386,18 +409,28 @@ pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathB
             git_ok(&directory, &["remote", "add", "origin", url])?;
         }
     }
-    commit_library(&directory, "Track WayExpand snippet library")?;
+    commit_library(
+        &directory,
+        library_primary_name(config_path)?,
+        "Track WayExpand snippet library",
+    )?;
     Ok(directory)
 }
 
-fn commit_library(directory: &Path, message: &str) -> Result<bool> {
-    let mut paths = vec![".gitignore", "expansions.toml"];
-    paths.push("snippets.d");
+fn library_primary_name(config_path: &Path) -> Result<&str> {
+    config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("configuration filename must be valid UTF-8")
+}
+
+fn commit_library(directory: &Path, primary: &str, message: &str) -> Result<bool> {
+    let primary_pathspec = format!(":(literal){primary}");
     // `-A` is essential here: if the final snippets.d file is deleted, the
     // directory disappears and therefore cannot be selected by an existence
     // check. Git still understands the pathspec and stages the deletion.
     let mut add = vec!["add", "-A", "--"];
-    for path in paths {
+    for path in [".gitignore", "snippets.d"] {
         let present = directory.join(path).exists();
         let tracked = !present
             && git_ok(directory, &["ls-files", "--", path]).is_ok_and(|output| !output.is_empty());
@@ -405,10 +438,18 @@ fn commit_library(directory: &Path, message: &str) -> Result<bool> {
             add.push(path);
         }
     }
-    if add.len() == 3 {
-        return Ok(false);
+    if add.len() > 3 {
+        git_ok(directory, &add)?;
     }
-    git_ok(directory, &add)?;
+    let primary_present = directory.join(primary).exists();
+    let primary_tracked = !primary_present
+        && git_ok(directory, &["ls-files", "--", &primary_pathspec])
+            .is_ok_and(|output| !output.is_empty());
+    if primary_present || primary_tracked {
+        // The default ignore rule excludes the entire config directory. Force
+        // only this exact literal primary path, never the snippet directory.
+        git_ok(directory, &["add", "-A", "-f", "--", &primary_pathspec])?;
+    }
     // The index may already hold unrelated staged files. Commit only the
     // exact library paths that changed, so nothing else can be published.
     let staged = git_ok_raw(
@@ -421,13 +462,13 @@ fn commit_library(directory: &Path, message: &str) -> Result<bool> {
             "-z",
             "--",
             ".gitignore",
-            "expansions.toml",
+            &primary_pathspec,
             "snippets.d",
         ],
     )?;
     let library_paths: Vec<String> = staged
         .split('\0')
-        .filter(|path| is_library_path(path))
+        .filter(|path| is_library_path(path, primary))
         .map(|path| format!(":(literal){path}"))
         .collect();
     if library_paths.is_empty() {
@@ -442,8 +483,9 @@ fn commit_library(directory: &Path, message: &str) -> Result<bool> {
 }
 
 /// Paths `wayexpand sync` is allowed to commit and publish.
-fn is_library_path(path: &str) -> bool {
-    matches!(path, ".gitignore" | "expansions.toml")
+fn is_library_path(path: &str, primary: &str) -> bool {
+    path == ".gitignore"
+        || path == primary
         || path
             .strip_prefix("snippets.d/")
             .is_some_and(|name| !name.contains('/') && name.ends_with(".toml") && name != ".toml")
@@ -451,7 +493,7 @@ fn is_library_path(path: &str) -> bool {
 
 /// Refuse a tree unless every entry is an allowlisted library path stored as
 /// an ordinary file blob (not a symlink, submodule, or other special mode).
-fn verify_library_tree(directory: &Path, revision: &str) -> Result<()> {
+fn verify_library_tree(directory: &Path, revision: &str, primary: &str) -> Result<()> {
     let listing = git_ok_raw(directory, &["ls-tree", "-r", "-z", "--full-tree", revision])?;
     let mut foreign = Vec::new();
     for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
@@ -460,7 +502,7 @@ fn verify_library_tree(directory: &Path, revision: &str) -> Result<()> {
             .split_once('\t')
             .context("git ls-tree reported an unexpected entry")?;
         let mode = header.split(' ').next().unwrap_or_default();
-        if !matches!(mode, "100644" | "100755") || !is_library_path(path) {
+        if !matches!(mode, "100644" | "100755") || !is_library_path(path, primary) {
             foreign.push(path.to_owned());
         }
     }
@@ -469,7 +511,7 @@ fn verify_library_tree(directory: &Path, revision: &str) -> Result<()> {
     }
     foreign.sort_unstable();
     bail!(
-        "refusing to sync: the remote library contains entries that are not plain snippet \
+        "refusing to sync: Git tree {revision} contains entries that are not plain snippet \
          library files ({}); your local library is unchanged",
         foreign.join(", ")
     )
@@ -478,7 +520,7 @@ fn verify_library_tree(directory: &Path, revision: &str) -> Result<()> {
 /// Refuse to push history that touches anything outside the library, such as
 /// files committed by hand or by an older release. `base` is the remote tip;
 /// without one, the whole history would be published and is checked.
-fn verify_outgoing_paths(directory: &Path, base: Option<&str>) -> Result<()> {
+fn verify_outgoing_paths(directory: &Path, base: Option<&str>, primary: &str) -> Result<()> {
     let range = base.map_or_else(|| "HEAD".to_owned(), |base| format!("{base}..HEAD"));
     let touched = git_ok_raw(
         directory,
@@ -494,7 +536,7 @@ fn verify_outgoing_paths(directory: &Path, base: Option<&str>) -> Result<()> {
     )?;
     let mut foreign: Vec<&str> = touched
         .split(['\0', '\n'])
-        .filter(|path| !path.is_empty() && !is_library_path(path))
+        .filter(|path| !path.is_empty() && !is_library_path(path, primary))
         .collect();
     if foreign.is_empty() {
         return Ok(());
@@ -520,7 +562,8 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     }
     let _lock = SyncLock::acquire(&directory)?;
     validate_library(config_path)?;
-    let committed = commit_library(&directory, "Sync WayExpand library")?;
+    let primary = library_primary_name(config_path)?;
+    let committed = commit_library(&directory, primary, "Sync WayExpand library")?;
     let remote = remote(&directory)?;
     let mut report = SyncReport {
         directory: directory.clone(),
@@ -545,7 +588,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         // checked out: a remote must not be able to place arbitrary files,
         // symlinks, or submodules in the configuration directory.
         git_ok(&directory, &["fetch", "--quiet", "origin", &branch])?;
-        verify_library_tree(&directory, "FETCH_HEAD")?;
+        verify_library_tree(&directory, "FETCH_HEAD", primary)?;
         let rebase = git(&directory, &["rebase", "--quiet", "FETCH_HEAD"])?;
         if !rebase.status.success() {
             let _ = git(&directory, &["rebase", "--abort"]);
@@ -566,7 +609,15 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
             bail!("remote changes would make the {error:#}; kept the local library");
         }
     }
-    verify_outgoing_paths(&directory, remote_has_branch.then_some("FETCH_HEAD"))?;
+    verify_outgoing_paths(
+        &directory,
+        remote_has_branch.then_some("FETCH_HEAD"),
+        primary,
+    )?;
+    // The path history check prevents unrelated commits from being published;
+    // inspect the actual outgoing tip too, so symlinks and special Git modes
+    // cannot hide behind an otherwise allowlisted filename.
+    verify_library_tree(&directory, "HEAD", primary)?;
     git_ok(
         &directory,
         &["push", "--quiet", "--set-upstream", "origin", &branch],
@@ -809,10 +860,13 @@ mod tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o600),
         )
         .expect("restrict snippet");
-        commit_library(&directory, "add snippet").expect("commit snippet");
+        commit_library(&directory, "expansions.toml", "add snippet").expect("commit snippet");
         std::fs::remove_file(snippet).expect("delete snippet");
         std::fs::remove_dir(snippets).expect("delete empty snippets directory");
-        assert!(commit_library(&directory, "remove snippet").expect("commit deletion"));
+        assert!(
+            commit_library(&directory, "expansions.toml", "remove snippet")
+                .expect("commit deletion")
+        );
         let tracked = git_ok(&directory, &["ls-tree", "-r", "--name-only", "HEAD"])
             .expect("list tracked files");
         assert!(!tracked.lines().any(|path| path == "snippets.d/old.toml"));
@@ -971,13 +1025,109 @@ mod tests {
 
     #[test]
     fn library_path_allowlist_is_exact() {
-        assert!(is_library_path("expansions.toml"));
-        assert!(is_library_path(".gitignore"));
-        assert!(is_library_path("snippets.d/work.toml"));
-        assert!(!is_library_path("snippets.d/nested/work.toml"));
-        assert!(!is_library_path("snippets.d/run.sh"));
-        assert!(!is_library_path("portal-token"));
-        assert!(!is_library_path("expansions.toml.bak"));
+        assert!(is_library_path("expansions.toml", "expansions.toml"));
+        assert!(is_library_path(".gitignore", "expansions.toml"));
+        assert!(is_library_path("snippets.d/work.toml", "expansions.toml"));
+        assert!(!is_library_path(
+            "snippets.d/nested/work.toml",
+            "expansions.toml"
+        ));
+        assert!(!is_library_path("snippets.d/run.sh", "expansions.toml"));
+        assert!(!is_library_path("portal-token", "expansions.toml"));
+        assert!(!is_library_path("expansions.toml.bak", "expansions.toml"));
+        assert!(is_library_path("team library.toml", "team library.toml"));
+        assert!(!is_library_path("other.toml", "team library.toml"));
+    }
+
+    #[test]
+    fn custom_primary_filename_is_staged_and_primary_symlinks_are_rejected() {
+        let (directory, config_path) = prepare_repository();
+        let custom_path = directory.join("team library.toml");
+        std::fs::rename(&config_path, &custom_path).expect("rename primary config");
+        init(&custom_path, None).expect("initialize custom primary library");
+        assert_eq!(
+            git_ok(&directory, &["ls-files", "--", "team library.toml"])
+                .expect("list custom primary"),
+            "team library.toml"
+        );
+        assert!(git_ok(&directory, &["ls-files", "--", "expansions.toml"])
+            .expect("list canonical primary")
+            .is_empty());
+
+        let real_path = directory.join("real-config.toml");
+        std::fs::rename(&custom_path, &real_path).expect("move primary behind symlink");
+        std::os::unix::fs::symlink(&real_path, &custom_path).expect("symlink primary config");
+        assert!(validate_library(&custom_path).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_rejects_symlinked_library_directory_and_gitignore() {
+        let (directory, config_path) = prepare_repository();
+        let target_directory = directory.join("snippets-target");
+        std::fs::create_dir(&target_directory).expect("create snippets target");
+        std::os::unix::fs::symlink(&target_directory, directory.join("snippets.d"))
+            .expect("symlink snippets directory");
+        assert!(validate_library(&config_path).is_err());
+        std::fs::remove_file(directory.join("snippets.d")).expect("remove snippets symlink");
+
+        let target_file = directory.join("ignore-target");
+        std::fs::write(&target_file, "*").expect("create ignore target");
+        std::os::unix::fs::symlink(&target_file, directory.join(".gitignore"))
+            .expect("symlink gitignore");
+        assert!(validate_library(&config_path).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn custom_primary_filename_syncs_to_and_from_the_remote() {
+        let (directory, default_path) = prepare_repository();
+        let custom_path = directory.join("workstation-library.toml");
+        std::fs::rename(&default_path, &custom_path).expect("rename primary config");
+        let remote_directory = test_directory();
+        std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+        git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+        let remote_url = remote_directory.display().to_string();
+        init(&custom_path, Some(&remote_url)).expect("initialize custom primary library");
+        assert!(sync(&custom_path).expect("push custom primary").pushed);
+
+        std::fs::write(
+            &custom_path,
+            "[[expansion]]\ntrigger = \":custom\"\nreplacement = \"updated\"\n",
+        )
+        .expect("update custom primary");
+        assert!(
+            sync(&custom_path)
+                .expect("sync custom primary change")
+                .pushed
+        );
+        let remote_tip =
+            git_ok(&remote_directory, &["rev-parse", "HEAD"]).expect("read bare remote tip");
+        assert!(
+            git_ok(&directory, &["ls-tree", "-r", "--name-only", &remote_tip])
+                .expect("list synced custom tree")
+                .lines()
+                .any(|path| path == "workstation-library.toml")
+        );
+        let _ = std::fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    #[test]
+    fn outgoing_tree_modes_reject_a_symlink_at_an_allowlisted_path() {
+        let (directory, config_path) = prepare_repository();
+        let target = directory.join("target");
+        std::fs::write(&target, "not the config").expect("write symlink target");
+        std::fs::remove_file(&config_path).expect("remove primary config");
+        std::os::unix::fs::symlink(&target, &config_path).expect("replace primary with symlink");
+        git_ok(&directory, &["add", "-f", "--", "expansions.toml"])
+            .expect("stage malicious primary symlink");
+        git_ok(&directory, &["commit", "--quiet", "-m", "malicious mode"])
+            .expect("commit malicious primary symlink");
+        let error = verify_library_tree(&directory, "HEAD", "expansions.toml")
+            .expect_err("outgoing tree must reject symlink modes");
+        assert!(format!("{error:#}").contains("expansions.toml"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

@@ -481,7 +481,10 @@ operators can distinguish a running process from newly installed binaries.
   "matcher_latency_window_count": 0,
   "matcher_latency_p50_us": 0,
   "matcher_latency_p95_us": 0,
-  "matcher_latency_p99_us": 0
+  "matcher_latency_p99_us": 0,
+  "usage_flush_max_duration_us": 0,
+  "usage_flush_failures_total": 0,
+  "usage_queue_rejected_total": 0
 }
 ```
 
@@ -519,6 +522,9 @@ operators can distinguish a running process from newly installed binaries.
 - `matcher_latency_sample_count` (integer): Lifetime count of input events processed by the matcher
 - `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)
 - `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
+- `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
+- `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
+- `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable
 
 These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 

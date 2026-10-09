@@ -123,6 +123,9 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "source",
             "state",
             "status_schema",
+            "usage_flush_failures_total",
+            "usage_flush_max_duration_us",
+            "usage_queue_rejected_total",
             "window_identity_exact",
             "window_tracker_connected",
         ],
@@ -144,6 +147,9 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "matcher_latency_p50_us",
         "matcher_latency_p95_us",
         "matcher_latency_p99_us",
+        "usage_flush_max_duration_us",
+        "usage_flush_failures_total",
+        "usage_queue_rejected_total",
     ] {
         assert!(body
             .lines()

@@ -44,6 +44,9 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "matcher_latency_p50_us"
                         | "matcher_latency_p95_us"
                         | "matcher_latency_p99_us"
+                        | "usage_flush_max_duration_us"
+                        | "usage_flush_failures_total"
+                        | "usage_queue_rejected_total"
                 ) =>
             {
                 match value.parse::<u64>() {

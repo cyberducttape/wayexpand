@@ -17,6 +17,11 @@ repository that tracks only the library: `expansions.toml` and any
 and Action Broker configuration are excluded by the generated `.gitignore` and
 never leave the machine. Git uses your normal credentials and SSH keys.
 
+When `wayexpand sync` is given a custom configuration path, that file's
+filename is tracked as the library's primary configuration instead of
+`expansions.toml`. Other machines must use the same filename and point WayExpand
+at that file; layered snippets remain in the sibling `snippets.d/` directory.
+
 On another machine, clone the repository into the configuration directory (or
 run `sync init` there with the same remote once its own library is empty or
 merged).

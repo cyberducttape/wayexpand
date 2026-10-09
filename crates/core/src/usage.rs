@@ -86,6 +86,27 @@ impl UsageStats {
         let day = crate::template::format_date(event.unix_timestamp);
         let total = self.daily.entry(day).or_default();
         *total = total.saturating_add(1);
+        self.enforce_limits();
+    }
+
+    /// Merge pre-aggregated counters without reconstructing individual
+    /// events. Used by the daemon's asynchronous persistence worker.
+    pub fn merge(&mut self, delta: &UsageStats) {
+        for (id, incoming) in &delta.snippets {
+            let usage = self.snippets.entry(id.clone()).or_default();
+            usage.count = usage.count.saturating_add(incoming.count);
+            usage.chars_typed = usage.chars_typed.saturating_add(incoming.chars_typed);
+            usage.chars_inserted = usage.chars_inserted.saturating_add(incoming.chars_inserted);
+            usage.last_used = usage.last_used.max(incoming.last_used);
+        }
+        for (day, count) in &delta.daily {
+            let total = self.daily.entry(day.clone()).or_default();
+            *total = total.saturating_add(*count);
+        }
+        self.enforce_limits();
+    }
+
+    fn enforce_limits(&mut self) {
         while self.daily.len() > MAX_DAILY_ENTRIES {
             self.daily.pop_first();
         }
@@ -256,4 +277,33 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
         }
     }
     risks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merging_usage_deltas_preserves_counters_and_last_use() {
+        let event = |timestamp| UsageEvent {
+            snippet_id: "example".into(),
+            typed_chars: 2,
+            inserted_chars: 5,
+            unix_timestamp: timestamp,
+        };
+        let mut saved = UsageStats::default();
+        saved.record(&event(1_700_000_000));
+        let mut delta = UsageStats::default();
+        delta.record(&event(1_700_000_001));
+        delta.record(&event(1_700_000_002));
+
+        saved.merge(&delta);
+
+        let usage = &saved.snippets["example"];
+        assert_eq!(usage.count, 3);
+        assert_eq!(usage.chars_typed, 6);
+        assert_eq!(usage.chars_inserted, 15);
+        assert_eq!(usage.last_used, 1_700_000_002);
+        assert_eq!(saved.daily.values().copied().sum::<u64>(), 3);
+    }
 }

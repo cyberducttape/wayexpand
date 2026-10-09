@@ -204,7 +204,10 @@ fn status_json_matches_documented_stable_contract() {
          matcher_latency_window_count=0\n\
          matcher_latency_p50_us=0\n\
          matcher_latency_p95_us=0\n\
-         matcher_latency_p99_us=0";
+         matcher_latency_p99_us=0\n\
+         usage_flush_max_duration_us=25\n\
+         usage_flush_failures_total=1\n\
+         usage_queue_rejected_total=2";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
@@ -244,6 +247,9 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["command_queue_rejected_total"], 0);
     assert_eq!(value["command_timeout_total"], 0);
     assert_eq!(value["command_failure_total"], 0);
+    assert_eq!(value["usage_flush_max_duration_us"], 25);
+    assert_eq!(value["usage_flush_failures_total"], 1);
+    assert_eq!(value["usage_queue_rejected_total"], 2);
 }
 
 #[test]
@@ -332,6 +338,9 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "matcher_latency_p50_us",
             "matcher_latency_p95_us",
             "matcher_latency_p99_us",
+            "usage_flush_max_duration_us",
+            "usage_flush_failures_total",
+            "usage_queue_rejected_total",
         ]
         .into_iter()
         .collect()

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Git synchronization now tracks the configured primary filename, rejects a
+  symlinked primary config, and verifies outgoing tree modes as well as paths.
+- Usage-stat persistence now runs on a dedicated bounded-queue worker rather
+  than the input reactor, with failure/drop counters and maximum flush duration
+  exposed in daemon status.
 - Redacted credentials in Git synchronization status and diagnostics, and use
   the configured `origin` name for fetch/push operations instead of passing
   credential-bearing URLs through those commands.
