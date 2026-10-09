@@ -27,6 +27,8 @@ All notable changes to WayExpand are documented here.
   endpoint.
 - Synchronization and CLI validation now merge the portable base config with
   `snippets.d`, catching duplicate triggers and hotkeys before daemon reload.
+- Daemon fleet composition now applies the same stable-ID update semantics when
+  layering fleet snippets over the primary configuration.
 - Added concurrent Action Broker startup coverage to ensure only one process can
   own a socket and failed starters cannot replace the active endpoint.
 

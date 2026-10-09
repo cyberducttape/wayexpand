@@ -288,9 +288,6 @@ impl FleetConfig {
         let base_expansions = base.expansion.len();
         let base_hotkeys = base.hotkey.len();
 
-        let mut config = base;
-        config.organization = crate::OrganizationPolicy::default();
-
         // Packs that must be signed but do not verify against a trusted,
         // root-owned signers file.
         let unsigned_packs: BTreeMap<String, String> = if policy.require_signed_packs {
@@ -369,13 +366,58 @@ impl FleetConfig {
             });
         }
 
-        config.expansion.extend(fleet.config.expansion);
-        config.hotkey.extend(fleet.config.hotkey);
-        if !fleet_settings.is_default() {
-            config.settings = fleet_settings;
+        // Compose the base and filtered fleet entries through the same merger
+        // used by portable-library validation. This preserves stable-ID layer
+        // updates instead of appending duplicate IDs and then rejecting them
+        // during Config::validate().
+        let mut merger = ConfigMerger::new();
+        merger.add_config(
+            base,
+            Provenance {
+                file: "expansions.toml".into(),
+                layer: "base".into(),
+            },
+        )?;
+        for expansion in std::mem::take(&mut fleet.config.expansion) {
+            let provenance = fleet
+                .expansions_source
+                .get(&expansion.trigger)
+                .cloned()
+                .unwrap_or_else(|| Provenance {
+                    file: "fleet layer".into(),
+                    layer: "user".into(),
+                });
+            merger.add_expansion(expansion, provenance)?;
         }
-        config.validate().map_err(FleetError::Config)?;
-        fleet.config = config;
+        for hotkey in std::mem::take(&mut fleet.config.hotkey) {
+            let provenance = fleet
+                .hotkeys_source
+                .get(&hotkey.chord)
+                .cloned()
+                .unwrap_or_else(|| Provenance {
+                    file: "fleet layer".into(),
+                    layer: "user".into(),
+                });
+            if merger.hotkeys.contains_key(&hotkey.chord) {
+                let existing = &merger.hotkeys[&hotkey.chord].1;
+                return Err(FleetError::DuplicateHotkey {
+                    chord: hotkey.chord.clone(),
+                    message: format!(
+                        "hotkey chord '{}' in {} conflicts with existing definition",
+                        hotkey.chord, provenance.file
+                    ),
+                    existing_file: existing.file.clone(),
+                });
+            }
+            merger
+                .hotkeys
+                .insert(hotkey.chord.clone(), (hotkey, provenance));
+        }
+        let mut merged = merger.merge()?;
+        if !fleet_settings.is_default() {
+            merged.config.settings = fleet_settings;
+        }
+        fleet.config = merged.config;
         // These fields are reported alongside the active arrays by the CLI;
         // recompute them after policy filtering and base-layer composition so
         // status output cannot describe entries that are no longer active.
@@ -718,6 +760,41 @@ mod tests {
         assert_eq!(fleet.config.expansion[0].replacement, "after");
         assert_eq!(fleet.stats.total_expansions, 1);
         assert_eq!(fleet.expansions_source[":new"].file, "user.toml");
+    }
+
+    #[test]
+    fn base_and_fleet_layer_update_by_stable_id() {
+        let id = "00000000-0000-4000-8000-000000000002";
+        let base = Config::parse(&format!(
+            "[[expansion]]\nid='{id}'\ntrigger=':old'\nreplacement='before'\n"
+        ))
+        .unwrap();
+        let later = Config::parse(&format!(
+            "[[expansion]]\nid='{id}'\ntrigger=':new'\nreplacement='after'\n"
+        ))
+        .unwrap()
+        .expansion
+        .into_iter()
+        .next()
+        .unwrap();
+        let mut merger = ConfigMerger::new();
+        merger
+            .add_expansion(
+                later,
+                Provenance {
+                    file: "user.toml".into(),
+                    layer: "user".into(),
+                },
+            )
+            .unwrap();
+        let fleet = merger.merge().unwrap();
+
+        let merged =
+            FleetConfig::apply_base_and_policy(fleet, base, &OrganizationPolicy::default())
+                .unwrap();
+        assert_eq!(merged.config.expansion.len(), 1);
+        assert_eq!(merged.config.expansion[0].trigger, ":new");
+        assert_eq!(merged.config.expansion[0].replacement, "after");
     }
 
     #[test]
