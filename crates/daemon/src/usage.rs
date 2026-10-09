@@ -9,8 +9,8 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
+        Arc, Mutex,
     },
-    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -280,8 +280,7 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
                 pending.merge(&batch);
             }
             Ok(UsageMessage::Clear(reply)) => {
-                pending = UsageStats::default();
-                let result = UsageStats::clear(&path);
+                let result = clear_pending(&path, &mut pending);
                 if result.is_err() {
                     FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
                 }
@@ -319,6 +318,12 @@ fn event_count(stats: &UsageStats) -> u64 {
         .snippets
         .values()
         .fold(0_u64, |count, usage| count.saturating_add(usage.count))
+}
+
+fn clear_pending(path: &std::path::Path, pending: &mut UsageStats) -> std::io::Result<bool> {
+    let cleared = UsageStats::clear(path)?;
+    *pending = UsageStats::default();
+    Ok(cleared)
 }
 
 fn flush_pending(path: &std::path::Path, pending: &mut UsageStats) -> bool {
@@ -414,6 +419,25 @@ mod tests {
         assert!(!stats.snippets.contains_key("persisted-before-clear"));
         assert!(!stats.snippets.contains_key("queued-before-clear"));
         assert_eq!(stats.snippets["after-clear"].count, 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn failed_clear_retains_writer_buffered_events() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-failure-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut pending = UsageStats::default();
+        pending.record(&event("retained"));
+
+        assert!(clear_pending(&directory, &mut pending).is_err());
+        assert_eq!(pending.snippets["retained"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
     }
 
