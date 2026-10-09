@@ -7,6 +7,23 @@ use wayexpand_core::{
 
 use crate::editor::Draft;
 
+/// Return a policy error before a GUI command preview is spawned.
+///
+/// The GUI runs direct previews outside the daemon's service sandbox, so it
+/// must apply the same effective organization enforcement policy first.
+pub(crate) fn command_preview_policy_violation(
+    policy: &OrganizationPolicy,
+    program: &str,
+) -> Option<String> {
+    let effective = policy.effective_enforcement_policy();
+    if effective.disable_commands {
+        return Some("command execution is disabled by organization policy".into());
+    }
+    effective
+        .command_path_violation(program)
+        .map(|reason| reason.to_string())
+}
+
 #[cfg(test)]
 pub(crate) fn run_command_preview(draft: &Draft) -> Result<String, String> {
     match draft.command_config() {
@@ -104,6 +121,34 @@ mod tests {
             settings: Settings::default(),
             organization: OrganizationPolicy::default(),
         }
+    }
+
+    #[test]
+    fn command_preview_honors_enforced_organization_policy() {
+        let mut policy = OrganizationPolicy {
+            safe_mode: true,
+            disable_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        assert_eq!(
+            command_preview_policy_violation(&policy, "git").as_deref(),
+            Some("command execution is disabled by organization policy")
+        );
+
+        policy.disable_commands = false;
+        policy.require_absolute_commands = true;
+        assert!(command_preview_policy_violation(&policy, "git").is_some());
+        assert!(command_preview_policy_violation(&policy, "/usr/bin/git").is_none());
+    }
+
+    #[test]
+    fn audit_only_policy_does_not_block_command_preview() {
+        let policy = OrganizationPolicy {
+            disable_commands: true,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        assert!(command_preview_policy_violation(&policy, "git").is_none());
     }
 
     #[test]

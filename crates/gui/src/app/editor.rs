@@ -127,6 +127,19 @@ impl GuiApp {
                 return;
             }
         };
+        // Command previews execute in the desktop user's GUI process, so they
+        // must not become a policy escape hatch for managed deployments. Use
+        // the same effective enforcement view as the daemon: audit-only policy
+        // remains observable but does not block, while safe mode blocks before
+        // any program is spawned.
+        if let Some(reason) =
+            preview::command_preview_policy_violation(&self.config.organization, &command.program)
+        {
+            self.command_preview_result = Some(Err(format!(
+                "Command preview blocked by organization policy: {reason}"
+            )));
+            return;
+        }
         let (sender, receiver) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancelled);
