@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: launchpad-sync-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -61,18 +65,26 @@ jobs:
           set -euo pipefail
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
-          # GitHub is the canonical repository.  This explicit lease also
-          # repairs a deliberate GitHub history rewrite (for example, when
-          # commit identities are normalized) while refusing to overwrite a
-          # Launchpad update that races the read below.
-          launchpad_main="$(git ls-remote launchpad refs/heads/main \
-            | awk 'NR == 1 { print $1 }')"
-          if [ -n "$launchpad_main" ]; then
-            timeout --signal=TERM --kill-after=30s 5m git push launchpad \
-              --force-with-lease="refs/heads/main:$launchpad_main" \
-              HEAD:refs/heads/main
+          # A tag push checks out the tagged commit. Never use that detached
+          # HEAD to update Launchpad main: an older release tag could rewind
+          # the mirror. Main synchronization is only valid for a main-branch
+          # push (or an explicit dispatch from that branch).
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # GitHub is the canonical repository. This explicit lease also
+            # repairs a deliberate GitHub history rewrite (for example, when
+            # commit identities are normalized) while refusing to overwrite a
+            # Launchpad update that races the read below.
+            launchpad_main="$(git ls-remote launchpad refs/heads/main \
+              | awk 'NR == 1 { print $1 }')"
+            if [ -n "$launchpad_main" ]; then
+              timeout --signal=TERM --kill-after=30s 5m git push launchpad \
+                --force-with-lease="refs/heads/main:$launchpad_main" \
+                HEAD:refs/heads/main
+            else
+              timeout --signal=TERM --kill-after=30s 5m git push launchpad HEAD:refs/heads/main
+            fi
           else
-            timeout --signal=TERM --kill-after=30s 5m git push launchpad HEAD:refs/heads/main
+            echo "Skipping Launchpad main update for $GITHUB_REF; syncing tags only."
           fi
 
           # Read the complete remote tag set once.  Opening one SSH session
