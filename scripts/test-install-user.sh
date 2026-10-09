@@ -35,6 +35,24 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 mkdir -p "$test_root/home" "$test_root/config"
 
+# The immutable install identity must change for any staged asset, including
+# edits that do not alter Cargo's commit-stamped binary version.
+payload_a="$test_root/staged payload a"
+payload_b="$test_root/staged payload b"
+for payload in "$payload_a" "$payload_b"; do
+    mkdir -p "$payload/bin" "$payload/systemd" "$payload/desktop" "$payload/ibus"
+    printf '%s\n' 'binary' >"$payload/bin/wayexpand"
+    printf '%s\n' 'service' >"$payload/systemd/wayexpand.service"
+    printf '%s\n' 'desktop' >"$payload/desktop/wayexpand.desktop"
+    printf '%s\n' 'ibus' >"$payload/ibus/wayexpand.xml"
+done
+identity_a=$("$project_dir/scripts/hash-install-payload.sh" "$payload_a")
+identity_a_repeat=$("$project_dir/scripts/hash-install-payload.sh" "$payload_a")
+[ "$identity_a" = "$identity_a_repeat" ]
+printf '%s\n' 'modified service' >"$payload_b/systemd/wayexpand.service"
+identity_b=$("$project_dir/scripts/hash-install-payload.sh" "$payload_b")
+[ "$identity_a" != "$identity_b" ]
+
 # Invalid enablement options must fail before Cargo is invoked or any files
 # are created under the selected home.
 if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
@@ -57,6 +75,19 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -L "$test_root/home/.local/lib/wayexpand/current" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
 first_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
+
+# An existing directory whose contents no longer match its digest must never
+# be activated as if it were the immutable build it claims to represent.
+staged_daemon="$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon"
+cp "$staged_daemon" "$test_root/wayexpand-daemon.backup"
+printf '%s\n' 'tampered payload' >>"$staged_daemon"
+if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'user installer accepted a modified immutable version directory' >&2
+    exit 1
+fi
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = "$first_build" ]
+cp "$test_root/wayexpand-daemon.backup" "$staged_daemon"
 
 # A second source identity with the same Cargo package version must activate
 # its own staged files rather than silently reusing the first build directory.

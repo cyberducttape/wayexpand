@@ -12,8 +12,8 @@ All notable changes to WayExpand are documented here.
   optional output files are private and non-overwriting, while diagnostic
   subprocesses have bounded output and teardown.
 - User installer version directories now use the built binary's full version
-  identity, so installs from newer development commits cannot reuse stale
-  files merely because the Cargo package version is unchanged.
+  identity plus a hash of the staged payload, so installs from newer commits or
+  changed local assets cannot silently reuse stale files.
 - Systemd unit CI now creates dummy executables at the versioned installer's
   active `current/bin` path, keeping service validation aligned with installs.
 - GUI command previews now distinguish local direct execution (outside both

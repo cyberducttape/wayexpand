@@ -102,11 +102,11 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
 # source commit in the binary version. Use that complete build identity for
 # the immutable install directory; package version alone would cause every
 # install from a newer commit to reuse stale binaries and service assets.
-version=$(
+build_version=$(
     "$target_dir/release/wayexpand" --version |
         sed -n 's/^wayexpand \([A-Za-z0-9.+~-][A-Za-z0-9.+~-]*\) (commit [A-Za-z0-9._-]*)$/\1/p'
 )
-case "$version" in
+case "$build_version" in
     ''|*[!A-Za-z0-9.+~-]*)
         printf '%s\n' 'error: could not determine a safe WayExpand build identity' >&2
         exit 1
@@ -134,7 +134,7 @@ install -d -m 0700 "$state_dir"
 chmod 0700 "$state_dir"
 
 install -d -m 0755 "$library_dir"
-stage_dir="$library_dir/.staging-$version-$$"
+stage_dir="$library_dir/.staging-$build_version-$$"
 install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$target_dir/release/$binary" "$stage_dir/bin/$binary"
@@ -142,9 +142,33 @@ done
 install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
-if [ ! -d "$library_dir/$version" ]; then
+payload_hash=$("$project_dir/scripts/hash-install-payload.sh" "$stage_dir")
+if [ "${#payload_hash}" -ne 64 ]; then
+    printf '%s\n' 'error: could not determine a valid install payload hash' >&2
+    exit 1
+fi
+case "$payload_hash" in
+    *[!0-9a-f]*|'')
+        printf '%s\n' 'error: could not determine a safe install payload identity' >&2
+        exit 1
+        ;;
+esac
+version="$build_version-$payload_hash"
+if [ ! -e "$library_dir/$version" ] && [ ! -L "$library_dir/$version" ]; then
     mv "$stage_dir" "$library_dir/$version"
 else
+    if [ -L "$library_dir/$version" ] || [ ! -d "$library_dir/$version" ]; then
+        printf '%s\n' "error: existing version path is not a real directory: $library_dir/$version" >&2
+        exit 1
+    fi
+    existing_hash=$("$project_dir/scripts/hash-install-payload.sh" "$library_dir/$version") || {
+        printf '%s\n' "error: existing version directory is incomplete or unsafe: $library_dir/$version" >&2
+        exit 1
+    }
+    if [ "$existing_hash" != "$payload_hash" ]; then
+        printf '%s\n' "error: existing version directory does not match its payload identity: $library_dir/$version" >&2
+        exit 1
+    fi
     for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
         if [ ! -x "$library_dir/$version/bin/$binary" ]; then
             printf '%s\n' "error: existing version directory is incomplete: $library_dir/$version" >&2
