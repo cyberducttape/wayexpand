@@ -29,6 +29,7 @@ jobs:
   certification:
     name: Real compositor certification
     uses: ./.github/workflows/certification.yml
+    secrets: inherit
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 

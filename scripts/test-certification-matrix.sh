@@ -86,6 +86,16 @@ grep -F -- 'Ineligible for production certification: evdev lacks sensitive-field
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null
+python3 - "$release_workflow" <<'PY'
+import sys
+
+body = open(sys.argv[1], encoding="utf-8").read()
+start = body.index("  certification:\n")
+end = body.find("\n  linux-aarch64:", start)
+section = body[start:] if end == -1 else body[start:end]
+if "    secrets: inherit\n" not in section:
+    raise SystemExit("release certification call must inherit CERTIFICATION_RUNNER_TOKEN")
+PY
 grep -F -- 'needs: [ci, certification]' "$release_workflow" >/dev/null
 grep -F -- 'needs: [ci, certification, linux-aarch64]' "$release_workflow" >/dev/null
 grep -F -- "checkout_ref: \${{ inputs.release_ref || github.ref }}" "$release_workflow" >/dev/null

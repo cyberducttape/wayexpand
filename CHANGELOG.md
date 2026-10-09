@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
   managed `safe_mode` deployments from bypassing command restrictions.
+- **Release certification secret forwarding:** release builds now inherit the
+  configured compositor-runner token when calling the reusable certification
+  workflow, so tag releases can reach the runner-capacity preflight.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit
