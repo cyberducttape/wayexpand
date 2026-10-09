@@ -3,9 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Write},
+    os::fd::AsRawFd,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -383,6 +388,7 @@ pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
     Ok(digest)
 }
 
+#[cfg(test)]
 fn read_signature_tool_output<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
     let mut output = Vec::new();
     reader
@@ -395,6 +401,67 @@ fn read_signature_tool_output<R: Read>(mut reader: R) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(output)
+}
+
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> io::Result<()> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn drain_signature_tool_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> io::Result<bool> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..64 {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                output.extend_from_slice(&buffer[..count]);
+                if output.len() > MAX_SIGNATURE_TOOL_OUTPUT_BYTES {
+                    return Err(io::Error::other(
+                        "ssh-keygen output exceeded the safety limit",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+fn write_signature_tool_input<W: Write + AsRawFd>(
+    writer: &mut W,
+    input: &[u8],
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> io::Result<()> {
+    set_nonblocking(writer)?;
+    let mut written = 0;
+    while written < input.len() {
+        if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "ssh-keygen input write timed out",
+            ));
+        }
+        match writer.write(&input[written..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "ssh-keygen stdin closed",
+                ))
+            }
+            Ok(count) => written += count,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
@@ -416,50 +483,84 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
         .stderr
         .take()
         .ok_or_else(|| PackError::SignatureTool("ssh-keygen stderr was not captured".into()))?;
-    let stdout_reader = thread::spawn(|| read_signature_tool_output(stdout));
-    let stderr_reader = thread::spawn(|| read_signature_tool_output(stderr));
     let mut supervisor = ChildSupervisor::new(child);
-    let input = input.as_bytes().to_owned();
-    let stdin_writer =
-        thread::spawn(move || stdin.map(|mut stdin| stdin.write_all(&input)).transpose());
+    if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+        return Err(PackError::SignatureTool(error.to_string()));
+    }
     let deadline = Instant::now() + SIGNATURE_TOOL_TIMEOUT;
+    let input = input.as_bytes().to_owned();
+    let stdin_cancelled = Arc::new(AtomicBool::new(false));
+    let writer_cancelled = Arc::clone(&stdin_cancelled);
+    let stdin_writer = thread::spawn(move || {
+        stdin
+            .map(|mut stdin| {
+                write_signature_tool_input(&mut stdin, &input, deadline, &writer_cancelled)
+            })
+            .transpose()
+    });
+    let mut stdout = stdout;
+    let mut stderr = stderr;
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut stdout_eof = drain_signature_tool_output(&mut stdout, &mut stdout_bytes)
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    let mut stderr_eof = drain_signature_tool_output(&mut stderr, &mut stderr_bytes)
+        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
     let status = loop {
+        if !stdout_eof {
+            stdout_eof = drain_signature_tool_output(&mut stdout, &mut stdout_bytes)
+                .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+        }
+        if !stderr_eof {
+            stderr_eof = drain_signature_tool_output(&mut stderr, &mut stderr_bytes)
+                .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+        }
         match supervisor.has_exited() {
             Ok(true) => {
                 supervisor.kill_group();
-                break supervisor
+                let status = supervisor
                     .reap()
                     .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+                let drain_deadline = Instant::now() + Duration::from_millis(100);
+                while !(stdout_eof && stderr_eof) && Instant::now() < drain_deadline {
+                    stdout_eof = drain_signature_tool_output(&mut stdout, &mut stdout_bytes)
+                        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+                    stderr_eof = drain_signature_tool_output(&mut stderr, &mut stderr_bytes)
+                        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+                    if !(stdout_eof && stderr_eof) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                if !stdout_eof || !stderr_eof {
+                    return Err(PackError::SignatureTool(
+                        "ssh-keygen output did not complete".into(),
+                    ));
+                }
+                break status;
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(false) | Err(_) => {
+                stdin_cancelled.store(true, Ordering::Release);
                 supervisor.kill_group();
                 let _ = supervisor.reap();
                 let _ = stdin_writer.join();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
                 return Err(PackError::SignatureTool(
                     "ssh-keygen timed out or could not be monitored".into(),
                 ));
             }
         }
     };
+    stdin_cancelled.store(true, Ordering::Release);
     stdin_writer
         .join()
         .map_err(|_| PackError::SignatureTool("ssh-keygen stdin writer failed".into()))?
         .map_err(|error| PackError::SignatureTool(error.to_string()))?;
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| PackError::SignatureTool("ssh-keygen stdout reader failed".into()))?
-        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| PackError::SignatureTool("ssh-keygen stderr reader failed".into()))?
-        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
     Ok(Output {
         status,
-        stdout,
-        stderr,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
     })
 }
 
@@ -655,6 +756,30 @@ mod tests {
             read_signature_tool_output(&vec![b'x'; MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1][..])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn signature_output_drain_is_bounded_for_continuous_output() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "yes ssh-keygen"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn continuous-output child");
+        let mut stdout = child.stdout.take().expect("child stdout");
+        set_nonblocking(&stdout).expect("make stdout nonblocking");
+        let mut output = Vec::new();
+        let started = Instant::now();
+        let result = drain_signature_tool_output(&mut stdout, &mut output)
+            .expect("bounded drain should yield before the total cap");
+        assert!(!result);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "continuous output exceeded the drain budget: {:?}",
+            started.elapsed()
+        );
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
