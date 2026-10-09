@@ -3,9 +3,10 @@ use super::{
 };
 use crate::CommandConfig;
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Mutex, RwLock,
+        mpsc, Arc, Condvar, Mutex, RwLock,
     },
     thread,
     thread::JoinHandle,
@@ -27,8 +28,60 @@ pub(super) fn notify_completion(notifier: &std::sync::RwLock<Option<CompletionNo
     }
 }
 
+/// Bounded multi-consumer command queue. A condition variable releases the
+/// queue mutex while workers wait, unlike a mutex-protected std MPSC
+/// receiver's `recv_timeout`, which makes idle workers take turns holding the
+/// receiver lock.
+pub(super) struct CommandQueue<T> {
+    items: Mutex<VecDeque<T>>,
+    wake: Condvar,
+    capacity: usize,
+}
+
+impl<T> CommandQueue<T> {
+    pub(super) fn new(capacity: usize) -> Self {
+        Self {
+            items: Mutex::new(VecDeque::with_capacity(capacity)),
+            wake: Condvar::new(),
+            capacity,
+        }
+    }
+
+    fn try_send(&self, item: T) -> Result<(), T> {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if items.len() >= self.capacity {
+            return Err(item);
+        }
+        items.push_back(item);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> Option<T> {
+        let mut items = self
+            .items
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(item) = items.pop_front() {
+            return Some(item);
+        }
+        let (mut items, _) = self
+            .wake
+            .wait_timeout(items, timeout)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        items.pop_front()
+    }
+
+    fn notify_all(&self) {
+        self.wake.notify_all();
+    }
+}
+
 pub(super) struct AsyncCommandRuntime {
-    pub(super) command_sender: mpsc::SyncSender<AsyncCommandJob>,
+    pub(super) command_sender: Arc<CommandQueue<AsyncCommandJob>>,
     pub(super) hotkey_sender: mpsc::SyncSender<HotkeyResult>,
     pub(super) receiver: mpsc::Receiver<AsyncCommandCompletion>,
     pub(super) hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
@@ -67,6 +120,7 @@ pub(super) fn send_completion_or_shutdown<T>(
 impl Drop for AsyncCommandRuntime {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
+        self.command_sender.notify_all();
         for worker in self.command_workers.drain(..) {
             let _ = worker.join();
         }
@@ -83,8 +137,7 @@ impl AsyncCommandRuntime {
         expansion_metrics: Arc<CommandMetricsState>,
         hotkey_metrics: Arc<CommandMetricsState>,
     ) -> Option<Self> {
-        let (command_sender, command_receiver) =
-            mpsc::sync_channel::<AsyncCommandJob>(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let command_sender = Arc::new(CommandQueue::new(super::ASYNC_COMMAND_QUEUE_CAPACITY));
         let (hotkey_sender, hotkey_receiver) =
             mpsc::sync_channel::<HotkeyResult>(super::ASYNC_COMMAND_QUEUE_CAPACITY);
         let (completion_sender, completion_receiver) =
@@ -92,12 +145,11 @@ impl AsyncCommandRuntime {
         let (hotkey_completion_sender, hotkey_completion_receiver) =
             mpsc::sync_channel(super::ASYNC_COMMAND_QUEUE_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
-        let command_receiver = Arc::new(Mutex::new(command_receiver));
         let mut command_workers = Vec::with_capacity(super::ASYNC_COMMAND_WORKER_COUNT);
         for worker_index in 0..super::ASYNC_COMMAND_WORKER_COUNT {
             let command_shutdown = Arc::clone(&shutdown);
             let worker_metrics = Arc::clone(&expansion_metrics);
-            let worker_receiver = Arc::clone(&command_receiver);
+            let worker_receiver = Arc::clone(&command_sender);
             let worker_completion_sender = completion_sender.clone();
             let worker_input_generation = Arc::clone(&shared_input_generation);
             let worker_notifier = Arc::clone(&completion_notifier);
@@ -105,16 +157,9 @@ impl AsyncCommandRuntime {
                 .name(format!("wayexpand-expansion-worker-{worker_index}"))
                 .spawn(move || {
                     while !command_shutdown.load(Ordering::Acquire) {
-                        let received = match worker_receiver.lock() {
-                            Ok(receiver) => receiver.recv_timeout(Duration::from_millis(50)),
-                            Err(poisoned) => poisoned
-                                .into_inner()
-                                .recv_timeout(Duration::from_millis(50)),
-                        };
-                        let job = match received {
-                            Ok(job) => job,
-                            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        let Some(job) = worker_receiver.recv_timeout(Duration::from_millis(50))
+                        else {
+                            continue;
                         };
                         if command_shutdown.load(Ordering::Acquire) {
                             worker_metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
@@ -237,7 +282,7 @@ impl AsyncCommandRuntime {
                 Ok(worker) => command_workers.push(worker),
                 Err(_) => {
                     shutdown.store(true, Ordering::Release);
-                    drop(command_sender);
+                    command_sender.notify_all();
                     for worker in command_workers {
                         let _ = worker.join();
                     }
@@ -292,7 +337,7 @@ impl AsyncCommandRuntime {
             Ok(worker) => worker,
             Err(_) => {
                 shutdown.store(true, Ordering::Release);
-                drop(command_sender);
+                command_sender.notify_all();
                 for worker in command_workers {
                     let _ = worker.join();
                 }
@@ -316,7 +361,21 @@ impl AsyncCommandRuntime {
         &self,
         job: AsyncCommandJob,
     ) -> Result<(), super::QueueSendError> {
-        self.try_send(&self.command_sender, job, &self.expansion_metrics)
+        self.expansion_metrics
+            .queue_depth
+            .fetch_add(1, Ordering::Relaxed);
+        match self.command_sender.try_send(job) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                self.expansion_metrics
+                    .queue_depth
+                    .fetch_sub(1, Ordering::Relaxed);
+                self.expansion_metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(super::QueueSendError::Full)
+            }
+        }
     }
 
     pub(super) fn try_send_hotkey(
@@ -373,6 +432,39 @@ pub(super) enum AsyncCommandJob {
 pub(super) struct FormOrigin {
     pub(super) app_id: Option<String>,
     pub(super) instance_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CommandQueue;
+    use std::{sync::Arc, thread, time::Duration};
+
+    #[test]
+    fn command_queue_supports_multiple_consumers_without_a_receiver_lock() {
+        let queue = Arc::new(CommandQueue::new(32));
+        for item in 0..32 {
+            queue
+                .try_send(item)
+                .expect("queue should accept its capacity");
+        }
+        let workers = (0..4)
+            .map(|_| {
+                let queue = Arc::clone(&queue);
+                thread::spawn(move || {
+                    let mut count = 0;
+                    while queue.recv_timeout(Duration::from_millis(20)).is_some() {
+                        count += 1;
+                    }
+                    count
+                })
+            })
+            .collect::<Vec<_>>();
+        let consumed: usize = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .sum();
+        assert_eq!(consumed, 32);
+    }
 }
 
 pub(super) struct AsyncCommandCompletion {

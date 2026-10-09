@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
   no longer disclose the workstation hostname.
 - **Bounded Git supervision:** synchronization now drains Git output without
   blocking reader-thread joins when descendants retain inherited descriptors.
+- **Command-worker scheduling:** expansion workers now share a bounded
+  condition-variable queue that releases its lock while idle, avoiding
+  serialized receiver timeouts without changing queue backpressure.
 - **Bounded helper supervision:** action-broker output draining now yields to
   action deadlines, form cancellation terminates process groups and transient
   systemd units without an unbounded reader join, and IBus discovery drains
