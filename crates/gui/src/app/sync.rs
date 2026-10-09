@@ -2,6 +2,7 @@
 
 use std::{
     io::Read,
+    os::fd::AsRawFd,
     process::{Command, Stdio},
     sync::mpsc,
     thread,
@@ -87,42 +88,68 @@ fn run_sync_command(cli: std::path::PathBuf, config: std::path::PathBuf) -> Resu
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let stdout = child
+    let mut stdout = child
         .stdout
         .take()
         .ok_or_else(|| "sync stdout was not captured".to_owned())?;
-    let stderr = child
+    let mut stderr = child
         .stderr
         .take()
         .ok_or_else(|| "sync stderr was not captured".to_owned())?;
-    let stdout_reader = thread::spawn(|| read_sync_output(stdout));
-    let stderr_reader = thread::spawn(|| read_sync_output(stderr));
     let mut supervisor = ChildSupervisor::new(child);
+    if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+        return Err(error.to_string());
+    }
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
     let deadline = Instant::now() + SYNC_TIMEOUT;
     let status = loop {
+        let stdout_eof =
+            drain_sync_output(&mut stdout, &mut stdout_bytes).map_err(|error| error.to_string())?;
+        let stderr_eof =
+            drain_sync_output(&mut stderr, &mut stderr_bytes).map_err(|error| error.to_string())?;
+        if stdout_bytes.len() > MAX_SYNC_OUTPUT_BYTES || stderr_bytes.len() > MAX_SYNC_OUTPUT_BYTES
+        {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            return Err("sync output exceeded the safety limit".to_owned());
+        }
         match supervisor.has_exited() {
             Ok(true) => {
                 supervisor.kill_group();
-                break supervisor.reap().map_err(|error| error.to_string())?;
+                let status = supervisor.reap().map_err(|error| error.to_string())?;
+                let drain_deadline = Instant::now() + Duration::from_millis(100);
+                let mut stdout_eof = stdout_eof;
+                let mut stderr_eof = stderr_eof;
+                while !(stdout_eof && stderr_eof) && Instant::now() < drain_deadline {
+                    stdout_eof = drain_sync_output(&mut stdout, &mut stdout_bytes)
+                        .map_err(|error| error.to_string())?;
+                    stderr_eof = drain_sync_output(&mut stderr, &mut stderr_bytes)
+                        .map_err(|error| error.to_string())?;
+                    if stdout_bytes.len() > MAX_SYNC_OUTPUT_BYTES
+                        || stderr_bytes.len() > MAX_SYNC_OUTPUT_BYTES
+                    {
+                        return Err("sync output exceeded the safety limit".to_owned());
+                    }
+                    if !(stdout_eof && stderr_eof) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                if !stdout_eof {
+                    return Err("sync stdout did not complete".to_owned());
+                }
+                break status;
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(false) | Err(_) => {
                 supervisor.kill_group();
                 let _ = supervisor.reap();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
                 return Err("sync timed out or could not be monitored".to_owned());
             }
         }
     };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| "sync stdout reader failed".to_owned())?
-        .map_err(|error| error.to_string())?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| "sync stderr reader failed".to_owned())?
-        .map_err(|error| error.to_string())?;
     let text = |bytes: &[u8]| {
         String::from_utf8_lossy(bytes)
             .lines()
@@ -132,34 +159,46 @@ fn run_sync_command(cli: std::path::PathBuf, config: std::path::PathBuf) -> Resu
             .to_owned()
     };
     if status.success() {
-        Ok(text(&stdout))
+        Ok(text(&stdout_bytes))
     } else {
-        Err(text(&stderr))
+        Err(text(&stderr_bytes))
     }
 }
 
-fn read_sync_output<R: Read>(mut reader: R) -> std::io::Result<Vec<u8>> {
-    let mut output = Vec::new();
-    reader
-        .by_ref()
-        .take((MAX_SYNC_OUTPUT_BYTES + 1) as u64)
-        .read_to_end(&mut output)?;
-    if output.len() > MAX_SYNC_OUTPUT_BYTES {
-        return Err(std::io::Error::other(
-            "sync output exceeded the safety limit",
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(format!(
+            "could not make sync output nonblocking: {}",
+            std::io::Error::last_os_error()
         ));
     }
-    Ok(output)
+    Ok(())
+}
+
+fn drain_sync_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> std::io::Result<bool> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..64 {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => output.extend_from_slice(&buffer[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{read_sync_output, MAX_SYNC_OUTPUT_BYTES};
+    use super::drain_sync_output;
 
     #[test]
-    fn sync_output_is_bounded() {
-        let error = read_sync_output(std::io::Cursor::new(vec![b'x'; MAX_SYNC_OUTPUT_BYTES + 1]))
-            .unwrap_err();
-        assert!(error.to_string().contains("safety limit"));
+    fn sync_output_drain_reaches_eof_without_a_blocking_join() {
+        let mut output = Vec::new();
+        let mut input = std::io::Cursor::new(b"sync complete\n".to_vec());
+        assert!(drain_sync_output(&mut input, &mut output).unwrap());
+        assert_eq!(output, b"sync complete\n");
     }
 }
