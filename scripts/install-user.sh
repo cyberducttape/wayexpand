@@ -185,6 +185,28 @@ previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
 next_link="$library_dir/.current-$$"
 ln -s "$version" "$next_link"
 mv -Tf "$next_link" "$library_dir/current"
+restore_previous_version() {
+    if [ -n "$previous_version" ]; then
+        rollback_link="$library_dir/.rollback-$$"
+        if ln -s "$previous_version" "$rollback_link"; then
+            mv -Tf "$rollback_link" "$library_dir/current"
+        else
+            printf '%s\n' 'error: could not prepare installer rollback link' >&2
+            return 1
+        fi
+    else
+        rm -f "$library_dir/current"
+    fi
+}
+rollback_on_install_failure() {
+    install_status=$?
+    if [ "$install_status" -ne 0 ]; then
+        printf '%s\n' 'error: installation failed after activating the staged version; restoring the previous version' >&2
+        restore_previous_version || true
+    fi
+    return "$install_status"
+}
+trap rollback_on_install_failure EXIT
 install -d -m 0755 "$bin_dir"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
@@ -280,11 +302,7 @@ if [ "$enable_service" -eq 1 ]; then
     fi
     if [ "$activation_ok" -ne 1 ]; then
         printf '%s\n' "error: unable to activate $service_name; restoring the previous version when available" >&2
-        if [ -n "$previous_version" ]; then
-            rollback_link="$library_dir/.rollback-$$"
-            ln -s "$previous_version" "$rollback_link"
-            mv -Tf "$rollback_link" "$library_dir/current"
-        fi
+        restore_previous_version || true
         systemctl --user daemon-reload || true
         if [ "$service_was_enabled" -eq 1 ]; then
             systemctl --user restart "$service_name" || true

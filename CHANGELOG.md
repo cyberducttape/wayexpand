@@ -67,6 +67,9 @@ All notable changes to WayExpand are documented here.
   owners, and hard-linked targets before locking or changing permissions.
 - Action Broker audit files are opened without following symlinks and must be
   private, user-owned regular files with a single hard link.
+- User installation now restores the previous active version (or removes the
+  first-install pointer) when a filesystem error interrupts setup after the
+  atomic version switch.
 - Runtime diagnostics now distinguish a connected window tracker from an exact
   focused-window identity, preventing false app-filter readiness reports.
 - Daemon startup now preserves an existing control socket when its ownership

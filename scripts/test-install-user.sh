@@ -76,6 +76,19 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
 first_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
 
+# Fail immediately after the version pointer is switched. The installer must
+# restore the old pointer, or remove it on a fresh installation, rather than
+# leave an incomplete install active.
+mkdir -p "$test_root/failed-home/.local"
+printf '%s\n' 'not a directory' >"$test_root/failed-home/.local/bin"
+if HOME="$test_root/failed-home" XDG_CONFIG_HOME="$test_root/failed-config" \
+    "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'user installer unexpectedly succeeded with an invalid bin path' >&2
+    exit 1
+fi
+[ ! -e "$test_root/failed-home/.local/lib/wayexpand/current" ]
+[ ! -L "$test_root/failed-home/.local/lib/wayexpand/current" ]
+
 # An existing directory whose contents no longer match its digest must never
 # be activated as if it were the immutable build it claims to represent.
 staged_daemon="$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon"
