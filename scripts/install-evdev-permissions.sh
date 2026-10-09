@@ -69,13 +69,17 @@ for argument in "$@"; do
     esac
 done
 
-if [ ! -f "$rule_src" ]; then
-    printf '%s\n' "error: $rule_src not found; run this from the project tree or a release tarball" >&2
-    exit 1
-fi
-if [ "$access_mode" = active-seat ] && [ ! -f "$uaccess_rule_src" ]; then
-    printf '%s\n' "error: $uaccess_rule_src not found" >&2
-    exit 1
+# Uninstall only needs the installed destinations and state file. Do not make
+# cleanup depend on the source archive or package still being present.
+if [ "$do_uninstall" -eq 0 ]; then
+    if [ ! -f "$rule_src" ]; then
+        printf '%s\n' "error: $rule_src not found; run this from the project tree or a release tarball" >&2
+        exit 1
+    fi
+    if [ "$access_mode" = active-seat ] && [ ! -f "$uaccess_rule_src" ]; then
+        printf '%s\n' "error: $uaccess_rule_src not found" >&2
+        exit 1
+    fi
 fi
 
 # --dry-run may be run without sudo, purely to preview; every other path

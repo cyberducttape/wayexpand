@@ -111,4 +111,22 @@ if "$empty_dir/scripts/install-evdev-permissions.sh" --dry-run >"$empty_dir/out"
 fi
 assert_contains missing-rule 'not found' "$(cat "$empty_dir/out")"
 
+if [ "$(id -u)" -eq 0 ]; then
+    # Cleanup must remain possible after the source/package files are gone.
+    stale_group="$empty_dir/stale-group.rules"
+    stale_seat="$empty_dir/stale-seat.rules"
+    stale_state="$empty_dir/stale-state"
+    printf '%s\n' 'installed rule' >"$stale_group"
+    printf '%s\n' 'installed rule' >"$stale_seat"
+    WAYEXPAND_EVDEV_RULE_DEST="$stale_group" \
+    WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$stale_seat" \
+    WAYEXPAND_EVDEV_STATE_FILE="$stale_state" \
+    "$empty_dir/scripts/install-evdev-permissions.sh" --uninstall --access=active-seat \
+        >"$empty_dir/uninstall-out"
+    [ ! -e "$stale_group" ]
+    [ ! -e "$stale_seat" ]
+else
+    printf '%s\n' 'skipping source-free uninstall check: requires root' >&2
+fi
+
 printf '%s\n' "install-evdev-permissions.sh test passed"

@@ -15,6 +15,8 @@ All notable changes to WayExpand are documented here.
 - **Fail-closed manual uninstall:** uninstall now detects running WayExpand
   processes even when the user systemd bus is unavailable, preventing active
   input capture or injection from surviving removal.
+- **Source-independent evdev cleanup:** revoking raw-input permissions no
+  longer requires the original source archive or package rule files to exist.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit
