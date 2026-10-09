@@ -21,6 +21,8 @@ All notable changes to WayExpand are documented here.
   temporary file and atomically renamed, preventing truncated cleanup records.
 - **Immediate evdev revocation:** uninstall now triggers existing input devices
   after removing udev rules, so active-seat ACLs are reevaluated immediately.
+- **Non-duplicating audit retries:** failed Action Broker audit batches now
+  roll back partial appends before retrying, preserving one record per action.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit

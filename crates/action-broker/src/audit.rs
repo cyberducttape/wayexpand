@@ -191,6 +191,9 @@ impl AuditWriter {
     }
 
     fn write_batch(&mut self, batch: &[Vec<u8>]) -> io::Result<()> {
+        if batch.is_empty() {
+            return Ok(());
+        }
         let bytes = batch.iter().map(Vec::len).sum::<usize>() as u64;
         if bytes > MAX_AUDIT_BYTES {
             return Err(io::Error::other("audit batch exceeds size limit"));
@@ -198,10 +201,29 @@ impl AuditWriter {
         if self.file.metadata()?.len().saturating_add(bytes) > MAX_AUDIT_BYTES {
             self.rotate()?;
         }
-        for line in batch {
-            self.file.write_all(line)?;
+        let start_len = self.file.metadata()?.len();
+        let result = (|| {
+            for line in batch {
+                self.file.write_all(line)?;
+            }
+            self.file.sync_data()
+        })();
+        if let Err(error) = result {
+            // A write or sync failure may occur after bytes have reached the
+            // file. Retrying the full batch without truncating would duplicate
+            // records and make the audit log untrustworthy.
+            if let Err(rollback) = self.file.set_len(start_len) {
+                tracing::error!(
+                    error = %rollback,
+                    start_len,
+                    "could not roll back a failed audit batch"
+                );
+            } else {
+                let _ = self.file.sync_data();
+            }
+            return Err(error);
         }
-        self.file.sync_data()
+        Ok(())
     }
 
     fn rotate(&mut self) -> io::Result<()> {
