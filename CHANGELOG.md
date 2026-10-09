@@ -12,6 +12,8 @@ All notable changes to WayExpand are documented here.
 - Guided setup now fails closed if its input-method route catalog is inconsistent.
 - Control-socket teardown now wakes and joins its listener thread instead of
   leaving an accept loop alive after the server is dropped.
+- Window-tracker teardown now joins its reconnect supervisor instead of
+  leaving a background tracker thread detached.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing

@@ -11,6 +11,7 @@ use std::{
         mpsc, Arc,
     },
     thread,
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -26,6 +27,7 @@ pub struct WindowTrackerHandle {
     pub receiver: mpsc::Receiver<Option<WindowContext>>,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    supervisor: Option<JoinHandle<()>>,
 }
 
 impl WindowTrackerHandle {
@@ -37,6 +39,9 @@ impl WindowTrackerHandle {
 impl Drop for WindowTrackerHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(supervisor) = self.supervisor.take() {
+            let _ = supervisor.join();
+        }
     }
 }
 
@@ -83,10 +88,11 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
         .name("wayexpand-window-tracker-supervisor".into())
         .spawn(move || supervise_kwin_window_tracker(sender, supervisor_connected, supervisor_stop))
     {
-        Ok(_) => Some(WindowTrackerHandle {
+        Ok(supervisor) => Some(WindowTrackerHandle {
             receiver,
             connected,
             stop,
+            supervisor: Some(supervisor),
         }),
         Err(error) => {
             warn!(%error, "could not start KWin window tracker supervisor");
