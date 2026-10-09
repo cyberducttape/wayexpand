@@ -12,6 +12,9 @@ All notable changes to WayExpand are documented here.
   workflow, so tag releases can reach the runner-capacity preflight.
 - **Bounded Launchpad synchronization:** the mirror job now has a workflow-level
   timeout in addition to its bounded SSH and push operations.
+- **Fail-closed manual uninstall:** uninstall now detects running WayExpand
+  processes even when the user systemd bus is unavailable, preventing active
+  input capture or injection from surviving removal.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit

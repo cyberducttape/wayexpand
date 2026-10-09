@@ -80,6 +80,23 @@ if command -v systemctl >/dev/null 2>&1; then
     fi
 fi
 
+# A missing or unusable user systemd bus does not prove that a manually
+# launched daemon has stopped. Refuse to remove binaries while any WayExpand
+# runtime is still present, otherwise the active process could continue
+# capturing or injecting input after the installation appears removed.
+if ! command -v ps >/dev/null 2>&1; then
+    printf '%s\n' "error: ps is required to verify that WayExpand processes are stopped" >&2
+    exit 1
+fi
+active_processes=$(ps -eo pid=,comm= 2>/dev/null | awk '
+    $2 ~ /^wayexpand(-daemon|-action-b|-ibus|-ui|-gui)?$/ { print $1 ":" $2 }
+')
+if [ -n "$active_processes" ]; then
+    printf '%s\n' 'error: WayExpand processes are still running; refusing to remove installed files:' >&2
+    printf '%s\n' "$active_processes" >&2
+    exit 1
+fi
+
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     if [ -e "$bin_dir/$binary" ]; then
         rm -f -- "$bin_dir/$binary"

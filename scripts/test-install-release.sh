@@ -141,4 +141,21 @@ if PATH="$stub_bin:$PATH" \
 fi
 [ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
 
+# A missing user systemd bus must not weaken the same invariant: a manually
+# launched daemon is still an active input process and blocks uninstall.
+mv "$stub_bin/systemctl" "$stub_bin/systemctl-disabled"
+cat >"$stub_bin/ps" <<'EOF'
+#!/bin/sh
+printf '%s\n' '4242 wayexpand-daemon'
+EOF
+chmod 0755 "$stub_bin/ps"
+if PATH="$stub_bin:$PATH" \
+    HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/uninstall-user.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'uninstaller removed files while a manually launched daemon was active' >&2
+    exit 1
+fi
+[ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
+
 printf '%s\n' "release install/uninstall test passed"
