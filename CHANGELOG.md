@@ -13,7 +13,8 @@ All notable changes to WayExpand are documented here.
   blocks both modes.
 - User installers now stage all six executables under a versioned library
   directory and atomically switch the `current` pointer; enabled upgrades
-  verify service activity and restore the prior pointer if startup fails.
+  preflight systemd availability, verify service activity, and restore the
+  prior pointer if reload, enablement, or startup fails.
 - Installer `--enable`/`--service` validation now runs before build or file
   changes, and both installers reject incomplete service selections early.
 - Secure config saves now retain no-symlink directory traversal when `openat2`

@@ -121,6 +121,24 @@ if PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/con
 fi
 [ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = 0.0.0 ]
 
+enable_failure_release="$test_root/wayexpand-0.0.2-linux-x86_64"
+cp -R "$release_dir" "$enable_failure_release"
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+case "$*" in
+    "--user enable "*) exit 1 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod 0755 "$stub_bin/systemctl"
+if PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$enable_failure_release/scripts/install-release.sh" --enable --service=wayexpand-evdev.service \
+    >/dev/null 2>&1; then
+    printf '%s\n' 'installer accepted a systemctl enable failure' >&2
+    exit 1
+fi
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = 0.0.0 ]
+
 cat >"$stub_bin/systemctl" <<'EOF'
 #!/bin/sh
 if [ -n "${SYSTEMCTL_LOG:-}" ]; then

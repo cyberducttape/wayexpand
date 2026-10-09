@@ -32,6 +32,10 @@ if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
     printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
     exit 2
 fi
+if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
+    printf '%s\n' 'error: systemctl is required for --enable' >&2
+    exit 127
+fi
 if [ "$(id -u)" -eq 0 ]; then
     if [ -n "${SUDO_USER:-}" ]; then
         printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
@@ -139,6 +143,10 @@ else
     done
     rm -rf "$stage_dir"
 fi
+service_was_enabled=0
+if [ "$enable_service" -eq 1 ] && systemctl --user is-enabled "$service_name" >/dev/null 2>&1; then
+    service_was_enabled=1
+fi
 previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
 next_link="$library_dir/.current-$$"
 ln -s "$version" "$next_link"
@@ -224,23 +232,30 @@ fi
 
 if [ "$enable_service" -eq 1 ]; then
     "$bin_dir/wayexpand" validate "$config_path"
-    if ! command -v systemctl >/dev/null 2>&1; then
-        printf '%s\n' "error: systemctl is required for --enable" >&2
-        exit 127
-    fi
     printf '%s\n' "Enabling user service: $service_name"
-    systemctl --user daemon-reload
-    systemctl --user enable "$service_name"
-    if ! systemctl --user restart "$service_name" || ! systemctl --user is-active --quiet "$service_name"; then
-        printf '%s\n' "error: $service_name failed to start; restoring previous version" >&2
+    activation_ok=1
+    systemctl --user daemon-reload || activation_ok=0
+    if [ "$activation_ok" -eq 1 ]; then
+        systemctl --user enable "$service_name" || activation_ok=0
+    fi
+    if [ "$activation_ok" -eq 1 ]; then
+        systemctl --user restart "$service_name" || activation_ok=0
+    fi
+    if [ "$activation_ok" -eq 1 ]; then
+        systemctl --user is-active --quiet "$service_name" || activation_ok=0
+    fi
+    if [ "$activation_ok" -ne 1 ]; then
+        printf '%s\n' "error: unable to activate $service_name; restoring the previous version when available" >&2
         if [ -n "$previous_version" ]; then
             rollback_link="$library_dir/.rollback-$$"
             ln -s "$previous_version" "$rollback_link"
             mv -Tf "$rollback_link" "$library_dir/current"
-            systemctl --user daemon-reload
+        fi
+        systemctl --user daemon-reload || true
+        if [ "$service_was_enabled" -eq 1 ]; then
             systemctl --user restart "$service_name" || true
         else
-            rm -f "$library_dir/current"
+            systemctl --user disable --now "$service_name" >/dev/null 2>&1 || true
         fi
         exit 1
     fi
