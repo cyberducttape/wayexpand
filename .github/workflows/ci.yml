@@ -520,9 +520,11 @@ jobs:
         run: cargo build --locked -p action-broker
       - name: Create dummy binaries for systemd verification
         run: |
-          mkdir -p ~/.local/bin
+          mkdir -p ~/.local/bin ~/.local/lib/wayexpand/current/bin
           touch ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon ~/.local/bin/wayexpand-action-broker
+          touch ~/.local/lib/wayexpand/current/bin/wayexpand ~/.local/lib/wayexpand/current/bin/wayexpand-daemon ~/.local/lib/wayexpand/current/bin/wayexpand-action-broker
           chmod +x ~/.local/bin/wayexpand ~/.local/bin/wayexpand-daemon ~/.local/bin/wayexpand-action-broker
+          chmod +x ~/.local/lib/wayexpand/current/bin/wayexpand ~/.local/lib/wayexpand/current/bin/wayexpand-daemon ~/.local/lib/wayexpand/current/bin/wayexpand-action-broker
       - name: Verify wayexpand.service
         run: systemd-analyze verify systemd/wayexpand.service
       - name: Verify wayexpand-input-method.service

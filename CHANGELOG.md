@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Systemd unit CI now creates dummy executables at the versioned installer's
+  active `current/bin` path, keeping service validation aligned with installs.
 - GUI command previews now distinguish local direct execution (outside both
   service sandboxes and broker audit) from named actions executed through the
   broker, and clarify that broker auditing is optional and health-dependent.
