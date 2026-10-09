@@ -117,4 +117,28 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 
+# A failed stop must fail closed before any executable is removed. This guards
+# the rollback invariant that an active capture/injection process is never
+# left running with its installed files silently deleted.
+mkdir -p "$test_root/home/.local/bin"
+printf '#!/bin/sh\nexit 0\n' >"$test_root/home/.local/bin/wayexpand-daemon"
+chmod 0755 "$test_root/home/.local/bin/wayexpand-daemon"
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+case "$*" in
+    "--user is-enabled "*) exit 0 ;;
+    "--user disable --now "*) exit 1 ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod 0755 "$stub_bin/systemctl"
+if PATH="$stub_bin:$PATH" \
+    HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/uninstall-user.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'uninstaller accepted a failed service stop' >&2
+    exit 1
+fi
+[ -x "$test_root/home/.local/bin/wayexpand-daemon" ]
+
 printf '%s\n' "release install/uninstall test passed"
