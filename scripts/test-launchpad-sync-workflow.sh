@@ -9,11 +9,15 @@ expected_group="group: launchpad-sync-\${{ github.repository }}"
 main_guard="if [ \"\$GITHUB_REF\" = \"refs/heads/main\" ]; then"
 tag_message="Skipping Launchpad main update for \$GITHUB_REF; syncing tags only."
 main_lease="--force-with-lease=\"refs/heads/main:\$launchpad_main\""
+probe_timeout="response=\"\$(timeout --signal=TERM --kill-after=10s 45s ssh"
+probe_connect_timeout="-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
 grep -F -- "$main_guard" "$workflow" >/dev/null
 grep -F -- "$tag_message" "$workflow" >/dev/null
 grep -F -- "$main_lease" "$workflow" >/dev/null
+grep -F -- "$probe_timeout" "$workflow" >/dev/null
+grep -F -- "$probe_connect_timeout" "$workflow" >/dev/null
 
 # Both main push forms must remain inside the branch guard. The two push lines
 # must occur after the guard and before the tag-only branch, so nested `if`

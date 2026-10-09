@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
   refuses to overwrite a concurrent branch update.
 - Launchpad mirroring retries bounded transient SSH push failures while
   preserving lease and divergence checks.
+- Launchpad SSH authorization probes now have explicit connection and overall
+  timeouts, preventing an unreachable service from hanging synchronization.
 - **Fail-closed certification and rollback:** production input-method
   certification now requires a healthy doctor result, and uninstall refuses to
   remove binaries while any managed user service cannot be stopped or remains

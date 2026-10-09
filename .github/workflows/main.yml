@@ -45,7 +45,9 @@ jobs:
           fingerprint="$(ssh-keygen -y -f ~/.ssh/launchpad_key | ssh-keygen -lf - | awk '{print $2}')"
           echo "Launchpad key fingerprint: $fingerprint"
           set +e
-          response="$(ssh -o BatchMode=yes -o IdentitiesOnly=yes \
+          response="$(timeout --signal=TERM --kill-after=10s 45s ssh \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key \
             -T cyberducttape@git.launchpad.net 2>&1)"
           set -e
