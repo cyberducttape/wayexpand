@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Cheaper latency diagnostics:** status is rebuilt on every key event, so
+  latency percentiles now refresh at most once a second instead of re-sorting
+  the sample window each time; counts stay live. The GUI shows "no samples"
+  for an empty window and recognizes the Fcitx5 direct-commit output mode.
 - **Consistent snippet-layer validation:** the daemon no longer re-validates
   `snippets.d` outside fleet mode (where it never loads those files), and
   `wayexpand validate` follows layer symlinks like the fleet loader, so

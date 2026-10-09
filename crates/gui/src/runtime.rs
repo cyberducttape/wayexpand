@@ -150,6 +150,9 @@ impl DaemonCapabilities {
                     Some("wlroots virtual-keyboard key synthesis")
                 }
                 "input-method-v2 text" => Some("input-method-v2 text"),
+                "Fcitx5 direct commit (libei fallback available)" => {
+                    Some("Fcitx5 direct commit (libei fallback available)")
+                }
                 _ => None,
             };
             found = true;

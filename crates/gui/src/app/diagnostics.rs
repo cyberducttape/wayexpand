@@ -365,8 +365,10 @@ impl GuiApp {
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label(label);
+            // The daemon publishes zeros for an empty window; measured
+            // samples always round up to at least 1 µs.
             let text = match (p50, p95, p99) {
-                (Some(p50), Some(p95), Some(p99)) => {
+                (Some(p50), Some(p95), Some(p99)) if p99 > 0 => {
                     format!("p50 {p50} µs · p95 {p95} µs · p99 {p99} µs")
                 }
                 _ => self.strings.no_samples().to_owned(),

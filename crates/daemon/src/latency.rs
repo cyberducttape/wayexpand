@@ -8,11 +8,16 @@
 use std::{
     collections::VecDeque,
     sync::{Mutex, OnceLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use wayexpand_core::{ExpansionEngine, ExpansionResult, TextInjector, TransactionOutcome};
 
 const WINDOW_CAPACITY: usize = 1024;
+/// Status is rebuilt every reactor turn (every key event) and the matcher
+/// window changes on each one; sorting the window that often would cost more
+/// than the matching it measures. Counts stay live; percentiles refresh at
+/// most this often.
+const PERCENTILE_REFRESH: Duration = Duration::from_secs(1);
 
 const OUTPUT_MODES: [&str; 5] = [
     "ei_text",
@@ -38,6 +43,7 @@ struct Window {
     total: u64,
     cached: Snapshot,
     dirty: bool,
+    percentiles_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -56,9 +62,16 @@ impl Window {
     }
 
     fn snapshot(&mut self) -> Snapshot {
-        if !self.dirty {
+        self.cached.sample_count = self.total;
+        self.cached.window_count = self.samples_ns.len();
+        if !self.dirty
+            || self
+                .percentiles_at
+                .is_some_and(|computed| computed.elapsed() < PERCENTILE_REFRESH)
+        {
             return self.cached;
         }
+        self.percentiles_at = Some(Instant::now());
         let mut sorted = self.samples_ns.iter().copied().collect::<Vec<_>>();
         sorted.sort_unstable();
         self.cached = Snapshot {
