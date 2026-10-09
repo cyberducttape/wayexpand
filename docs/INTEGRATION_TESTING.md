@@ -165,6 +165,15 @@ self-hosted Wayland runners or by an operator before publishing a release;
 Ubuntu-hosted CI is not a substitute for them. A release is not compositor
 certified merely because the unit, smoke, doctor, or protocol tests pass.
 
+The certification workflow performs a hosted preflight before it schedules any
+self-hosted jobs. Configure the repository secret
+`CERTIFICATION_RUNNER_TOKEN` with a fine-grained GitHub token (or GitHub App
+token) that has repository **Administration: read** permission; GitHub's
+default workflow token cannot list repository self-hosted runners. The
+preflight requires an online runner labeled `wayexpand-certification` plus
+each of `kde`, `gnome`, `sway`, and `hyprland`, and fails with the missing
+labels instead of leaving a release queued indefinitely.
+
 Use the evidence collector on a real compositor session:
 
 ```sh

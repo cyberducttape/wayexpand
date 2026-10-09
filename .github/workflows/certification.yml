@@ -27,9 +27,14 @@ jobs:
     steps:
       - name: Require online compositor runners
         env:
-          GH_TOKEN: ${{ github.token }}
+          CERTIFICATION_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "$CERTIFICATION_RUNNER_TOKEN" ]; then
+            echo 'Missing CERTIFICATION_RUNNER_TOKEN; configure a fine-grained token with repository Administration: read permission.' >&2
+            exit 1
+          fi
+          export GH_TOKEN="$CERTIFICATION_RUNNER_TOKEN"
           runners_json="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100")"
           missing=()
           for compositor in kde gnome sway hyprland; do

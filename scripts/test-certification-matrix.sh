@@ -31,6 +31,7 @@ workflow="$project_dir/.github/workflows/certification.yml"
 grep -F -- 'runner-preflight:' "$workflow" >/dev/null
 grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
+grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
 grep -F -- 'actions: read' "$workflow" >/dev/null
 for compositor in kde gnome sway hyprland; do
     grep -F -- "compositor: $compositor" "$workflow" >/dev/null
