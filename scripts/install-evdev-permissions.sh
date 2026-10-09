@@ -152,15 +152,22 @@ if [ "$do_uninstall" -eq 1 ]; then
         printf '%s\n' "(dry run; no changes made)"
         exit 0
     fi
+    udev_changed=0
     if [ -e "$rule_dest" ]; then
         rm -f -- "$rule_dest"
-        command -v udevadm >/dev/null 2>&1 && udevadm control --reload
+        udev_changed=1
         printf '%s\n' "Removed $rule_dest"
     fi
     if [ -e "$uaccess_rule_dest" ]; then
         rm -f -- "$uaccess_rule_dest"
-        command -v udevadm >/dev/null 2>&1 && udevadm control --reload
+        udev_changed=1
         printf '%s\n' "Removed $uaccess_rule_dest"
+    fi
+    if [ "$udev_changed" -eq 1 ] && command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload
+        # Reload affects future device events; trigger existing input devices
+        # too so uaccess ACLs are revoked without requiring a replug.
+        udevadm trigger --subsystem-match=input
     fi
     if [ "$access_mode" = input-group ] && [ "$state_added_input_group" -eq 1 ] \
         && [ "$state_user" = "$target_user" ] && is_member; then
