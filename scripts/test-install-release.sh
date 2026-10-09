@@ -146,7 +146,8 @@ fi
 mv "$stub_bin/systemctl" "$stub_bin/systemctl-disabled"
 cat >"$stub_bin/ps" <<'EOF'
 #!/bin/sh
-printf '%s\n' '4242 wayexpand-daemon'
+printf '%s\n' '4242 /tmp/wayexpand-daemon --config /tmp/test.toml'
+printf '%s\n' '4243 /tmp/wayexpand-action-broker'
 EOF
 chmod 0755 "$stub_bin/ps"
 if PATH="$stub_bin:$PATH" \

@@ -88,8 +88,10 @@ if ! command -v ps >/dev/null 2>&1; then
     printf '%s\n' "error: ps is required to verify that WayExpand processes are stopped" >&2
     exit 1
 fi
-active_processes=$(ps -eo pid=,comm= 2>/dev/null | awk '
-    $2 ~ /^wayexpand(-daemon|-action-b|-ibus|-ui|-gui)?$/ { print $1 ":" $2 }
+active_processes=$(ps -eo pid=,args= 2>/dev/null | awk '
+    $2 ~ /(^|\/)wayexpand(-daemon|-action-broker|-ibus|-ui|-gui)([[:space:]]|$)/ {
+        print $1 ":" $2
+    }
 ')
 if [ -n "$active_processes" ]; then
     printf '%s\n' 'error: WayExpand processes are still running; refusing to remove installed files:' >&2
