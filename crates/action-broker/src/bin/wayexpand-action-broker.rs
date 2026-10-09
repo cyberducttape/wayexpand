@@ -760,4 +760,35 @@ mod tests {
         drop(permits);
         assert!(slots.try_acquire().is_ok());
     }
+
+    #[test]
+    fn broker_health_is_published_atomically_with_private_permissions() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-health-test-{}-{}",
+            std::process::id(),
+            HEALTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&directory).expect("create health test directory");
+        let path = directory.join("health.json");
+
+        write_broker_health(&path, None, false, true).expect("publish broker health");
+
+        let contents = fs::read_to_string(&path).expect("read broker health");
+        let status: serde_json::Value = serde_json::from_str(&contents).expect("parse health");
+        assert_eq!(status["running"], true);
+        assert_eq!(status["audit_enabled"], false);
+        assert_eq!(
+            fs::metadata(&path).expect("stat health").mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::read_dir(&directory)
+                .expect("read health directory")
+                .count(),
+            1,
+            "temporary health files must not remain after publication"
+        );
+
+        fs::remove_dir_all(directory).expect("remove health test directory");
+    }
 }

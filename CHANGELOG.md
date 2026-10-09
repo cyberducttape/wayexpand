@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added regression coverage for atomic, private Action Broker health-file publication.
+
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
   managed `safe_mode` deployments from bypassing command restrictions.
