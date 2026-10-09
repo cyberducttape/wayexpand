@@ -71,11 +71,21 @@ case "$state_home" in
 esac
 
 config_path="$config_dir/expansions.toml"
-if [ "$enable_service" -eq 1 ] && { [ -e "$config_path" ] || [ -L "$config_path" ]; }; then
+if [ "$enable_service" -eq 1 ]; then
+    validation_path=
+    if [ -e "$config_path" ] || [ -L "$config_path" ]; then
+        validation_path="$config_path"
+        printf '%s\n' "Validating existing configuration before upgrade: $config_path"
+    elif [ -f "$release_dir/expansions.toml" ]; then
+        validation_path="$release_dir/expansions.toml"
+        printf '%s\n' "Validating bundled configuration before installation: $validation_path"
+    else
+        printf '%s\n' 'error: --enable requires an existing configuration or bundled expansions.toml' >&2
+        exit 1
+    fi
     # Validate before replacing any installed files. An upgrade must not leave
-    # a mixed-version installation behind when the existing library is invalid.
-    printf '%s\n' "Validating existing configuration before upgrade: $config_path"
-    "$release_dir/bin/wayexpand" validate "$config_path"
+    # a mixed-version installation behind when the active library is invalid.
+    "$release_dir/bin/wayexpand" validate "$validation_path"
 fi
 
 install -d -m 0700 "$state_dir"
