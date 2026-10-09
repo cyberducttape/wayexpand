@@ -646,7 +646,10 @@ async fn main() -> Result<()> {
                     output_size: audit_output_size(&action_response),
                 };
                 let audit_result = if audit_required {
-                    logger.record_required(&event)
+                    // Waits for an fsync (up to the writer's confirmation
+                    // timeout); keep it off the async worker like the other
+                    // blocking broker I/O. The runtime is multi-threaded.
+                    tokio::task::block_in_place(|| logger.record_required(&event))
                 } else {
                     logger.record(&event)
                 };

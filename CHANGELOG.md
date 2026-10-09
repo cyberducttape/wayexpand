@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Broker responsiveness with mandatory audit:** waiting for a required audit
+  event's fsync no longer blocks an async runtime worker.
 - **Cheaper latency diagnostics:** status is rebuilt on every key event, so
   latency percentiles now refresh at most once a second instead of re-sorting
   the sample window each time; counts stay live. The GUI shows "no samples"
