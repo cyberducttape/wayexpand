@@ -592,7 +592,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         let rebase = git(&directory, &["rebase", "--quiet", "FETCH_HEAD"])?;
         if !rebase.status.success() {
             let _ = git(&directory, &["rebase", "--abort"]);
-            restrict_library_permissions(&directory);
+            restrict_library_permissions(&directory, primary);
             bail!(
                 "the remote library conflicts with local changes; your local library is unchanged. \
                  Resolve it with git in {}",
@@ -600,12 +600,12 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
             );
         }
         report.pulled = true;
-        restrict_library_permissions(&directory);
+        restrict_library_permissions(&directory, primary);
         if let Err(error) = validate_library(config_path) {
             // Never leave the daemon a broken library: restore the local one.
             git_ok(&directory, &["reset", "--quiet", "--hard", &before])?;
             // The reset rewrites files with the umask; keep them loadable.
-            restrict_library_permissions(&directory);
+            restrict_library_permissions(&directory, primary);
             bail!("remote changes would make the {error:#}; kept the local library");
         }
     }
@@ -628,7 +628,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
 
 /// Git writes files with the local umask; the library must not be group- or
 /// world-writable to load, so pulled files are made private.
-fn restrict_library_permissions(directory: &Path) {
+fn restrict_library_permissions(directory: &Path, primary: &str) {
     use std::os::unix::fs::PermissionsExt;
     // Never follow a symlink: chmod through one changes its target, which
     // can be any file the user owns.
@@ -637,7 +637,7 @@ fn restrict_library_permissions(directory: &Path) {
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
         }
     };
-    private(&directory.join("expansions.toml"));
+    private(&directory.join(primary));
     let snippets = directory.join("snippets.d");
     if std::fs::symlink_metadata(&snippets).is_ok_and(|metadata| metadata.file_type().is_dir()) {
         let _ = std::fs::set_permissions(&snippets, std::fs::Permissions::from_mode(0o700));
@@ -1002,6 +1002,45 @@ mod tests {
     }
 
     #[test]
+    fn custom_primary_permissions_are_repaired_after_remote_rebase() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (directory, default_path) = prepare_repository();
+        let primary = "team library.toml";
+        let config_path = directory.join(primary);
+        std::fs::rename(default_path, &config_path).expect("rename primary configuration");
+        let remote_directory = test_directory();
+        std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+        git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+        let remote_url = remote_directory.display().to_string();
+        init(&config_path, Some(&remote_url)).expect("initialize custom primary library");
+        assert!(sync(&config_path).expect("initial sync").pushed);
+        push_from_another_clone(
+            &remote_url,
+            &[(
+                primary,
+                "[[expansion]]\ntrigger = \":remote\"\nreplacement = \"updated\"\n",
+                false,
+            )],
+        );
+
+        let report = sync(&config_path).expect("custom-primary remote update is valid");
+
+        assert!(report.pulled && report.pushed);
+        assert_eq!(
+            std::fs::metadata(&config_path)
+                .expect("stat pulled primary")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        Config::load(&config_path).expect("pulled primary remains loadable");
+        let _ = std::fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    #[test]
     fn permission_repair_never_follows_symlinks() {
         use std::os::unix::fs::PermissionsExt;
         let directory = test_directory();
@@ -1012,8 +1051,11 @@ mod tests {
             .expect("make script executable");
         std::os::unix::fs::symlink(&script, directory.join("snippets.d/from-remote.toml"))
             .expect("create symlink");
+        std::os::unix::fs::symlink(&script, directory.join("custom-primary.toml"))
+            .expect("create custom primary symlink");
 
-        restrict_library_permissions(&directory);
+        restrict_library_permissions(&directory, "expansions.toml");
+        restrict_library_permissions(&directory, "custom-primary.toml");
 
         let mode = std::fs::metadata(&script)
             .expect("stat script")

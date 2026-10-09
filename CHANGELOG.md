@@ -36,7 +36,8 @@ All notable changes to WayExpand are documented here.
   is unavailable or blocked, using descriptor-relative `openat` with
   `O_NOFOLLOW` rather than an unsafe path-based fallback.
 - Git synchronization now tracks the configured primary filename, rejects a
-  symlinked primary config, and verifies outgoing tree modes as well as paths.
+  symlinked primary config, repairs that file's permissions after remote
+  updates, and verifies outgoing tree modes as well as paths.
 - Usage-stat persistence now runs on a dedicated bounded-queue worker rather
   than the input reactor, with failure/drop counters and maximum flush duration
   exposed in daemon status.
