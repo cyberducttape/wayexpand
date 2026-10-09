@@ -27,6 +27,12 @@ trap 'rm -rf "$test_root"' EXIT INT TERM
 # installer can be exercised.
 cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
 export CARGO_HOME="$cargo_home"
+# Keep rustup's managed toolchains outside the fixture homes. Each installer
+# invocation intentionally changes HOME to test isolation; without a stable
+# RUSTUP_HOME, rustup downloads the same pinned toolchain into every fixture
+# and Cargo rebuilds the release payload for each toolchain copy.
+rustup_home=${RUSTUP_HOME:-"$HOME/.rustup"}
+export RUSTUP_HOME="$rustup_home"
 # Reuse the target directory populated by earlier CI checks when the caller
 # did not provide one. This keeps the installer test focused on installation
 # behavior instead of recompiling the entire GUI dependency graph from zero.
