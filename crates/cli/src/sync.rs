@@ -93,6 +93,13 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
                         thread::sleep(Duration::from_millis(5));
                     }
                 }
+                // Callers parse stdout (tree listings, outgoing paths) for
+                // safety decisions, so a truncated listing must fail closed.
+                // stderr is diagnostic only and may legitimately stay open in
+                // a persistent SSH control master outside git's group.
+                if !stdout_eof {
+                    bail!("git {} output did not complete", args.join(" "));
+                }
                 break status;
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
@@ -177,7 +184,23 @@ fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
 
 fn validate_library(config_path: &Path) -> Result<()> {
     Config::validate_library_files(config_path)
-        .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))
+        .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))?;
+    // Git would commit a symlink as a link, which the remote tree check on
+    // every other machine refuses; require plain files in the library.
+    let directory = config_path
+        .parent()
+        .context("configuration path has no directory")?;
+    for file in Config::layer_files(directory)
+        .map_err(|error| anyhow::anyhow!("library is invalid: {}", error.safe_summary()))?
+    {
+        if !std::fs::symlink_metadata(&file).is_ok_and(|metadata| metadata.file_type().is_file()) {
+            bail!(
+                "library is invalid: {} is not a plain file; sync tracks only regular snippet files",
+                file.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn remote(directory: &Path) -> Result<Option<String>> {
@@ -547,6 +570,31 @@ mod tests {
         )
         .expect("restrict invalid snippet");
         assert!(validate_library(&config_path).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn sync_validation_refuses_symlinked_layers() {
+        use std::os::unix::fs::PermissionsExt;
+        let (directory, config_path) = prepare_repository();
+        let snippets = directory.join("snippets.d");
+        std::fs::create_dir(&snippets).expect("create snippets directory");
+        std::fs::set_permissions(&snippets, std::fs::Permissions::from_mode(0o700))
+            .expect("restrict snippets directory");
+        let target = directory.join("outside.toml");
+        std::fs::write(
+            &target,
+            "[[expansion]]\ntrigger = \";t\"\nreplacement = \"x\"\n",
+        )
+        .expect("write target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600))
+            .expect("restrict target");
+        std::os::unix::fs::symlink(&target, snippets.join("linked.toml")).expect("symlink layer");
+
+        // The loader accepts the link; sync refuses to track it.
+        Config::validate_layer_files(&config_path).expect("loader follows layer symlinks");
+        let error = validate_library(&config_path).expect_err("sync tracks plain files only");
+        assert!(format!("{error:#}").contains("linked.toml"), "{error:#}");
         let _ = std::fs::remove_dir_all(directory);
     }
 

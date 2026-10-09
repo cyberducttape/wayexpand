@@ -339,8 +339,9 @@ fn load_for_mode(
     fleet: bool,
     policy: &OrganizationPolicy,
 ) -> Result<(Config, Option<FileStamp>)> {
+    // Layer files in snippets.d are validated by the fleet loader, which is
+    // the only daemon path that reads them (and follows symlinks as it does).
     let (mut base, stamp) = load_consistent(path)?;
-    Config::validate_library_files(path).map_err(anyhow::Error::new)?;
     if fleet {
         // Kept typed so `safe_reload_error` can report what went wrong.
         let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)

@@ -512,18 +512,33 @@ pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
 impl Config {
     /// Validate the primary configuration and every portable layer file next
-    /// to it. Synchronization and daemon reloads use this same preflight so a
-    /// malformed `snippets.d/*.toml` file cannot be promoted unnoticed.
+    /// to it, so a malformed `snippets.d/*.toml` file cannot be synchronized
+    /// or reported valid unnoticed.
     pub fn validate_library_files(path: impl AsRef<Path>) -> Result<(), ConfigError> {
         let path = path.as_ref();
         Self::load(path)?;
-        let Some(directory) = path.parent() else {
+        Self::validate_layer_files(path)
+    }
+
+    /// Validate each `snippets.d/*.toml` layer next to the configuration at
+    /// `path`. Layers are loaded like the fleet loader does: symlinks are
+    /// followed, and `Config::load` rejects non-regular or unsafe targets.
+    pub fn validate_layer_files(path: impl AsRef<Path>) -> Result<(), ConfigError> {
+        let Some(directory) = path.as_ref().parent() else {
             return Ok(());
         };
+        for file in Self::layer_files(directory)? {
+            Self::load(file)?;
+        }
+        Ok(())
+    }
+
+    /// The sorted `snippets.d/*.toml` entries next to a configuration.
+    pub fn layer_files(directory: &Path) -> Result<Vec<std::path::PathBuf>, ConfigError> {
         let snippets = directory.join("snippets.d");
         let entries = match fs::read_dir(&snippets) {
             Ok(entries) => entries,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => {
                 return Err(ConfigError::Read {
                     path: snippets.display().to_string(),
@@ -531,36 +546,22 @@ impl Config {
                 })
             }
         };
-        let mut files = entries
-            .map(|entry| {
-                entry.map_err(|source| ConfigError::Read {
-                    path: snippets.display().to_string(),
-                    source,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|entry| entry.path())
-            .filter(|entry| {
-                entry
-                    .extension()
-                    .is_some_and(|extension| extension == "toml")
-            })
-            .collect::<Vec<_>>();
-        files.sort();
-        for file in files {
-            let metadata = fs::symlink_metadata(&file).map_err(|source| ConfigError::Read {
-                path: file.display().to_string(),
+        let mut files = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|source| ConfigError::Read {
+                path: snippets.display().to_string(),
                 source,
             })?;
-            if !metadata.file_type().is_file() {
-                return Err(ConfigError::NotRegular {
-                    path: file.display().to_string(),
-                });
+            let file = entry.path();
+            if file
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+            {
+                files.push(file);
             }
-            Self::load(file)?;
         }
-        Ok(())
+        files.sort();
+        Ok(files)
     }
 
     /// Static snippet replacements by trigger and alias, for

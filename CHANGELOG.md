@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Consistent snippet-layer validation:** the daemon no longer re-validates
+  `snippets.d` outside fleet mode (where it never loads those files), and
+  `wayexpand validate` follows layer symlinks like the fleet loader, so
+  stow-style setups load again. `wayexpand sync` still requires plain files,
+  and now fails closed if git's output did not complete.
 - **Bounded busy-request drain:** the control socket's overload path discards
   at most 16 KiB of an unread request, so a client that keeps writing cannot
   hold the accept loop.
