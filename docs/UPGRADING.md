@@ -21,7 +21,21 @@ sudo apt update && sudo apt upgrade wayexpand
 git pull && makepkg -si
 ```
 
-The daemon will reload automatically. No service restart required.
+The installer does not restart a running user service. It preserves the
+current process while replacing the binaries, so the new binary is not active
+until you explicitly restart the selected service. Validate the configuration
+first, then restart and verify the service:
+
+```bash
+wayexpand validate ~/.config/wayexpand/expansions.toml
+systemctl --user restart wayexpand-input-method.service
+systemctl --user is-active wayexpand-input-method.service
+wayexpand doctor --json
+```
+
+For an evdev deployment, use `wayexpand-evdev.service` in the restart and
+verification commands instead. Keep the previous release available until the
+health check and a real expansion test pass.
 
 ---
 
@@ -152,9 +166,13 @@ If an upgrade causes issues, downgrade to the previous version:
 ### From Source
 
 ```bash
+# Stop capture/injection before replacing the active binary.
+systemctl --user disable --now wayexpand-input-method.service
 git checkout v1.1.1
 ./scripts/install-user.sh
-systemctl --user restart wayexpand-input-method.service
+wayexpand validate ~/.config/wayexpand/expansions.toml
+systemctl --user enable --now wayexpand-input-method.service
+systemctl --user is-active wayexpand-input-method.service
 ```
 
 ### From PPA (only if a previous PPA version is installed and still available)
@@ -163,6 +181,11 @@ systemctl --user restart wayexpand-input-method.service
 sudo apt install wayexpand=1.1.1-1
 sudo apt-mark hold wayexpand  # Prevent auto-upgrade
 ```
+
+After a package downgrade, verify the selected user service is active and run
+`wayexpand doctor --json` before resuming normal typing. If the service cannot
+be stopped, do not remove or replace its binaries; resolve the systemd error
+first.
 
 To resume auto-updates: `sudo apt-mark unhold wayexpand`
 
