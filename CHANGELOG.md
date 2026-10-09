@@ -28,6 +28,8 @@ All notable changes to WayExpand are documented here.
   the sender closes.
 - **Private audit-file creation:** the broker requests mode `0600` while
   creating audit files, closing the permissive-umask exposure window.
+- **Exclusive broker health publication:** health snapshots now use exclusive
+  temporary files, preventing same-UID symlink races during atomic updates.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit

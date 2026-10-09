@@ -29,6 +29,7 @@ use tracing::{error, info, warn};
 
 const MAX_CONCURRENT_ACTIONS: usize = 16;
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
+static HEALTH_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// How long a response write may take once shutdown has begun, so a client
 /// that stopped reading cannot hold up the broker for the full socket timeout.
@@ -361,25 +362,50 @@ fn write_broker_health(
         "audit_write_failures_total": health.write_failures,
         "audit_healthy": audit_logger.is_none() || health.healthy(),
     });
-    let temporary = path.with_file_name(format!(
-        ".{}.tmp.{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("wayexpand-broker-health.json"),
-        std::process::id()
-    ));
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    serde_json::to_writer(&mut file, &status)
-        .map_err(|error| std::io::Error::other(format!("serialize broker health: {error}")))?;
-    file.write_all(b"\n")?;
-    file.sync_data()?;
-    fs::rename(&temporary, path)?;
-    Ok(())
+    let prefix = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("wayexpand-broker-health.json");
+    let mut temporary = None;
+    let mut file = None;
+    for _ in 0..16 {
+        let sequence = HEALTH_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate =
+            path.with_file_name(format!(".{prefix}.tmp.{}.{}", std::process::id(), sequence));
+        match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&candidate)
+        {
+            Ok(opened) => {
+                temporary = Some(candidate);
+                file = Some(opened);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let Some(temporary) = temporary else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate an exclusive broker health temporary file",
+        ));
+    };
+    let mut file = file.expect("health temporary file exists with its handle");
+    let result = (|| {
+        serde_json::to_writer(&mut file, &status)
+            .map_err(|error| std::io::Error::other(format!("serialize broker health: {error}")))?;
+        file.write_all(b"\n")?;
+        file.sync_data()?;
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn validate_config_ancestors(path: &Path) -> Result<()> {
