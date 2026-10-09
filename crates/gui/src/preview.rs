@@ -13,14 +13,20 @@ use crate::editor::Draft;
 /// must apply the same effective organization enforcement policy first.
 pub(crate) fn command_preview_policy_violation(
     policy: &OrganizationPolicy,
-    program: &str,
+    command: &wayexpand_core::CommandConfig,
 ) -> Option<String> {
     let effective = policy.effective_enforcement_policy();
     if effective.disable_commands {
         return Some("command execution is disabled by organization policy".into());
     }
+    // Named actions resolve to administrator-configured executables inside
+    // the broker. The GUI has no program path to validate, and must not apply
+    // the direct-command absolute-path rule to an action ID.
+    if command.action.is_some() {
+        return None;
+    }
     effective
-        .command_path_violation(program)
+        .command_path_violation(&command.program)
         .map(|reason| reason.to_string())
 }
 
@@ -131,14 +137,47 @@ mod tests {
             ..OrganizationPolicy::default()
         };
         assert_eq!(
-            command_preview_policy_violation(&policy, "git").as_deref(),
+            command_preview_policy_violation(&policy, &direct_command("git")).as_deref(),
             Some("command execution is disabled by organization policy")
         );
 
         policy.disable_commands = false;
         policy.require_absolute_commands = true;
-        assert!(command_preview_policy_violation(&policy, "git").is_some());
-        assert!(command_preview_policy_violation(&policy, "/usr/bin/git").is_none());
+        assert!(command_preview_policy_violation(&policy, &direct_command("git")).is_some());
+        assert!(
+            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git")).is_none()
+        );
+    }
+
+    #[test]
+    fn managed_action_uses_broker_path_policy_not_direct_program_path_policy() {
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_absolute_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let mut command = direct_command("");
+        command.action = Some("approved-action".into());
+        assert!(command_preview_policy_violation(&policy, &command).is_none());
+
+        let blocked = OrganizationPolicy {
+            safe_mode: true,
+            disable_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        assert!(command_preview_policy_violation(&blocked, &command).is_some());
+    }
+
+    fn direct_command(program: &str) -> wayexpand_core::CommandConfig {
+        wayexpand_core::CommandConfig {
+            action: None,
+            program: program.into(),
+            args: Vec::new(),
+            timeout_ms: 500,
+            cache_ms: 0,
+            environment: Default::default(),
+            pass_env: Vec::new(),
+        }
     }
 
     #[test]
@@ -148,7 +187,7 @@ mod tests {
             require_absolute_commands: true,
             ..OrganizationPolicy::default()
         };
-        assert!(command_preview_policy_violation(&policy, "git").is_none());
+        assert!(command_preview_policy_violation(&policy, &direct_command("git")).is_none());
     }
 
     #[test]

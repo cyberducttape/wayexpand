@@ -39,10 +39,10 @@ impl Strings {
     pub fn managed_command_preview_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "This managed action runs through the configured Action Broker, using its policy, timeout, and environment restrictions. Run it once to see the current output."
+                "This named action runs through the configured Action Broker and is subject to its allowlist and execution policy. Broker auditing is optional and health-dependent; check wayexpand doctor --json for audit health."
             }
             Language::German => {
-                "Diese verwaltete Aktion läuft über den konfigurierten Action Broker mit dessen Richtlinien, Zeitlimit und Umgebungsbeschränkungen. Einmal ausführen, um die aktuelle Ausgabe zu sehen."
+                "Diese benannte Aktion läuft über den konfigurierten Action Broker und unterliegt dessen Zulassungsliste und Ausführungsrichtlinien. Das Broker-Audit ist optional und vom Zustand des Protokolls abhängig; den Audit-Status zeigt wayexpand doctor --json."
             }
         }
     }
@@ -50,10 +50,10 @@ impl Strings {
     pub fn direct_command_preview_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "This direct program runs locally in the GUI process with desktop-user privileges. It does not reproduce the daemon service sandbox; use it only as an advanced preview."
+                "This direct program runs locally with desktop-user privileges, outside the daemon and broker sandboxes. It is not recorded in the Action Broker audit; use only for trusted commands."
             }
             Language::German => {
-                "Dieses direkte Programm läuft lokal im GUI-Prozess mit den Rechten des Desktop-Benutzers. Die Sandbox des Daemons wird nicht reproduziert; verwenden Sie dies nur als erweiterte Vorschau."
+                "Dieses Programm läuft lokal mit den Rechten des Desktop-Benutzers außerhalb der Daemon- und Broker-Sandbox. Es wird nicht im Action-Broker-Audit protokolliert; nur für vertrauenswürdige Befehle verwenden."
             }
         }
     }

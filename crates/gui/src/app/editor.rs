@@ -133,7 +133,7 @@ impl GuiApp {
         // remains observable but does not block, while safe mode blocks before
         // any program is spawned.
         if let Some(reason) =
-            preview::command_preview_policy_violation(&self.config.organization, &command.program)
+            preview::command_preview_policy_violation(&self.config.organization, &command)
         {
             self.command_preview_result = Some(Err(format!(
                 "Command preview blocked by organization policy: {reason}"

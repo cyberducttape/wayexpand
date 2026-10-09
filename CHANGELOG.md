@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI command previews now distinguish local direct execution (outside both
+  service sandboxes and broker audit) from named actions executed through the
+  broker, and clarify that broker auditing is optional and health-dependent.
+- Managed-action previews no longer apply the direct executable absolute-path
+  policy to their empty GUI-side program field; named-action policy remains
+  enforced by the broker, while organization command-disable policy still
+  blocks both modes.
 - User installers now stage all six executables under a versioned library
   directory and atomically switch the `current` pointer; enabled upgrades
   verify service activity and restore the prior pointer if startup fails.
