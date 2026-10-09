@@ -745,6 +745,32 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
         .unwrap_or_else(default_config_path);
     let stats_path = wayexpand_core::usage_stats_path(&path);
     if clear {
+        let daemon_result = wayexpand_core::DaemonClient::from_environment().and_then(|client| {
+            client.execute(wayexpand_core::DaemonOperation::ClearUsageStats {
+                path: stats_path.clone(),
+            })
+        });
+        match daemon_result {
+            Ok(response) => {
+                if response.contains("does not match daemon configuration") {
+                    // This CLI invocation targets a different library from
+                    // the running daemon; clear only the requested file below.
+                } else {
+                    if response.starts_with("could not clear") || response.contains("unavailable") {
+                        return Err(config_error(response.trim().to_string()));
+                    }
+                    println!("{}", response.trim());
+                    return Ok(());
+                }
+            }
+            Err(wayexpand_core::DaemonClientError::Connect { source, .. })
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) => {}
+            Err(wayexpand_core::DaemonClientError::SocketPathMissing) => {}
+            Err(error) => return Err(daemon_error(error.to_string())),
+        }
         match wayexpand_core::UsageStats::clear(&stats_path) {
             Ok(true) => println!("local usage statistics cleared"),
             Ok(false) => println!("no local usage statistics to clear"),

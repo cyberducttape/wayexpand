@@ -54,6 +54,7 @@ pub struct ControlServer {
     /// A pending `explain` request, answered by the reactor from its live
     /// engine state.
     explain_requested: Arc<Mutex<Option<ExplainRequest>>>,
+    usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     /// Wakes the reactor after a request that changes daemon state.
     waker: crate::waker::WakerSlot,
@@ -99,6 +100,7 @@ impl ControlServer {
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain_requested: Arc::new(Mutex::new(None)),
+            usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("starting".into())),
             waker: Arc::default(),
             path: None,
@@ -178,7 +180,9 @@ impl ControlServer {
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
         let explain_requested = Arc::new(Mutex::new(None));
+        let usage_clear = Arc::new(Mutex::new(None));
         let explain_slot = Arc::clone(&explain_requested);
+        let usage_clear_slot = Arc::clone(&usage_clear);
         let status = Arc::new(Mutex::new("starting".into()));
         let waker: crate::waker::WakerSlot = Arc::default();
         let waker_slot = Arc::clone(&waker);
@@ -209,6 +213,7 @@ impl ControlServer {
                         insert: Arc::clone(&insert_slot),
                         focus: Arc::clone(&focus_slot),
                         explain: Arc::clone(&explain_slot),
+                        usage_clear: Arc::clone(&usage_clear_slot),
                         status: Arc::clone(&status_flag),
                         waker: Arc::clone(&waker_slot),
                     };
@@ -253,6 +258,7 @@ impl ControlServer {
             insert_requested,
             focus_snapshot,
             explain_requested,
+            usage_clear,
             status,
             waker,
             path: Some(path),
@@ -300,6 +306,12 @@ impl ControlServer {
     /// wake the loop immediately.
     pub fn set_waker(&self, waker: crate::waker::Waker) {
         let _ = self.waker.set(waker);
+    }
+
+    pub fn set_usage_clear_handle(&self, handle: crate::usage::UsageClearHandle) {
+        if let Ok(mut slot) = self.usage_clear.lock() {
+            *slot = Some(handle);
+        }
     }
 
     pub fn set_status(&self, status: crate::status::StatusBody) {
@@ -359,6 +371,7 @@ struct Flags {
     insert: Arc<Mutex<Option<InsertRequest>>>,
     focus: Arc<Mutex<FocusSnapshot>>,
     explain: Arc<Mutex<Option<ExplainRequest>>>,
+    usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     waker: crate::waker::WakerSlot,
 }
@@ -468,6 +481,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         insert,
         focus,
         explain,
+        usage_clear,
         status,
         waker,
     } = flags;
@@ -509,6 +523,20 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         return Ok(());
     }
     if let Some(response) = explain_request(&command, &explain, &waker)? {
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
+    if let Some(path) = command.trim().strip_prefix("stats-clear ") {
+        let handle = usage_clear
+            .lock()
+            .map_err(|_| anyhow::anyhow!("usage clear lock poisoned"))?
+            .clone();
+        let response = match handle.map(|handle| handle.clear(std::path::Path::new(path))) {
+            Some(Ok(true)) => "local usage statistics cleared\n".to_string(),
+            Some(Ok(false)) => "no local usage statistics to clear\n".to_string(),
+            Some(Err(error)) => format!("could not clear local usage statistics: {error}\n"),
+            None => "usage statistics writer unavailable\n".to_string(),
+        };
         stream.write_all(response.as_bytes())?;
         return Ok(());
     }
@@ -598,6 +626,7 @@ mod tests {
                     insert,
                     focus,
                     explain: Arc::new(Mutex::new(None)),
+                    usage_clear: Arc::new(Mutex::new(None)),
                     status: status_worker,
                     waker: Arc::default(),
                 },
@@ -658,6 +687,7 @@ mod tests {
             insert: Arc::clone(&insert),
             focus: Arc::clone(&focus),
             explain: Arc::new(Mutex::new(None)),
+            usage_clear: Arc::new(Mutex::new(None)),
             status,
             waker: Arc::default(),
         };
@@ -887,6 +917,7 @@ mod tests {
             insert: Arc::new(Mutex::new(None)),
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: Arc::new(Mutex::new(None)),
+            usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: slot,
         };

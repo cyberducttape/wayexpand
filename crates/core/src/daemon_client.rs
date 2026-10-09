@@ -77,6 +77,9 @@ pub enum DaemonOperation {
     Pause,
     Resume,
     Stop,
+    ClearUsageStats {
+        path: PathBuf,
+    },
     Insert {
         trigger: String,
     },
@@ -174,6 +177,17 @@ fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientE
         DaemonOperation::Pause => Ok("pause".into()),
         DaemonOperation::Resume => Ok("resume".into()),
         DaemonOperation::Stop => Ok("stop".into()),
+        DaemonOperation::ClearUsageStats { path } => {
+            let path = path.to_str().ok_or(DaemonClientError::InvalidOperation {
+                reason: "usage statistics path is not valid UTF-8",
+            })?;
+            if path.is_empty() || path.len() > 768 || path.chars().any(char::is_control) {
+                return Err(DaemonClientError::InvalidOperation {
+                    reason: "usage statistics path is empty, too long, or contains controls",
+                });
+            }
+            Ok(format!("stats-clear {path}"))
+        }
         DaemonOperation::Insert { trigger } => {
             validate_text(trigger, MAX_INSERT_TRIGGER_CHARS, "insert trigger")?;
             Ok(format!("insert {trigger}"))

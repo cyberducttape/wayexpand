@@ -438,6 +438,9 @@ fn main() -> Result<()> {
     let stdin_closed = false;
     let logged_queue_rejections = 0;
     let usage = usage::UsageRecorder::new(wayexpand_core::usage_stats_path(&path));
+    if let Some(handle) = usage.clear_handle() {
+        control.set_usage_clear_handle(handle);
+    }
     let mut daemon = Daemon {
         control,
         policy,

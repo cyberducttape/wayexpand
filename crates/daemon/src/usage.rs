@@ -10,6 +10,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
+    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -44,34 +45,84 @@ pub fn metrics_snapshot() -> UsageMetrics {
 }
 
 pub struct UsageRecorder {
-    sender: Option<SyncSender<UsageStats>>,
+    path: PathBuf,
+    sender: Option<SyncSender<UsageMessage>>,
     pending: UsageStats,
+    pending_generation: u64,
+    generation: Arc<Mutex<u64>>,
     worker: Option<JoinHandle<()>>,
     worker_done: Option<Receiver<()>>,
+}
+
+enum UsageMessage {
+    Batch(UsageStats),
+    Clear(mpsc::SyncSender<std::io::Result<bool>>),
+}
+
+#[derive(Clone)]
+pub struct UsageClearHandle {
+    sender: SyncSender<UsageMessage>,
+    generation: Arc<Mutex<u64>>,
+    path: PathBuf,
+}
+
+impl UsageClearHandle {
+    pub fn clear(&self, requested_path: &std::path::Path) -> std::io::Result<bool> {
+        if requested_path != self.path {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "requested statistics path does not match daemon configuration",
+            ));
+        }
+        let (reply, result) = mpsc::sync_channel(1);
+        {
+            let mut generation = self
+                .generation
+                .lock()
+                .map_err(|_| std::io::Error::other("usage clear generation lock poisoned"))?;
+            self.sender
+                .try_send(UsageMessage::Clear(reply))
+                .map_err(|error| {
+                    std::io::Error::new(std::io::ErrorKind::WouldBlock, error.to_string())
+                })?;
+            *generation = generation.wrapping_add(1);
+        }
+        result
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut, error.to_string()))?
+    }
 }
 
 impl UsageRecorder {
     pub fn new(path: PathBuf) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
+        let generation = Arc::new(Mutex::new(0));
         let (done_sender, done_receiver) = mpsc::channel();
+        let worker_path = path.clone();
         let worker = thread::Builder::new()
             .name("wayexpand-usage-writer".into())
             .spawn(move || {
-                usage_writer(path, receiver);
+                usage_writer(worker_path, receiver);
                 let _ = done_sender.send(());
             });
         match worker {
             Ok(worker) => Self {
+                path,
                 sender: Some(sender),
                 pending: UsageStats::default(),
+                pending_generation: 0,
+                generation: Arc::clone(&generation),
                 worker: Some(worker),
                 worker_done: Some(done_receiver),
             },
             Err(error) => {
                 warn!(%error, "could not start usage statistics worker; usage events will be dropped");
                 Self {
+                    path,
                     sender: None,
                     pending: UsageStats::default(),
+                    pending_generation: 0,
+                    generation,
                     worker: None,
                     worker_done: None,
                 }
@@ -79,9 +130,25 @@ impl UsageRecorder {
         }
     }
 
+    pub fn clear_handle(&self) -> Option<UsageClearHandle> {
+        self.sender.as_ref().map(|sender| UsageClearHandle {
+            sender: sender.clone(),
+            generation: Arc::clone(&self.generation),
+            path: self.path.clone(),
+        })
+    }
+
     /// Drain engine events and enqueue one bounded batch without waiting for
     /// the worker or the filesystem.
     pub fn collect(&mut self, engine: &mut ExpansionEngine) {
+        if let Ok(generation) = self.generation.lock() {
+            if self.pending_generation != *generation {
+                let dropped = event_count(&self.pending);
+                self.pending = UsageStats::default();
+                self.pending_generation = *generation;
+                record_rejections(dropped);
+            }
+        }
         for event in engine.drain_usage_events() {
             self.pending.record(&event);
         }
@@ -100,11 +167,21 @@ impl UsageRecorder {
         if self.pending.snippets.is_empty() {
             return;
         }
+        let Ok(generation) = self.generation.lock() else {
+            return;
+        };
+        if self.pending_generation != *generation {
+            let dropped = event_count(&self.pending);
+            self.pending = UsageStats::default();
+            self.pending_generation = *generation;
+            record_rejections(dropped);
+            return;
+        }
         let batch = std::mem::take(&mut self.pending);
-        match sender.try_send(batch) {
+        match sender.try_send(UsageMessage::Batch(batch)) {
             Ok(()) => {}
-            Err(TrySendError::Full(batch)) => self.pending = batch,
-            Err(TrySendError::Disconnected(batch)) => {
+            Err(TrySendError::Full(UsageMessage::Batch(batch))) => self.pending = batch,
+            Err(TrySendError::Disconnected(UsageMessage::Batch(batch))) => {
                 let dropped = event_count(&batch).saturating_add(event_count(&self.pending));
                 self.pending = UsageStats::default();
                 self.sender = None;
@@ -114,6 +191,10 @@ impl UsageRecorder {
                     "usage statistics worker stopped unexpectedly"
                 );
             }
+            Err(
+                TrySendError::Full(UsageMessage::Clear(_))
+                | TrySendError::Disconnected(UsageMessage::Clear(_)),
+            ) => unreachable!("only usage batches are enqueued here"),
         }
     }
 
@@ -189,14 +270,22 @@ fn record_rejections(count: u64) {
     QUEUE_REJECTED_TOTAL.fetch_add(count, Ordering::Relaxed);
 }
 
-fn usage_writer(path: PathBuf, receiver: Receiver<UsageStats>) {
+fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
     let mut pending = UsageStats::default();
     let mut last_flush = Instant::now();
     loop {
         let wait = SAVE_INTERVAL.saturating_sub(last_flush.elapsed());
         match receiver.recv_timeout(wait) {
-            Ok(batch) => {
+            Ok(UsageMessage::Batch(batch)) => {
                 pending.merge(&batch);
+            }
+            Ok(UsageMessage::Clear(reply)) => {
+                pending = UsageStats::default();
+                let result = UsageStats::clear(&path);
+                if result.is_err() {
+                    FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                }
+                let _ = reply.send(result);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !pending.snippets.is_empty() {
@@ -296,6 +385,39 @@ mod tests {
     }
 
     #[test]
+    fn serialized_clear_drops_already_queued_events_but_keeps_later_events() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("usage-stats.json");
+        let mut persisted = UsageStats::default();
+        persisted.record(&event("persisted-before-clear"));
+        persisted.save(&path).unwrap();
+
+        let mut recorder = UsageRecorder::new(path.clone());
+        recorder.pending.record(&event("queued-before-clear"));
+        recorder.enqueue_pending();
+        recorder.clear_handle().unwrap().clear(&path).unwrap();
+        assert!(UsageStats::load(&path).snippets.is_empty());
+
+        recorder.pending_generation = *recorder.generation.lock().unwrap();
+        recorder.pending.record(&event("after-clear"));
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+        let stats = UsageStats::load(&path);
+        assert!(!stats.snippets.contains_key("persisted-before-clear"));
+        assert!(!stats.snippets.contains_key("queued-before-clear"));
+        assert_eq!(stats.snippets["after-clear"].count, 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn worker_failures_are_counted_and_shutdown_remains_bounded() {
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -316,12 +438,17 @@ mod tests {
     #[test]
     fn full_queue_does_not_block_and_keeps_aggregated_counters() {
         let (sender, _receiver) = mpsc::sync_channel(1);
-        sender.try_send(UsageStats::default()).unwrap();
+        sender
+            .try_send(UsageMessage::Batch(UsageStats::default()))
+            .unwrap();
         let mut pending = UsageStats::default();
         pending.record(&event("retained"));
         let mut recorder = UsageRecorder {
+            path: PathBuf::new(),
             sender: Some(sender),
             pending: pending.clone(),
+            pending_generation: 0,
+            generation: Arc::new(Mutex::new(0)),
             worker: None,
             worker_done: None,
         };
