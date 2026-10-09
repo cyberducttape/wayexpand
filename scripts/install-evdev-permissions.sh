@@ -281,11 +281,19 @@ fi
 
 install -d -m 0755 "$(dirname -- "$state_file")"
 umask 077
+state_tmp=$(mktemp "${state_file}.tmp.XXXXXX")
+cleanup_state_tmp() {
+    rm -f -- "$state_tmp"
+}
+trap cleanup_state_tmp EXIT HUP INT TERM
 {
     printf 'access_mode=%s\n' "$access_mode"
     printf 'target_user=%s\n' "$target_user"
     printf 'added_input_group=%s\n' "$state_added_input_group"
-} >"$state_file"
+} >"$state_tmp"
+chmod 0600 "$state_tmp"
+mv -f -- "$state_tmp" "$state_file"
+trap - EXIT HUP INT TERM
 
 if [ "$access_mode" = active-seat ]; then
     printf '%s\n' "Active-seat ACLs apply after udev reload/trigger and seat activation."

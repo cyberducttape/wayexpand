@@ -17,6 +17,8 @@ All notable changes to WayExpand are documented here.
   input capture or injection from surviving removal.
 - **Source-independent evdev cleanup:** revoking raw-input permissions no
   longer requires the original source archive or package rule files to exist.
+- **Crash-safe evdev state:** permission ownership state is now written to a
+  temporary file and atomically renamed, preventing truncated cleanup records.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit
