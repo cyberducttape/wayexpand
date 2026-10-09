@@ -130,11 +130,12 @@ impl DaemonClient {
             .read_to_end(&mut response)
         {
             // An overloaded daemon replies without reading the request, so
-            // the kernel may report a reset after delivering the full busy
-            // response. Only that exact response is accepted after an error.
-            if source.kind() == std::io::ErrorKind::ConnectionReset
-                && response == CONTROL_BUSY_RESPONSE
-            {
+            // the kernel may report a transport error after delivering the
+            // full busy response. The payload is the protocol authority; do
+            // not make the typed result depend on which errno the local
+            // kernel chose for the peer's close/reset sequence. Only that
+            // exact bounded response is accepted after an error.
+            if response == CONTROL_BUSY_RESPONSE {
                 return Err(DaemonClientError::Busy);
             }
             return Err(DaemonClientError::Read { source });
