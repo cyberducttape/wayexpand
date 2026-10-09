@@ -128,13 +128,8 @@ install -Dm644 "$project_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$project_dir/systemd/wayexpand-action-broker.service" \
     "$unit_dir/wayexpand-action-broker.service"
-broker_dropin_dir="$unit_dir/wayexpand-action-broker.service.d"
-install -d -m 0755 "$broker_dropin_dir"
-{
-    printf '%s\n' '[Service]'
-    printf 'ReadWritePaths="%s"\n' "$state_dir"
-} >"$broker_dropin_dir/10-state-directory.conf"
-chmod 0644 "$broker_dropin_dir/10-state-directory.conf"
+"$project_dir/scripts/install-xdg-systemd-dropins.sh" \
+    "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$bin_dir"
 install -Dm644 "$project_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
@@ -174,7 +169,7 @@ printf '%s\n' "   export PATH=\"$bin_dir:\$PATH\""
 printf '%s\n' ""
 printf '%s\n' "2. Reload systemd:"
 printf '%s\n' "   systemctl --user daemon-reload"
-printf '%s\n' "   # If named actions are configured, create ~/.config/wayexpand/broker.toml and enable:"
+printf '%s\n' "   # If named actions are configured, edit $broker_config and enable:"
 printf '%s\n' "   systemctl --user enable --now wayexpand-action-broker.service"
 if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet wayexpand-action-broker.service 2>/dev/null; then
     printf '%s\n' "Active broker service still uses its current process; restart it after this upgrade:"

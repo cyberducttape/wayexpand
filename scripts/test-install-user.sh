@@ -52,7 +52,9 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
-[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]
 [ -d "$test_root/home/.local/state/wayexpand" ]
 [ "$(stat -c '%a' "$test_root/home/.local/state/wayexpand")" = 700 ]
 [ -f "$test_root/config/wayexpand/broker.toml" ]
@@ -65,8 +67,12 @@ XDG_STATE_HOME="$custom_state_home" \
 "$project_dir/scripts/install-user.sh"
 [ -d "$custom_state_home/wayexpand" ]
 [ "$(stat -c '%a' "$custom_state_home/wayexpand")" = 700 ]
-grep -Fx "ReadWritePaths=\"$custom_state_home/wayexpand\"" \
-    "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf"
+grep -F "ReadWritePaths=%t \"$test_root/config/wayexpand\" \"$custom_state_home/wayexpand\"" \
+    "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
+grep -F "WAYEXPAND_PORTAL_TOKEN_PATH=$test_root/config/wayexpand/libei-portal-token" \
+    "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf"
+grep -F -- "--config \"$test_root/config/wayexpand/broker.toml\"" \
+    "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
 
 if HOME="$test_root/home" XDG_CONFIG_HOME=relative \
     "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
@@ -93,6 +99,18 @@ XDG_CONFIG_HOME="$test_root/config" \
 "$project_dir/scripts/install-user.sh"
 
 cmp -s "$config_path" "$test_root/expected-config.toml"
+
+# The installer-generated service configuration remains valid for custom XDG
+# roots containing spaces, and systemd specifiers in filesystem paths are escaped.
+space_config_home="$test_root/config with spaces%"
+space_state_home="$test_root/state with spaces%"
+space_config_systemd="$test_root/config with spaces%%"
+HOME="$test_root/home" XDG_CONFIG_HOME="$space_config_home" \
+XDG_STATE_HOME="$space_state_home" "$project_dir/scripts/install-user.sh"
+grep -F "Environment=\"XDG_CONFIG_HOME=$space_config_systemd\"" \
+    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
+grep -F 'config with spaces%%/wayexpand/broker.toml' \
+    "$space_config_home/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
 
 # Enabled upgrades validate before replacing installed files. Keep a sentinel
 # binary when the existing library is rejected by the preflight.

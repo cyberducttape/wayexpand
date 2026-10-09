@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Redacted credentials in Git synchronization status and diagnostics, and use
+  the configured `origin` name for fetch/push operations instead of passing
+  credential-bearing URLs through those commands.
+- Generated user-service systemd drop-ins from the installer's resolved XDG
+  paths so daemon token access, sandbox write permissions, and broker policy
+  configuration stay aligned for custom configuration and state directories.
 - Added regression coverage for atomic, private Action Broker health-file publication.
 - Prevented GUI Git-sync timeouts from hanging on blocking output-reader joins.
 - Installer upgrades now validate existing libraries before replacing installed files.

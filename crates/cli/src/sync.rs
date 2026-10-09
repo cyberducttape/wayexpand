@@ -153,7 +153,10 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
                 // stderr is diagnostic only and may legitimately stay open in
                 // a persistent SSH control master outside git's group.
                 if !stdout_eof {
-                    bail!("git {} output did not complete", args.join(" "));
+                    bail!(
+                        "git {} output did not complete",
+                        redact_git_diagnostic(&args.join(" "))
+                    );
                 }
                 break status;
             }
@@ -161,7 +164,10 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
             Ok(false) | Err(_) => {
                 supervisor.kill_group();
                 let _ = supervisor.reap();
-                bail!("git {} timed out or could not be monitored", args.join(" "));
+                bail!(
+                    "git {} timed out or could not be monitored",
+                    redact_git_diagnostic(&args.join(" "))
+                );
             }
         }
     };
@@ -217,8 +223,8 @@ fn git_ok(directory: &Path, args: &[&str]) -> Result<String> {
     if !output.status.success() {
         bail!(
             "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
+            redact_git_diagnostic(&args.join(" ")),
+            redact_git_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -230,8 +236,8 @@ fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
     if !output.status.success() {
         bail!(
             "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
+            redact_git_diagnostic(&args.join(" ")),
+            redact_git_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
         );
     }
     String::from_utf8(output.stdout).context("git reported a non-UTF-8 path")
@@ -264,11 +270,98 @@ fn remote(directory: &Path) -> Result<Option<String>> {
     // mirror remote sync unpredictably.
     let output = git(directory, &["remote", "get-url", "origin"])?;
     if output.status.success() {
-        return Ok(Some(
-            String::from_utf8_lossy(&output.stdout).trim().to_owned(),
-        ));
+        return Ok(Some(redact_remote_url(
+            String::from_utf8_lossy(&output.stdout).trim(),
+        )));
     }
     Ok(None)
+}
+
+/// Remove URL credentials before a remote is included in status or JSON.
+fn redact_remote_url(value: &str) -> String {
+    let Some((scheme, remainder)) = value.split_once("://") else {
+        return value.to_owned();
+    };
+    let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
+    let authority = &remainder[..authority_end];
+    let safe_authority = authority
+        .rfind('@')
+        .map_or(authority, |at| &authority[at + 1..]);
+    let tail = &remainder[authority_end..];
+    let mut result = format!("{scheme}://{safe_authority}");
+    if let Some((query, fragment)) = tail.split_once('#') {
+        result.push_str(&redact_query(query));
+        if !fragment.is_empty() {
+            result.push_str("#[REDACTED]");
+        }
+    } else {
+        result.push_str(&redact_query(tail));
+    }
+    result
+}
+
+fn redact_query(tail: &str) -> String {
+    let Some((path, query)) = tail.split_once('?') else {
+        return tail.to_owned();
+    };
+    let query = query
+        .split('&')
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let key_lower = key.to_ascii_lowercase();
+            if [
+                "token",
+                "password",
+                "passwd",
+                "secret",
+                "auth",
+                "credential",
+                "api_key",
+                "access_key",
+                "key",
+            ]
+            .iter()
+            .any(|sensitive| key_lower.contains(sensitive))
+            {
+                format!("{key}=[REDACTED]")
+            } else if value.is_empty() {
+                key.to_owned()
+            } else {
+                format!("{key}={value}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{path}?{query}")
+}
+
+fn redact_git_diagnostic(value: &str) -> String {
+    value
+        .split_inclusive(char::is_whitespace)
+        .map(|part| {
+            let Some(scheme_marker) = part.find("://") else {
+                return part.to_owned();
+            };
+            let scheme_start = part[..scheme_marker]
+                .rfind(|character: char| {
+                    !character.is_ascii_alphanumeric()
+                        && character != '+'
+                        && character != '-'
+                        && character != '.'
+                })
+                .map_or(0, |index| index + 1);
+            let (url, suffix) = part.split_at(part.trim_end_matches(char::is_whitespace).len());
+            let (url, trailing) =
+                url.split_at(url.trim_end_matches([',', ';', ')', ']', '\'']).len());
+            format!(
+                "{}{}{}{}",
+                &part[..scheme_start],
+                redact_remote_url(&url[scheme_start..]),
+                trailing,
+                suffix
+            )
+        })
+        .collect()
 }
 
 /// Make the configuration directory a library repository.
@@ -436,14 +529,14 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         pushed: false,
         remote: remote.clone(),
     };
-    let Some(remote) = remote else {
+    let Some(_remote) = remote else {
         return Ok(report);
     };
     let before = git_ok(&directory, &["rev-parse", "HEAD"])?;
     let branch = git_ok(&directory, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     let remote_has_branch = git(
         &directory,
-        &["ls-remote", "--exit-code", "--heads", &remote, &branch],
+        &["ls-remote", "--exit-code", "--heads", "origin", &branch],
     )?
     .status
     .success();
@@ -451,7 +544,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         // Fetch first and inspect the remote tree before anything from it is
         // checked out: a remote must not be able to place arbitrary files,
         // symlinks, or submodules in the configuration directory.
-        git_ok(&directory, &["fetch", "--quiet", &remote, &branch])?;
+        git_ok(&directory, &["fetch", "--quiet", "origin", &branch])?;
         verify_library_tree(&directory, "FETCH_HEAD")?;
         let rebase = git(&directory, &["rebase", "--quiet", "FETCH_HEAD"])?;
         if !rebase.status.success() {
@@ -476,7 +569,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     verify_outgoing_paths(&directory, remote_has_branch.then_some("FETCH_HEAD"))?;
     git_ok(
         &directory,
-        &["push", "--quiet", "--set-upstream", &remote, &branch],
+        &["push", "--quiet", "--set-upstream", "origin", &branch],
     )?;
     report.pushed = true;
     Ok(report)
@@ -885,6 +978,51 @@ mod tests {
         assert!(!is_library_path("snippets.d/run.sh"));
         assert!(!is_library_path("portal-token"));
         assert!(!is_library_path("expansions.toml.bak"));
+    }
+
+    #[test]
+    fn remote_reporting_redacts_credentials_and_diagnostic_urls() {
+        assert_eq!(
+            redact_remote_url("https://alice:topsecret@example.invalid/lib.git?token=private&ref=main#fragment-secret"),
+            "https://example.invalid/lib.git?token=[REDACTED]&ref=main#[REDACTED]"
+        );
+        assert_eq!(
+            redact_remote_url("ssh://git@example.invalid/team/lib.git"),
+            "ssh://example.invalid/team/lib.git"
+        );
+        let diagnostic = redact_git_diagnostic(
+            "fatal: https://alice:topsecret@example.invalid/lib.git?password=hidden failed\n",
+        );
+        assert!(!diagnostic.contains("topsecret"));
+        assert!(!diagnostic.contains("hidden"));
+        assert!(diagnostic.contains("example.invalid/lib.git"));
+    }
+
+    #[test]
+    fn origin_status_never_returns_embedded_credentials() {
+        let (directory, config_path) = prepare_repository();
+        git_ok(
+            &directory,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://user:credential-secret@example.invalid/library.git?access_token=query-secret",
+            ],
+        )
+        .expect("add credential-bearing origin");
+        let shown = remote(&directory)
+            .expect("read remote")
+            .expect("origin exists");
+        assert_eq!(
+            shown,
+            "https://example.invalid/library.git?access_token=[REDACTED]"
+        );
+        let status = status(&config_path).expect("format status");
+        assert!(!status.contains("credential-secret"));
+        assert!(!status.contains("query-secret"));
+        assert!(status.contains("example.invalid/library.git"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

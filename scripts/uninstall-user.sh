@@ -120,11 +120,19 @@ for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.ser
         printf '%s\n' "Removed $unit_dir/$unit"
     fi
 done
-broker_dropin_dir="$unit_dir/wayexpand-action-broker.service.d"
-if [ -e "$broker_dropin_dir/10-state-directory.conf" ]; then
-    rm -f -- "$broker_dropin_dir/10-state-directory.conf"
-    rmdir "$broker_dropin_dir" 2>/dev/null || true
-    printf '%s\n' "Removed $broker_dropin_dir/10-state-directory.conf"
+for service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+    dropin="$unit_dir/$service.d/10-xdg-paths.conf"
+    if [ -e "$dropin" ]; then
+        rm -f -- "$dropin"
+        rmdir "${dropin%/*}" 2>/dev/null || true
+        printf '%s\n' "Removed $dropin"
+    fi
+done
+legacy_broker_dropin="$unit_dir/wayexpand-action-broker.service.d/10-state-directory.conf"
+if [ -e "$legacy_broker_dropin" ]; then
+    rm -f -- "$legacy_broker_dropin"
+    rmdir "${legacy_broker_dropin%/*}" 2>/dev/null || true
+    printf '%s\n' "Removed $legacy_broker_dropin"
 fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload || true

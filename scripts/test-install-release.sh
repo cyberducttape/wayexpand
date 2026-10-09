@@ -19,6 +19,7 @@ install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/com
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
 install -m 0600 "$project_dir/broker.toml.example" "$release_dir/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$release_dir/scripts/"
+install -m 0755 "$project_dir/scripts/install-xdg-systemd-dropins.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-evdev-permissions.sh" "$release_dir/scripts/"
 install -m 0644 "$project_dir/udev/71-wayexpand-evdev.rules" "$release_dir/udev/"
@@ -70,7 +71,9 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
-[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
+[ -f "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]
 [ -d "$test_root/home/.local/state/wayexpand" ]
 [ "$(stat -c '%a' "$test_root/home/.local/state/wayexpand")" = 700 ]
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
@@ -114,7 +117,9 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
-[ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-state-directory.conf" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 
 # An enabled upgrade validates the existing library before replacing any

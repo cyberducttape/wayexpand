@@ -107,13 +107,8 @@ install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
     "$unit_dir/wayexpand-evdev.service"
 install -Dm644 "$release_dir/systemd/wayexpand-action-broker.service" \
     "$unit_dir/wayexpand-action-broker.service"
-broker_dropin_dir="$unit_dir/wayexpand-action-broker.service.d"
-install -d -m 0755 "$broker_dropin_dir"
-{
-    printf '%s\n' '[Service]'
-    printf 'ReadWritePaths="%s"\n' "$state_dir"
-} >"$broker_dropin_dir/10-state-directory.conf"
-chmod 0644 "$broker_dropin_dir/10-state-directory.conf"
+"$release_dir/scripts/install-xdg-systemd-dropins.sh" \
+    "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$bin_dir"
 install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
     "$application_dir/wayexpand.desktop"
 if [ -f "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" ]; then
@@ -158,7 +153,7 @@ printf '%s\n' "  systemctl --user daemon-reload"
 printf '%s\n' "  wayexpand setup"
 printf '%s\n' "  wayexpand status"
 printf '%s\n' "  wayexpand doctor"
-printf '%s\n' "  # If named actions are configured, create ~/.config/wayexpand/broker.toml and enable:"
+printf '%s\n' "  # If named actions are configured, edit $config_dir/broker.toml and enable:"
 printf '%s\n' "  systemctl --user enable --now wayexpand-action-broker.service"
 printf '%s\n' "  wayexpand explain-backend"
 printf '%s\n' "  wayexpand edit"
