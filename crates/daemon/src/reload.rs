@@ -341,21 +341,37 @@ fn load_for_mode(
 ) -> Result<(Config, Option<FileStamp>)> {
     // Layer files in snippets.d are validated by the fleet loader, which is
     // the only daemon path that reads them (and follows symlinks as it does).
-    let (mut base, stamp) = load_consistent(path)?;
-    if fleet {
-        // Kept typed so `safe_reload_error` can report what went wrong.
-        let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
-            .map_err(anyhow::Error::new)?;
-        for violation in &merged.policy_violations {
-            super::policy::log_violation(policy, violation);
+    // A layer can change while that merge is in progress, so take a signature
+    // before and after the full load and retry rather than briefly promoting a
+    // mixed snapshot of the library.
+    for attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
+        let (mut base, stamp) = load_consistent(path)?;
+        if fleet {
+            let before = standard_fleet_signature();
+            // Kept typed so `safe_reload_error` can report what went wrong.
+            let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
+                .map_err(anyhow::Error::new)?;
+            let after = standard_fleet_signature();
+            if before != after {
+                if attempt + 1 == MAX_CONSISTENCY_ATTEMPTS {
+                    anyhow::bail!(
+                        "fleet configuration changed while being read after {MAX_CONSISTENCY_ATTEMPTS} attempts"
+                    );
+                }
+                continue;
+            }
+            for violation in &merged.policy_violations {
+                super::policy::log_violation(policy, violation);
+            }
+            base = merged.config;
         }
-        base = merged.config;
+
+        base.apply_administrator_policy(policy)
+            .map_err(anyhow::Error::new)?;
+
+        return Ok((base, stamp));
     }
-
-    base.apply_administrator_policy(policy)
-        .map_err(anyhow::Error::new)?;
-
-    Ok((base, stamp))
+    unreachable!("fleet consistency loop returns or fails on every attempt")
 }
 
 fn standard_fleet_signature() -> u64 {

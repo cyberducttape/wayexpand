@@ -14,6 +14,8 @@ All notable changes to WayExpand are documented here.
   leaving an accept loop alive after the server is dropped.
 - Window-tracker teardown now joins its reconnect supervisor instead of
   leaving a background tracker thread detached.
+- Fleet reloads now verify that all layer files remain stable across the merge,
+  preventing a mixed snippet snapshot from becoming active during an edit.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
