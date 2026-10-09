@@ -12,6 +12,10 @@ All notable changes to WayExpand are documented here.
   warns when libei keysym fallback is active, separates matcher/preparation
   latency from output-backend latency, and visibly labels organization policy
   enforcement as audit-only when `safe_mode` is disabled.
+- **Latency evidence:** daemon status and `status --json` now expose bounded
+  p50/p95/p99 injection profiles by negotiated output mode and replacement-size
+  bucket, so backend pacing can be evaluated without conflating it with
+  matcher latency.
 - **Audit and sync privacy:** managed Action Broker deployments can require
   audit confirmation before returning successful action results; failed audit
   writes are retried and surfaced as action errors. Git sync commit messages

@@ -51,6 +51,8 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                     Err(_) => value.into(),
                 }
             }
+            "injection_latency_profiles" => serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.into())),
             _ => value.into(),
         };
         object.insert(key.to_owned(), value);

@@ -42,6 +42,7 @@
     "injection_latency_p50_us": "integer",
     "injection_latency_p95_us": "integer",
     "injection_latency_p99_us": "integer",
+    "injection_latency_profiles": "object",
     "matcher_latency_sample_count": "integer",
     "matcher_latency_window_count": "integer",
     "matcher_latency_p50_us": "integer",

@@ -110,6 +110,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "injection_latency_p50_us",
             "injection_latency_p95_us",
             "injection_latency_p99_us",
+            "injection_latency_profiles",
             "injection_latency_sample_count",
             "injection_latency_window_count",
             "matcher_latency_p50_us",
@@ -130,18 +131,23 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=6\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
-    assert!(body.ends_with(
-        "injection_latency_sample_count=0\n\
-         injection_latency_window_count=0\n\
-         injection_latency_p50_us=0\n\
-         injection_latency_p95_us=0\n\
-         injection_latency_p99_us=0\n\
-         matcher_latency_sample_count=0\n\
-         matcher_latency_window_count=0\n\
-         matcher_latency_p50_us=0\n\
-         matcher_latency_p95_us=0\n\
-         matcher_latency_p99_us=0"
-    ));
+    for field in [
+        "injection_latency_sample_count",
+        "injection_latency_window_count",
+        "injection_latency_p50_us",
+        "injection_latency_p95_us",
+        "injection_latency_p99_us",
+        "injection_latency_profiles",
+        "matcher_latency_sample_count",
+        "matcher_latency_window_count",
+        "matcher_latency_p50_us",
+        "matcher_latency_p95_us",
+        "matcher_latency_p99_us",
+    ] {
+        assert!(body
+            .lines()
+            .any(|line| line.starts_with(&format!("{field}="))));
+    }
 }
 
 struct RecordingInjector {

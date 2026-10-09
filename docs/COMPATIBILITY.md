@@ -476,6 +476,7 @@ operators can distinguish a running process from newly installed binaries.
   "injection_latency_p50_us": 0,
   "injection_latency_p95_us": 0,
   "injection_latency_p99_us": 0,
+  "injection_latency_profiles": {},
   "matcher_latency_sample_count": 0,
   "matcher_latency_window_count": 0,
   "matcher_latency_p50_us": 0,
@@ -514,6 +515,7 @@ operators can distinguish a running process from newly installed binaries.
 - `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
 - `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
+- `injection_latency_profiles` (object): Non-empty rolling percentile profiles keyed by negotiated output mode (`ei_text`, `libei_keysym_fallback`, `input_method_v2`, `wlroots_virtual_keyboard`, or `other`) and replacement-size bucket (`small` ≤32, `medium` 33–256, `large` >256 Unicode scalar values). Each profile contains `sample_count`, `window_count`, and p50/p95/p99 microsecond values; empty profiles are omitted.
 - `matcher_latency_sample_count` (integer): Lifetime count of input events processed by the matcher
 - `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)
 - `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
