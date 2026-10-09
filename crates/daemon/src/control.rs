@@ -27,6 +27,8 @@ const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
+/// Reads of at most 1 KiB used to discard an overloaded client's request.
+const BUSY_DRAIN_READS: usize = 16;
 
 pub struct ControlServer {
     pub reload_requested: Arc<AtomicBool>,
@@ -337,13 +339,13 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
     // generic read error. Discard whatever the client already sent, without
     // ever blocking the accept loop.
     if stream.set_nonblocking(true).is_ok() {
+        // Bounded: this runs on the accept thread, and a client that keeps
+        // writing must not be able to hold it in this loop.
         let mut discard = [0_u8; 1024];
-        loop {
+        for _ in 0..BUSY_DRAIN_READS {
             match stream.read(&mut discard) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => break,
             }
         }
         let _ = stream.set_nonblocking(false);

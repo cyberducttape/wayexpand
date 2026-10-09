@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Bounded busy-request drain:** the control socket's overload path discards
+  at most 16 KiB of an unread request, so a client that keeps writing cannot
+  hold the accept loop.
 - **Rejected expansions no longer stop the evdev output worker:** a refusal such
   as a Fcitx5 password-field or trigger-mismatch response (or unrepresentable
   keysym text) now drops only that expansion. Previously it stopped the
