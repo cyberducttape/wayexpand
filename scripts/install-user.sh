@@ -183,8 +183,7 @@ if [ "$enable_service" -eq 1 ] && systemctl --user is-enabled "$service_name" >/
 fi
 previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
 next_link="$library_dir/.current-$$"
-ln -s "$version" "$next_link"
-mv -Tf "$next_link" "$library_dir/current"
+version_switch_started=0
 restore_previous_version() {
     if [ -n "$previous_version" ]; then
         rollback_link="$library_dir/.rollback-$$"
@@ -201,12 +200,23 @@ restore_previous_version() {
 rollback_on_install_failure() {
     install_status=$?
     if [ "$install_status" -ne 0 ]; then
-        printf '%s\n' 'error: installation failed after activating the staged version; restoring the previous version' >&2
-        restore_previous_version || true
+        if [ "$version_switch_started" -eq 1 ]; then
+            printf '%s\n' 'error: installation failed during or after switching to the staged version; restoring the previous version' >&2
+            restore_previous_version || true
+        fi
+        rm -f "$next_link"
     fi
     return "$install_status"
 }
 trap rollback_on_install_failure EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ln -s "$version" "$next_link"
+# Mark the transaction before mv: if a signal or an I/O error interrupts the
+# atomic rename, rollback is safe whether the old or new link is visible.
+version_switch_started=1
+mv -Tf "$next_link" "$library_dir/current"
 install -d -m 0755 "$bin_dir"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"

@@ -95,6 +95,30 @@ fi
 [ ! -e "$test_root/failed-home/.local/lib/wayexpand/current" ]
 [ ! -L "$test_root/failed-home/.local/lib/wayexpand/current" ]
 
+# Terminate the installer with SIGTERM as soon as it reaches the first
+# post-switch install command. The signal handler must enter the same rollback
+# path as an ordinary nonzero exit.
+signal_home="$test_root/signal-home"
+signal_config="$test_root/signal-config"
+signal_bin="$test_root/signal-bin"
+mkdir -p "$signal_bin"
+cat >"$signal_bin/install" <<'EOF'
+#!/bin/sh
+if [ "$1" = '-d' ] && [ "$2" = '-m' ] && [ "$4" = "$HOME/.local/bin" ]; then
+    kill -TERM "$PPID"
+    exit 0
+fi
+exec /usr/bin/install "$@"
+EOF
+chmod 0755 "$signal_bin/install"
+if PATH="$signal_bin:$PATH" HOME="$signal_home" XDG_CONFIG_HOME="$signal_config" \
+    "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
+    printf '%s\n' 'user installer unexpectedly survived SIGTERM after the version switch' >&2
+    exit 1
+fi
+[ ! -e "$signal_home/.local/lib/wayexpand/current" ]
+[ ! -L "$signal_home/.local/lib/wayexpand/current" ]
+
 # An existing directory whose contents no longer match its digest must never
 # be activated as if it were the immutable build it claims to represent.
 staged_daemon="$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon"
