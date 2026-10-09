@@ -16,6 +16,7 @@ anyhow.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 rustix.workspace = true
+libc.workspace = true
 unicode-segmentation = "1"
 wayexpand-core = { path = "../core" }
 wayexpand-process-supervisor = { path = "../process-supervisor" }

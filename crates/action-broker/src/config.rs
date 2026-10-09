@@ -166,6 +166,12 @@ pub struct BrokerConfig {
     /// Optional privacy-preserving JSONL execution audit sink.
     #[serde(default)]
     pub audit_path: Option<String>,
+
+    /// Require each action audit event to be written before returning success.
+    /// This is intended for managed deployments; it adds action latency and
+    /// fails the caller when the audit sink cannot accept the event.
+    #[serde(default)]
+    pub audit_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +187,8 @@ pub struct BrokerSettings {
     pub default_cwd: Option<String>,
     #[serde(default)]
     pub audit_path: Option<String>,
+    #[serde(default)]
+    pub audit_required: bool,
 }
 
 fn default_strict_env() -> bool {
@@ -200,6 +208,7 @@ impl Default for BrokerConfig {
             strict_env: true,
             default_cwd: None,
             audit_path: None,
+            audit_required: false,
         }
     }
 }
@@ -213,6 +222,7 @@ impl BrokerConfig {
             config.strict_env = settings.strict_env;
             config.default_cwd = settings.default_cwd;
             config.audit_path = settings.audit_path;
+            config.audit_required = settings.audit_required;
         }
         Ok(config)
     }
@@ -521,13 +531,15 @@ args_prefix = ["hello"]
 
     #[test]
     fn broker_config_accepts_audit_path() {
-        let config =
-            BrokerConfig::from_toml("[broker]\naudit_path = \"/tmp/wayexpand-actions.jsonl\"")
-                .unwrap();
+        let config = BrokerConfig::from_toml(
+            "[broker]\naudit_path = \"/tmp/wayexpand-actions.jsonl\"\naudit_required = true",
+        )
+        .unwrap();
         assert_eq!(
             config.audit_path.as_deref(),
             Some("/tmp/wayexpand-actions.jsonl")
         );
+        assert!(config.audit_required);
     }
 
     #[test]

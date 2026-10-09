@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Audit and sync privacy:** managed Action Broker deployments can require
+  audit confirmation before returning successful action results; failed audit
+  writes are retried and surfaced as action errors. Git sync commit messages
+  no longer disclose the workstation hostname.
+- **Bounded Git supervision:** synchronization now drains Git output without
+  blocking reader-thread joins when descendants retain inherited descriptors.
 - **Bounded helper supervision:** action-broker output draining now yields to
   action deadlines, form cancellation terminates process groups and transient
   systemd units without an unbounded reader join, and IBus discovery drains

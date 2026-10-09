@@ -229,6 +229,7 @@ CONFIGURATION:
     strict_env = true
     # Optional JSONL execution audit sink (mode 0600, rotates at 16 MiB).
     # audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"
+    # audit_required = false
 
     [actions."example"]
     program = "/usr/bin/example"
@@ -342,6 +343,7 @@ fn broker_health_path(socket_path: &Path) -> PathBuf {
 fn write_broker_health(
     path: &Path,
     audit_logger: Option<&AuditLogger>,
+    audit_required: bool,
     running: bool,
 ) -> std::io::Result<()> {
     let health = audit_logger
@@ -354,6 +356,7 @@ fn write_broker_health(
         "pid": std::process::id(),
         "running": running,
         "audit_enabled": audit_logger.is_some(),
+        "audit_required": audit_logger.is_some() && audit_required,
         "audit_queue_dropped_total": health.dropped_events,
         "audit_write_failures_total": health.write_failures,
         "audit_healthy": audit_logger.is_none() || health.healthy(),
@@ -458,6 +461,10 @@ async fn main() -> Result<()> {
     let executor = Arc::new(
         ActionExecutor::new(&config).map_err(|e| anyhow!("Failed to create executor: {}", e))?,
     );
+    let audit_required = config.audit_required;
+    if audit_required && config.audit_path.is_none() {
+        return Err(anyhow!("audit_required requires audit_path"));
+    }
     let audit_logger = match config.audit_path.as_deref() {
         Some(path) => {
             let logger = AuditLogger::new(Path::new(path), policy_hash.clone())
@@ -474,7 +481,9 @@ async fn main() -> Result<()> {
         BrokerServer::bind(&options.socket_path)
             .map_err(|e| anyhow!("Failed to bind broker socket: {}", e))?,
     );
-    if let Err(error) = write_broker_health(&health_path, audit_logger.as_deref(), true) {
+    if let Err(error) =
+        write_broker_health(&health_path, audit_logger.as_deref(), audit_required, true)
+    {
         warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
     }
     let action_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_ACTIONS));
@@ -613,7 +622,7 @@ async fn main() -> Result<()> {
             let _permit = permit;
             let started_at = unix_time_ms();
             let started = Instant::now();
-            let action_response = match executor.execute(request).await {
+            let mut action_response = match executor.execute(request).await {
                 Ok(output) => output,
                 Err(error) => action_broker::ActionResponse::Error(error),
             };
@@ -636,10 +645,22 @@ async fn main() -> Result<()> {
                     ),
                     output_size: audit_output_size(&action_response),
                 };
-                if let Err(error) = logger.record(&event) {
+                let audit_result = if audit_required {
+                    logger.record_required(&event)
+                } else {
+                    logger.record(&event)
+                };
+                if let Err(error) = audit_result {
                     error!(request_id = %request_id, error = %error, "failed to write action audit event");
+                    if audit_required {
+                        action_response = action_broker::ActionResponse::Error(
+                            ActionError::Internal {
+                                reason: format!("mandatory action audit failed: {error}"),
+                            },
+                        );
+                    }
                 }
-                if let Err(error) = write_broker_health(&health_path, Some(logger), true) {
+                if let Err(error) = write_broker_health(&health_path, Some(logger), audit_required, true) {
                     warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
                 }
             }
@@ -663,7 +684,9 @@ async fn main() -> Result<()> {
             error!(error = %error, "broker connection task failed during shutdown");
         }
     }
-    if let Err(error) = write_broker_health(&health_path, audit_logger.as_deref(), false) {
+    if let Err(error) =
+        write_broker_health(&health_path, audit_logger.as_deref(), audit_required, false)
+    {
         warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
     }
     if let Some(logger) = audit_logger.as_deref() {

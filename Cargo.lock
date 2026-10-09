@@ -4103,6 +4103,7 @@ name = "wayexpand"
 version = "1.3.3"
 dependencies = [
  "anyhow",
+ "libc",
  "rustix 1.1.5",
  "serde_json",
  "toml",

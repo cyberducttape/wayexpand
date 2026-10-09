@@ -65,6 +65,7 @@ impl AuditHealth {
 
 enum AuditMessage {
     Event(Vec<u8>),
+    Required(Vec<u8>, SyncSender<io::Result<()>>),
     FlushAndStop,
 }
 
@@ -93,6 +94,16 @@ impl AuditLogger {
     }
 
     pub fn record(&self, event: &AuditEvent<'_>) -> io::Result<()> {
+        self.enqueue(event, false)
+    }
+
+    /// Record an event and wait until it has been synced to the audit file.
+    /// This is the stronger contract used by managed deployments.
+    pub fn record_required(&self, event: &AuditEvent<'_>) -> io::Result<()> {
+        self.enqueue(event, true)
+    }
+
+    fn enqueue(&self, event: &AuditEvent<'_>, required: bool) -> io::Result<()> {
         let mut line = serde_json::to_vec(event)
             .map_err(|error| io::Error::other(format!("serialize audit event: {error}")))?;
         line.push(b'\n');
@@ -100,14 +111,28 @@ impl AuditLogger {
             .sender
             .as_ref()
             .ok_or_else(|| io::Error::other("audit writer is shutting down"))?;
+        if required {
+            let (ack_sender, ack_receiver) = mpsc::sync_channel(0);
+            if sender
+                .try_send(AuditMessage::Required(line, ack_sender))
+                .is_err()
+            {
+                self.dropped_events.fetch_add(1, Ordering::Relaxed);
+                return Err(io::Error::other(
+                    "audit writer is unavailable; event dropped",
+                ));
+            }
+            return ack_receiver
+                .recv_timeout(Duration::from_secs(2))
+                .map_err(|_| io::Error::other("audit writer did not confirm the event"))?;
+        }
         match sender.try_send(AuditMessage::Event(line)) {
             Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(AuditMessage::Event(_))) => {
+            Err(mpsc::TrySendError::Full(_)) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
                 Err(io::Error::other("audit queue is full; event dropped"))
             }
-            Err(mpsc::TrySendError::Full(AuditMessage::FlushAndStop))
-            | Err(mpsc::TrySendError::Disconnected(_)) => {
+            Err(mpsc::TrySendError::Disconnected(_)) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
                 Err(io::Error::other(
                     "audit writer is unavailable; event dropped",
@@ -208,14 +233,36 @@ fn run_writer(
     write_failures: Arc<AtomicU64>,
 ) {
     while let Ok(message) = receiver.recv() {
-        let AuditMessage::Event(first) = message else {
-            break;
+        let first = match message {
+            AuditMessage::Event(first) => first,
+            AuditMessage::Required(line, ack) => {
+                let result =
+                    write_with_retry(&mut writer, std::slice::from_ref(&line), &write_failures);
+                let _ = ack.send(result);
+                continue;
+            }
+            AuditMessage::FlushAndStop => break,
         };
         let mut batch = vec![first];
         let mut stop_after_batch = false;
         while batch.len() < AUDIT_BATCH_SIZE {
             match receiver.recv_timeout(AUDIT_BATCH_WAIT) {
                 Ok(AuditMessage::Event(line)) => batch.push(line),
+                Ok(AuditMessage::Required(line, ack)) => {
+                    let result = write_with_retry(&mut writer, &batch, &write_failures);
+                    if result.is_ok() {
+                        let result = write_with_retry(
+                            &mut writer,
+                            std::slice::from_ref(&line),
+                            &write_failures,
+                        );
+                        let _ = ack.send(result);
+                    } else {
+                        let _ = ack.send(result);
+                    }
+                    batch.clear();
+                    break;
+                }
                 Ok(AuditMessage::FlushAndStop) => {
                     stop_after_batch = true;
                     break;
@@ -225,17 +272,34 @@ fn run_writer(
                 }
             }
         }
-        if let Err(error) = writer.write_batch(&batch) {
-            write_failures.fetch_add(1, Ordering::Relaxed);
+        if let Err(error) = write_with_retry(&mut writer, &batch, &write_failures) {
             tracing::error!(error = %error, events = batch.len(), "failed to write action audit batch");
-            if let Ok(reopened) = AuditWriter::open(&writer.path) {
-                writer = reopened;
-            }
         }
         if stop_after_batch {
             break;
         }
     }
+}
+
+fn write_with_retry(
+    writer: &mut AuditWriter,
+    batch: &[Vec<u8>],
+    write_failures: &AtomicU64,
+) -> io::Result<()> {
+    let mut last_error = None;
+    for _ in 0..3 {
+        match writer.write_batch(batch) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                write_failures.fetch_add(1, Ordering::Relaxed);
+                last_error = Some(error);
+                if let Ok(reopened) = AuditWriter::open(&writer.path) {
+                    *writer = reopened;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| io::Error::other("audit write failed")))
 }
 
 pub fn policy_hash(content: &[u8]) -> String {
@@ -283,6 +347,35 @@ mod tests {
         assert_eq!(value["action_id"], "cluster-status");
         assert!(value.get("stdout").is_none());
         assert!(value.get("arguments").is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn required_audit_waits_for_a_synced_event() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-required-audit-test-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let logger = AuditLogger::new(&path, "policy-hash".to_string()).unwrap();
+        logger
+            .record_required(&AuditEvent {
+                timestamp: 1,
+                request_id: "request-1",
+                action_id: "required",
+                caller_pid: None,
+                caller_executable: None,
+                policy_hash: logger.policy_hash(),
+                start: 1,
+                finish: 2,
+                duration_ms: 1,
+                exit_status: Some(0),
+                timed_out: false,
+                output_size: 0,
+            })
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+        drop(logger);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -10,6 +10,7 @@
 
 use std::{
     io::Read,
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread,
@@ -54,41 +55,87 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
         .stderr(Stdio::piped())
         .spawn()
         .context("could not run git; is it installed?")?;
-    let stdout = child.stdout.take().context("git stdout was not captured")?;
-    let stderr = child.stderr.take().context("git stderr was not captured")?;
-    let stdout_reader = thread::spawn(|| read_git_output(stdout));
-    let stderr_reader = thread::spawn(|| read_git_output(stderr));
+    let mut stdout = child.stdout.take().context("git stdout was not captured")?;
+    let mut stderr = child.stderr.take().context("git stderr was not captured")?;
     let mut supervisor = ChildSupervisor::new(child);
+    if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+        return Err(error);
+    }
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
     let deadline = Instant::now() + GIT_TIMEOUT;
     let status = loop {
+        let stdout_eof = drain_git_output(&mut stdout, &mut stdout_bytes)?;
+        let stderr_eof = drain_git_output(&mut stderr, &mut stderr_bytes)?;
+        if stdout_bytes.len() > MAX_GIT_OUTPUT_BYTES || stderr_bytes.len() > MAX_GIT_OUTPUT_BYTES {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            bail!("git output exceeded the safety limit");
+        }
         match supervisor.has_exited() {
             Ok(true) => {
                 supervisor.kill_group();
-                break supervisor.reap().context("could not reap git")?;
+                let status = supervisor.reap().context("could not reap git")?;
+                let drain_deadline = Instant::now() + Duration::from_millis(100);
+                let mut stdout_eof = stdout_eof;
+                let mut stderr_eof = stderr_eof;
+                while !(stdout_eof && stderr_eof) && Instant::now() < drain_deadline {
+                    stdout_eof = drain_git_output(&mut stdout, &mut stdout_bytes)?;
+                    stderr_eof = drain_git_output(&mut stderr, &mut stderr_bytes)?;
+                    if stdout_bytes.len() > MAX_GIT_OUTPUT_BYTES
+                        || stderr_bytes.len() > MAX_GIT_OUTPUT_BYTES
+                    {
+                        bail!("git output exceeded the safety limit");
+                    }
+                    if !(stdout_eof && stderr_eof) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                break status;
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(false) | Err(_) => {
                 supervisor.kill_group();
                 let _ = supervisor.reap();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
                 bail!("git {} timed out or could not be monitored", args.join(" "));
             }
         }
     };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow::anyhow!("git stdout reader failed"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow::anyhow!("git stderr reader failed"))??;
     Ok(Output {
         status,
-        stdout,
-        stderr,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
     })
 }
 
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<()> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        bail!(
+            "could not make git output nonblocking: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+fn drain_git_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> Result<bool> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..64 {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => output.extend_from_slice(&buffer[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
 fn read_git_output<R: Read>(mut reader: R) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     reader
@@ -300,9 +347,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         bail!("the library is not a Git repository yet; run `wayexpand sync init [--remote URL]`");
     }
     validate_library(config_path)?;
-    let host = std::fs::read_to_string("/etc/hostname").unwrap_or_default();
-    let message = format!("Sync WayExpand library from {}", host.trim());
-    let committed = commit_library(&directory, message.trim_end())?;
+    let committed = commit_library(&directory, "Sync WayExpand library")?;
     let remote = remote(&directory)?;
     let mut report = SyncReport {
         directory: directory.clone(),
@@ -454,6 +499,34 @@ mod tests {
     fn git_output_is_bounded() {
         assert_eq!(read_git_output(&b"git output"[..]).unwrap(), b"git output");
         assert!(read_git_output(&vec![b'x'; MAX_GIT_OUTPUT_BYTES + 1][..]).is_err());
+    }
+
+    #[test]
+    fn git_output_drain_yields_for_continuous_output() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "yes wayexpand"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn continuous-output child");
+        let mut stdout = child.stdout.take().expect("child stdout");
+        set_nonblocking(&stdout).expect("make stdout nonblocking");
+        let mut output = Vec::new();
+        let started = Instant::now();
+        let _ = drain_git_output(&mut stdout, &mut output).expect("drain output");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn sync_uses_a_generic_commit_message() {
+        let (directory, config_path) = prepare_repository();
+        sync(&config_path).expect("sync local library");
+        let message =
+            git_ok(&directory, &["log", "-1", "--format=%s"]).expect("read commit message");
+        assert_eq!(message, "Sync WayExpand library");
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
