@@ -4677,6 +4677,20 @@ fn cancelling_a_form_does_not_wait_for_a_descendant_holding_stdout() {
 }
 
 #[test]
+fn malformed_form_output_does_not_leave_an_inherited_pipe_alive() {
+    let _helper = FakeFormHelper::new("malformed-descendant", r#"printf '{'; sleep 30 &"#);
+    let fields = crate::form_fields("{{field:name}}").unwrap();
+    let shutdown = AtomicBool::new(false);
+    let started = Instant::now();
+    let result = super::command_runtime::run_form_helper("Test", &fields, &shutdown);
+    assert!(matches!(result, Err(CommandError::IncompleteOutput)));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "malformed form output waited on an inherited stdout pipe"
+    );
+}
+
+#[test]
 fn a_form_result_is_dropped_when_focus_moved_to_another_app() {
     let _helper = FakeFormHelper::new(
         "moved",

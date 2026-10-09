@@ -645,9 +645,22 @@ pub(super) fn run_form_helper(
     let mut child = process.spawn().map_err(|error| CommandError::SpawnFailed {
         detail: error.to_string(),
     })?;
-    let mut stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
+    // The helper was spawned with piped stdout. If the descriptor is
+    // unexpectedly absent, still clean up the transient systemd unit before
+    // returning; dropping the direct child alone does not own that cgroup.
+    let mut stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let mut guard = ChildSupervisor::new(child);
+            terminate_form_helper(&mut guard, transient_unit.as_deref());
+            return Err(CommandError::OutputChannelLost);
+        }
+    };
     let mut guard = ChildSupervisor::new(child);
-    set_nonblocking_stdout(&stdout)?;
+    if let Err(error) = set_nonblocking_stdout(&stdout) {
+        terminate_form_helper(&mut guard, transient_unit.as_deref());
+        return Err(error);
+    }
     let mut bytes = Vec::new();
     let mut stdout_eof = false;
     let deadline = Instant::now() + FORM_TIMEOUT;
@@ -661,22 +674,33 @@ pub(super) fn run_form_helper(
                 }
             };
         }
-        if guard
-            .has_exited()
-            .map_err(|error| CommandError::WaitFailed {
-                operation: ProcessWaitOperation::TryWait,
-                reason: ProcessWaitFailure::Io {
-                    detail: error.to_string(),
-                },
-            })?
-        {
+        let has_exited = match guard.has_exited() {
+            Ok(has_exited) => has_exited,
+            Err(error) => {
+                terminate_form_helper(&mut guard, transient_unit.as_deref());
+                return Err(CommandError::WaitFailed {
+                    operation: ProcessWaitOperation::TryWait,
+                    reason: ProcessWaitFailure::Io {
+                        detail: error.to_string(),
+                    },
+                });
+            }
+        };
+        if has_exited {
             guard.kill_group();
-            break guard.reap().map_err(|error| CommandError::WaitFailed {
-                operation: ProcessWaitOperation::Reap,
-                reason: ProcessWaitFailure::Io {
-                    detail: error.to_string(),
-                },
-            })?;
+            let status = match guard.reap() {
+                Ok(status) => status,
+                Err(error) => {
+                    stop_transient_form_unit(transient_unit.as_deref());
+                    return Err(CommandError::WaitFailed {
+                        operation: ProcessWaitOperation::Reap,
+                        reason: ProcessWaitFailure::Io {
+                            detail: error.to_string(),
+                        },
+                    });
+                }
+            };
+            break status;
         }
         if shutdown.load(Ordering::Acquire) || Instant::now() >= deadline {
             terminate_form_helper(&mut guard, transient_unit.as_deref());
@@ -690,28 +714,43 @@ pub(super) fn run_form_helper(
     };
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while !stdout_eof && Instant::now() < drain_deadline {
-        stdout_eof = read_available_form_output(&mut stdout, &mut bytes, None)?;
+        stdout_eof = match read_available_form_output(&mut stdout, &mut bytes, None) {
+            Ok(eof) => eof,
+            Err(error) => {
+                stop_transient_form_unit(transient_unit.as_deref());
+                return Err(error);
+            }
+        };
         if !stdout_eof {
             thread::sleep(Duration::from_millis(5));
         }
     }
     if !stdout_eof {
+        stop_transient_form_unit(transient_unit.as_deref());
         return Err(CommandError::IncompleteOutput);
     }
     if !status.success() {
         // Cancelled: the trigger stays as typed.
+        stop_transient_form_unit(transient_unit.as_deref());
         return Err(CommandError::StaleInput);
     }
     if bytes.len() > MAX_FORM_OUTPUT_BYTES {
+        stop_transient_form_unit(transient_unit.as_deref());
         return Err(CommandError::OutputTooLarge);
     }
-    let values: std::collections::HashMap<String, String> =
-        serde_json::from_slice(&bytes).map_err(|_| CommandError::IncompleteOutput)?;
+    let values: std::collections::HashMap<String, String> = match serde_json::from_slice(&bytes) {
+        Ok(values) => values,
+        Err(_) => {
+            stop_transient_form_unit(transient_unit.as_deref());
+            return Err(CommandError::IncompleteOutput);
+        }
+    };
     let mut checked = std::collections::HashMap::with_capacity(fields.len());
     for field in fields {
-        let value = values
-            .get(&field.key)
-            .ok_or(CommandError::IncompleteOutput)?;
+        let value = values.get(&field.key).ok_or_else(|| {
+            stop_transient_form_unit(transient_unit.as_deref());
+            CommandError::IncompleteOutput
+        })?;
         let valid = value.len() <= MAX_FORM_VALUE_BYTES
             && !value
                 .chars()
@@ -721,6 +760,7 @@ pub(super) fn run_form_helper(
                 crate::FormFieldKind::Text { .. } => true,
             };
         if !valid {
+            stop_transient_form_unit(transient_unit.as_deref());
             return Err(CommandError::IncompleteOutput);
         }
         checked.insert(field.key.clone(), value.clone());

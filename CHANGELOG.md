@@ -16,6 +16,8 @@ All notable changes to WayExpand are documented here.
   leaving a background tracker thread detached.
 - Fleet reloads now verify that all layer files remain stable across the merge,
   preventing a mixed snippet snapshot from becoming active during an edit.
+- Form-helper failures now stop their transient systemd unit, including
+  inherited-pipe and malformed-output paths, preventing orphaned GUI helpers.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
