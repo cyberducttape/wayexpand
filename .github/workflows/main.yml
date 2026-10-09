@@ -70,11 +70,15 @@ jobs:
           retry_push() {
             local attempt
             for attempt in 1 2 3; do
-              if timeout --signal=TERM --kill-after=30s 5m git push "$@"; then
+              set +e
+              timeout --signal=TERM --kill-after=30s 5m git push "$@"
+              push_status=$?
+              set -e
+              if [ "$push_status" -eq 0 ]; then
                 return 0
               fi
               if [ "$attempt" -lt 3 ]; then
-                echo "Launchpad push attempt $attempt failed; retrying." >&2
+                echo "Launchpad push attempt $attempt failed with status $push_status; retrying." >&2
                 sleep $((attempt * 10))
               fi
             done

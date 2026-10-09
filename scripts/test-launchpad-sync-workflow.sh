@@ -11,6 +11,8 @@ tag_message="Skipping Launchpad main update for \$GITHUB_REF; syncing tags only.
 main_lease="--force-with-lease=\"refs/heads/main:\$launchpad_main\""
 probe_timeout="response=\"\$(timeout --signal=TERM --kill-after=10s 45s ssh"
 probe_connect_timeout="-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+grep -F -- 'for attempt in 1 2 3; do' "$workflow" >/dev/null
+grep -F -- 'push_status=$?' "$workflow" >/dev/null
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
 grep -F -- "$main_guard" "$workflow" >/dev/null
