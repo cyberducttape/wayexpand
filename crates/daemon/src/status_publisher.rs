@@ -21,6 +21,7 @@ pub(crate) struct StatusSnapshot {
     capture_capabilities: InputSourceCapabilities,
     injection_capabilities: InjectorCapabilities,
     window_tracker_connected: bool,
+    window_identity_exact: bool,
 }
 
 impl StatusPublisher {
@@ -54,6 +55,7 @@ impl StatusPublisher {
             capture_capabilities,
             injection_capabilities,
             window_tracker_connected,
+            window_identity_exact: control.focus_snapshot().exact_window_identity,
         };
         // Always rebuild the body: other paths (output reconnect, input-method
         // pass-through setup) publish directly through `crate::status`, so an
@@ -74,6 +76,7 @@ impl StatusPublisher {
             snapshot.capture_capabilities,
             snapshot.injection_capabilities,
             snapshot.window_tracker_connected,
+            snapshot.window_identity_exact,
         ));
         self.last = Some(snapshot);
     }

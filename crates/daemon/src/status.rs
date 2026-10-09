@@ -77,6 +77,7 @@ pub fn daemon_status_body_with_latency(
         InputSourceCapabilities::default(),
         InjectorCapabilities::default(),
         false,
+        false,
     )
 }
 
@@ -94,6 +95,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
     capture: InputSourceCapabilities,
     injection: InjectorCapabilities,
     window_tracker_connected: bool,
+    window_identity_exact: bool,
 ) -> StatusBody {
     let matcher_latency = crate::latency::matcher_snapshot();
     let injection_latency_profiles = crate::latency::profiles_json();
@@ -111,7 +113,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
         capture.local_compose_aware,
         capture.layout_aware,
         window_tracker_connected,
-        window_tracker_connected,
+        window_identity_exact,
         injection.atomic_replace,
         injection.full_unicode,
         injection.cursor_reposition,

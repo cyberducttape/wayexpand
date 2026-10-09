@@ -69,6 +69,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             ..InjectorCapabilities::default()
         },
         true,
+        false,
     );
     let body = body.as_str();
     let mut fields: Vec<&str> = body
@@ -148,6 +149,27 @@ fn daemon_status_body_matches_documented_stable_contract() {
             .lines()
             .any(|line| line.starts_with(&format!("{field}="))));
     }
+}
+
+#[test]
+fn connected_window_tracker_does_not_claim_exact_identity_without_a_focus_token() {
+    let body = status::daemon_status_body_with_runtime_capabilities(
+        "evdev",
+        "libei",
+        "connected",
+        false,
+        Path::new("/tmp/config.toml"),
+        true,
+        "ei_text",
+        CommandMetrics::default(),
+        latency::Snapshot::default(),
+        InputSourceCapabilities::default(),
+        InjectorCapabilities::default(),
+        true,
+        false,
+    );
+    assert!(body.as_str().contains("window_tracker_connected=true\n"));
+    assert!(body.as_str().contains("window_identity_exact=false\n"));
 }
 
 struct RecordingInjector {
@@ -1127,6 +1149,7 @@ fn status_response_fits_the_client_read_limit() {
         InputSourceCapabilities::INPUT_METHOD_V2,
         InjectorCapabilities::default(),
         true,
+        false,
     );
     let response = format!("running\n{}\n", body.as_str());
     assert!(

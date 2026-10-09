@@ -20,6 +20,8 @@ All notable changes to WayExpand are documented here.
   inherited-pipe and malformed-output paths, preventing orphaned GUI helpers.
 - Git synchronization now serializes the complete repository transaction,
   preventing concurrent callers from interleaving fetch, rebase, and rollback.
+- Runtime diagnostics now distinguish a connected window tracker from an exact
+  focused-window identity, preventing false app-filter readiness reports.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
