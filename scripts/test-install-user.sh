@@ -60,14 +60,23 @@ first_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
 
 # A second source identity with the same Cargo package version must activate
 # its own staged files rather than silently reusing the first build directory.
-HOME="$test_root/home" \
-XDG_CONFIG_HOME="$test_root/config" \
-WAYEXPAND_BUILD_SHA=install-test-next \
-"$project_dir/scripts/install-user.sh"
-second_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
-[ "$second_build" != "$first_build" ]
-[ -x "$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon" ]
-[ -x "$test_root/home/.local/lib/wayexpand/$second_build/bin/wayexpand-daemon" ]
+case "$("$CARGO_TARGET_DIR/release/wayexpand" --version)" in
+    *-dev+*)
+        HOME="$test_root/home" \
+        XDG_CONFIG_HOME="$test_root/config" \
+        WAYEXPAND_BUILD_SHA=install-test-next \
+        "$project_dir/scripts/install-user.sh"
+        second_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
+        [ "$second_build" != "$first_build" ]
+        [ -x "$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon" ]
+        [ -x "$test_root/home/.local/lib/wayexpand/$second_build/bin/wayexpand-daemon" ]
+        ;;
+    *)
+        # Exact tagged builds use a stable release identity and are expected
+        # to be idempotent when installed repeatedly.
+        [ -x "$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon" ]
+        ;;
+esac
 [ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
