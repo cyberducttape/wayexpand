@@ -475,7 +475,10 @@ pub(crate) fn status(config_path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
     fn test_directory() -> PathBuf {
         let suffix = SystemTime::now()
@@ -483,8 +486,9 @@ mod tests {
             .expect("system clock is after the Unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "wayexpand-sync-test-{}-{suffix}",
-            std::process::id()
+            "wayexpand-sync-test-{}-{suffix}-{}",
+            std::process::id(),
+            TEST_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ))
     }
 
