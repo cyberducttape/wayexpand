@@ -23,6 +23,9 @@ All notable changes to WayExpand are documented here.
   after removing udev rules, so active-seat ACLs are reevaluated immediately.
 - **Non-duplicating audit retries:** failed Action Broker audit batches now
   roll back partial appends before retrying, preserving one record per action.
+- **Bounded audit shutdown:** broker teardown no longer blocks waiting for a
+  flush sentinel when the audit queue is full; queued events still drain after
+  the sender closes.
 - **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
   output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit

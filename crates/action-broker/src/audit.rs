@@ -158,7 +158,14 @@ impl AuditLogger {
 
     fn shutdown(&mut self) {
         if let Some(sender) = self.sender.take() {
-            let _ = sender.send(AuditMessage::FlushAndStop);
+            match sender.try_send(AuditMessage::FlushAndStop) {
+                Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+                Err(mpsc::TrySendError::Full(_)) => {
+                    // Dropping the last sender makes the receiver drain all
+                    // already-queued events and then exit on Disconnected.
+                    // Never block broker teardown waiting for one queue slot.
+                }
+            }
         }
         if let Some(worker) = self.worker.take() {
             if worker.join().is_err() {
