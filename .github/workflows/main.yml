@@ -65,6 +65,19 @@ jobs:
           set -euo pipefail
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
+          retry_push() {
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout --signal=TERM --kill-after=30s 5m git push "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Launchpad push attempt $attempt failed; retrying." >&2
+                sleep $((attempt * 10))
+              fi
+            done
+            return 1
+          }
           # A tag push checks out the tagged commit. Never use that detached
           # HEAD to update Launchpad main: an older release tag could rewind
           # the mirror. Main synchronization is only valid for a main-branch
@@ -77,11 +90,11 @@ jobs:
             launchpad_main="$(git ls-remote launchpad refs/heads/main \
               | awk 'NR == 1 { print $1 }')"
             if [ -n "$launchpad_main" ]; then
-              timeout --signal=TERM --kill-after=30s 5m git push launchpad \
+              retry_push launchpad \
                 --force-with-lease="refs/heads/main:$launchpad_main" \
                 HEAD:refs/heads/main
             else
-              timeout --signal=TERM --kill-after=30s 5m git push launchpad HEAD:refs/heads/main
+              retry_push launchpad HEAD:refs/heads/main
             fi
           else
             echo "Skipping Launchpad main update for $GITHUB_REF; syncing tags only."
@@ -112,5 +125,5 @@ jobs:
             fi
           done < <(git for-each-ref --format='%(refname:strip=2)' refs/tags)
           if [ "${#tag_pushes[@]}" -gt 0 ]; then
-            timeout --signal=TERM --kill-after=30s 5m git push launchpad "${tag_pushes[@]}"
+            retry_push launchpad "${tag_pushes[@]}"
           fi
