@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   certification now requires a healthy doctor result, and uninstall refuses to
   remove binaries while any managed user service cannot be stopped or remains
   active.
+- **Robust daemon overload handling:** busy control-socket responses are now
+  recognized from their exact bounded payload even when the peer close produces
+  different platform-specific transport errors.
 - **Diagnostics clarity:** the GUI now highlights the negotiated output mode,
   warns when libei keysym fallback is active, separates matcher/preparation
   latency from output-backend latency, and visibly labels organization policy

@@ -15,6 +15,30 @@ const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 const MAX_INSERT_TRIGGER_CHARS: usize = 128;
 const MAX_EXPLAIN_TEXT_CHARS: usize = 256;
 
+fn decode_response(
+    response: Vec<u8>,
+    read_result: std::io::Result<()>,
+) -> Result<String, DaemonClientError> {
+    if let Err(source) = read_result {
+        // An overloaded daemon replies without reading the request, so the
+        // kernel may report a transport error after delivering the full busy
+        // response. The payload is the protocol authority; do not make the
+        // typed result depend on which errno the local kernel chose for the
+        // peer's close/reset sequence.
+        if response == CONTROL_BUSY_RESPONSE {
+            return Err(DaemonClientError::Busy);
+        }
+        return Err(DaemonClientError::Read { source });
+    }
+    if response.len() > CONTROL_MAX_RESPONSE_BYTES {
+        return Err(DaemonClientError::ResponseTooLarge);
+    }
+    if response == CONTROL_BUSY_RESPONSE {
+        return Err(DaemonClientError::Busy);
+    }
+    String::from_utf8(response).map_err(|source| DaemonClientError::InvalidUtf8 { source })
+}
+
 #[derive(Debug, Error)]
 pub enum DaemonClientError {
     #[error("XDG_RUNTIME_DIR or WAYEXPAND_SOCKET is required")]
@@ -125,28 +149,11 @@ impl DaemonClient {
             .map_err(|source| DaemonClientError::Send { source })?;
 
         let mut response = Vec::with_capacity(CONTROL_MAX_RESPONSE_BYTES);
-        if let Err(source) = stream
+        let read_result = stream
             .take((CONTROL_MAX_RESPONSE_BYTES + 1) as u64)
             .read_to_end(&mut response)
-        {
-            // An overloaded daemon replies without reading the request, so
-            // the kernel may report a transport error after delivering the
-            // full busy response. The payload is the protocol authority; do
-            // not make the typed result depend on which errno the local
-            // kernel chose for the peer's close/reset sequence. Only that
-            // exact bounded response is accepted after an error.
-            if response == CONTROL_BUSY_RESPONSE {
-                return Err(DaemonClientError::Busy);
-            }
-            return Err(DaemonClientError::Read { source });
-        }
-        if response.len() > CONTROL_MAX_RESPONSE_BYTES {
-            return Err(DaemonClientError::ResponseTooLarge);
-        }
-        if response == CONTROL_BUSY_RESPONSE {
-            return Err(DaemonClientError::Busy);
-        }
-        String::from_utf8(response).map_err(|source| DaemonClientError::InvalidUtf8 { source })
+            .map(|_| ());
+        decode_response(response, read_result)
     }
 
     pub fn status(&self) -> Result<String, DaemonClientError> {
@@ -276,6 +283,21 @@ mod tests {
         ));
         server.join().expect("server thread");
         fs::remove_file(socket).expect("remove test socket");
+    }
+
+    #[test]
+    fn busy_payload_wins_over_transport_error_variants() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let result = decode_response(
+                CONTROL_BUSY_RESPONSE.to_vec(),
+                Err(std::io::Error::from(kind)),
+            );
+            assert!(matches!(result, Err(DaemonClientError::Busy)), "{kind:?}");
+        }
     }
 
     #[test]
