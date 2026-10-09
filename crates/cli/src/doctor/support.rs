@@ -2,9 +2,17 @@
 
 use crate::commands::Args;
 use crate::*;
-use std::{io::Read, process::Stdio};
+use std::{
+    io::Read,
+    os::fd::AsRawFd,
+    process::Stdio,
+    thread,
+    time::{Duration, Instant},
+};
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
+const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Produce a privacy-preserving summary from the same doctor and certification
 /// reports operators can run independently. This is an explicit allowlist:
@@ -50,24 +58,79 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
 
 fn read_report(command_name: &str) -> Result<serde_json::Value> {
     let executable = std::env::current_exe().context("locating the WayExpand executable")?;
-    let mut child = Command::new(executable)
+    let mut command = Command::new(executable);
+    configure_process_group(&mut command);
+    let mut child = command
         .args([command_name, "--json"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .with_context(|| format!("starting {command_name} diagnostics"))?;
-    let mut stdout = child.stdout.take().context("capturing diagnostic output")?;
-    let mut bytes = Vec::new();
-    stdout
-        .by_ref()
-        .take(MAX_REPORT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .context("reading diagnostic output")?;
-    let status = child.wait().context("waiting for diagnostic command")?;
-    if bytes.len() as u64 > MAX_REPORT_BYTES {
-        bail!("{command_name} diagnostics exceeded the support-report size limit");
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        bail!("could not capture {command_name} diagnostic output");
+    };
+    let mut supervisor = ChildSupervisor::new(child);
+    let fd = stdout.as_raw_fd();
+    // SAFETY: fcntl changes status flags on the owned stdout descriptor.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error())
+            .context("making diagnostic output nonblocking");
     }
+    let mut bytes = Vec::new();
+    let deadline = Instant::now() + REPORT_TIMEOUT;
+    let mut eof = false;
+    let status = loop {
+        if Instant::now() >= deadline {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            bail!("{command_name} diagnostics exceeded the time limit");
+        }
+        if !eof {
+            let mut buffer = [0_u8; 8192];
+            loop {
+                match stdout.read(&mut buffer) {
+                    Ok(0) => {
+                        eof = true;
+                        break;
+                    }
+                    Ok(count) => {
+                        bytes.extend_from_slice(&buffer[..count]);
+                        if bytes.len() as u64 > MAX_REPORT_BYTES {
+                            supervisor.kill_group();
+                            let _ = supervisor.reap();
+                            bail!(
+                                "{command_name} diagnostics exceeded the support-report size limit"
+                            );
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) => {
+                        supervisor.kill_group();
+                        let _ = supervisor.reap();
+                        return Err(error).context("reading diagnostic output");
+                    }
+                }
+            }
+        }
+        match supervisor.has_exited() {
+            Ok(true) if eof => {
+                supervisor.kill_group();
+                break supervisor
+                    .reap()
+                    .context("waiting for diagnostic command")?;
+            }
+            Ok(_) => thread::sleep(Duration::from_millis(5)),
+            Err(error) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                return Err(error).context("checking diagnostic command status");
+            }
+        }
+    };
     // `doctor --json` intentionally exits unsuccessfully for unhealthy hosts,
     // but still emits the full machine-readable report. Certification also
     // emits a useful report when no live scenario has been run.

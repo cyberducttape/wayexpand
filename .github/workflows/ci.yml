@@ -386,6 +386,8 @@ jobs:
         run: bash scripts/test-e2e.sh
       - name: Doctor smoke test
         run: bash scripts/test-doctor.sh
+      - name: Redacted support bundle test
+        run: bash scripts/test-support-bundle.sh
       - name: Library Git sync test
         run: bash scripts/test-sync.sh
       - name: Signed pack test
