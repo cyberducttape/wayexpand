@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Reliable IBus setup probe:** the registry probe reads `ibus list-engine`
+  output to EOF after the helper exits, so the engine line is not missed.
 - **Broker responsiveness with mandatory audit:** waiting for a required audit
   event's fsync no longer blocks an async runtime worker.
 - **Cheaper latency diagnostics:** status is rebuilt on every key event, so

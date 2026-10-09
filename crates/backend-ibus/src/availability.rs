@@ -17,6 +17,7 @@ const IBUS_REGISTRY_READS_PER_DRAIN: usize = 64;
 #[derive(Default)]
 struct RegistryDrain {
     truncated: bool,
+    eof: bool,
 }
 
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
@@ -37,6 +38,7 @@ fn drain_registry_output(
     for _ in 0..IBUS_REGISTRY_READS_PER_DRAIN {
         match stdout.read(&mut buffer) {
             Ok(0) => {
+                result.eof = true;
                 return Ok(result);
             }
             Ok(count) => {
@@ -105,7 +107,21 @@ fn ibus_registry_contains_engine() -> bool {
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                return status.success() && registry_output_contains_engine(&output)
+                // Output written just before exit is still in the pipe; read
+                // it to EOF (bounded) before deciding, or the engine line can
+                // be missed.
+                let drain_deadline = Instant::now() + Duration::from_millis(100);
+                let complete = loop {
+                    match drain_registry_output(&mut stdout, &mut output) {
+                        Ok(drain) if drain.truncated => break false,
+                        Ok(drain) if drain.eof => break true,
+                        Ok(_) if Instant::now() < drain_deadline => {
+                            thread::sleep(Duration::from_millis(5))
+                        }
+                        Ok(_) | Err(_) => break false,
+                    }
+                };
+                return complete && status.success() && registry_output_contains_engine(&output);
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) | Err(_) => {
