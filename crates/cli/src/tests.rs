@@ -198,7 +198,12 @@ fn status_json_matches_documented_stable_contract() {
          injection_latency_window_count=0\n\
          injection_latency_p50_us=0\n\
          injection_latency_p95_us=0\n\
-         injection_latency_p99_us=0";
+         injection_latency_p99_us=0\n\
+         matcher_latency_sample_count=0\n\
+         matcher_latency_window_count=0\n\
+         matcher_latency_p50_us=0\n\
+         matcher_latency_p95_us=0\n\
+         matcher_latency_p99_us=0";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
@@ -320,6 +325,11 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "injection_latency_p50_us",
             "injection_latency_p95_us",
             "injection_latency_p99_us",
+            "matcher_latency_sample_count",
+            "matcher_latency_window_count",
+            "matcher_latency_p50_us",
+            "matcher_latency_p95_us",
+            "matcher_latency_p99_us",
         ]
         .into_iter()
         .collect()

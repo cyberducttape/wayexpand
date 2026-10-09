@@ -37,7 +37,8 @@ confidentiality. Unprivileged WayExpand user services must be able to read it fo
 
 ```toml
 [organization]
-# Enforcement mode: true = block violations, false = warn only
+# Enforcement mode: true = block violations, false = warn only.
+# Managed deployments should explicitly set this to true.
 safe_mode = false
 
 # Disable all command execution (expansions with commands are blocked)
@@ -121,6 +122,13 @@ When `safe_mode = false`:
 log the same violation details to journald with the configured audit_prefix.
 Violations never silently fail or cause unexpected behavior changes between
 audit and safe modes.
+
+**Managed-deployment warning:** loading a policy file does not enable its
+restrictions. With `safe_mode = false`, the policy is audit-only and command,
+backend, pack, and replacement restrictions remain permissive. Treat audit
+mode as a rollout/testing phase; set `safe_mode = true`, explicitly allow only
+reviewed backends and signed packs, and disable commands unless they are
+required for the deployment.
 
 ## Examples
 

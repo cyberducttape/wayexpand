@@ -26,7 +26,7 @@ pub(crate) fn process_event(
         // Invalidate any pending asynchronous expansions before processing
         // the hotkey. This also updates undo validity: undo is only preserved
         // for the undo chord itself; all other keys invalidate it.
-        let _ = engine.process(event);
+        let _ = latency::measure_matcher(|| engine.process(event));
 
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
@@ -91,7 +91,7 @@ pub(crate) fn process_event(
         return Ok(());
     }
     // Check policy before executing deferred commands.
-    let pending = engine.process_deferred(event);
+    let pending = latency::measure_matcher(|| engine.process_deferred(event));
     apply_pending_results(engine, pending, injector, policy, active_backend)
 }
 

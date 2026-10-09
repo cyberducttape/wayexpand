@@ -97,6 +97,12 @@ pub(crate) struct DaemonCapabilities {
     pub injection_mode: Option<&'static str>,
     pub injection_max_text_chars: Option<usize>,
     pub injection_throughput_chars_per_sec: Option<u32>,
+    pub injection_latency_p50_us: Option<u64>,
+    pub injection_latency_p95_us: Option<u64>,
+    pub injection_latency_p99_us: Option<u64>,
+    pub matcher_latency_p50_us: Option<u64>,
+    pub matcher_latency_p95_us: Option<u64>,
+    pub matcher_latency_p99_us: Option<u64>,
     pub capture_sensitive_focus: Option<bool>,
     pub capture_exclusive: Option<bool>,
     pub capture_reliable_key_state: Option<bool>,
@@ -136,8 +142,10 @@ impl DaemonCapabilities {
         let mut found = false;
         if let Some(value) = status.field("inject_insertion_mode") {
             capabilities.injection_mode = match value {
-                "ei_text" => Some("ei_text"),
-                "libei keysym fallback" => Some("libei keysym fallback"),
+                "ei_text" | "ei_text (UTF-8 insertion)" => Some("ei_text"),
+                "libei keysym fallback" | "ei_keyboard keysym fallback (12ms key pacing)" => {
+                    Some("libei keysym fallback")
+                }
                 "wlroots virtual-keyboard key synthesis" => {
                     Some("wlroots virtual-keyboard key synthesis")
                 }
@@ -153,6 +161,37 @@ impl DaemonCapabilities {
         if let Some(value) = status.u64_field("inject_expected_throughput_chars_per_sec") {
             capabilities.injection_throughput_chars_per_sec = u32::try_from(value).ok();
             found |= capabilities.injection_throughput_chars_per_sec.is_some();
+        }
+        for (key, slot) in [
+            (
+                "injection_latency_p50_us",
+                &mut capabilities.injection_latency_p50_us,
+            ),
+            (
+                "injection_latency_p95_us",
+                &mut capabilities.injection_latency_p95_us,
+            ),
+            (
+                "injection_latency_p99_us",
+                &mut capabilities.injection_latency_p99_us,
+            ),
+            (
+                "matcher_latency_p50_us",
+                &mut capabilities.matcher_latency_p50_us,
+            ),
+            (
+                "matcher_latency_p95_us",
+                &mut capabilities.matcher_latency_p95_us,
+            ),
+            (
+                "matcher_latency_p99_us",
+                &mut capabilities.matcher_latency_p99_us,
+            ),
+        ] {
+            if let Some(value) = status.u64_field(key) {
+                *slot = Some(value);
+                found = true;
+            }
         }
         for (key, slot) in [
             (
@@ -430,6 +469,17 @@ mod tests {
             super::DaemonCapabilities::parse("status_schema=6\nstate=connected\n"),
             None
         );
+    }
+
+    #[test]
+    fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
+        let capabilities = super::DaemonCapabilities::parse(
+            "status_schema=6\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+        )
+        .unwrap();
+        assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
+        assert_eq!(capabilities.matcher_latency_p50_us, Some(12));
+        assert_eq!(capabilities.injection_latency_p95_us, Some(3400));
     }
 
     #[test]

@@ -95,6 +95,22 @@ impl GuiApp {
             }
             theme::card(ui, palette, |ui| {
                 ui.label(self.strings.active_route());
+                let mode = capabilities.injection_mode.unwrap_or("unknown");
+                let fallback = mode.contains("keysym fallback");
+                ui.horizontal(|ui| {
+                    ui.label(self.strings.output_mode());
+                    ui.colored_label(
+                        if fallback || mode == "unknown" {
+                            palette.warning
+                        } else {
+                            palette.success
+                        },
+                        mode,
+                    );
+                });
+                if fallback {
+                    ui.colored_label(palette.warning, self.strings.keysym_fallback_warning());
+                }
                 ui.label(
                     RichText::new(&self.daemon_status)
                         .small()
@@ -220,6 +236,23 @@ impl GuiApp {
             ] {
                 self.render_capability_row(ui, palette, key, value);
             }
+            theme::section_header(ui, "", self.strings.latency());
+            self.render_latency_row(
+                ui,
+                palette,
+                self.strings.matcher_latency(),
+                capabilities.matcher_latency_p50_us,
+                capabilities.matcher_latency_p95_us,
+                capabilities.matcher_latency_p99_us,
+            );
+            self.render_latency_row(
+                ui,
+                palette,
+                self.strings.output_latency(),
+                capabilities.injection_latency_p50_us,
+                capabilities.injection_latency_p95_us,
+                capabilities.injection_latency_p99_us,
+            );
         }
         ui.label(
             RichText::new(format!(
@@ -289,7 +322,14 @@ impl GuiApp {
         for (name, detail) in &self.protocol_probes {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(name).strong());
-                ui.label(RichText::new(detail).color(palette.muted));
+                let warning = detail.contains("enforcement disabled")
+                    || detail.contains("audit-only")
+                    || detail.contains("raw keyboard");
+                ui.label(RichText::new(detail).color(if warning {
+                    palette.warning
+                } else {
+                    palette.muted
+                }));
             });
         }
     }
@@ -311,6 +351,27 @@ impl GuiApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.colored_label(color, label);
             });
+        });
+    }
+
+    fn render_latency_row(
+        &self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        label: &str,
+        p50: Option<u64>,
+        p95: Option<u64>,
+        p99: Option<u64>,
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(label);
+            let text = match (p50, p95, p99) {
+                (Some(p50), Some(p95), Some(p99)) => {
+                    format!("p50 {p50} µs · p95 {p95} µs · p99 {p99} µs")
+                }
+                _ => self.strings.no_samples().to_owned(),
+            };
+            ui.label(RichText::new(text).monospace().small().color(palette.muted));
         });
     }
 }

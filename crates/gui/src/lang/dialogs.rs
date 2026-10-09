@@ -141,6 +141,52 @@ impl Strings {
         }
     }
 
+    pub fn output_mode(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Negotiated output mode",
+            Language::German => "Ausgehandelter Ausgabemodus",
+        }
+    }
+
+    pub fn keysym_fallback_warning(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Keysym fallback is active: output is layout-dependent and paced, so longer replacements may be noticeably slower."
+            }
+            Language::German => {
+                "Keysym-Fallback ist aktiv: Die Ausgabe hängt vom Layout ab und wird gebremst; längere Ersetzungen können spürbar langsamer sein."
+            }
+        }
+    }
+
+    pub fn latency(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Latency (recent samples)",
+            Language::German => "Latenz (letzte Messwerte)",
+        }
+    }
+
+    pub fn matcher_latency(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Matcher / preparation",
+            Language::German => "Matcher / Vorbereitung",
+        }
+    }
+
+    pub fn output_latency(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Output backend / injection",
+            Language::German => "Ausgabebackend / Einfügen",
+        }
+    }
+
+    pub fn no_samples(&self) -> &'static str {
+        match self.lang {
+            Language::English => "no samples yet",
+            Language::German => "noch keine Messwerte",
+        }
+    }
+
     pub fn application_context(&self) -> &'static str {
         match self.lang {
             Language::English => "Application context",

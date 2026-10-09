@@ -112,6 +112,11 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "injection_latency_p99_us",
             "injection_latency_sample_count",
             "injection_latency_window_count",
+            "matcher_latency_p50_us",
+            "matcher_latency_p95_us",
+            "matcher_latency_p99_us",
+            "matcher_latency_sample_count",
+            "matcher_latency_window_count",
             "paused",
             "source",
             "state",
@@ -130,7 +135,12 @@ fn daemon_status_body_matches_documented_stable_contract() {
          injection_latency_window_count=0\n\
          injection_latency_p50_us=0\n\
          injection_latency_p95_us=0\n\
-         injection_latency_p99_us=0"
+         injection_latency_p99_us=0\n\
+         matcher_latency_sample_count=0\n\
+         matcher_latency_window_count=0\n\
+         matcher_latency_p50_us=0\n\
+         matcher_latency_p95_us=0\n\
+         matcher_latency_p99_us=0"
     ));
 }
 

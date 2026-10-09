@@ -54,10 +54,16 @@ pub(crate) fn probe_protocols() -> Vec<(String, String)> {
 fn organization_policy_detail() -> String {
     match load_organization_policy() {
         Ok(policy) if policy.is_active() => format!(
-            "valid; safe_mode={}, allowed_backends={:?}",
-            policy.safe_mode, policy.allowed_backends
+            "valid; enforcement={}, safe_mode={}, allowed_backends={:?}",
+            if policy.safe_mode {
+                "enabled"
+            } else {
+                "audit-only"
+            },
+            policy.safe_mode,
+            policy.allowed_backends
         ),
-        Ok(_) => "valid; default permissive policy is active".into(),
+        Ok(_) => "valid; enforcement disabled; default permissive policy is active".into(),
         Err(error) => format!("invalid: daemon will refuse startup ({error})"),
     }
 }

@@ -73,6 +73,11 @@ fn window() -> &'static Mutex<Window> {
     WINDOW.get_or_init(|| Mutex::new(Window::default()))
 }
 
+fn matcher_window() -> &'static Mutex<Window> {
+    static WINDOW: OnceLock<Mutex<Window>> = OnceLock::new();
+    WINDOW.get_or_init(|| Mutex::new(Window::default()))
+}
+
 fn record(elapsed_ns: u64) {
     let mut state = window()
         .lock()
@@ -87,8 +92,27 @@ pub fn snapshot() -> Snapshot {
         .snapshot()
 }
 
+/// Snapshot of time spent processing input through the matcher and preparing
+/// an expansion, excluding output injection and its serialized actor.
+pub fn matcher_snapshot() -> Snapshot {
+    matcher_window()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .snapshot()
+}
+
 pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
     measure(|| ExpansionEngine::apply(injector, result))
+}
+
+pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let result = operation();
+    let mut state = matcher_window()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.record(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+    result
 }
 
 fn measure<T>(operation: impl FnOnce() -> T) -> T {

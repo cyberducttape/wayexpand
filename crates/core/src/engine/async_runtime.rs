@@ -434,6 +434,21 @@ pub(super) struct FormOrigin {
     pub(super) instance_id: String,
 }
 
+pub(super) struct AsyncCommandCompletion {
+    pub(super) config_index: usize,
+    pub(super) generation: u64,
+    pub(super) cache_ms: u64,
+    pub(super) additional_max_size: usize,
+    pub(super) result: ExpansionResult,
+    pub(super) output: Result<String, CommandError>,
+    pub(super) form: Option<FormOrigin>,
+}
+
+pub(super) struct AsyncHotkeyCompletion {
+    pub(super) action: HotkeyResult,
+    pub(super) output: Result<(), HotkeyError>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::CommandQueue;
@@ -465,19 +480,4 @@ mod tests {
             .sum();
         assert_eq!(consumed, 32);
     }
-}
-
-pub(super) struct AsyncCommandCompletion {
-    pub(super) config_index: usize,
-    pub(super) generation: u64,
-    pub(super) cache_ms: u64,
-    pub(super) additional_max_size: usize,
-    pub(super) result: ExpansionResult,
-    pub(super) output: Result<String, CommandError>,
-    pub(super) form: Option<FormOrigin>,
-}
-
-pub(super) struct AsyncHotkeyCompletion {
-    pub(super) action: HotkeyResult,
-    pub(super) output: Result<(), HotkeyError>,
 }

@@ -39,6 +39,11 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "injection_latency_p50_us"
                         | "injection_latency_p95_us"
                         | "injection_latency_p99_us"
+                        | "matcher_latency_sample_count"
+                        | "matcher_latency_window_count"
+                        | "matcher_latency_p50_us"
+                        | "matcher_latency_p95_us"
+                        | "matcher_latency_p99_us"
                 ) =>
             {
                 match value.parse::<u64>() {

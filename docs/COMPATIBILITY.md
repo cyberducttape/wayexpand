@@ -475,7 +475,12 @@ operators can distinguish a running process from newly installed binaries.
   "injection_latency_window_count": 0,
   "injection_latency_p50_us": 0,
   "injection_latency_p95_us": 0,
-  "injection_latency_p99_us": 0
+  "injection_latency_p99_us": 0,
+  "matcher_latency_sample_count": 0,
+  "matcher_latency_window_count": 0,
+  "matcher_latency_p50_us": 0,
+  "matcher_latency_p95_us": 0,
+  "matcher_latency_p99_us": 0
 }
 ```
 
@@ -509,6 +514,9 @@ operators can distinguish a running process from newly installed binaries.
 - `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
 - `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
+- `matcher_latency_sample_count` (integer): Lifetime count of input events processed by the matcher
+- `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)
+- `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
 
 These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 

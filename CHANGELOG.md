@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Diagnostics clarity:** the GUI now highlights the negotiated output mode,
+  warns when libei keysym fallback is active, separates matcher/preparation
+  latency from output-backend latency, and visibly labels organization policy
+  enforcement as audit-only when `safe_mode` is disabled.
 - **Audit and sync privacy:** managed Action Broker deployments can require
   audit confirmation before returning successful action results; failed audit
   writes are retried and surfaced as action errors. Git sync commit messages
