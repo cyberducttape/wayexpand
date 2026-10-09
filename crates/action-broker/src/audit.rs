@@ -5,8 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
-    os::unix::fs::OpenOptionsExt,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -190,12 +189,7 @@ struct AuditWriter {
 
 impl AuditWriter {
     fn open(path: &Path) -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(path)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        let file = open_audit_file(path)?;
         Ok(Self {
             path: path.to_owned(),
             file,
@@ -248,18 +242,42 @@ impl AuditWriter {
         ));
         drop(std::mem::replace(
             &mut self.file,
-            OpenOptions::new().write(true).open(&self.path)?,
+            open_audit_file(&self.path)?,
         ));
         let _ = std::fs::remove_file(&rotated);
         std::fs::rename(&self.path, &rotated)?;
-        self.file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(&self.path)?;
-        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
+        self.file = open_audit_file(&self.path)?;
         Ok(())
     }
+}
+
+fn open_audit_file(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.nlink() != 1
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "audit file has an unsafe type, owner, or link count",
+        ));
+    }
+    // Change permissions through the verified descriptor; the configured
+    // pathname may be replaced after validation and must never be chmod'd.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    if file.metadata()?.permissions().mode() & 0o777 != 0o600 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "audit file permissions could not be made private",
+        ));
+    }
+    Ok(file)
 }
 
 fn run_writer(
@@ -346,6 +364,19 @@ pub fn policy_hash(content: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn test_directory(label: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-audit-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        path
+    }
+
     #[test]
     fn policy_hash_is_stable_and_sha256_shaped() {
         let hash = policy_hash(b"policy");
@@ -412,5 +443,67 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
         drop(logger);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn audit_open_refuses_symlinks_without_changing_the_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = test_directory("symlink");
+        let target = directory.join("unrelated-file");
+        let link = directory.join("audit.jsonl");
+        std::fs::write(&target, "do not modify").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(AuditWriter::open(&link).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"do not modify");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn audit_file_is_private_and_single_linked() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = test_directory("private");
+        let path = directory.join("audit.jsonl");
+        let file = open_audit_file(&path).unwrap();
+        let metadata = file.metadata().unwrap();
+        assert!(metadata.file_type().is_file());
+        assert_eq!(metadata.nlink(), 1);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        drop(file);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn audit_rotation_replaces_a_backup_symlink_without_touching_its_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = test_directory("rotation");
+        let path = directory.join("audit.jsonl");
+        let rotated = directory.join("audit.jsonl.1");
+        let target = directory.join("unrelated-file");
+        std::fs::write(&target, "do not rotate over this").unwrap();
+        symlink(&target, &rotated).unwrap();
+
+        let mut writer = AuditWriter::open(&path).unwrap();
+        writer
+            .write_batch(&[vec![b'x'; MAX_AUDIT_BYTES as usize]])
+            .unwrap();
+        writer.write_batch(&[b"next event\n".to_vec()]).unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"do not rotate over this");
+        assert_eq!(std::fs::metadata(&rotated).unwrap().len(), MAX_AUDIT_BYTES);
+        assert_eq!(std::fs::read(&path).unwrap(), b"next event\n");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

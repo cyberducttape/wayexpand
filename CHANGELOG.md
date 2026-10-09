@@ -65,6 +65,8 @@ All notable changes to WayExpand are documented here.
   preventing concurrent callers from interleaving fetch, rebase, and rollback.
 - Git sync lock acquisition now rejects symlinks, special files, foreign
   owners, and hard-linked targets before locking or changing permissions.
+- Action Broker audit files are opened without following symlinks and must be
+  private, user-owned regular files with a single hard link.
 - Runtime diagnostics now distinguish a connected window tracker from an exact
   focused-window identity, preventing false app-filter readiness reports.
 - Daemon startup now preserves an existing control socket when its ownership
