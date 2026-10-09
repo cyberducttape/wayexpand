@@ -1,7 +1,74 @@
 //! First-run and backend setup: the guided setup task, turn-on button, and raw-input (evdev) setup.
 
 use crate::*;
-use wayexpand_process_supervisor::{configure_process_group, kill_process_group_by_pid};
+use std::{
+    io::Read,
+    os::fd::AsRawFd,
+    process::{ChildStderr, ChildStdout},
+};
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
+
+const MAX_SETUP_OUTPUT_BYTES: usize = 128 * 1024;
+const SETUP_OUTPUT_READS_PER_DRAIN: usize = 64;
+
+fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(format!(
+            "could not make setup output nonblocking: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+fn drain_setup_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> Result<bool, String> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..SETUP_OUTPUT_READS_PER_DRAIN {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                output.extend_from_slice(&buffer[..count]);
+                if output.len() > MAX_SETUP_OUTPUT_BYTES {
+                    return Err("setup output exceeded the safety limit".to_owned());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(false)
+}
+
+fn finish_setup_process(
+    supervisor: &mut ChildSupervisor,
+    stdout: &mut ChildStdout,
+    stderr: &mut ChildStderr,
+    stdout_bytes: &mut Vec<u8>,
+    stderr_bytes: &mut Vec<u8>,
+    mut stdout_eof: bool,
+    mut stderr_eof: bool,
+) -> Result<std::process::ExitStatus, String> {
+    supervisor.kill_group();
+    let status = supervisor.reap().map_err(|error| error.to_string())?;
+    let drain_deadline = Instant::now() + Duration::from_millis(100);
+    while !(stdout_eof && stderr_eof) && Instant::now() < drain_deadline {
+        if !stdout_eof {
+            stdout_eof = drain_setup_output(stdout, stdout_bytes)?;
+        }
+        if !stderr_eof {
+            stderr_eof = drain_setup_output(stderr, stderr_bytes)?;
+        }
+        if !(stdout_eof && stderr_eof) {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    if !stdout_eof || !stderr_eof {
+        return Err("setup output did not complete".to_owned());
+    }
+    Ok(status)
+}
 
 impl GuiApp {
     /// One-click setup: run `wayexpand setup --yes`, which configures only
@@ -34,42 +101,56 @@ impl GuiApp {
                         .stderr(std::process::Stdio::piped())
                         .spawn()
                         .map_err(|error| error.to_string())?;
+                    let mut stdout = child
+                        .stdout
+                        .take()
+                        .ok_or_else(|| "setup stdout was not captured".to_owned())?;
+                    let mut stderr = child
+                        .stderr
+                        .take()
+                        .ok_or_else(|| "setup stderr was not captured".to_owned())?;
+                    let mut supervisor = ChildSupervisor::new(child);
+                    set_nonblocking(&stdout)?;
+                    set_nonblocking(&stderr)?;
+                    let mut stdout_bytes = Vec::new();
+                    let mut stderr_bytes = Vec::new();
+                    let mut stdout_eof = false;
+                    let mut stderr_eof = false;
                     let deadline = Instant::now() + SETUP_TIMEOUT;
-                    loop {
+                    let status = loop {
+                        if !stdout_eof {
+                            stdout_eof = drain_setup_output(&mut stdout, &mut stdout_bytes)?;
+                        }
+                        if !stderr_eof {
+                            stderr_eof = drain_setup_output(&mut stderr, &mut stderr_bytes)?;
+                        }
                         if worker_cancel.load(Ordering::Acquire) {
-                            kill_process_group_by_pid(child.id());
-                            let _ = child.kill();
-                            let _ = child.wait();
+                            supervisor.kill_group();
+                            let _ = supervisor.reap();
                             return Err("Setup cancelled".to_owned());
                         }
-                        if child
-                            .try_wait()
-                            .map_err(|error| error.to_string())?
-                            .is_some()
-                        {
-                            // A setup helper may outlive the CLI leader while
-                            // retaining this worker's stdout/stderr pipes.
-                            // Close that inherited-pipe path before collecting
-                            // output, otherwise wait_with_output could block
-                            // after the leader has already exited.
-                            kill_process_group_by_pid(child.id());
-                            break;
+                        if supervisor.has_exited().map_err(|error| error.to_string())? {
+                            break finish_setup_process(
+                                &mut supervisor,
+                                &mut stdout,
+                                &mut stderr,
+                                &mut stdout_bytes,
+                                &mut stderr_bytes,
+                                stdout_eof,
+                                stderr_eof,
+                            )?;
                         }
                         if Instant::now() >= deadline {
-                            kill_process_group_by_pid(child.id());
-                            let _ = child.kill();
-                            let _ = child.wait();
+                            supervisor.kill_group();
+                            let _ = supervisor.reap();
                             return Err("Setup timed out after 30 seconds".to_owned());
                         }
                         thread::sleep(Duration::from_millis(50));
-                    }
-                    let output = child
-                        .wait_with_output()
-                        .map_err(|error| error.to_string())?;
-                    if output.status.success() {
-                        Ok(Self::setup_output_text(&output.stdout))
+                    };
+                    if status.success() {
+                        Ok(Self::setup_output_text(&stdout_bytes))
                     } else {
-                        Err(Self::setup_output_text(&output.stderr))
+                        Err(Self::setup_output_text(&stderr_bytes))
                     }
                 })();
                 let _ = sender.send(result);
@@ -216,4 +297,31 @@ pub(crate) fn onboarding_step(
         );
         ui.label(RichText::new(title).strong().size(16.0));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use wayexpand_process_supervisor::configure_process_group;
+
+    #[test]
+    fn setup_output_drain_yields_for_continuous_output() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "yes setup"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn continuous-output child");
+        let mut stdout = child.stdout.take().expect("child stdout");
+        set_nonblocking(&stdout).expect("make stdout nonblocking");
+        let mut output = Vec::new();
+        let started = Instant::now();
+        let result = drain_setup_output(&mut stdout, &mut output);
+        assert!(result.is_ok());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
