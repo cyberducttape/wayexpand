@@ -31,6 +31,8 @@ All notable changes to WayExpand are documented here.
   layering fleet snippets over the primary configuration.
 - Fleet status statistics now count the primary configuration file even when it
   contains only settings, keeping loaded-file diagnostics accurate.
+- Preserved the latest hosted engine-sequence fuzz input as a stable regression
+  case so future engine changes replay the reported state sequence.
 - Added concurrent Action Broker startup coverage to ensure only one process can
   own a socket and failed starters cannot replace the active endpoint.
 

@@ -161,9 +161,24 @@ fn apply(engine: &mut ExpansionEngine, model: &mut Model, event: InputEvent) {
     for result in &results {
         check_result(model, result);
         engine.commit_applied_expansion(result);
-        // A character that completed the match is re-typed after the
-        // replacement and stays part of the document (and the buffer).
-        model.typed = result.reinsert_after.map(String::from).unwrap_or_default();
+        // Mirror the transaction against the model's document: remove only
+        // the matched suffix, preserve any earlier text, and keep a
+        // terminating character that was folded into the replacement. The
+        // previous model replaced the entire document with just the
+        // terminator, producing false fuzz failures when a match followed
+        // earlier buffered text.
+        let prefix = result
+            .reinsert_after
+            .and_then(|delimiter| model.typed.strip_suffix(delimiter))
+            .and_then(|before| before.strip_suffix(&result.matched_text))
+            .or_else(|| model.typed.strip_suffix(&result.matched_text));
+        let Some(prefix) = prefix else {
+            unreachable!("check_result accepted a result that is not a typed suffix");
+        };
+        model.typed = prefix.to_owned();
+        if let Some(delimiter) = result.reinsert_after {
+            model.typed.push(delimiter);
+        }
     }
     model.undo_available = results.last().is_some_and(|result| result.undoable);
     if clears {
@@ -267,5 +282,12 @@ mod tests {
             }
             super::check_engine_sequence(&data);
         }
+    }
+
+    #[test]
+    fn engine_sequence_regression_from_fuzz_artifact() {
+        // Replayed from the engine_sequence artifact produced by the hosted
+        // fuzz job for commit 8644844.
+        super::check_engine_sequence(&[0x7a, 0x81, 0x7a, 0x81, 0x7a, 0x81, 0x00, 0x00, 0x37, 0x5b]);
     }
 }
