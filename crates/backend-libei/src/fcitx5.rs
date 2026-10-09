@@ -24,9 +24,13 @@ pub enum ReplaceResult {
     /// The bridge definitely did not alter the target. The ordinary libei
     /// path may be used only for statuses where the bridge was inapplicable.
     FallbackAllowed(&'static str),
-    /// The bridge may have altered the target before transport failed, or a
-    /// future bridge returned an unknown status. Never issue raw backspaces.
+    /// The bridge refused this expansion (selection, mismatch, sensitive
+    /// field, or an unknown status). Never issue raw backspaces.
     Blocked(String),
+    /// D-Bus transport failed; the bridge may have altered the target. Never
+    /// issue raw backspaces, and recreate the route rather than refusing every
+    /// later expansion against a bridge that may have gone away.
+    TransportFailed(String),
 }
 
 /// Fcitx5 bridge status values. The compatible bridge returns these as `u32`.
@@ -82,11 +86,11 @@ impl Client {
                 )) {
                     Ok(COMMITTED) => ReplaceResult::Committed,
                     Ok(status) => classify_status(status),
-                    Err(error) => ReplaceResult::Blocked(error),
+                    Err(error) => ReplaceResult::TransportFailed(error),
                 }
             }
             Ok(status) => classify_status(status),
-            Err(error) => ReplaceResult::Blocked(error),
+            Err(error) => ReplaceResult::TransportFailed(error),
         }
     }
 

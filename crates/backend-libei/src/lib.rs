@@ -760,6 +760,13 @@ impl TextInjector for LibeiInjector {
                         retryable: false,
                     })
                 }
+                fcitx5::ReplaceResult::TransportFailed(message) => {
+                    return Err(InjectorError {
+                        backend: BACKEND_NAME,
+                        message: format!("Fcitx5 direct replacement failed: {message}"),
+                        retryable: true,
+                    })
+                }
             }
         }
         // Only the ordinary libei route needs the active-keymap check. Do it

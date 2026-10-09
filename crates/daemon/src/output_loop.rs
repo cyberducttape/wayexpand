@@ -20,7 +20,9 @@ use std::{
 use tracing::{info, warn};
 use wayexpand_backend_libei::{LibeiInjector, LibeiOptions};
 use wayexpand_backend_wlroots::WlrootsInjector;
-use wayexpand_core::{InjectorCapabilities, InjectorError, KeyEventState, Modifiers, TextInjector};
+use wayexpand_core::{
+    InjectorCapabilities, InjectorError, InjectorErrorKind, KeyEventState, Modifiers, TextInjector,
+};
 
 use crate::{control, input_loop::wait_for_retry, status};
 
@@ -268,7 +270,15 @@ pub fn spawn_async_injector(
                     ),
                     OutputCommand::Shutdown => break,
                 };
-                let failed = if let Err(error) = &result {
+                // A rejected expansion (unrepresentable text, a sensitive or
+                // mismatched target) leaves the session healthy: return it to
+                // the caller, which drops that expansion. Only transport and
+                // fatal backend failures stop the actor and trigger recovery.
+                let failed = if let Some(error) = result
+                    .as_ref()
+                    .err()
+                    .filter(|error| error.kind() != InjectorErrorKind::ExpansionRejected)
+                {
                     let _ = worker_failure_sender.try_send(OutputFailure {
                         message: error.message.clone(),
                         retryable: error.retryable,
@@ -549,6 +559,53 @@ mod tests {
         fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
             Ok(())
         }
+    }
+
+    /// Rejects the first replacement as a sensitive target, then succeeds.
+    struct RejectOnceInjector {
+        rejected: bool,
+    }
+
+    impl TextInjector for RejectOnceInjector {
+        fn name(&self) -> &'static str {
+            "reject-once-test"
+        }
+
+        fn replace(&mut self, _: &str, _: &str) -> Result<(), InjectorError> {
+            if std::mem::replace(&mut self.rejected, true) {
+                return Ok(());
+            }
+            Err(InjectorError {
+                backend: self.name(),
+                message: "target is a password field".into(),
+                retryable: false,
+            })
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn rejected_expansion_keeps_the_output_worker_running() {
+        let (mut injector, failures, worker_state) =
+            spawn_async_injector(Box::new(RejectOnceInjector { rejected: false })).unwrap();
+
+        let error = injector
+            .replace(":a", "secret")
+            .expect_err("the sensitive target refuses this expansion");
+        assert_eq!(error.kind(), InjectorErrorKind::ExpansionRejected);
+        // Not a worker failure: the daemon must not treat it as permanent.
+        assert!(failures.try_recv().is_err());
+        assert!(worker_state.is_running());
+        injector
+            .replace(":a", "next")
+            .expect("the same worker accepts the next expansion");
     }
 
     struct BlockingShutdownInjector {

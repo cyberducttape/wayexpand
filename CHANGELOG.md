@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Rejected expansions no longer stop the evdev output worker:** a refusal such
+  as a Fcitx5 password-field or trigger-mismatch response (or unrepresentable
+  keysym text) now drops only that expansion. Previously it stopped the
+  serialized output worker and the daemon exited with "output backend failed
+  permanently". Fcitx5 bridge transport failures are now retryable, so the
+  route reconnects and re-probes the bridge.
 - **Safer Launchpad synchronization:** sync runs are serialized, and version-tag
   checkouts can no longer overwrite the Launchpad `main` branch.
 - Launchpad vendored-branch publication now uses an explicit remote lease and
