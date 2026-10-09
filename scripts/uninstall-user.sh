@@ -55,13 +55,29 @@ case "$state_home" in
 esac
 
 if command -v systemctl >/dev/null 2>&1; then
+    stop_failed=0
     for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
         if systemctl --user is-enabled "$service_name" >/dev/null 2>&1 \
             || systemctl --user is-active "$service_name" >/dev/null 2>&1; then
             printf '%s\n' "Stopping and disabling $service_name"
-            systemctl --user disable --now "$service_name" >/dev/null 2>&1 || true
+            if ! systemctl --user disable --now "$service_name" >/dev/null 2>&1; then
+                printf '%s\n' "error: could not stop and disable $service_name; refusing to remove installed files" >&2
+                stop_failed=1
+            fi
         fi
     done
+    if [ "$stop_failed" -ne 0 ]; then
+        exit 1
+    fi
+    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+        if systemctl --user is-active "$service_name" >/dev/null 2>&1; then
+            printf '%s\n' "error: $service_name is still active; refusing to remove installed files" >&2
+            stop_failed=1
+        fi
+    done
+    if [ "$stop_failed" -ne 0 ]; then
+        exit 1
+    fi
 fi
 
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do

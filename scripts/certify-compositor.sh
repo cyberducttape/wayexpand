@@ -248,10 +248,12 @@ case "$backend" in
         fi
         ;;
     input-method-v2)
-        if ! printf '%s' "$doctor_json" | jq -e '
-            .healthy == true or
-            (.wayland == true and .config.valid == true and .policy.policy.valid == true and .control_socket.valid == true)
-        ' >/dev/null 2>&1; then
+        # This is the only route currently eligible for production
+        # certification.  Do not allow an explicitly selected route to bypass
+        # the overall doctor health contract: a live daemon alone is not
+        # evidence that policy, configuration, broker, and session checks all
+        # passed.
+        if ! printf '%s' "$doctor_json" | jq -e '.healthy == true' >/dev/null 2>&1; then
             doctor_probe_valid=0
         fi
         if ! printf '%s' "$status_json" | jq -e '

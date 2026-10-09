@@ -43,6 +43,9 @@ cat >"$stub_bin/systemctl" <<'EOF'
 if [ -n "${SYSTEMCTL_LOG:-}" ]; then
     printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
 fi
+case "$*" in
+    "--user is-enabled "*|"--user is-active "*) exit 1 ;;
+esac
 exit 0
 EOF
 chmod 0755 "$stub_bin/systemctl"
