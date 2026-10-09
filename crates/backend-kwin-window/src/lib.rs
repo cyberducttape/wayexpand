@@ -21,7 +21,10 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use wayexpand_core::{WindowContext, WindowTracker, WindowTrackerError};
+use wayexpand_core::{
+    window_update_channel, WindowContext, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
+    WindowUpdateSender,
+};
 use zbus::{blocking::Connection, interface};
 
 const BACKEND_NAME: &str = "kwin-window";
@@ -58,7 +61,7 @@ pub enum KwinWindowError {
 }
 
 struct WindowTrackerService {
-    sender: Mutex<mpsc::Sender<Option<WindowContext>>>,
+    sender: Mutex<WindowUpdateSender>,
     // Session-bus methods are callable by other local clients; only accept
     // focus reports from the KWin process that owns org.kde.KWin at setup.
     kwin_owner: String,
@@ -122,7 +125,7 @@ pub struct KwinWindowTracker {
     // Kept alive for the object's lifetime: dropping it stops serving the
     // callback interface the loaded script calls into.
     connection: Connection,
-    receiver: mpsc::Receiver<Option<WindowContext>>,
+    receiver: WindowUpdateReceiver,
     #[cfg(test)]
     service_name: String,
     plugin_name: String,
@@ -190,7 +193,7 @@ impl KwinWindowTracker {
             .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
         let nonce = u64::from_le_bytes(nonce_bytes);
         let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce:x}");
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = window_update_channel();
         let connection = bounded_session_connection(
             zbus::connection::Builder::session()?
                 .method_timeout(DBUS_METHOD_TIMEOUT)

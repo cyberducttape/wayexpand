@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Window-focus updates now use a bounded latest-snapshot channel, coalescing
+  obsolete focus events during bursts while preserving unknown-focus and
+  disconnect states instead of allowing an unbounded event backlog.
 - Usage-stat clears and daemon flushes now share a bounded interprocess lock,
   preventing a concurrent flush from resurrecting cleared history; temporary
   stats files are created exclusively without following symlinks. When the

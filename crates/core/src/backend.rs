@@ -1,8 +1,96 @@
-use std::fmt;
-use std::time::Duration;
+use std::{
+    fmt,
+    sync::{
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
 use std::{fs::OpenOptions, path::Path};
 
 use crate::{InputEvent, Modifiers, WindowContext};
+
+/// Create a latest-value channel for focused-window snapshots. Window focus
+/// changes are state, not a log: if producers outpace consumers, intermediate
+/// snapshots are coalesced instead of accumulating an unbounded queue.
+pub fn window_update_channel() -> (WindowUpdateSender, WindowUpdateReceiver) {
+    let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
+    let latest = Arc::new(Mutex::new(None));
+    (
+        WindowUpdateSender {
+            latest: Arc::clone(&latest),
+            wake: wake_sender,
+        },
+        WindowUpdateReceiver {
+            latest,
+            wake: wake_receiver,
+        },
+    )
+}
+
+#[derive(Clone)]
+pub struct WindowUpdateSender {
+    latest: Arc<Mutex<Option<Option<WindowContext>>>>,
+    wake: SyncSender<()>,
+}
+
+pub struct WindowUpdateReceiver {
+    latest: Arc<Mutex<Option<Option<WindowContext>>>>,
+    wake: Receiver<()>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WindowUpdateSendError;
+
+impl WindowUpdateSender {
+    /// Publish the current focus snapshot, replacing any older pending one.
+    /// `None` is a real update meaning that no focused window is known.
+    pub fn send(&self, window: Option<WindowContext>) -> Result<(), WindowUpdateSendError> {
+        *self
+            .latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(window);
+        match self.wake.try_send(()) {
+            Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
+            Err(mpsc::TrySendError::Disconnected(())) => Err(WindowUpdateSendError),
+        }
+    }
+}
+
+impl WindowUpdateReceiver {
+    fn take_latest(&self) -> Option<Option<WindowContext>> {
+        self.latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+
+    pub fn try_recv(&self) -> Result<Option<WindowContext>, TryRecvError> {
+        loop {
+            self.wake.try_recv()?;
+            if let Some(window) = self.take_latest() {
+                return Ok(window);
+            }
+            // A concurrent publisher may have placed a wake token just after
+            // this receiver consumed the latest snapshot. Consume that stale
+            // token and keep looking for a real pending value.
+        }
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<WindowContext>, mpsc::RecvTimeoutError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.wake
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))?;
+            if let Some(window) = self.take_latest() {
+                return Ok(window);
+            }
+        }
+    }
+}
 
 /// State of a low-level keyboard event sent through a pass-through injector.
 /// Keeping this distinct from the text-expansion API is what lets an input
@@ -649,6 +737,77 @@ fn discover_uinput() -> (BackendState, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_updates_coalesce_to_the_latest_snapshot() {
+        let (sender, receiver) = window_update_channel();
+        sender
+            .send(Some(WindowContext {
+                app_id: Some("old.app".into()),
+                title: None,
+                instance_id: None,
+            }))
+            .unwrap();
+        sender
+            .send(Some(WindowContext {
+                app_id: Some("new.app".into()),
+                title: None,
+                instance_id: None,
+            }))
+            .unwrap();
+
+        assert_eq!(
+            receiver
+                .try_recv()
+                .unwrap()
+                .and_then(|window| window.app_id),
+            Some("new.app".into())
+        );
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+    }
+
+    #[test]
+    fn window_updates_preserve_unknown_focus_and_disconnect_state() {
+        let (sender, receiver) = window_update_channel();
+        sender
+            .send(Some(WindowContext {
+                app_id: Some("possibly-stale.app".into()),
+                title: None,
+                instance_id: None,
+            }))
+            .unwrap();
+        sender.send(None).unwrap();
+        drop(sender);
+
+        assert_eq!(receiver.try_recv(), Ok(None));
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn window_updates_remain_bounded_under_a_producer_burst() {
+        let (sender, receiver) = window_update_channel();
+        let producer = std::thread::spawn(move || {
+            for index in 0..10_000 {
+                sender
+                    .send(Some(WindowContext {
+                        app_id: Some(index.to_string()),
+                        title: None,
+                        instance_id: None,
+                    }))
+                    .unwrap();
+            }
+        });
+        producer.join().unwrap();
+
+        assert_eq!(
+            receiver
+                .try_recv()
+                .unwrap()
+                .and_then(|window| window.app_id),
+            Some("9999".into())
+        );
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
 
     #[test]
     fn input_source_profiles_keep_security_guarantees_separate() {

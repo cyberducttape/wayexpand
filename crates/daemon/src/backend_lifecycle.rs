@@ -16,7 +16,9 @@ use std::{
 };
 use tracing::{info, warn};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
-use wayexpand_core::{WindowContext, WindowTracker};
+use wayexpand_core::{
+    window_update_channel, WindowContext, WindowTracker, WindowUpdateReceiver, WindowUpdateSender,
+};
 
 const TRACKER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const TRACKER_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -24,7 +26,7 @@ const TRACKER_MAX_BACKOFF: Duration = Duration::from_secs(30);
 const TRACKER_STABLE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct WindowTrackerHandle {
-    pub receiver: mpsc::Receiver<Option<WindowContext>>,
+    pub receiver: WindowUpdateReceiver,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     supervisor: Option<JoinHandle<()>>,
@@ -79,7 +81,7 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
     // deliberately not part of the production daemon until its event-loop,
     // ownership, and compositor test coverage are complete.
 
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = window_update_channel();
     let connected = Arc::new(AtomicBool::new(false));
     let supervisor_connected = Arc::clone(&connected);
     let stop = Arc::new(AtomicBool::new(false));
@@ -102,7 +104,7 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
 }
 
 fn supervise_kwin_window_tracker(
-    sender: mpsc::Sender<Option<WindowContext>>,
+    sender: WindowUpdateSender,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 ) {
@@ -116,7 +118,7 @@ fn supervise_kwin_window_tracker(
 }
 
 fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
-    sender: mpsc::Sender<Option<WindowContext>>,
+    sender: WindowUpdateSender,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     mut probe: Probe,
@@ -197,11 +199,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     }
 }
 
-fn wait_for_tracker_retry(
-    stop: &AtomicBool,
-    sender: &mpsc::Sender<Option<WindowContext>>,
-    delay: Duration,
-) -> bool {
+fn wait_for_tracker_retry(stop: &AtomicBool, sender: &WindowUpdateSender, delay: Duration) -> bool {
     let deadline = Instant::now() + delay;
     while !stop.load(Ordering::Acquire) {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -223,21 +221,14 @@ fn wait_for_tracker_retry(
 /// input-event wait and processing.
 /// Returns the latest window context if any changes were pending.
 pub fn drain_pending_window_events(
-    window_tracker: Option<&mpsc::Receiver<Option<WindowContext>>>,
+    window_tracker: Option<&WindowUpdateReceiver>,
 ) -> Option<Option<WindowContext>> {
     if let Some(receiver) = window_tracker {
-        let mut latest = None;
-        loop {
-            match receiver.try_recv() {
-                Ok(window) => latest = Some(window),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    latest = Some(None);
-                    break;
-                }
-            }
-        }
-        return latest;
+        return match receiver.try_recv() {
+            Ok(window) => Some(window),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+        };
     }
     None
 }
@@ -249,6 +240,7 @@ mod tests {
 
     struct ScriptedTracker {
         events: VecDeque<Result<Option<WindowContext>, &'static str>>,
+        failure_delay: Duration,
     }
 
     struct GatedTracker {
@@ -292,11 +284,14 @@ mod tests {
         ) -> Result<Option<Option<WindowContext>>, wayexpand_core::WindowTrackerError> {
             match self.events.pop_front().unwrap_or(Ok(None)) {
                 Ok(window) => Ok(Some(window)),
-                Err(message) => Err(wayexpand_core::WindowTrackerError {
-                    backend: self.name(),
-                    message: message.into(),
-                    retryable: true,
-                }),
+                Err(message) => {
+                    thread::sleep(self.failure_delay);
+                    Err(wayexpand_core::WindowTrackerError {
+                        backend: self.name(),
+                        message: message.into(),
+                        retryable: true,
+                    })
+                }
             }
         }
     }
@@ -311,7 +306,7 @@ mod tests {
 
     #[test]
     fn supervisor_reprobes_reconnects_and_publishes_fresh_context() {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = window_update_channel();
         let mut probe_count = 0;
         let probe = move || {
             probe_count += 1;
@@ -324,9 +319,11 @@ mod tests {
         let mut trackers = VecDeque::from([
             ScriptedTracker {
                 events: VecDeque::from([Ok(Some(window("old.app"))), Err("script stopped")]),
+                failure_delay: Duration::ZERO,
             },
             ScriptedTracker {
                 events: VecDeque::from([Ok(Some(window("fresh.app"))), Err("stop test")]),
+                failure_delay: Duration::from_millis(50),
             },
         ]);
         let connect = move || Ok::<_, &'static str>(trackers.pop_front().unwrap());
@@ -362,7 +359,7 @@ mod tests {
 
     #[test]
     fn supervisor_publishes_tracker_health_and_clears_it_on_disconnect() {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = window_update_channel();
         let (ready_sender, ready_receiver) = mpsc::channel();
         let (release_sender, release_receiver) = mpsc::channel();
         let tracker = GatedTracker {
@@ -411,7 +408,7 @@ mod tests {
 
     #[test]
     fn tracker_retry_stops_without_waiting_for_the_full_backoff() {
-        let (sender, _receiver) = mpsc::channel();
+        let (sender, _receiver) = window_update_channel();
         let stop = AtomicBool::new(true);
         let started = Instant::now();
         assert!(!wait_for_tracker_retry(
@@ -436,7 +433,7 @@ mod tests {
 
     #[test]
     fn draining_focus_events_keeps_the_latest_snapshot() {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = window_update_channel();
         sender
             .send(Some(WindowContext {
                 app_id: Some("old.app".into()),
@@ -465,7 +462,7 @@ mod tests {
 
     #[test]
     fn draining_a_disconnected_tracker_fails_closed_to_no_window() {
-        let (sender, receiver) = mpsc::channel::<Option<WindowContext>>();
+        let (sender, receiver) = window_update_channel();
         drop(sender);
 
         assert_eq!(drain_pending_window_events(Some(&receiver)), Some(None));
