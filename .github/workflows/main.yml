@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: launchpad-sync-${{ github.repository }}-${{ github.ref }}
+  group: launchpad-sync-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
