@@ -109,8 +109,79 @@ pub(super) fn open_secure_directory(path: &Path) -> std::io::Result<fs::File> {
         rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
         rustix::fs::ResolveFlags::BENEATH | rustix::fs::ResolveFlags::NO_SYMLINKS,
-    )?;
-    Ok(fs::File::from(directory))
+    );
+    match directory {
+        Ok(directory) => Ok(fs::File::from(directory)),
+        // Older kernels and some seccomp profiles reject openat2. Walk each
+        // component using directory descriptors and O_NOFOLLOW instead; this
+        // retains the no-symlink guarantee rather than falling back to a
+        // path-based open.
+        Err(error)
+            if error == rustix::io::Errno::NOSYS
+                || error == rustix::io::Errno::PERM
+                || error == rustix::io::Errno::INVAL =>
+        {
+            open_secure_directory_walk(root, relative)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_secure_directory_walk(root: OwnedFd, relative: &Path) -> std::io::Result<fs::File> {
+    let mut current = root;
+    for component in relative.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "configuration path must not contain dot components",
+            ));
+        }
+        current = rustix::fs::openat(
+            &current,
+            component.as_os_str(),
+            rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )?;
+    }
+    Ok(fs::File::from(current))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod fallback_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn descriptor_walk_accepts_directories_and_rejects_symlinks() {
+        let root_path = std::env::temp_dir().join(format!(
+            "wayexpand-openat-fallback-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let real = root_path.join("real");
+        fs::create_dir_all(&real).unwrap();
+        symlink(&real, root_path.join("linked")).unwrap();
+
+        let root_fd = rustix::fs::open(
+            "/",
+            rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        let relative_root = root_path.strip_prefix("/").unwrap();
+        assert!(open_secure_directory_walk(root_fd.try_clone().unwrap(), relative_root).is_ok());
+        assert!(open_secure_directory_walk(root_fd, &relative_root.join("linked")).is_err());
+
+        fs::remove_file(root_path.join("linked")).unwrap();
+        fs::remove_dir(&real).unwrap();
+        fs::remove_dir(root_path).unwrap();
+    }
 }
 
 pub(super) fn resolve_config_target(path: &Path) -> Result<std::path::PathBuf, ConfigError> {

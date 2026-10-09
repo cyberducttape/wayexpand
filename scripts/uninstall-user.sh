@@ -26,6 +26,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 bin_dir="$HOME/.local/bin"
+library_dir="$HOME/.local/lib/wayexpand"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
@@ -100,7 +101,7 @@ if [ -n "$active_processes" ]; then
 fi
 
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
-    if [ -e "$bin_dir/$binary" ]; then
+    if [ -e "$bin_dir/$binary" ] || [ -L "$bin_dir/$binary" ]; then
         rm -f -- "$bin_dir/$binary"
         printf '%s\n' "Removed $bin_dir/$binary"
     fi
@@ -108,6 +109,8 @@ done
 if [ -e "$ibus_component_dir/wayexpand.xml" ]; then
     rm -f -- "$ibus_component_dir/wayexpand.xml"
     printf '%s\n' "Removed $ibus_component_dir/wayexpand.xml"
+elif [ -L "$ibus_component_dir/wayexpand.xml" ]; then
+    rm -f -- "$ibus_component_dir/wayexpand.xml"
 fi
 if [ -e "$ibus_component_dir/wayexpand-ibus.xml" ]; then
     rm -f -- "$ibus_component_dir/wayexpand-ibus.xml"
@@ -159,6 +162,11 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
         rm -f -- "$icon_path"
     fi
 done
+
+if [ -d "$library_dir" ]; then
+    rm -rf -- "$library_dir"
+    printf '%s\n' "Removed $library_dir"
+fi
 
 if [ "$purge_config" -eq 1 ]; then
     if [ -e "$config_dir" ]; then

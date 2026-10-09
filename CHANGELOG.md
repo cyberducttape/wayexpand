@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- User installers now stage all six executables under a versioned library
+  directory and atomically switch the `current` pointer; enabled upgrades
+  verify service activity and restore the prior pointer if startup fails.
+- Installer `--enable`/`--service` validation now runs before build or file
+  changes, and both installers reject incomplete service selections early.
+- Secure config saves now retain no-symlink directory traversal when `openat2`
+  is unavailable or blocked, using descriptor-relative `openat` with
+  `O_NOFOLLOW` rather than an unsafe path-based fallback.
 - Git synchronization now tracks the configured primary filename, rejects a
   symlinked primary config, and verifies outgoing tree modes as well as paths.
 - Usage-stat persistence now runs on a dedicated bounded-queue worker rather

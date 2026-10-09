@@ -30,6 +30,11 @@ for argument in "$@"; do
             ;;
     esac
 done
+if [ "$enable_service" -eq 1 ] && [ -z "$service_name" ]; then
+    printf '%s\n' "error: --enable requires an explicit --service selection" >&2
+    printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
+    exit 2
+fi
 if [ "$(id -u)" -eq 0 ]; then
     if [ -n "${SUDO_USER:-}" ]; then
         printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
@@ -47,6 +52,12 @@ for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wa
 done
 
 bin_dir="$HOME/.local/bin"
+library_dir="$HOME/.local/lib/wayexpand"
+version=$(basename "$release_dir" | sed -n 's/^wayexpand-\([0-9][0-9A-Za-z.+~-]*\)-linux-.*/\1/p')
+if [ -z "$version" ]; then
+    printf '%s\n' 'error: release directory name must be wayexpand-VERSION-linux-ARCH' >&2
+    exit 1
+fi
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
@@ -91,26 +102,43 @@ fi
 install -d -m 0700 "$state_dir"
 chmod 0700 "$state_dir"
 
-install -Dm755 "$release_dir/bin/wayexpand-daemon" "$bin_dir/wayexpand-daemon"
-install -Dm755 "$release_dir/bin/wayexpand-action-broker" "$bin_dir/wayexpand-action-broker"
-install -Dm755 "$release_dir/bin/wayexpand" "$bin_dir/wayexpand"
-install -Dm755 "$release_dir/bin/wayexpand-ui" "$bin_dir/wayexpand-ui"
-install -Dm755 "$release_dir/bin/wayexpand-gui" "$bin_dir/wayexpand-gui"
-install -Dm755 "$release_dir/bin/wayexpand-ibus" "$bin_dir/wayexpand-ibus"
-if [ -f "$release_dir/ibus/component/wayexpand-ibus.xml" ]; then
-    install -Dm644 "$release_dir/ibus/component/wayexpand-ibus.xml" \
-        "$HOME/.local/share/ibus/component/wayexpand.xml"
+install -d -m 0755 "$library_dir"
+stage_dir="$library_dir/.staging-$version-$$"
+install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus"
+for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    install -m 0755 "$release_dir/bin/$binary" "$stage_dir/bin/$binary"
+done
+install -m 0644 "$release_dir/systemd"/*.service "$stage_dir/systemd/"
+install -m 0644 "$release_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
+install -m 0644 "$release_dir/ibus/component/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
+if [ ! -d "$library_dir/$version" ]; then
+    mv "$stage_dir" "$library_dir/$version"
+else
+    for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+        if [ ! -x "$library_dir/$version/bin/$binary" ]; then
+            printf '%s\n' "error: existing version directory is incomplete: $library_dir/$version" >&2
+            exit 1
+        fi
+    done
+    rm -rf "$stage_dir"
 fi
-install -Dm644 "$release_dir/systemd/wayexpand-input-method.service" \
-    "$unit_dir/wayexpand-input-method.service"
-install -Dm644 "$release_dir/systemd/wayexpand-evdev.service" \
-    "$unit_dir/wayexpand-evdev.service"
-install -Dm644 "$release_dir/systemd/wayexpand-action-broker.service" \
-    "$unit_dir/wayexpand-action-broker.service"
+previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
+next_link="$library_dir/.current-$$"
+ln -s "$version" "$next_link"
+mv -Tf "$next_link" "$library_dir/current"
+install -d -m 0755 "$bin_dir"
+for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
+    ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
+done
+install -d -m 0755 "$unit_dir" "$HOME/.local/share/ibus/component" "$application_dir"
+for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+    ln -sfn "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
+done
+ln -sfn "$library_dir/current/ibus/wayexpand.xml" \
+    "$HOME/.local/share/ibus/component/wayexpand.xml"
 "$release_dir/scripts/install-xdg-systemd-dropins.sh" \
-    "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$bin_dir"
-install -Dm644 "$release_dir/desktop/wayexpand.desktop" \
-    "$application_dir/wayexpand.desktop"
+    "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$library_dir/current/bin"
+ln -sfn "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
 if [ -f "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" ]; then
     install -Dm644 "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
         "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
@@ -171,11 +199,6 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 if [ "$enable_service" -eq 1 ]; then
-    if [ -z "$service_name" ]; then
-        printf '%s\n' "error: --enable requires an explicit --service selection" >&2
-        printf '%s\n' "choose a service only after reviewing wayexpand doctor and accepting its documented limitations" >&2
-        exit 2
-    fi
     "$bin_dir/wayexpand" validate "$config_path"
     if ! command -v systemctl >/dev/null 2>&1; then
         printf '%s\n' "error: systemctl is required for --enable" >&2
@@ -184,6 +207,18 @@ if [ "$enable_service" -eq 1 ]; then
     printf '%s\n' "Enabling user service: $service_name"
     systemctl --user daemon-reload
     systemctl --user enable "$service_name"
-    systemctl --user restart "$service_name"
+    if ! systemctl --user restart "$service_name" || ! systemctl --user is-active --quiet "$service_name"; then
+        printf '%s\n' "error: $service_name failed to start; restoring previous version" >&2
+        if [ -n "$previous_version" ]; then
+            rollback_link="$library_dir/.rollback-$$"
+            ln -s "$previous_version" "$rollback_link"
+            mv -Tf "$rollback_link" "$library_dir/current"
+            systemctl --user daemon-reload
+            systemctl --user restart "$service_name" || true
+        else
+            rm -f "$library_dir/current"
+        fi
+        exit 1
+    fi
     printf '%s\n' "Enabled $service_name"
 fi

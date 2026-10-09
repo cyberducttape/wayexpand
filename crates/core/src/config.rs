@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{Read, Write},
-    os::fd::AsRawFd,
+    os::fd::{AsRawFd, OwnedFd},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
     sync::{

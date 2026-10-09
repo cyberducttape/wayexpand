@@ -35,6 +35,15 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 mkdir -p "$test_root/home" "$test_root/config"
 
+# Invalid enablement options must fail before Cargo is invoked or any files
+# are created under the selected home.
+if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$project_dir/scripts/install-user.sh" --enable >/dev/null 2>&1; then
+    echo 'installer accepted --enable without --service' >&2
+    exit 1
+fi
+[ ! -e "$test_root/home/.local" ]
+
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
 "$project_dir/scripts/install-user.sh"
@@ -45,6 +54,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
+[ -L "$test_root/home/.local/lib/wayexpand/current" ]
+[ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
 [ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]

@@ -34,6 +34,13 @@ install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
 
+if HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/install-release.sh" --enable >/dev/null 2>&1; then
+    printf '%s\n' 'release installer accepted --enable without --service' >&2
+    exit 1
+fi
+[ ! -e "$test_root/home/.local" ]
+
 # Stub out systemctl so this test never touches the invoking user's real
 # systemd session, no matter what HOME/XDG_CONFIG_HOME are set to (systemctl
 # talks to the session bus, which is independent of those variables).
@@ -45,6 +52,7 @@ if [ -n "${SYSTEMCTL_LOG:-}" ]; then
     printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
 fi
 case "$*" in
+    "--user is-active --quiet "*) exit 0 ;;
     "--user is-enabled "*|"--user is-active "*) exit 1 ;;
 esac
 exit 0
@@ -64,6 +72,8 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-gui" ]
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
+[ -L "$test_root/home/.local/lib/wayexpand/current" ]
+[ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
 [ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
@@ -89,6 +99,39 @@ XDG_CONFIG_HOME="$test_root/config" \
 grep -F -- '--user daemon-reload' "$systemctl_log" >/dev/null
 grep -F -- '--user enable wayexpand-evdev.service' "$systemctl_log" >/dev/null
 grep -F -- '--user restart wayexpand-evdev.service' "$systemctl_log" >/dev/null
+
+# A new release whose service fails to start must atomically restore the
+# previously active version.
+next_release="$test_root/wayexpand-0.0.1-linux-x86_64"
+cp -R "$release_dir" "$next_release"
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+case "$*" in
+    "--user restart "*) exit 1 ;;
+    "--user is-active --quiet "*) exit 0 ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod 0755 "$stub_bin/systemctl"
+if PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$next_release/scripts/install-release.sh" --enable --service=wayexpand-evdev.service \
+    >/dev/null 2>&1; then
+    printf '%s\n' 'installer accepted a service startup failure' >&2
+    exit 1
+fi
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = 0.0.0 ]
+
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+if [ -n "${SYSTEMCTL_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
+fi
+case "$*" in
+    "--user is-enabled "*|"--user is-active "*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod 0755 "$stub_bin/systemctl"
 
 touch "$test_root/71-wayexpand-evdev.rules" "$test_root/69-wayexpand-evdev-uaccess.rules"
 PATH="$stub_bin:$PATH" \

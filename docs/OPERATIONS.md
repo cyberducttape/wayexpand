@@ -14,7 +14,10 @@ From a checkout, run:
 ./scripts/install-user.sh
 ```
 
-This installs release binaries under `~/.local/bin`, copies the two backend
+This installs versioned binaries under `~/.local/lib/wayexpand/` and stable
+command links under `~/.local/bin`; service units execute through the atomically
+switched `current` version pointer. Enabled upgrades verify the selected
+service and restore its prior version if startup fails. The installer also copies the two backend
 units and the optional Action Broker unit to `~/.config/systemd/user`, installs
 an XDG desktop entry under
 `~/.local/share/applications`, and creates the example configuration only when the

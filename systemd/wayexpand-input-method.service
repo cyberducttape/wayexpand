@@ -9,8 +9,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
-ExecStartPre=%h/.local/bin/wayexpand validate
-ExecStart=%h/.local/bin/wayexpand-daemon --source=input-method
+ExecStartPre=%h/.local/lib/wayexpand/current/bin/wayexpand validate
+ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=input-method
 Restart=on-failure
 RestartSec=2s
 SuccessExitStatus=SIGTERM
