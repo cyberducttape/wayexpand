@@ -542,6 +542,39 @@ mod tests {
     }
 
     #[test]
+    fn ipc_concurrent_start_allows_only_one_owner() {
+        let socket_path = test_socket("concurrent");
+        let attempts = 8;
+        let mut threads = Vec::with_capacity(attempts);
+        for _ in 0..attempts {
+            let path = socket_path.clone();
+            threads.push(thread::spawn(move || BrokerServer::bind(path)));
+        }
+
+        let mut owners = Vec::new();
+        let mut failures = Vec::new();
+        for thread in threads {
+            match thread.join().expect("broker bind thread should not panic") {
+                Ok(server) => owners.push(server),
+                Err(error) => failures.push(error),
+            }
+        }
+
+        assert_eq!(owners.len(), 1, "exactly one concurrent broker may bind");
+        assert_eq!(failures.len(), attempts - 1);
+        assert!(failures.iter().all(|error| matches!(
+            error,
+            IpcError::Io(io_error) if io_error.kind() == std::io::ErrorKind::AddrInUse
+        )));
+
+        // Keep the winning listener alive while checking that failed starters
+        // did not unlink or replace its endpoint.
+        assert!(UnixStream::connect(&socket_path).is_ok());
+        drop(owners);
+        assert!(!socket_path.exists());
+    }
+
+    #[test]
     fn ipc_rejects_non_sticky_writable_ancestor() {
         let socket_path = test_socket("insecure/socket");
         let parent = socket_path.parent().unwrap();

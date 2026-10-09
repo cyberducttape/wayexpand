@@ -22,6 +22,8 @@ All notable changes to WayExpand are documented here.
   preventing concurrent callers from interleaving fetch, rebase, and rollback.
 - Runtime diagnostics now distinguish a connected window tracker from an exact
   focused-window identity, preventing false app-filter readiness reports.
+- Added concurrent Action Broker startup coverage to ensure only one process can
+  own a socket and failed starters cannot replace the active endpoint.
 
 - **Policy-safe GUI command previews:** explicit command previews now honor the
   effective organization policy before spawning a local program, preventing
