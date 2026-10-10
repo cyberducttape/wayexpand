@@ -364,7 +364,7 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
                     "fields": ["chord", "description", "command", "enabled"]
                 },
                 "Settings": {
-                    "fields": ["max_buffer_chars", "undo_chord", "font_scale", "libei_token_persistence", "fcitx5_direct_commit", "template_env", "allow_clipboard", "usage_stats"]
+                    "fields": ["max_buffer_chars", "undo_chord", "font_scale", "libei_token_persistence", "fcitx5_direct_commit", "template_env", "allow_clipboard", "clipboard_mode", "usage_stats"]
                 },
                 "CommandConfig": {
                     "fields": ["action", "program", "args", "timeout_ms", "cache_ms", "environment", "pass_env"]
@@ -379,14 +379,11 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
 }
 
 pub(crate) fn import_command(mut args: Args) -> Result<()> {
-    let format = args
-        .next()
-        .ok_or_else(|| usage_error("usage: wayexpand import espanso <file>"))?;
-    let source = args
-        .next()
-        .ok_or_else(|| usage_error("usage: wayexpand import espanso <file>"))?;
+    const USAGE: &str = "usage: wayexpand import espanso <file> [--strict] [--report-json]";
+    let format = args.next().ok_or_else(|| usage_error(USAGE))?;
+    let source = args.next().ok_or_else(|| usage_error(USAGE))?;
     if format != "espanso" {
-        usage_bail!("usage: wayexpand import espanso <file> [--strict] [--report-json]");
+        usage_bail!("{USAGE}");
     }
     let mut strict = false;
     let mut report_json = false;
@@ -394,7 +391,7 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
         match option.as_str() {
             "--strict" => strict = true,
             "--report-json" => report_json = true,
-            _ => usage_bail!("usage: wayexpand import espanso <file> [--strict] [--report-json]"),
+            _ => usage_bail!("{USAGE}"),
         }
     }
     let mode = if strict {
@@ -404,24 +401,27 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
     };
     let imported = wayexpand_core::import_espanso_with_mode(Path::new(&source), mode)?;
     if report_json {
+        // Keep stderr a single JSON document so it can be redirected to a
+        // file and parsed; the human-readable report would corrupt it.
         eprintln!("{}", serde_json::to_string(&imported.report)?);
-    }
-    eprintln!(
-        "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
-        imported.report.fully_migrated,
-        imported.report.migrated_with_warnings,
-        imported.report.unsupported
-    );
-    for warning in &imported.report.warnings {
-        for detail in &warning.details {
-            eprintln!("warning: {}: {detail}", warning.trigger);
-        }
-    }
-    for unsupported in &imported.report.unsupported_matches {
+    } else {
         eprintln!(
-            "unsupported: {}: {}",
-            unsupported.trigger, unsupported.reason
+            "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
+            imported.report.fully_migrated,
+            imported.report.migrated_with_warnings,
+            imported.report.unsupported
         );
+        for warning in &imported.report.warnings {
+            for detail in &warning.details {
+                eprintln!("warning: {}: {detail}", warning.trigger);
+            }
+        }
+        for unsupported in &imported.report.unsupported_matches {
+            eprintln!(
+                "unsupported: {}: {}",
+                unsupported.trigger, unsupported.reason
+            );
+        }
     }
     print!("{}", toml::to_string_pretty(&imported.config)?);
     Ok(())

@@ -959,7 +959,11 @@ impl ExpansionEngine {
             max_replacement_size: self.config.organization.max_replacement_size,
             config_index,
             generation: plan.generation,
-            captured_window: self.current_window.clone(),
+            // Only command-backed results complete late enough to need it.
+            captured_window: plan
+                .command
+                .as_ref()
+                .and_then(|_| self.current_window.clone()),
             propagate_case: plan.propagate_case,
             cache_ms: plan.command.as_ref().map_or(0, |command| command.cache_ms),
             cached_output: plan.command.as_ref().and_then(|command| {

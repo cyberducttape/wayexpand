@@ -186,7 +186,7 @@ pub enum TemplateError {
     #[error("an included snippet cannot contain {{{{cursor}}}}")]
     CursorInInclude,
     #[error(
-        "the clipboard variable is disabled (settings.allow_clipboard, or organization policy)"
+        "the clipboard variable is disabled (settings.allow_clipboard, settings.clipboard_mode, or organization policy)"
     )]
     ClipboardDisabled,
     #[error("the clipboard could not be read")]

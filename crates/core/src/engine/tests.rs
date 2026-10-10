@@ -3722,6 +3722,49 @@ fn deferred_command_is_not_run_after_input_generation_changes() {
     assert!(!marker.exists(), "stale deferred commands must not run");
 }
 
+#[test]
+fn deferred_command_is_not_run_after_focus_changes_without_input() {
+    let marker =
+        std::env::temp_dir().join(format!("wayexpand-deferred-focus-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let config = Config::parse(&format!(
+        r#"
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sh"
+        args = ["-c", "printf ran > '{}'"]
+        timeout_ms = 500
+        "#,
+        marker.display()
+    ))
+    .unwrap();
+    let window = |app_id: &str| crate::WindowContext {
+        app_id: Some(app_id.into()),
+        title: None,
+        instance_id: None,
+    };
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_current_window(Some(window("editor")));
+    let pending = engine
+        .process_deferred(InputEvent::Text(":cmd".into()))
+        .pop()
+        .unwrap();
+    // A restored window context (e.g. across reload) does not bump the
+    // input generation, so only the captured focus can catch it.
+    engine.set_current_window(Some(window("terminal")));
+
+    assert!(matches!(
+        engine.execute_pending_inline(pending, 0),
+        Err(CommandError::StaleInput)
+    ));
+    assert!(
+        !marker.exists(),
+        "deferred commands must not run in a new focus"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
@@ -4276,6 +4319,33 @@ fn aliases_are_omitted_from_saved_toml_when_empty() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();
     assert!(!text.contains("aliases"), "{text}");
+}
+
+#[test]
+fn default_clipboard_mode_is_omitted_from_saved_toml() {
+    let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
+    let text = toml::to_string(&config).unwrap();
+    assert!(!text.contains("clipboard_mode"), "{text}");
+
+    let fresh = Config::parse("[settings]\nclipboard_mode = \"fresh\"\n").unwrap();
+    let text = toml::to_string(&fresh).unwrap();
+    assert_eq!(
+        Config::parse(&text).unwrap().settings.clipboard_mode,
+        crate::ClipboardMode::Fresh
+    );
+}
+
+#[test]
+fn disabled_clipboard_mode_rejects_the_clipboard_variable() {
+    let config = "[settings]\nallow_clipboard = true\nclipboard_mode = \"disabled\"\n\
+                  [[expansion]]\ntrigger = \":c\"\nreplacement = \"{{clipboard}}\"\n";
+    assert!(matches!(
+        Config::parse(config),
+        Err(crate::ConfigError::InvalidTemplate {
+            source: crate::TemplateError::ClipboardDisabled,
+            ..
+        })
+    ));
 }
 
 fn explain_engine(config: &str) -> ExpansionEngine {
@@ -5031,6 +5101,12 @@ fn clipboard_prefetch_needs_a_reader_and_policy_permission() {
                    [settings]\nallow_clipboard = true\n\
                    [[expansion]]\ntrigger = \":clip\"\nreplacement = \"{{clipboard}}\"\n";
     let (mut engine, calls) = prefetch_engine(blocked);
+    type_text(&mut engine, ":cli");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let fresh = "[settings]\nallow_clipboard = true\nclipboard_mode = \"fresh\"\n\
+                 [[expansion]]\ntrigger = \":clip\"\nreplacement = \"{{clipboard}}\"\n";
+    let (mut engine, calls) = prefetch_engine(fresh);
     type_text(&mut engine, ":cli");
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

@@ -172,7 +172,9 @@ pub struct Settings {
     /// Clipboard expansion consistency policy. Prefetch is the historical
     /// behavior; Fresh reads at render time and Disabled rejects the
     /// clipboard template variable even when allow_clipboard is true.
-    #[serde(default)]
+    /// Omitted when default so saved configs still load in older readers,
+    /// which reject unknown settings.
+    #[serde(skip_serializing_if = "ClipboardMode::is_prefetch")]
     pub clipboard_mode: ClipboardMode,
     /// Record local usage statistics (snippet IDs, counts, and dates; never
     /// text) next to the configuration. On by default; nothing leaves the
@@ -188,6 +190,12 @@ pub enum ClipboardMode {
     Prefetch,
     Fresh,
     Disabled,
+}
+
+impl ClipboardMode {
+    fn is_prefetch(&self) -> bool {
+        *self == Self::Prefetch
+    }
 }
 
 fn default_usage_stats() -> bool {
