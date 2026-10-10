@@ -181,18 +181,13 @@ pub struct Settings {
     pub usage_stats: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ClipboardMode {
-    Fresh,
+    #[default]
     Prefetch,
+    Fresh,
     Disabled,
-}
-
-impl Default for ClipboardMode {
-    fn default() -> Self {
-        Self::Prefetch
-    }
 }
 
 fn default_usage_stats() -> bool {

@@ -38,16 +38,11 @@ pub struct EspansoImport {
     pub skipped: usize,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EspansoImportMode {
+    #[default]
     Permissive,
     Strict,
-}
-
-impl Default for EspansoImportMode {
-    fn default() -> Self {
-        Self::Permissive
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
