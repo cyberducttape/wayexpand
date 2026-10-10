@@ -125,6 +125,14 @@ missing completion event is evidence that backend or portal teardown blocked;
 it must be investigated before certification. Do not include typed secrets or
 replacement text in soak logs.
 
+Output timeouts are indeterminate outcomes, not proof that no text changed.
+The serialized output worker is cancelled, retired, and kept in the
+`retiring_output_workers` set until it reports stopped; reconnection is refused
+while any retired worker remains live. Certification must inject a backend
+call that completes after its acknowledgement deadline and verify both that
+the late call is observable and that no replacement injector is created before
+the old worker terminates.
+
 ### Expansion latency interpretation
 
 The daemon publishes separate rolling percentiles for matcher/preparation
