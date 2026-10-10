@@ -56,8 +56,8 @@ pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::Matcher;
 pub use migration::{
-    import_espanso, EspansoImport, EspansoImportReport, EspansoImportWarning,
-    EspansoUnsupportedMatch, MigrationError,
+    import_espanso, import_espanso_with_mode, EspansoImport, EspansoImportMode,
+    EspansoImportReport, EspansoImportWarning, EspansoUnsupportedMatch, MigrationError,
 };
 pub use pack::{
     import_pack, inspect_pack, pack_digest, sign_pack, trusted_signers_file, verify_pack_signature,

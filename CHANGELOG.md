@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Espanso imports now support strict semantic filtering and JSON migration
+  reports, so entries with unmapped behavior can be discarded before activation.
+- Removed the unconditional 10 ms delay from command cleanup while retaining
+  unreaped-leader process-group teardown ordering.
 - Fixed Debian, RPM, and Arch packages pointing their user units at the
   user-installer path `~/.local/lib/wayexpand/current/bin`; packaged units are
   rewritten to `/usr/bin` again.

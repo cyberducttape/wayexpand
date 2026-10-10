@@ -385,10 +385,27 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
     let source = args
         .next()
         .ok_or_else(|| usage_error("usage: wayexpand import espanso <file>"))?;
-    if args.next().is_some() || format != "espanso" {
-        usage_bail!("usage: wayexpand import espanso <file>");
+    if format != "espanso" {
+        usage_bail!("usage: wayexpand import espanso <file> [--strict] [--report-json]");
     }
-    let imported = import_espanso(Path::new(&source))?;
+    let mut strict = false;
+    let mut report_json = false;
+    for option in args {
+        match option.as_str() {
+            "--strict" => strict = true,
+            "--report-json" => report_json = true,
+            _ => usage_bail!("usage: wayexpand import espanso <file> [--strict] [--report-json]"),
+        }
+    }
+    let mode = if strict {
+        wayexpand_core::EspansoImportMode::Strict
+    } else {
+        wayexpand_core::EspansoImportMode::Permissive
+    };
+    let imported = wayexpand_core::import_espanso_with_mode(Path::new(&source), mode)?;
+    if report_json {
+        eprintln!("{}", serde_json::to_string(&imported.report)?);
+    }
     eprintln!(
         "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
         imported.report.fully_migrated,

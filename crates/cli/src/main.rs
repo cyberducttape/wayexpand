@@ -214,7 +214,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Create a non-overwriting config backup",
             ),
             (
-                "import espanso <file>",
+                "import espanso <file> [--strict] [--report-json]",
                 "Convert an Espanso YAML file to TOML on stdout",
             ),
             (

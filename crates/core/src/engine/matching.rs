@@ -364,4 +364,11 @@ mod tests {
         assert!(!glob_matches("a*b", "a"));
         assert!(!glob_matches("*foo", "fo"));
     }
+
+    #[test]
+    fn adversarial_wildcards_terminate_without_matching() {
+        let pattern = "*a*a*a*a*a*a*a*z";
+        let value = "a".repeat(2_000);
+        assert!(!glob_matches(pattern, &value));
+    }
 }

@@ -2,7 +2,7 @@ use crate::{
     config::{OrganizationPolicy, MAX_CONFIG_BYTES},
     Config, ConfigError, ExpansionConfig, MatchMode, Settings,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Read, path::Path};
 use thiserror::Error;
 
@@ -38,7 +38,19 @@ pub struct EspansoImport {
     pub skipped: usize,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EspansoImportMode {
+    Permissive,
+    Strict,
+}
+
+impl Default for EspansoImportMode {
+    fn default() -> Self {
+        Self::Permissive
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct EspansoImportReport {
     pub fully_migrated: usize,
     pub migrated_with_warnings: usize,
@@ -47,13 +59,13 @@ pub struct EspansoImportReport {
     pub unsupported_matches: Vec<EspansoUnsupportedMatch>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EspansoImportWarning {
     pub trigger: String,
     pub details: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EspansoUnsupportedMatch {
     pub trigger: String,
     pub reason: String,
@@ -78,9 +90,18 @@ pub enum MigrationError {
     Parse(#[from] serde_yaml::Error),
     #[error("imported configuration is invalid: {0}")]
     Invalid(#[from] ConfigError),
+    #[error("strict Espanso import rejected {trigger}: {details}")]
+    StrictRejected { trigger: String, details: String },
 }
 
 pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, MigrationError> {
+    import_espanso_with_mode(path, EspansoImportMode::Permissive)
+}
+
+pub fn import_espanso_with_mode(
+    path: impl AsRef<Path>,
+    mode: EspansoImportMode,
+) -> Result<EspansoImport, MigrationError> {
     let path = path.as_ref();
     let read_error = |source: std::io::Error| MigrationError::Read {
         path: path.display().to_string(),
@@ -136,6 +157,12 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
     let mut expansion = Vec::with_capacity(document.matches.len());
     let mut report = EspansoImportReport::default();
     for key in document.extra.keys() {
+        if mode == EspansoImportMode::Strict {
+            return Err(MigrationError::StrictRejected {
+                trigger: "(file)".into(),
+                details: format!("top-level option `{key}` is not imported"),
+            });
+        }
         report.warnings.push(EspansoImportWarning {
             trigger: "(file)".into(),
             details: vec![format!(
@@ -174,6 +201,17 @@ pub fn import_espanso(path: impl AsRef<Path>) -> Result<EspansoImport, Migration
             .keys()
             .map(|key| format!("option `{key}` is not mapped; review its semantics"))
             .collect::<Vec<_>>();
+        if mode == EspansoImportMode::Strict && !details.is_empty() {
+            report.unsupported += 1;
+            report.unsupported_matches.push(EspansoUnsupportedMatch {
+                trigger,
+                reason: format!(
+                    "strict mode discarded the match because {}",
+                    details.join(", ")
+                ),
+            });
+            continue;
+        }
         if details.is_empty() {
             report.fully_migrated += 1;
         } else {
@@ -266,6 +304,29 @@ mod tests {
                 && warning.details.iter().any(|detail| detail.contains("word"))
         }));
         assert_eq!(imported.report.unsupported_matches[0].trigger, ":dynamic");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn strict_mode_discards_semantically_changed_matches_and_reports_them() {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-espanso-strict-{}.yml",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            "matches:\n  - trigger: ':plain'\n    replace: Hello\n  - trigger: ':word'\n    replace: Hello\n    word: true\n",
+        )
+        .unwrap();
+
+        let imported = import_espanso_with_mode(&path, EspansoImportMode::Strict).unwrap();
+        assert_eq!(imported.config.expansion.len(), 1);
+        assert_eq!(imported.report.fully_migrated, 1);
+        assert_eq!(imported.report.unsupported, 1);
+        assert_eq!(imported.report.unsupported_matches[0].trigger, ":word");
+        assert!(imported.report.unsupported_matches[0]
+            .reason
+            .contains("word"));
         fs::remove_file(path).unwrap();
     }
 

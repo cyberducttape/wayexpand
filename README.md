@@ -159,6 +159,10 @@ predictable, not to claim that WayExpand is a security sandbox.
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 ```
 
+Use `--strict` to reject entries whose Espanso semantics cannot be preserved.
+Use `--report-json` to emit a machine-readable migration report on stderr;
+review warnings before activating a permissive import.
+
 The GUI defaults to a merge that preserves current snippets and reports
 duplicates/conflicts; replacement is a separate explicit action. Review the
 CLI's migration report or GUI preview for unmapped features before applying.
