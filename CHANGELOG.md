@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Git sync no longer accepts outgoing history whose file names contain
+  newlines; such a name could pass the library-path check as two allowed
+  paths and publish a file that was later deleted.
+- Conditional config saves no longer fail with a spurious "busy" error when
+  another tool has written legacy (ID-less) snippets back; this is now
+  reported as a revision conflict.
+- A legacy configuration that WayExpand cannot write (for example a
+  root-managed file) now loads with snippet IDs assigned in memory instead
+  of failing while trying to persist the migration.
 - Espanso imports now support strict semantic filtering and JSON migration
   reports, so entries with unmapped behavior can be discarded before activation.
 - Fixed Debian, RPM, and Arch packages pointing their user units at the

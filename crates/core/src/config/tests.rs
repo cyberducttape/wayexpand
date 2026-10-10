@@ -219,6 +219,34 @@ fn conditional_save_reports_reintroduced_legacy_content_as_conflict() {
 }
 
 #[test]
+fn legacy_config_in_unwritable_directory_loads_with_in_memory_ids() {
+    if rustix::process::geteuid().is_root() {
+        return; // root bypasses directory permissions
+    }
+    let directory = std::env::temp_dir().join(format!(
+        "wayexpand-config-readonly-legacy-{}",
+        std::process::id()
+    ));
+    let _ = fs::set_permissions(&directory, fs::Permissions::from_mode(0o700));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("expansions.toml");
+    let legacy = "[[expansion]]\ntrigger = \":x\"\nreplacement = \"old\"\n";
+    fs::write(&path, legacy).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let loaded = Config::load_versioned(&path);
+
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let loaded = loaded.unwrap();
+    assert_eq!(loaded.config.expansion[0].trigger, ":x");
+    assert!(!loaded.config.expansion[0].id.is_empty());
+    assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+    fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
 fn concurrent_legacy_loaders_converge_on_persisted_ids() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-config-concurrent-legacy-{}.toml",

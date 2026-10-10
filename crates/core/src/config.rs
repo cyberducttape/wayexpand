@@ -723,13 +723,24 @@ impl Config {
     /// write lock, so concurrent readers converge on one ID set. Editors
     /// should keep the revision and use it for conditional saves rather than
     /// re-reading the file independently.
+    ///
+    /// A legacy file this process cannot write (for example a root-managed
+    /// configuration read by a service user) is still loaded: its IDs are
+    /// migrated in memory only and are regenerated on every load until an
+    /// administrator saves the file.
     pub fn load_versioned(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
         let path = path.as_ref();
         let loaded = Self::load_versioned_once(path)?;
         if !source_has_legacy_expansion_ids(&loaded.source) {
             return Ok(loaded);
         }
+        match Self::persist_legacy_id_migration(path) {
+            Err(error) if error.is_unwritable_target() => Ok(loaded),
+            result => result,
+        }
+    }
 
+    fn persist_legacy_id_migration(path: &Path) -> Result<LoadedConfig, ConfigError> {
         let resolved = resolve_config_target(path)?;
         validate_parent_directories(&resolved)?;
         let _lock = ConfigWriteLock::acquire(&resolved)?;

@@ -116,6 +116,19 @@ pub enum ConfigError {
 }
 
 impl ConfigError {
+    /// Whether a write failed only because this process may not modify the
+    /// target (permissions, a read-only mount, or a root-owned file).
+    pub(super) fn is_unwritable_target(&self) -> bool {
+        match self {
+            Self::RootOwnedWriteRequiresAdmin { .. } => true,
+            Self::Read { source, .. } => matches!(
+                source.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            ),
+            _ => false,
+        }
+    }
+
     /// Return operator-useful diagnostics without echoing configuration text.
     /// The `Display` implementation remains detailed for library callers, but
     /// user-facing health checks should use this boundary-safe form.
