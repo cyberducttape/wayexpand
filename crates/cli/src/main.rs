@@ -55,9 +55,9 @@ use wayexpand_backend_selection::{
 };
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    all_capabilities, default_config_path, discover_backends, import_espanso, import_pack,
-    inspect_pack, BackendKind, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode,
-    OrganizationPolicy, CONTROL_STATUS_SCHEMA,
+    all_capabilities, default_config_path, discover_backends, import_pack, inspect_pack,
+    BackendKind, Config, ExpansionEngine, FleetConfig, InputEvent, MatchMode, OrganizationPolicy,
+    CONTROL_STATUS_SCHEMA,
 };
 
 use args::{take_json_flag, take_option};
