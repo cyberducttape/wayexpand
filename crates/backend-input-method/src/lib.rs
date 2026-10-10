@@ -709,28 +709,15 @@ impl InputMethodSource {
         Ok(())
     }
 
-    /// Reject the unsafe constructor that would create an input-method
-    /// session without a keyboard pass-through path. Use
-    /// [`Self::connect_with_key_pass_through`] for production connections.
+    /// Connect an input-method session with its mandatory keyboard
+    /// pass-through injector.
     ///
     /// The compositor may give this object an exclusive keyboard grab after
     /// activation. Printable text and common editing keys are forwarded via
-    /// the input-method commit contract, and unsupported keys can be passed
-    /// through via a separate lifecycle-aware injector (e.g. libei). The
-    /// This remains an explicit error rather than a best-effort connection so
-    /// callers cannot accidentally expose an exclusive grab without delivery.
-    pub fn connect() -> Result<Self, InputMethodError> {
-        Err(InputMethodError::PassThrough {
-            message: "input-method-v2 requires a key pass-through injector before activation"
-                .into(),
-            retryable: true,
-        })
-    }
-
-    /// Connect an input-method session only after its mandatory keyboard
-    /// pass-through injector has been established. Keeping the injector in
-    /// the constructed source makes it impossible for production callers to
-    /// expose an exclusive grab with no delivery path for unsupported keys.
+    /// the input-method commit contract, and unsupported keys are passed
+    /// through via a separate lifecycle-aware injector (e.g. libei). Taking
+    /// the injector here, rather than attaching it afterwards, means an
+    /// active source always has a delivery path for unsupported keys.
     pub fn connect_with_key_pass_through(
         key_pass_through: Box<dyn TextInjector>,
     ) -> Result<Self, InputMethodError> {

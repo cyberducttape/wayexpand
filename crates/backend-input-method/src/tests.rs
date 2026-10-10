@@ -195,17 +195,6 @@ struct RecordingInjector {
     fail: bool,
 }
 
-#[test]
-fn bare_input_method_connection_is_rejected_without_pass_through() {
-    assert!(matches!(
-        InputMethodSource::connect(),
-        Err(InputMethodError::PassThrough {
-            retryable: true,
-            ..
-        })
-    ));
-}
-
 struct FailFirstReleaseInjector {
     failed_release: bool,
     events: Vec<(u32, KeyEventState, bool)>,
