@@ -45,12 +45,12 @@ pub use config::{
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};
 pub use engine::{
-    run_command, run_command_cancellable, BrokerOperation, BrokerProtocolFailure,
-    BrokerUnavailableReason, CheckStatus, CommandError, CommandErrorKind, CommandMetrics,
-    CompletionNotifier, ExpansionEngine, ExpansionError, ExpansionResult, ExplainCheck,
-    Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError, PendingExpansionDispatch,
-    PendingExpansionResult, ProcessWaitFailure, ProcessWaitOperation, TransactionOutcome,
-    WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
+    command_preview_sandboxed, run_command, run_command_cancellable, run_command_preview,
+    BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CheckStatus, CommandError,
+    CommandErrorKind, CommandMetrics, CompletionNotifier, ExpansionEngine, ExpansionError,
+    ExpansionResult, ExplainCheck, Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError,
+    PendingExpansionDispatch, PendingExpansionResult, ProcessWaitFailure, ProcessWaitOperation,
+    TransactionOutcome, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};

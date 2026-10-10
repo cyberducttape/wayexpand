@@ -9,8 +9,9 @@ use crate::editor::Draft;
 
 /// Return a policy error before a GUI command preview is spawned.
 ///
-/// The GUI runs direct previews outside the daemon's service sandbox, so it
-/// must apply the same effective organization enforcement policy first.
+/// Without a systemd user manager the GUI runs previews directly, outside any
+/// service sandbox, so it must apply the same effective organization
+/// enforcement policy first.
 pub(crate) fn command_preview_policy_violation(
     policy: &OrganizationPolicy,
     command: &wayexpand_core::CommandConfig,

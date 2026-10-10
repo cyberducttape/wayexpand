@@ -223,7 +223,7 @@ fn broker_output_text(
 }
 
 #[cfg(unix)]
-fn run_command_unix(
+pub(super) fn run_command_unix(
     child: Child,
     mut stdout: ChildStdout,
     mut stderr: ChildStderr,
@@ -584,7 +584,7 @@ fn read_available_form_output(
 }
 
 #[cfg(unix)]
-fn stop_transient_form_unit(unit: Option<&str>) {
+pub(super) fn stop_transient_unit(unit: Option<&str>) {
     let Some(unit) = unit else {
         return;
     };
@@ -615,7 +615,7 @@ fn stop_transient_form_unit(unit: Option<&str>) {
 fn terminate_form_helper(guard: &mut ChildSupervisor, unit: Option<&str>) {
     // systemd-run owns a separate transient cgroup; stopping the wrapper
     // alone does not guarantee that a GUI descendant releases the pipe.
-    stop_transient_form_unit(unit);
+    stop_transient_unit(unit);
     guard.kill_group();
     let _ = guard.reap();
 }
@@ -694,7 +694,7 @@ pub(super) fn run_form_helper(
             let status = match guard.reap() {
                 Ok(status) => status,
                 Err(error) => {
-                    stop_transient_form_unit(transient_unit.as_deref());
+                    stop_transient_unit(transient_unit.as_deref());
                     return Err(CommandError::WaitFailed {
                         operation: ProcessWaitOperation::Reap,
                         reason: ProcessWaitFailure::Io {
@@ -720,7 +720,7 @@ pub(super) fn run_form_helper(
         stdout_eof = match read_available_form_output(&mut stdout, &mut bytes, None) {
             Ok(eof) => eof,
             Err(error) => {
-                stop_transient_form_unit(transient_unit.as_deref());
+                stop_transient_unit(transient_unit.as_deref());
                 return Err(error);
             }
         };
@@ -729,29 +729,29 @@ pub(super) fn run_form_helper(
         }
     }
     if !stdout_eof {
-        stop_transient_form_unit(transient_unit.as_deref());
+        stop_transient_unit(transient_unit.as_deref());
         return Err(CommandError::IncompleteOutput);
     }
     if !status.success() {
         // Cancelled: the trigger stays as typed.
-        stop_transient_form_unit(transient_unit.as_deref());
+        stop_transient_unit(transient_unit.as_deref());
         return Err(CommandError::StaleInput);
     }
     if bytes.len() > MAX_FORM_OUTPUT_BYTES {
-        stop_transient_form_unit(transient_unit.as_deref());
+        stop_transient_unit(transient_unit.as_deref());
         return Err(CommandError::OutputTooLarge);
     }
     let values: std::collections::HashMap<String, String> = match serde_json::from_slice(&bytes) {
         Ok(values) => values,
         Err(_) => {
-            stop_transient_form_unit(transient_unit.as_deref());
+            stop_transient_unit(transient_unit.as_deref());
             return Err(CommandError::IncompleteOutput);
         }
     };
     let mut checked = std::collections::HashMap::with_capacity(fields.len());
     for field in fields {
         let value = values.get(&field.key).ok_or_else(|| {
-            stop_transient_form_unit(transient_unit.as_deref());
+            stop_transient_unit(transient_unit.as_deref());
             CommandError::IncompleteOutput
         })?;
         let valid = value.len() <= MAX_FORM_VALUE_BYTES
@@ -763,7 +763,7 @@ pub(super) fn run_form_helper(
                 crate::FormFieldKind::Text { .. } => true,
             };
         if !valid {
-            stop_transient_form_unit(transient_unit.as_deref());
+            stop_transient_unit(transient_unit.as_deref());
             return Err(CommandError::IncompleteOutput);
         }
         checked.insert(field.key.clone(), value.clone());

@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI command previews run in a transient systemd user unit with the
+  daemon's sandbox directives and minimal environment, so a preview fails
+  where the real expansion would. Without a systemd user manager they run
+  directly, as before. A test keeps the directives identical to the units.
+- Documented that the units' filesystem directives (`ProtectHome=`,
+  `ProtectSystem=`, `PrivateTmp=`, `ReadWritePaths=`) are silently skipped
+  on hosts that restrict unprivileged user namespaces.
 - Daemon status (schema 7) reports output-route health: `output_health`
   (`ok`, `recovering`, `stalled`), a count of transactions with an unknown
   outcome, and the number and age of retired output workers that block

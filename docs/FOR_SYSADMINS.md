@@ -477,7 +477,7 @@ $EDITOR ~/.config/wayexpand/expansions.toml
 ```
 
 The GUI provides a visual editor with preview for static snippets. Command
-backed snippets require an explicit **Run once** action because previewing them
+backed snippets require an explicit run action because previewing them
 can execute external programs. Category and text filtering (including tags)
 help organize the library for quick access during daily work.
 
@@ -593,9 +593,10 @@ the command is subject to the actual systemd sandbox, then check logs:
 journalctl --user -u wayexpand-input-method.service -f
 # Type a trigger with a program, observe result
 ```
-The GUI Preview button runs in the GUI process outside this sandbox; use it
-only to validate replacement output and command behavior independent of
-systemd restrictions.
+With a systemd user manager, the GUI's **Run in service sandbox** button runs
+the command in a transient unit with the same sandbox directives as the
+daemon, so it is a faithful check. Without one, the button reads **Run
+locally (advanced)** and applies no sandbox.
 
 ## Scaling Considerations
 

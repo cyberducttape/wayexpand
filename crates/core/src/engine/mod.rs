@@ -8,6 +8,7 @@ mod hotkeys;
 mod insertion;
 pub mod matching;
 mod policy;
+mod preview_sandbox;
 mod runtime_state;
 mod state;
 pub mod transaction;
@@ -34,6 +35,7 @@ use state::NormalizedWindowContext;
 use async_runtime::{AsyncCommandJob, AsyncCommandRuntime, FormOrigin};
 pub use command_runtime::{run_command, run_command_cancellable};
 use command_runtime::{CommandMetricsState, QueueSendError};
+pub use preview_sandbox::{command_preview_sandboxed, run_command_preview};
 
 use crate::{
     AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError, HotkeyConfig,

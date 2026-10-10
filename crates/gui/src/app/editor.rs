@@ -127,7 +127,7 @@ impl GuiApp {
                 return;
             }
         };
-        // Command previews execute in the desktop user's GUI process, so they
+        // Command previews are started by the desktop user's GUI, so they
         // must not become a policy escape hatch for managed deployments. Use
         // the same effective enforcement view as the daemon: audit-only policy
         // remains observable but does not block, while safe mode blocks before
@@ -152,7 +152,9 @@ impl GuiApp {
         let spawned = thread::Builder::new()
             .name("wayexpand-command-preview".into())
             .spawn(move || {
-                let result = wayexpand_core::run_command_cancellable(&command, &worker_cancel)
+                // Runs under the daemon's service sandbox when systemd is
+                // available, so the preview behaves like the real expansion.
+                let result = wayexpand_core::run_command_preview(&command, &worker_cancel)
                     .map_err(|error| strings.status_command_failed(&error.to_string()));
                 let _ = sender.send(result);
             });

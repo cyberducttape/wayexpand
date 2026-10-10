@@ -146,7 +146,8 @@ local trusted helpers only; service/cgroup-level containment belongs in the
 daemon's systemd-enforced sandbox (see `systemd/wayexpand.service` for details).
 The daemon uses `ProtectHome=read-only`, `ProtectSystem=strict`, and other
 restrictions that prevent commands from writing to `$HOME`, accessing the
-network, or making unauthorized filesystem changes. A command that works when
+network, or making unauthorized filesystem changes, where the host permits
+the mount namespaces they need (see [SECURITY.md](../SECURITY.md)). A command that works when
 typed manually may fail when triggered by WayExpand if it requires capabilities
 the sandbox forbids.
 
@@ -176,16 +177,15 @@ environment values, and command output. `wayexpand doctor` reports broker
 health, queue drops, and audit write failures. See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md).
 
-⚠️ **Important:** The GUI's Preview button does NOT run commands under the daemon's
-systemd sandbox — it invokes them in the GUI process without those restrictions.
-This means:
-
-- `wayexpand-gui` preview can succeed while the live daemon expansion fails
-- The preview validates expansion *output* but not the systemd sandbox constraints
-
-To test a command under actual daemon sandbox restrictions, either:
-1. Manually type the trigger and observe the result, or
-2. Check `journalctl --user -u wayexpand-input-method.service` for daemon errors
+**GUI command previews:** when a systemd user manager is available, the
+editor's **Run in service sandbox** button runs the command in a transient
+user unit (`wayexpand-preview-*.service`) with the same sandbox directives as
+the packaged capture units, the same minimal environment, and the command's
+timeout. A preview therefore fails where the daemon would. Without a systemd
+user manager the button reads **Run locally (advanced)** and runs the command
+directly, which matches a daemon that is also running outside systemd. The
+sandbox is only as strong as the host allows; see the host limitation in
+[SECURITY.md](../SECURITY.md). Named actions always run through the broker.
 
 For full details on sandbox behavior and command execution constraints, see
 `SECURITY.md`'s section on command expansions.

@@ -58,6 +58,8 @@ impl GuiApp {
                                     self.strings.running()
                                 } else if managed_action {
                                     self.strings.run_through_broker()
+                                } else if wayexpand_core::command_preview_sandboxed() {
+                                    self.strings.run_in_service_sandbox()
                                 } else {
                                     self.strings.run_once()
                                 }),

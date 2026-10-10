@@ -78,6 +78,18 @@ manually may fail when invoked as a WayExpand expansion if it tries to:
 - Access files outside `/tmp` or `/run`
 - Perform other operations restricted by the systemd unit
 
+**Host limitation:** `ProtectHome=`, `ProtectSystem=`, `PrivateTmp=`, and
+`ReadWritePaths=` need a mount namespace, which a systemd *user* manager can
+only create when unprivileged user namespaces are allowed. Where they are
+restricted (for example Ubuntu with
+`kernel.apparmor_restrict_unprivileged_userns=1`), systemd skips these
+directives without an error, and only the process restrictions (no new
+privileges, seccomp filters such as `RestrictAddressFamilies=` and
+`MemoryDenyWriteExecute=`, and resource limits) apply. To check a running
+daemon, compare `readlink /proc/<daemon-pid>/ns/mnt` with
+`readlink /proc/self/ns/mnt`: identical values mean the filesystem
+restrictions are not in effect.
+
 The systemd unit is deliberately restrictive to limit the blast radius of a
 compromised or misconfigured command. Do not relax the restrictions in
 `systemd/wayexpand.service` or use a wrapper script as a way to bypass them.

@@ -22,6 +22,14 @@ impl Strings {
         }
     }
 
+    /// The preview runs in a transient unit with the daemon's sandbox.
+    pub fn run_in_service_sandbox(&self) -> &'static str {
+        match self.lang {
+            Language::English | Language::Indonesian => "Run in service sandbox",
+            Language::German => "In der Dienst-Sandbox ausführen",
+        }
+    }
+
     pub fn run_through_broker(&self) -> &'static str {
         match self.lang {
             Language::English | Language::Indonesian => "Run through broker",

@@ -799,9 +799,11 @@ and tracks fixes for them.
 
 The command preview action executes in a background worker and reports
 `Running…` while it waits. Managed actions are labelled **Run through broker**
-and use the configured broker policy; direct programs are labelled **Run
-locally (advanced)** because they run with GUI-process privileges rather than
-the daemon service sandbox. Both use the bounded timeout, and results are
+and use the configured broker policy. Direct programs are labelled **Run in
+service sandbox** when a systemd user manager is available, and then run in a
+transient unit with the daemon's sandbox directives; otherwise they are
+labelled **Run locally (advanced)** and run with GUI-process privileges. All
+use the bounded timeout, and results are
 associated with the draft that started them, so output from an older draft is
 not displayed after the editor changes.
 
