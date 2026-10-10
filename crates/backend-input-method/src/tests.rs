@@ -195,6 +195,17 @@ struct RecordingInjector {
     fail: bool,
 }
 
+#[test]
+fn bare_input_method_connection_is_rejected_without_pass_through() {
+    assert!(matches!(
+        InputMethodSource::connect(),
+        Err(InputMethodError::PassThrough {
+            retryable: true,
+            ..
+        })
+    ));
+}
+
 struct FailFirstReleaseInjector {
     failed_release: bool,
     events: Vec<(u32, KeyEventState, bool)>,
@@ -633,6 +644,60 @@ fn pending_pass_through_preserves_modifiers() {
                 ..Modifiers::default()
             }
         )]
+    );
+}
+
+#[test]
+fn failed_pass_through_keeps_held_press_until_injector_recovers() {
+    let mut pending = VecDeque::from([
+        PendingKeyPassThrough {
+            keycode: 29,
+            modifiers: Modifiers::default(),
+            state: KeyEventState::Pressed,
+        },
+        PendingKeyPassThrough {
+            keycode: 29,
+            modifiers: Modifiers::default(),
+            state: KeyEventState::Released,
+        },
+    ]);
+    let mut injector = RecordingInjector {
+        calls: Vec::new(),
+        events: Vec::new(),
+        fail: true,
+    };
+
+    let error = pass_through_pending_key(&mut pending, Some(&mut injector)).unwrap_err();
+    assert!(error.retryable);
+    assert_eq!(pending.len(), 2, "failed delivery must remain retryable");
+
+    injector.fail = false;
+    pass_through_pending_key(&mut pending, Some(&mut injector)).unwrap();
+    pass_through_pending_key(&mut pending, Some(&mut injector)).unwrap();
+    assert!(pending.is_empty());
+    assert_eq!(
+        injector.events,
+        vec![(29, KeyEventState::Pressed), (29, KeyEventState::Released)]
+    );
+}
+
+#[test]
+fn missing_pass_through_does_not_consume_held_key_events() {
+    let mut pending = VecDeque::from([PendingKeyPassThrough {
+        keycode: 105,
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        },
+        state: KeyEventState::Pressed,
+    }]);
+
+    let error = pass_through_pending_key(&mut pending, None).unwrap_err();
+    assert!(error.retryable);
+    assert_eq!(
+        pending.len(),
+        1,
+        "missing injector must not consume the key"
     );
 }
 

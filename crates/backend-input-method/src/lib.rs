@@ -709,15 +709,31 @@ impl InputMethodSource {
         Ok(())
     }
 
-    /// Connect an input-method session.
+    /// Reject the unsafe constructor that would create an input-method
+    /// session without a keyboard pass-through path. Use
+    /// [`Self::connect_with_key_pass_through`] for production connections.
     ///
     /// The compositor may give this object an exclusive keyboard grab after
     /// activation. Printable text and common editing keys are forwarded via
     /// the input-method commit contract, and unsupported keys can be passed
     /// through via a separate lifecycle-aware injector (e.g. libei). The
-    /// daemon attaches this injector before exposing the source to the
-    /// compositor, so an active source always has a safe pass-through path.
+    /// This remains an explicit error rather than a best-effort connection so
+    /// callers cannot accidentally expose an exclusive grab without delivery.
     pub fn connect() -> Result<Self, InputMethodError> {
+        Err(InputMethodError::PassThrough {
+            message: "input-method-v2 requires a key pass-through injector before activation"
+                .into(),
+            retryable: true,
+        })
+    }
+
+    /// Connect an input-method session only after its mandatory keyboard
+    /// pass-through injector has been established. Keeping the injector in
+    /// the constructed source makes it impossible for production callers to
+    /// expose an exclusive grab with no delivery path for unsupported keys.
+    pub fn connect_with_key_pass_through(
+        key_pass_through: Box<dyn TextInjector>,
+    ) -> Result<Self, InputMethodError> {
         let connection = Connection::connect_to_env()?;
         let mut event_queue = connection.new_event_queue();
         let qh = event_queue.handle();
@@ -749,7 +765,7 @@ impl InputMethodSource {
                 event_queue,
             }),
             state,
-            key_pass_through: None,
+            key_pass_through: Some(key_pass_through),
             wake: None,
         })
     }

@@ -132,7 +132,7 @@ pub fn connect_input_method_session(
     };
 
     let backend_mode = key_injector.status_detail();
-    let source = InputMethodSource::connect()?.with_key_pass_through(key_injector);
+    let source = InputMethodSource::connect_with_key_pass_through(key_injector)?;
     status::set_daemon_status_with_mode(
         control,
         "input-method",
