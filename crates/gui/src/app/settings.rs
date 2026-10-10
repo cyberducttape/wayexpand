@@ -185,6 +185,7 @@ impl GuiApp {
             for (language, label) in [
                 (Language::English, "English"),
                 (Language::German, "Deutsch"),
+                (Language::Indonesian, "Bahasa Indonesia"),
             ] {
                 if theme::chip_scaled(
                     ui,

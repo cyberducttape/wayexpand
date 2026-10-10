@@ -4,14 +4,14 @@ use crate::*;
 impl Strings {
     pub fn fleet_layers(&self) -> &'static str {
         match self.lang {
-            Language::English => "Fleet layers",
+            Language::English | Language::Indonesian => "Fleet layers",
             Language::German => "Flotten-Ebenen",
         }
     }
 
     pub fn not_checked(&self) -> &'static str {
         match self.lang {
-            Language::English => "Not checked",
+            Language::English | Language::Indonesian => "Not checked",
             Language::German => "Nicht geprüft",
         }
     }
@@ -22,11 +22,15 @@ impl Strings {
     /// `wayexpand doctor` rather than paraphrasing it away.
     pub fn backend_state(&self, state: BackendState) -> &'static str {
         match (self.lang, state) {
-            (Language::English, BackendState::Available) => "Ready",
-            (Language::English, BackendState::RequiresPermission) => "Needs permission",
-            (Language::English, BackendState::Implemented) => "Not probed",
-            (Language::English, BackendState::Unavailable) => "Unavailable",
-            (Language::English, BackendState::NotImplemented) => "Not implemented",
+            (Language::English | Language::Indonesian, BackendState::Available) => "Ready",
+            (Language::English | Language::Indonesian, BackendState::RequiresPermission) => {
+                "Needs permission"
+            }
+            (Language::English | Language::Indonesian, BackendState::Implemented) => "Not probed",
+            (Language::English | Language::Indonesian, BackendState::Unavailable) => "Unavailable",
+            (Language::English | Language::Indonesian, BackendState::NotImplemented) => {
+                "Not implemented"
+            }
             (Language::German, BackendState::Available) => "Bereit",
             (Language::German, BackendState::RequiresPermission) => "Berechtigung nötig",
             (Language::German, BackendState::Implemented) => "Nicht geprüft",

@@ -4,6 +4,7 @@ mod status;
 pub enum Language {
     English,
     German,
+    Indonesian,
 }
 
 impl Language {
@@ -13,6 +14,8 @@ impl Language {
             .and_then(|lang| {
                 if lang.starts_with("de") {
                     Some(Language::German)
+                } else if lang.starts_with("id") {
+                    Some(Language::Indonesian)
                 } else {
                     None
                 }
@@ -24,6 +27,7 @@ impl Language {
         match self {
             Language::English => "en",
             Language::German => "de",
+            Language::Indonesian => "id",
         }
     }
 
@@ -31,6 +35,7 @@ impl Language {
         match code {
             "en" => Some(Language::English),
             "de" => Some(Language::German),
+            "id" => Some(Language::Indonesian),
             _ => None,
         }
     }

@@ -599,6 +599,8 @@ WayExpand GUI now supports multiple languages with automatic detection and manua
 
 - **English** (en) — Default
 - **Deutsch** (de) — German
+- **Bahasa Indonesia** (id) — Indonesian locale with English fallback while the
+  catalog is being translated
 
 ## Using Different Languages
 
@@ -613,7 +615,7 @@ The easiest way to switch languages is to use the GUI:
 
 ### Environment Variable
 
-Set the `LANG` environment variable to use German by default:
+Set the `LANG` environment variable to choose the default language:
 
 ```bash
 # Use German
@@ -622,6 +624,10 @@ wayexpand-gui
 
 # Use English (default)
 export LANG=en_US.UTF-8
+wayexpand-gui
+
+# Use Indonesian
+export LANG=id_ID.UTF-8
 wayexpand-gui
 ```
 
@@ -642,6 +648,7 @@ The language system is implemented in `crates/gui/src/lang.rs`:
 pub enum Language {
     English,
     German,
+    Indonesian,
 }
 
 pub struct Strings {
