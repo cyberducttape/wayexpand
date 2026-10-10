@@ -46,7 +46,7 @@ done
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
 install -Dm644 systemd/wayexpand-action-broker.service %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
-sed -i 's#%h/.local/bin/#/usr/bin/#g' \
+sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' \
     %{buildroot}%{_userunitdir}/wayexpand-input-method.service \
     %{buildroot}%{_userunitdir}/wayexpand-evdev.service \
     %{buildroot}%{_userunitdir}/wayexpand-action-broker.service

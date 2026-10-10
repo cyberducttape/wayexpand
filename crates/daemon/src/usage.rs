@@ -24,6 +24,9 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(60);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 const SHUTDOWN_ENQUEUE_WAIT: Duration = Duration::from_millis(250);
 const QUEUE_CAPACITY: usize = 8;
+/// Shorter than the control client's 2 s I/O timeout, so a slow clear is
+/// reported to the CLI instead of surfacing as a socket read timeout.
+const CLEAR_REPLY_WAIT: Duration = Duration::from_millis(1500);
 
 static MAX_FLUSH_DURATION_US: AtomicU64 = AtomicU64::new(0);
 static FLUSH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -56,6 +59,10 @@ pub struct UsageRecorder {
 
 enum UsageMessage {
     Batch(UsageStats),
+    /// Persist everything already queued and exit. Shutdown cannot rely on
+    /// channel disconnection: the control server keeps a clear handle, and
+    /// therefore a sender clone, alive until after the recorder stops.
+    Shutdown,
     Clear(
         mpsc::SyncSender<std::io::Result<bool>>,
         Arc<Mutex<UsageGeneration>>,
@@ -104,7 +111,7 @@ impl UsageClearHandle {
                 })?;
         }
         result
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(CLEAR_REPLY_WAIT)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut, error.to_string()))?
     }
 }
@@ -159,10 +166,10 @@ impl UsageRecorder {
     pub fn collect(&mut self, engine: &mut ExpansionEngine) {
         if let Ok(generation) = self.generation.lock() {
             if self.pending_generation != generation.value {
-                let dropped = event_count(&self.pending);
+                // Events from before a successful clear are discarded by
+                // request; they are not queue rejections.
                 self.pending = UsageStats::default();
                 self.pending_generation = generation.value;
-                record_rejections(dropped);
             }
         }
         for event in engine.drain_usage_events() {
@@ -190,10 +197,8 @@ impl UsageRecorder {
             return;
         }
         if self.pending_generation != generation.value {
-            let dropped = event_count(&self.pending);
             self.pending = UsageStats::default();
             self.pending_generation = generation.value;
-            record_rejections(dropped);
             return;
         }
         let batch = std::mem::take(&mut self.pending);
@@ -210,10 +215,9 @@ impl UsageRecorder {
                     "usage statistics worker stopped unexpectedly"
                 );
             }
-            Err(
-                TrySendError::Full(UsageMessage::Clear(..))
-                | TrySendError::Disconnected(UsageMessage::Clear(..)),
-            ) => unreachable!("only usage batches are enqueued here"),
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                unreachable!("only usage batches are enqueued here")
+            }
         }
     }
 
@@ -237,8 +241,24 @@ impl UsageRecorder {
                 "usage events could not be queued before shutdown"
             );
         }
-        // Disconnect tells the worker to persist everything already queued.
-        self.sender.take();
+        // Ask the worker to persist everything already queued. The control
+        // server's clear handle keeps the channel connected, so dropping our
+        // sender alone would leave the worker waiting for its next interval.
+        if let Some(sender) = self.sender.take() {
+            let deadline = Instant::now() + SHUTDOWN_ENQUEUE_WAIT;
+            loop {
+                match sender.try_send(UsageMessage::Shutdown) {
+                    Ok(()) | Err(TrySendError::Disconnected(_)) => break,
+                    Err(TrySendError::Full(_)) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(TrySendError::Full(_)) => {
+                        warn!("usage statistics worker did not accept the shutdown request");
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     fn wait_for_worker(&mut self) {
@@ -319,7 +339,7 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
                 // receive would spin forever after the first minute.
                 last_flush = Instant::now();
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Ok(UsageMessage::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 for _ in 0..3 {
                     if pending.snippets.is_empty() || flush_pending(&path, &mut pending) {
                         break;
@@ -411,6 +431,30 @@ mod tests {
         let stats = UsageStats::load(&path);
         assert!(!stats.snippets.contains_key("a"));
         assert_eq!(stats.snippets["b"].count, 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn shutdown_persists_promptly_while_a_clear_handle_is_alive() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-shutdown-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("usage-stats.json");
+        let mut recorder = UsageRecorder::new(path.clone());
+        // The control server holds this for the daemon's whole lifetime.
+        let _clear_handle = recorder.clear_handle().unwrap();
+        recorder.pending.record(&event("kept"));
+        let started = Instant::now();
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+        assert!(started.elapsed() < SHUTDOWN_WAIT);
+        assert_eq!(UsageStats::load(&path).snippets["kept"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
     }
 

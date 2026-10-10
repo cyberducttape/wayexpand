@@ -70,8 +70,8 @@ package() {
     install -Dm644 systemd/wayexpand-action-broker.service "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"
     # The source units target the user-local install layout used by the
     # release scripts. Distro packages must bind them to the package-owned
-    # binaries so ~/.local/bin cannot shadow an installed update.
-    sed -i 's#%h/.local/bin/#/usr/bin/#g' \
+    # binaries so a user-local install cannot shadow an installed update.
+    sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service" \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service" \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"

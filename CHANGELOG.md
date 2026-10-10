@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed Debian, RPM, and Arch packages pointing their user units at the
+  user-installer path `~/.local/lib/wayexpand/current/bin`; packaged units are
+  rewritten to `/usr/bin` again.
+- Fixed daemon shutdown waiting out the full usage-writer deadline and
+  skipping the final usage flush: the control server's clear handle kept the
+  writer channel open, so the writer now receives an explicit shutdown request.
+- `wayexpand stats --clear` now falls back to a locked local clear when the
+  running daemon predates `stats-clear`, instead of reporting success without
+  clearing; statistics discarded by a clear are no longer counted as queue
+  rejections.
+- Git sync diagnostics no longer panic while redacting URLs quoted with
+  multi-byte characters (for example `»…«` in localized Git messages).
+- The release installer now rolls back the `current` pointer on failure or
+  interruption, matching the source installer; both installers remove partial
+  staging directories and keep only the active and previous version payloads.
 - Window-focus updates now use a bounded latest-snapshot channel, coalescing
   obsolete focus events during bursts while preserving unknown-focus and
   disconnect states instead of allowing an unbounded event backlog.

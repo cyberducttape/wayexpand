@@ -47,10 +47,10 @@ override_dh_install:
 	dh_install --package=wayexpand systemd/wayexpand-input-method.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-evdev.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-action-broker.service usr/lib/systemd/user/
-	# Bind packaged units to /usr/bin; never allow a stale ~/.local/bin binary
-	# to win through a user-service PATH.
+	# Bind packaged units to /usr/bin; never allow a stale user-local binary
+	# (~/.local/lib/wayexpand/current/bin or ~/.local/bin) to win.
 	for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do \
-		sed -i 's#%h/.local/bin/#/usr/bin/#g' debian/wayexpand/usr/lib/systemd/user/$$unit; \
+		sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' debian/wayexpand/usr/lib/systemd/user/$$unit; \
 	done
 	# Keep evdev policies inert; the explicit helper activates one in /etc/udev/rules.d.
 	dh_install --package=wayexpand udev/71-wayexpand-evdev.rules usr/share/wayexpand/udev/

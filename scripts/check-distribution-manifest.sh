@@ -100,11 +100,14 @@ if test -f "$project_dir/wayexpand.spec"; then
     fi
 fi
 
-# Systemd user units use %h/.local/bin in the source tree for source installs.
+# Systemd user units use %h/.local/lib/wayexpand/current/bin in the source tree
+# for user installs.
 # Distro packages install binaries in /usr/bin, so every packaged service must
 # be rewritten, including the Action Broker.
 package_units='wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service'
-spec_transform=$(sed -n "/^sed -i 's#%h\\/.local\\/bin\\/#\\/usr\\/bin\\/#g'/,/^install/p" "$project_dir/wayexpand.spec") || {
+unit_rewrite="sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g'"
+spec_transform=$(awk -v prefix="$unit_rewrite" 'index($0, prefix) == 1 { printing = 1 } printing && /^install/ { exit } printing { print }' "$project_dir/wayexpand.spec")
+[ -n "$spec_transform" ] || {
     printf '%s\n' 'RPM spec does not rewrite packaged service binaries to /usr/bin' >&2
     exit 1
 }
@@ -114,7 +117,7 @@ for unit in $package_units; do
         exit 1
     }
 done
-grep -F "sed -i 's#%h/.local/bin/#/usr/bin/#g'" "$project_dir/debian/rules" >/dev/null || {
+grep -F "$unit_rewrite" "$project_dir/debian/rules" >/dev/null || {
     printf '%s\n' 'Debian rules do not rewrite packaged service binaries to /usr/bin' >&2
     exit 1
 }
@@ -122,7 +125,7 @@ grep -F "sed -i 's#%h/.local/bin/#/usr/bin/#g'" "$project_dir/debian/rules" >/de
 staged_units=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-packaged-units.XXXXXX")
 trap 'rm -rf "$staged_units"' EXIT INT TERM
 for unit in $package_units; do
-    sed 's#%h/.local/bin/#/usr/bin/#g' \
+    sed -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' \
         "$project_dir/systemd/$unit" >"$staged_units/$unit"
 done
 grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \

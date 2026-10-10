@@ -752,9 +752,12 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
         });
         match daemon_result {
             Ok(response) => {
-                if response.contains("does not match daemon configuration") {
+                if response.contains("does not match daemon configuration")
+                    || response.starts_with("unknown command")
+                {
                     // This CLI invocation targets a different library from
-                    // the running daemon; clear only the requested file below.
+                    // the running daemon, or the daemon predates stats-clear;
+                    // clear the requested file directly under its lock below.
                 } else {
                     if response.starts_with("could not clear") || response.contains("unavailable") {
                         return Err(config_error(response.trim().to_string()));

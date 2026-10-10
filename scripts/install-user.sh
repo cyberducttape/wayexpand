@@ -135,6 +135,11 @@ chmod 0700 "$state_dir"
 
 install -d -m 0755 "$library_dir"
 stage_dir="$library_dir/.staging-$build_version-$$"
+# Never leave a partial payload behind if staging fails or is interrupted.
+trap 'rm -rf -- "$stage_dir"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$target_dir/release/$binary" "$stage_dir/bin/$binary"
@@ -209,9 +214,6 @@ rollback_on_install_failure() {
     return "$install_status"
 }
 trap rollback_on_install_failure EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 ln -s "$version" "$next_link"
 # Mark the transaction before mv: if a signal or an I/O error interrupts the
 # atomic rename, rollback is safe whether the old or new link is visible.
@@ -323,3 +325,14 @@ if [ "$enable_service" -eq 1 ]; then
     fi
     printf '%s\n' "Enabled $service_name"
 fi
+
+# Keep only the active and previous payloads. Each build identity is a full
+# copy of the binaries, so unpruned upgrades would grow without bound.
+for entry in "$library_dir"/*; do
+    name=${entry##*/}
+    if [ -L "$entry" ] || [ ! -d "$entry" ] || [ "$name" = "$version" ] ||
+        [ "$name" = "${previous_version##*/}" ]; then
+        continue
+    fi
+    rm -rf -- "$entry"
+done

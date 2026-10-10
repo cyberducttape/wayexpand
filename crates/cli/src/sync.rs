@@ -378,14 +378,17 @@ fn redact_git_diagnostic(value: &str) -> String {
             let Some(scheme_marker) = part.find("://") else {
                 return part.to_owned();
             };
+            // Step past the whole delimiter: localized Git messages quote
+            // URLs with multi-byte characters such as `»`.
             let scheme_start = part[..scheme_marker]
-                .rfind(|character: char| {
+                .char_indices()
+                .rfind(|&(_, character)| {
                     !character.is_ascii_alphanumeric()
                         && character != '+'
                         && character != '-'
                         && character != '.'
                 })
-                .map_or(0, |index| index + 1);
+                .map_or(0, |(index, character)| index + character.len_utf8());
             let (url, suffix) = part.split_at(part.trim_end_matches(char::is_whitespace).len());
             let (url, trailing) =
                 url.split_at(url.trim_end_matches([',', ';', ')', ']', '\'']).len());
@@ -1236,6 +1239,11 @@ mod tests {
         assert!(!diagnostic.contains("topsecret"));
         assert!(!diagnostic.contains("hidden"));
         assert!(diagnostic.contains("example.invalid/lib.git"));
+        let localized = redact_git_diagnostic(
+            "fatal: Konnte nicht von »https://alice:topsecret@example.invalid/lib.git« lesen\n",
+        );
+        assert!(!localized.contains("topsecret"));
+        assert!(localized.contains("»https://example.invalid/lib.git«"));
     }
 
     #[test]
