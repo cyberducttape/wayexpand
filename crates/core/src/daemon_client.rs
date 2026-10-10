@@ -277,8 +277,9 @@ mod tests {
         let listener = UnixListener::bind(&socket).expect("bind test socket");
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept test client");
-            // Wait for the request to be queued but leave it unread, so the
-            // close produces the ECONNRESET a real overloaded peer can cause.
+            // Wait for the request to be queued, then drain it before sending
+            // the response. The daemon uses the same bounded drain so the
+            // response is not dependent on platform-specific reset timing.
             let mut readable = libc::pollfd {
                 fd: std::os::fd::AsRawFd::as_raw_fd(&stream),
                 events: libc::POLLIN,
@@ -286,6 +287,9 @@ mod tests {
             };
             // SAFETY: `readable` is a valid pollfd for a live descriptor.
             assert_eq!(unsafe { libc::poll(&mut readable, 1, 2_000) }, 1);
+            let mut command = [0_u8; 7];
+            stream.read_exact(&mut command).expect("read request");
+            assert_eq!(&command, b"status\n");
             stream
                 .write_all(b"error=busy\nretryable=true\n")
                 .expect("write busy response");
