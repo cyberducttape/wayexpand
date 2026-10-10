@@ -243,7 +243,7 @@ impl Strings {
     pub fn backend_label(&self, kind: wayexpand_core::BackendKind) -> &'static str {
         match (self.lang, kind) {
             (
-                Language::English,
+                Language::English | Language::Indonesian,
                 wayexpand_core::BackendKind::InputMethodV2 | wayexpand_core::BackendKind::Evdev,
             ) => "Keyboard capture",
             (
@@ -251,7 +251,7 @@ impl Strings {
                 wayexpand_core::BackendKind::InputMethodV2 | wayexpand_core::BackendKind::Evdev,
             ) => "Tastatureingabe",
             (
-                Language::English,
+                Language::English | Language::Indonesian,
                 wayexpand_core::BackendKind::Libei
                 | wayexpand_core::BackendKind::WlrootsVirtualKeyboard
                 | wayexpand_core::BackendKind::Uinput,
@@ -563,7 +563,7 @@ impl Strings {
                 "Zum Testen unterstützt · nicht geprüft"
             }
             (
-                Language::English,
+                Language::English | Language::Indonesian,
                 wayexpand_core::BackendState::Unavailable
                 | wayexpand_core::BackendState::NotImplemented,
             ) => "Unavailable",
