@@ -129,9 +129,20 @@ fn start_prefetch(shared: &Arc<Shared>, read: &ReadClipboard, max_age: Duration)
                 slot.value = Prefetched::Ready(Instant::now(), value);
             }
             worker_shared.ready.notify_all();
-            // Expiration is checked lazily by start_prefetch/take_or_read.
-            // Do not keep an otherwise idle OS thread alive just to clear a
-            // timestamped value.
+            // Erase an unused value instead of keeping clipboard contents
+            // around until the next interaction. The wait ends early once
+            // the value is taken or superseded, so the thread only lingers
+            // while a value is actually held.
+            let slot = lock(&worker_shared);
+            let (mut slot, _) = worker_shared
+                .ready
+                .wait_timeout_while(slot, max_age, |slot| {
+                    slot.generation == generation && matches!(slot.value, Prefetched::Ready(..))
+                })
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if slot.generation == generation {
+                slot.value = Prefetched::Empty;
+            }
         });
     if spawned.is_err() {
         let mut slot = lock(shared);
@@ -159,14 +170,19 @@ fn take_or_read(shared: &Shared, read: &ReadClipboard, max_age: Duration) -> Opt
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .0;
     }
-    match std::mem::take(&mut slot.value) {
-        Prefetched::Ready(at, value) if at.elapsed() < max_age => return value,
+    let taken = std::mem::take(&mut slot.value);
+    if !matches!(taken, Prefetched::Ready(at, _) if at.elapsed() < max_age) {
         // Stale, never prefetched, or still pending past the backstop: the
         // pending read's result will be discarded by its generation check.
-        _ => slot.generation = slot.generation.wrapping_add(1),
+        slot.generation = slot.generation.wrapping_add(1);
     }
     drop(slot);
-    read()
+    // Release a prefetch thread waiting to erase the value just taken.
+    shared.ready.notify_all();
+    match taken {
+        Prefetched::Ready(at, value) if at.elapsed() < max_age => value,
+        _ => read(),
+    }
 }
 
 #[cfg(test)]
@@ -211,11 +227,22 @@ mod tests {
     #[test]
     fn unused_prefetched_value_is_erased_after_max_age() {
         let (read, calls) = counting_read(Duration::ZERO);
-        let (reader, prefetch) = prefetching_clipboard(read, Duration::from_millis(50));
-        (prefetch.0)();
+        let max_age = Duration::from_millis(50);
+        let shared = Arc::new(Shared {
+            slot: Mutex::new(Slot::default()),
+            ready: Condvar::new(),
+        });
+        start_prefetch(&shared, &read, max_age);
         std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            matches!(lock(&shared).value, Prefetched::Empty),
+            "unused clipboard contents must not stay in memory"
+        );
         // The stale value is gone; the render reads synchronously.
-        assert_eq!((reader.0)().as_deref(), Some("value-2"));
+        assert_eq!(
+            take_or_read(&shared, &read, max_age).as_deref(),
+            Some("value-2")
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
