@@ -30,17 +30,37 @@ pub(crate) fn control_command(requested: &str, mut args: Args) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn insert_command(mut args: Args) -> Result<()> {
-    let trigger = args
-        .next()
-        .ok_or_else(|| usage_error("usage: wayexpand insert <trigger>"))?;
-    if args.next().is_some() {
-        usage_bail!("usage: wayexpand insert <trigger>");
-    }
+pub(crate) fn insert_command(args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand insert [--verified] <trigger>";
+    let (verified, trigger) = match args.collect::<Vec<_>>().as_slice() {
+        [trigger] if trigger != "--verified" => (false, trigger.clone()),
+        [flag, trigger] if flag == "--verified" => (true, trigger.clone()),
+        _ => usage_bail!("{USAGE}"),
+    };
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         usage_bail!("a trigger cannot be empty or contain control characters");
     }
-    let response = control_operation(wayexpand_core::DaemonOperation::Insert { trigger })?;
+    let operation = if verified {
+        // Bind the insert to the window focused now; the daemon refuses it
+        // if focus has moved by the time it would type.
+        let response = control_operation(wayexpand_core::DaemonOperation::Focus)?;
+        let focus = wayexpand_core::DaemonFocus::parse(&response)
+            .ok_or_else(|| daemon_error("daemon returned an unreadable focus response"))?;
+        let (generation, token) = focus.verified_target().ok_or_else(|| {
+            daemon_error(
+                "cannot verify the insert target: the window tracker does not report an exact \
+                 identity for the focused window",
+            )
+        })?;
+        wayexpand_core::DaemonOperation::InsertTarget {
+            generation,
+            token: token.to_owned(),
+            trigger,
+        }
+    } else {
+        wayexpand_core::DaemonOperation::Insert { trigger }
+    };
+    let response = control_operation(operation)?;
     if response.trim_end() != "insert scheduled" {
         return Err(daemon_error(format!(
             "daemon refused the insert: {}",

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand insert --verified <trigger>` binds an insert to the window
+  focused when the command runs and fails instead of falling back when that
+  window cannot be identified exactly. The new organization policy
+  `require_verified_insert_target` (safe mode) refuses unverified inserts.
 - Git sync no longer accepts outgoing history whose file names contain
   newlines; such a name could pass the library-path check as two allowed
   paths and publish a file that was later deleted.

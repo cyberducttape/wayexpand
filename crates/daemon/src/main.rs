@@ -263,7 +263,11 @@ fn main() -> Result<()> {
         anyhow::bail!("organization policy blocks startup: {violation}");
     }
 
-    let control = control::ControlServer::start()?;
+    let control = control::ControlServer::start(
+        policy
+            .effective_enforcement_policy()
+            .require_verified_insert_target,
+    )?;
     let managed = control.path().is_some();
     // Work arriving from other threads wakes the reactor instead of waiting
     // for its next poll timeout.

@@ -64,6 +64,40 @@ pub enum DaemonClientError {
     InvalidOperation { reason: &'static str },
 }
 
+/// The daemon's answer to [`DaemonOperation::Focus`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonFocus {
+    pub generation: u64,
+    /// Opaque hexadecimal identity of the focused window; empty when unknown.
+    pub token: String,
+    /// Whether the window tracker reports exact window identity.
+    pub exact_identity: bool,
+}
+
+impl DaemonFocus {
+    /// Parse a `focus` response. Returns `None` when it is missing a
+    /// required field, which proves nothing about the focused window.
+    pub fn parse(response: &str) -> Option<Self> {
+        let field = |name: &str| {
+            response
+                .lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+        };
+        Some(Self {
+            generation: field("focus_generation")?.parse().ok()?,
+            token: field("focus_token")?.to_owned(),
+            exact_identity: field("focus_identity") == Some("exact"),
+        })
+    }
+
+    /// The `(generation, token)` for a verified insert, available only when
+    /// the window has a token and its identity is exact.
+    pub fn verified_target(&self) -> Option<(u64, &str)> {
+        (self.exact_identity && !self.token.is_empty())
+            .then_some((self.generation, self.token.as_str()))
+    }
+}
+
 /// Typed operations supported by the daemon control socket.
 ///
 /// Frontends should construct one of these operations instead of formatting
@@ -241,6 +275,29 @@ fn validate_text(
 mod tests {
     use super::*;
     use std::{fs, os::unix::net::UnixListener, thread};
+
+    #[test]
+    fn focus_response_yields_a_target_only_for_exact_identity() {
+        let exact =
+            DaemonFocus::parse("focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n")
+                .unwrap();
+        assert_eq!(exact.verified_target(), Some((4, "abcd")));
+
+        let inexact = DaemonFocus::parse(
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=unavailable\n",
+        )
+        .unwrap();
+        assert_eq!(inexact.verified_target(), None);
+        let unknown =
+            DaemonFocus::parse("focus_generation=4\nfocus_token=\nfocus_identity=exact\n").unwrap();
+        assert_eq!(unknown.verified_target(), None);
+
+        assert_eq!(
+            DaemonFocus::parse("focus_token=abcd\nfocus_identity=exact\n"),
+            None
+        );
+        assert_eq!(DaemonFocus::parse("running\n"), None);
+    }
 
     #[test]
     fn sends_command_and_reads_response() {

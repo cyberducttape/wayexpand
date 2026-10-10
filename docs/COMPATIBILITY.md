@@ -381,6 +381,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy.policy.require_atomic_replace` (bool): Whether startup requires a protocol-level atomic replacement capability; enforced only when `safe_mode` is true
 - `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
+- `policy.policy.require_verified_insert_target` (bool): Whether explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced only when `safe_mode` is true
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
   - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.
@@ -574,7 +575,7 @@ text is never included. The command exits 0 whether or not the text expands.
 
 ---
 
-### `wayexpand insert <trigger>` and the `insert` control command
+### `wayexpand insert [--verified] <trigger>` and the `insert` control command
 
 `wayexpand insert <trigger>` asks the running daemon to type the snippet with
 that configured trigger at the cursor, erasing nothing. The quick-insert picker
@@ -601,8 +602,22 @@ clipboard-only. `insert-target <generation> <token> <trigger>` is `insert`
 that the daemon refuses unless the focused window still has that token and
 generation when the request is processed.
 
+`wayexpand insert --verified <trigger>` is the verified-target form of the
+CLI: it reads `focus` and sends `insert-target` for the window focused when
+the command runs. It fails (exit `4`) when `focus_identity` is not `exact`,
+rather than falling back to an unverified insert. As with the picker, a
+refusal because focus moved after the request was accepted is logged by the
+daemon, not reported to the client.
+
+When the administrator policy sets `require_verified_insert_target` and
+`safe_mode`, the daemon replies `insert refused: organization policy requires
+a verified insert target (use insert --verified)` to a plain `insert` line and
+queues nothing; `insert-target` is unaffected. In audit mode the plain insert
+proceeds and the violation is logged.
+
 **Exit codes:** `0` when the daemon accepted the request, `2` for a missing or
-malformed trigger, `4` when the daemon is unreachable or rejects the request.
+malformed trigger, `4` when the daemon is unreachable or rejects the request,
+or when `--verified` cannot obtain an exact focus target.
 
 **Stability:** 🧪 **New in 1.2.x** — additive; existing control commands are
 unchanged.
@@ -634,6 +649,9 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::template_env` and `Settings::allow_clipboard`, and
   `OrganizationPolicy::disable_template_env` / `disable_clipboard` — see
   [TEMPLATES.md](TEMPLATES.md).
+- `OrganizationPolicy::require_verified_insert_target` (bool, default
+  `false`, omitted from saved TOML when `false`) — refuse explicit inserts
+  that do not name a verified focus target; see the `insert` section.
 - `Settings::clipboard_mode` (`prefetch`, `fresh`, or `disabled`; default
   `prefetch`) — controls whether clipboard-backed templates may use a bounded
   prefetch snapshot, read at render time, or be blocked.

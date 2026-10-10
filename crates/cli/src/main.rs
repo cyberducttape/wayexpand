@@ -194,7 +194,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Resolve a hotkey without executing it",
             ),
             (
-                "insert <trigger>",
+                "insert [--verified] <trigger>",
                 "Type a snippet at the cursor via the running daemon",
             ),
             (

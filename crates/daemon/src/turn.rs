@@ -193,6 +193,18 @@ impl Daemon {
             // types a snippet at the cursor through the same injector and
             // evdev safety gate as a typed expansion. It is a user action,
             // so a refusal or injection failure is logged, never fatal.
+            if let Some(violation) = unverified_insert_violation(&self.policy, &request) {
+                crate::policy::log_violation(&self.policy, violation);
+                // The control socket already refuses these in safe mode;
+                // this backstop keeps the reactor authoritative.
+                if self
+                    .policy
+                    .effective_enforcement_policy()
+                    .require_verified_insert_target
+                {
+                    return Ok(true);
+                }
+            }
             let snapshot = self.control.focus_snapshot();
             let current_token = self.config.engine.current_window().and_then(focus_token);
             if !insert_target_matches_current_focus(&request, current_token.as_deref(), &snapshot) {
@@ -541,6 +553,15 @@ impl Daemon {
     }
 }
 
+/// Policy violation for an explicit insert that names no focus target.
+fn unverified_insert_violation(
+    policy: &wayexpand_core::OrganizationPolicy,
+    request: &InsertRequest,
+) -> Option<&'static str> {
+    (policy.require_verified_insert_target && request.focus_token.is_none())
+        .then_some("explicit insert refused: no verified focus target was supplied")
+}
+
 fn insert_target_matches_current_focus(
     request: &InsertRequest,
     current_token: Option<&str>,
@@ -559,6 +580,25 @@ fn insert_target_matches_current_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unverified_insert_is_a_violation_only_under_the_policy() {
+        let unguarded = InsertRequest {
+            trigger: ";sig".into(),
+            focus_token: None,
+            focus_generation: None,
+        };
+        let guarded = InsertRequest {
+            focus_token: Some("abcd".into()),
+            focus_generation: Some(1),
+            ..unguarded.clone()
+        };
+        let mut policy = wayexpand_core::OrganizationPolicy::default();
+        assert_eq!(unverified_insert_violation(&policy, &unguarded), None);
+        policy.require_verified_insert_target = true;
+        assert!(unverified_insert_violation(&policy, &unguarded).is_some());
+        assert_eq!(unverified_insert_violation(&policy, &guarded), None);
+    }
 
     #[test]
     fn insert_target_rejects_same_app_title_window_after_focus_changes() {

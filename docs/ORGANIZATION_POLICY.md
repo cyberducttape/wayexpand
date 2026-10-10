@@ -75,6 +75,12 @@ require_atomic_replace = false
 # Require the input source to report password/sensitive-field focus
 require_sensitive_focus = false
 
+# Refuse explicit snippet inserts unless they name the exact focused window
+# (`wayexpand insert --verified` or the quick-insert picker). Plain
+# `wayexpand insert` is best-effort: it targets whatever is focused when the
+# daemon types. Requires a window tracker with exact identity (KWin).
+require_verified_insert_target = false
+
 # Maximum replacement text size in bytes (0 = unlimited)
 max_replacement_size = 65536
 
@@ -102,7 +108,7 @@ When `safe_mode = true`:
   `require_sensitive_focus` reject startup before capture begins when the
   selected source/backend cannot provide the guarantee. libei and wlroots
   output are `best-effort`, IBus is `verified`, input-method-v2 is `atomic`
-- Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends
+- Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`)
 - Can require absolute command paths so `program = "git"` is rejected
 
 **Enforcement is consistent across all policy paths:** All expansion checks
@@ -142,6 +148,7 @@ require_absolute_commands = true
 disable_title_matching = false
 require_atomic_replace = true
 require_sensitive_focus = true
+require_verified_insert_target = true
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]
 # Empty is unrestricted, so list the packs explicitly when restricting use.

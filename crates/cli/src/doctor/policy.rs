@@ -33,6 +33,7 @@ pub(crate) fn print_policy_diagnostics_json(
                     .minimum_replacement_guarantee
                     .map(wayexpand_core::ReplacementGuarantee::as_str),
                 "require_sensitive_focus": policy.require_sensitive_focus,
+                "require_verified_insert_target": policy.require_verified_insert_target,
                 "disable_hotkeys": policy.disable_hotkeys,
                 "disable_title_matching": policy.disable_title_matching,
                 "max_replacement_size": policy.max_replacement_size,

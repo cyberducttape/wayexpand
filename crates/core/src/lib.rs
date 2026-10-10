@@ -42,7 +42,7 @@ pub use config::{
     ConfigError, ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
-pub use daemon_client::{DaemonClient, DaemonClientError, DaemonOperation};
+pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};
 pub use engine::{
     run_command, run_command_cancellable, BrokerOperation, BrokerProtocolFailure,

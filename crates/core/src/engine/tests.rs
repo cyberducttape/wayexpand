@@ -4322,6 +4322,31 @@ fn aliases_are_omitted_from_saved_toml_when_empty() {
 }
 
 #[test]
+fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
+    let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
+    let text = toml::to_string(&config).unwrap();
+    assert!(!text.contains("require_verified_insert_target"), "{text}");
+
+    let required =
+        Config::parse("[organization]\nrequire_verified_insert_target = true\n").unwrap();
+    let text = toml::to_string(&required).unwrap();
+    assert!(
+        Config::parse(&text)
+            .unwrap()
+            .organization
+            .require_verified_insert_target
+    );
+    assert!(required.organization.is_active());
+    assert!(
+        !required
+            .organization
+            .effective_enforcement_policy()
+            .require_verified_insert_target,
+        "audit mode must not enforce"
+    );
+}
+
+#[test]
 fn default_clipboard_mode_is_omitted_from_saved_toml() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();

@@ -671,24 +671,16 @@ fn picker_expansion_is_eligible(expansion: &ExpansionConfig, daemon_available: b
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
-    let generation = response
-        .lines()
-        .find_map(|line| line.strip_prefix("focus_generation="))?
-        .parse()
-        .ok()?;
-    let token = response
-        .lines()
-        .find_map(|line| line.strip_prefix("focus_token="))?;
-    let exact_identity_available = response
-        .lines()
-        .find_map(|line| line.strip_prefix("focus_identity="))
-        == Some("exact");
-    let token = token.to_owned();
+    let focus = wayexpand_core::DaemonFocus::parse(response)?;
     Some(FocusInfo {
-        target: (!token.is_empty() && exact_identity_available)
-            .then_some(FocusTarget { generation, token }),
+        target: focus
+            .verified_target()
+            .map(|(generation, token)| FocusTarget {
+                generation,
+                token: token.to_owned(),
+            }),
         daemon_available: true,
-        exact_identity_available,
+        exact_identity_available: focus.exact_identity,
     })
 }
 

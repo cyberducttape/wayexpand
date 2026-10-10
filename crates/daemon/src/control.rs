@@ -109,7 +109,10 @@ impl ControlServer {
         }
     }
 
-    pub fn start() -> Result<Self> {
+    /// Start the control socket. With `require_verified_insert`, an insert
+    /// request without a focus target is refused before it reaches the
+    /// reactor, so the client learns why nothing was inserted.
+    pub fn start(require_verified_insert: bool) -> Result<Self> {
         let Some(requested_path) = socket_path() else {
             return Ok(Self::detached());
         };
@@ -211,6 +214,7 @@ impl ControlServer {
                         stop: Arc::clone(&stop_flag),
                         pause: Arc::clone(&pause_flag),
                         insert: Arc::clone(&insert_slot),
+                        require_verified_insert,
                         focus: Arc::clone(&focus_slot),
                         explain: Arc::clone(&explain_slot),
                         usage_clear: Arc::clone(&usage_clear_slot),
@@ -369,6 +373,7 @@ struct Flags {
     stop: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     insert: Arc<Mutex<Option<InsertRequest>>>,
+    require_verified_insert: bool,
     focus: Arc<Mutex<FocusSnapshot>>,
     explain: Arc<Mutex<Option<ExplainRequest>>>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
@@ -402,6 +407,11 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
     let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
     let _ = stream.shutdown(std::net::Shutdown::Write);
 }
+
+/// Reply to an insert without a focus target under
+/// `require_verified_insert_target`.
+pub const UNVERIFIED_INSERT_REFUSED: &str =
+    "insert refused: organization policy requires a verified insert target (use insert --verified)\n";
 
 /// The trigger of an `insert <trigger>` request, taken verbatim: a
 /// configured trigger may legitimately begin or end with a space. Control
@@ -479,6 +489,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         stop,
         pause,
         insert,
+        require_verified_insert,
         focus,
         explain,
         usage_clear,
@@ -510,6 +521,9 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     };
     if let Some(request) = insert_request(&command) {
         let response = match request {
+            Some(request) if require_verified_insert && request.focus_token.is_none() => {
+                UNVERIFIED_INSERT_REFUSED
+            }
             Some(request) => {
                 *insert
                     .lock()
@@ -624,6 +638,7 @@ mod tests {
                     stop: stop_worker,
                     pause: pause_worker,
                     insert,
+                    require_verified_insert: false,
                     focus,
                     explain: Arc::new(Mutex::new(None)),
                     usage_clear: Arc::new(Mutex::new(None)),
@@ -673,6 +688,40 @@ mod tests {
     }
 
     #[test]
+    fn verified_insert_policy_refuses_requests_without_a_focus_target() {
+        let insert = Arc::new(Mutex::new(None));
+        let flags = Flags {
+            reload: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            pause: Arc::new(AtomicBool::new(false)),
+            insert: Arc::clone(&insert),
+            require_verified_insert: true,
+            focus: Arc::new(Mutex::new(FocusSnapshot::default())),
+            explain: Arc::new(Mutex::new(None)),
+            usage_clear: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new(String::new())),
+            waker: Arc::default(),
+        };
+        let send = |command: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags.clone()).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        };
+
+        assert_eq!(send("insert ;sig\n"), UNVERIFIED_INSERT_REFUSED);
+        assert!(insert.lock().unwrap().is_none(), "nothing may be queued");
+
+        assert_eq!(send("insert-target 4 abcd ;sig\n"), "insert scheduled\n");
+        let queued = insert.lock().unwrap().clone().unwrap();
+        assert_eq!(queued.focus_token.as_deref(), Some("abcd"));
+        assert_eq!(queued.focus_generation, Some(4));
+    }
+
+    #[test]
     fn insert_takes_the_trigger_verbatim_and_refuses_control_characters() {
         let reload = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -685,6 +734,7 @@ mod tests {
             stop,
             pause,
             insert: Arc::clone(&insert),
+            require_verified_insert: false,
             focus: Arc::clone(&focus),
             explain: Arc::new(Mutex::new(None)),
             usage_clear: Arc::new(Mutex::new(None)),
@@ -915,6 +965,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::new(Mutex::new(None)),
+            require_verified_insert: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: Arc::new(Mutex::new(None)),
             usage_clear: Arc::new(Mutex::new(None)),

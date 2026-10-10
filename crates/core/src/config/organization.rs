@@ -52,6 +52,14 @@ pub struct OrganizationPolicy {
     /// focus (password, PIN, or equivalent).
     pub require_sensitive_focus: bool,
 
+    /// Refuse explicit snippet inserts (`wayexpand insert`, the quick-insert
+    /// picker) unless the request names the exact focused window it was
+    /// prepared for and that window is still focused. Unverified best-effort
+    /// inserts are logged in audit mode and refused in safe mode. Omitted
+    /// from saved files when false so older releases can still read them.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub require_verified_insert_target: bool,
+
     /// Maximum replacement size in bytes. Replacements larger than this
     /// are rejected. Prevents DoS via huge expansions. 0 = unlimited.
     pub max_replacement_size: usize,
@@ -94,6 +102,7 @@ impl Default for OrganizationPolicy {
             require_atomic_replace: false,
             minimum_replacement_guarantee: None,
             require_sensitive_focus: false,
+            require_verified_insert_target: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
             allowed_packs: Vec::new(),
@@ -126,6 +135,7 @@ impl OrganizationPolicy {
         effective.require_atomic_replace = false;
         effective.minimum_replacement_guarantee = None;
         effective.require_sensitive_focus = false;
+        effective.require_verified_insert_target = false;
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
         effective.allowed_packs.clear();
@@ -146,6 +156,7 @@ impl OrganizationPolicy {
             || self.require_atomic_replace
             || self.minimum_replacement_guarantee.is_some()
             || self.require_sensitive_focus
+            || self.require_verified_insert_target
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
             || !self.allowed_packs.is_empty()
