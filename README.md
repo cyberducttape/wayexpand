@@ -136,7 +136,10 @@ Be precise about what works where:
 
 See the [support matrix](docs/SUPPORT_MATRIX.md) and
 [certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known
-limits.
+limits. Deployment teams should also use the
+[production acceptance checklist](docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md);
+it separates implemented controls from gates that require real desktop
+evidence.
 
 ## Security and operational safety
 

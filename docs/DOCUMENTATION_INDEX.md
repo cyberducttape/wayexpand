@@ -141,6 +141,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [PACKAGING.md](PACKAGING.md) | Package maintainers | Building for distros |
 | [RELEASING.md](RELEASING.md) | Maintainers | Release process |
 | [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
+| [PRODUCTION_ACCEPTANCE_CHECKLIST.md](PRODUCTION_ACCEPTANCE_CHECKLIST.md) | Release/SRE teams | Evidence gates for production deployment |
 | [LIBRARY_SYNC.md](LIBRARY_SYNC.md) | All users | Optional Git sync of the snippet library |
 | [TEMPLATES.md](TEMPLATES.md) | All users | Template variables and their trust levels |
 | [FUZZING.md](FUZZING.md) | Contributors/QA | Fuzz targets for untrusted input |

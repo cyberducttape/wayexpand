@@ -25,6 +25,11 @@ Point the importer at an Espanso match file:
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 ```
 
+Use `--strict` to discard matches whose Espanso behavior cannot be preserved;
+unmapped top-level options reject the import. Use `--report-json` to emit the
+machine-readable report on stderr for review or fleet tooling. Without
+`--strict`, the importer keeps supported matches and records semantic warnings.
+
 The command writes converted TOML to stdout and prints a migration report to
 stderr. The report separates fully migrated entries, entries migrated with
 warnings or unmapped options, and unsupported dynamic matches.
@@ -40,6 +45,13 @@ For a large migration, keep the report with the converted file:
 wayexpand import espanso ~/.config/espanso/match/base.yml \
   > ~/wayexpand-import.toml 2> ~/wayexpand-import-report.txt
 wayexpand validate ~/wayexpand-import.toml
+```
+
+For a strict migration with a structured report:
+
+```bash
+wayexpand import espanso ~/.config/espanso/match/base.yml --strict --report-json \
+  > ~/wayexpand-import.toml 2> ~/wayexpand-import-report.json
 ```
 
 This gives you a concrete answer such as “fully migrated / warnings /

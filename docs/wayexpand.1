@@ -59,8 +59,10 @@ contents, credentials, and detailed error strings. A file is created with mode
 .B fleet status [--json]
 Show the merged fleet configuration layers and their provenance.
 .TP
-.B import espanso FILE
-Import an Espanso YAML file and print the converted TOML configuration.
+.B import espanso FILE [--strict] [--report-json]
+Import an Espanso YAML file and print converted TOML. Strict mode discards
+matches with unmapped semantics; report-json emits a machine-readable report
+on stderr.
 .TP
 .B set-enabled TRIGGER on|off [CONFIG]
 Enable or disable an expansion and save the configuration atomically.

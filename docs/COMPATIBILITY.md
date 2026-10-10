@@ -634,6 +634,9 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::template_env` and `Settings::allow_clipboard`, and
   `OrganizationPolicy::disable_template_env` / `disable_clipboard` — see
   [TEMPLATES.md](TEMPLATES.md).
+- `Settings::clipboard_mode` (`prefetch`, `fresh`, or `disabled`; default
+  `prefetch`) — controls whether clipboard-backed templates may use a bounded
+  prefetch snapshot, read at render time, or be blocked.
 - `ExpansionConfig::aliases` (list of strings, default empty, omitted from
   saved TOML and JSON when empty) — additional triggers for the same
   replacement. Older readers that reject unknown fields will not load a
