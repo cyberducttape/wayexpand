@@ -191,6 +191,34 @@ fn versioned_load_uses_one_source_snapshot_and_rejects_stale_save() {
 }
 
 #[test]
+fn conditional_save_reports_reintroduced_legacy_content_as_conflict() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-config-legacy-conflict-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let legacy = "[[expansion]]\ntrigger = \":x\"\nreplacement = \"old\"\n";
+    fs::write(&path, legacy).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let loaded = Config::load_versioned(&path).unwrap();
+
+    // Another tool writes legacy (ID-less) content back.
+    fs::write(&path, legacy).unwrap();
+    let started = std::time::Instant::now();
+    let error = loaded
+        .config
+        .save_atomic_if_revision_matches(&path, &loaded.revision)
+        .unwrap_err();
+    assert!(matches!(error, ConfigError::RevisionConflict), "{error:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "the save must not wait on its own lock"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
 fn concurrent_legacy_loaders_converge_on_persisted_ids() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-config-concurrent-legacy-{}.toml",

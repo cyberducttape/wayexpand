@@ -908,7 +908,11 @@ impl Config {
         let resolved = resolve_config_target(path.as_ref())?;
         validate_parent_directories(&resolved)?;
         let _lock = ConfigWriteLock::acquire(&resolved)?;
-        let current = Self::load_versioned(&resolved)?;
+        // Not `load_versioned`: its legacy-ID migration takes this same lock
+        // again and would time out as Busy. Legacy content on disk cannot
+        // match a revision handed out by `load_versioned`, so it is reported
+        // as the conflict it is.
+        let current = Self::load_versioned_once(&resolved)?;
         if current.revision != *expected {
             return Err(ConfigError::RevisionConflict);
         }
