@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Indonesian GUI locale is now translated. It previously shared the
+  English text for every string, so selecting Bahasa Indonesia showed
+  English; a test now rejects shared English/Indonesian string arms.
 - On the evdev + libei route, output transactions run on the output worker
   as pending reactor state instead of blocking the reactor. Stop, status,
   and `explain` stay responsive during slow or wedged output; input, focus,

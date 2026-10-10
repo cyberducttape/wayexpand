@@ -1786,3 +1786,24 @@ fn editor_command_limits_are_exactly_cores() {
     draft.command_args.push("x".into());
     assert!(draft.command_config().is_err());
 }
+
+#[test]
+fn indonesian_strings_are_translated_not_english_fallbacks() {
+    // Every string arm must name Indonesian on its own; sharing an arm with
+    // English silently shows English text to Indonesian users.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lang");
+    for entry in fs::read_dir(&directory).unwrap() {
+        let path = entry.unwrap().path();
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(
+            !source.contains("Language::English | Language::Indonesian"),
+            "{} shares English text with Indonesian",
+            path.display()
+        );
+    }
+    let english = crate::lang::Strings::new(Language::English);
+    let indonesian = crate::lang::Strings::new(Language::Indonesian);
+    assert_eq!(indonesian.settings(), "Pengaturan");
+    assert_eq!(indonesian.cancel(), "Batal");
+    assert_ne!(indonesian.save_settings(), english.save_settings());
+}

@@ -599,8 +599,7 @@ WayExpand GUI now supports multiple languages with automatic detection and manua
 
 - **English** (en) — Default
 - **Deutsch** (de) — German
-- **Bahasa Indonesia** (id) — Indonesian locale with English fallback while the
-  catalog is being translated
+- **Bahasa Indonesia** (id) — Indonesian
 
 ## Using Different Languages
 
