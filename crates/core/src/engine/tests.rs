@@ -1395,6 +1395,49 @@ fn non_atomic_failure_during_insert_is_unknown_and_not_replayed() {
     assert_eq!(injector.calls, ["erase::x", "insert:replacement"]);
 }
 
+#[test]
+fn non_atomic_failures_with_delimiter_reinsertion_are_unknown_and_not_replayed() {
+    let result = ExpansionResult {
+        reinsert_after: Some(' '),
+        ..failure_injection_result()
+    };
+    for (fail_on_erase, expected_calls) in [
+        (true, vec!["erase::x "]),
+        (false, vec!["erase::x ", "insert:replacement "]),
+    ] {
+        let mut injector = FailingNonAtomicInjector {
+            fail_on_erase,
+            fail_on_insert: !fail_on_erase,
+            calls: Vec::new(),
+        };
+        let outcome = ExpansionEngine::apply(&mut injector, &result);
+        assert!(
+            matches!(
+                outcome,
+                crate::TransactionOutcome::UnknownPartialFailure { .. }
+            ),
+            "fail_on_erase={fail_on_erase}: {outcome:?}"
+        );
+        // The delimiter travels with the erase and insert; nothing is retried.
+        assert_eq!(injector.calls, expected_calls);
+    }
+}
+
+#[test]
+fn cursor_failure_after_delimiter_reinsertion_is_reported_as_applied() {
+    let result = ExpansionResult {
+        cursor_offset: Some(1),
+        reinsert_after: Some(' '),
+        ..failure_injection_result()
+    };
+    let outcome = ExpansionEngine::apply(&mut CursorFailingInjector, &result);
+    assert!(matches!(
+        &outcome,
+        crate::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+    ));
+    assert!(outcome.is_applied());
+}
+
 struct AtomicInjector {
     calls: Vec<String>,
 }
