@@ -550,8 +550,11 @@ fn verify_outgoing_paths(directory: &Path, base: Option<&str>, primary: &str) ->
             &range,
         ],
     )?;
+    // With `-z` and an empty format, every path is NUL-terminated. Paths may
+    // legally contain newlines, so splitting on them as well would let
+    // `expansions.toml\nanything` pass as two allowlisted paths.
     let mut foreign: Vec<&str> = touched
-        .split(['\0', '\n'])
+        .split('\0')
         .filter(|path| !path.is_empty() && !is_library_path(path, primary))
         .collect();
     if foreign.is_empty() {
@@ -737,6 +740,30 @@ mod tests {
         )
         .expect("configure test Git user email");
         (directory, config_path)
+    }
+
+    #[test]
+    fn outgoing_history_rejects_paths_with_embedded_newlines() {
+        let (directory, _config_path) = prepare_repository();
+        git_ok(&directory, &["add", "expansions.toml"]).unwrap();
+        git_ok(&directory, &["commit", "--quiet", "-m", "library"]).unwrap();
+        let hidden = directory.join("expansions.toml\nsnippets.d");
+        std::fs::create_dir(&hidden).unwrap();
+        std::fs::write(hidden.join("private.toml"), "secret\n").unwrap();
+        git_ok(&directory, &["add", "--all"]).unwrap();
+        git_ok(&directory, &["commit", "--quiet", "-m", "smuggle"]).unwrap();
+        std::fs::remove_dir_all(&hidden).unwrap();
+        git_ok(&directory, &["add", "--all"]).unwrap();
+        git_ok(&directory, &["commit", "--quiet", "-m", "hide"]).unwrap();
+
+        // The file is gone from HEAD, so only the history check can catch it.
+        verify_library_tree(&directory, "HEAD", "expansions.toml").unwrap();
+        let error = verify_outgoing_paths(&directory, None, "expansions.toml").unwrap_err();
+        assert!(
+            error.to_string().contains("outside the snippet library"),
+            "{error:#}"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
