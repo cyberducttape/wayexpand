@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use crate::control::InsertRequest;
+use crate::pending_output::{OutputJob, OutputOrigin};
 use crate::*;
 use wayexpand_core::CheckStatus;
 
@@ -130,6 +131,17 @@ impl Daemon {
             };
             restore_abandoned_results(&mut self.config.engine, gating.abandoned);
 
+            if self.serialized_output() {
+                return self.start_output(
+                    OutputOrigin::Command,
+                    gating
+                        .results
+                        .into_iter()
+                        .map(OutputJob::Expansion)
+                        .collect(),
+                    gating.follow_up,
+                );
+            }
             if !gating.results.is_empty() {
                 if self.input_method_mode {
                     if let Some(source) = self.input_method.as_mut() {
@@ -229,6 +241,18 @@ impl Daemon {
                     if !gating.abandoned.is_empty() {
                         warn!("requested snippet insert abandoned because input arrived first");
                     }
+                    if self.serialized_output() {
+                        self.start_output(
+                            OutputOrigin::Insert,
+                            gating
+                                .results
+                                .into_iter()
+                                .map(OutputJob::Expansion)
+                                .collect(),
+                            gating.follow_up,
+                        )?;
+                        return Ok(false);
+                    }
                     let outcome = if gating.results.is_empty() {
                         Ok(())
                     } else if self.input_method_mode {
@@ -262,25 +286,7 @@ impl Daemon {
                         Ok(())
                     };
                     if let Err(error) = outcome {
-                        warn!(%error, "requested snippet insert failed");
-                        if error.retryable() {
-                            // A timed-out or partially applied picker insert
-                            // has an unknown outcome. Retire this actor and
-                            // wait for its worker to stop before reconnecting;
-                            // never submit another request to it or replay
-                            // this insert against a new focused window.
-                            self.retire_output_injector();
-                            let _ = process_event(
-                                &mut self.config.engine,
-                                InputEvent::EndOfInput,
-                                None,
-                                &self.policy,
-                                self.active_backend,
-                            );
-                            self.connection_state = "reconnecting";
-                            self.output_retry_at = Some(Instant::now());
-                            self.output_retry_delay = Duration::from_millis(250);
-                        }
+                        self.recover_from_insert_error(&error);
                     }
                     replay_evdev_follow_up(
                         &mut self.config.engine,
@@ -382,7 +388,7 @@ impl Daemon {
             ) {
                 Ok(backend) => {
                     if self.evdev_mode && self.backend_name == "libei" {
-                        match spawn_async_injector(backend) {
+                        match spawn_async_injector(backend, Some(self.waker.clone())) {
                             Ok((backend, failures, worker_state)) => {
                                 self.injector = Some(backend);
                                 self.output_failures = Some(failures);
@@ -468,6 +474,29 @@ impl Daemon {
         self.output_retry_at = Some(Instant::now());
         self.output_retry_delay = Duration::from_millis(250);
         Ok(())
+    }
+
+    /// Handle a failed explicit insert. It is a user action, so a failure is
+    /// logged and never fatal; the insert is never replayed.
+    pub(crate) fn recover_from_insert_error(&mut self, error: &EventError) {
+        warn!(%error, "requested snippet insert failed");
+        if error.retryable() {
+            // A timed-out or partially applied picker insert has an unknown
+            // outcome. Retire this actor and wait for its worker to stop
+            // before reconnecting; never submit another request to it or
+            // replay this insert against a new focused window.
+            self.retire_output_injector();
+            let _ = process_event(
+                &mut self.config.engine,
+                InputEvent::EndOfInput,
+                None,
+                &self.policy,
+                self.active_backend,
+            );
+            self.connection_state = "reconnecting";
+            self.output_retry_at = Some(Instant::now());
+            self.output_retry_delay = Duration::from_millis(250);
+        }
     }
 
     /// Tell the engine what the live output route guarantees about erasing

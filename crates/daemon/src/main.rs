@@ -9,6 +9,7 @@ mod input_loop;
 mod latency;
 mod output_health;
 mod output_loop;
+mod pending_output;
 mod policy;
 mod reactor;
 mod reload;
@@ -148,6 +149,9 @@ struct Daemon {
     output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
     output_worker: Option<OutputWorkerState>,
     retiring_output_workers: Vec<OutputWorkerState>,
+    /// A transaction in flight on the serialized output worker; see
+    /// `pending_output`.
+    pending_output: Option<pending_output::PendingOutput>,
     stdin_closed: bool,
     logged_queue_rejections: u64,
     waker: waker::Waker,
@@ -370,8 +374,9 @@ fn main() -> Result<()> {
                     anyhow::bail!("output backend startup cancelled while stopping")
                 };
                 if evdev_mode && backend == "libei" {
-                    let (injector, failures, worker_state) = spawn_async_injector(injector)
-                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    let (injector, failures, worker_state) =
+                        spawn_async_injector(injector, Some(waker.clone()))
+                            .map_err(|error| anyhow::anyhow!("{error}"))?;
                     output_failures = Some(failures);
                     output_worker = Some(worker_state);
                     Some(injector)
@@ -473,12 +478,19 @@ fn main() -> Result<()> {
         output_failures,
         output_worker,
         retiring_output_workers: Vec::new(),
+        pending_output: None,
         stdin_closed,
         logged_queue_rejections,
         waker,
         usage,
     };
     loop {
+        if daemon.pending_output.is_some() {
+            match daemon.service_pending_output()? {
+                Step::Next => continue,
+                Step::Stop => break,
+            }
+        }
         let metrics = match daemon.maintain()? {
             std::ops::ControlFlow::Continue(metrics) => metrics,
             std::ops::ControlFlow::Break(()) => break,
@@ -491,8 +503,13 @@ fn main() -> Result<()> {
             input_loop::IDLE_MAINTENANCE_INTERVAL
         };
         daemon.apply_completed_commands()?;
+        // Output started on the serialized worker ends the turn: nothing
+        // else may produce output until its outcome is known.
+        if daemon.pending_output.is_some() {
+            continue;
+        }
         daemon.answer_explain_request();
-        if daemon.handle_insert_request()? {
+        if daemon.handle_insert_request()? || daemon.pending_output.is_some() {
             continue;
         }
         daemon.publish_status(metrics);

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- On the evdev + libei route, output transactions run on the output worker
+  as pending reactor state instead of blocking the reactor. Stop, status,
+  and `explain` stay responsive during slow or wedged output; input, focus,
+  pause, reload, and further output still wait for the outcome, so ordering
+  and undo bookkeeping are unchanged.
 - GUI command previews run in a transient systemd user unit with the
   daemon's sandbox directives and minimal environment, so a preview fails
   where the real expansion would. Without a systemd user manager they run

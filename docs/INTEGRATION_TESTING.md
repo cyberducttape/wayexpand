@@ -133,6 +133,15 @@ call that completes after its acknowledgement deadline and verify both that
 the late call is observable and that no replacement injector is created before
 the old worker terminates.
 
+On the serialized route (evdev capture with libei output) each expansion,
+undo, or insert is applied on the output worker as one transaction while the
+reactor keeps it as pending state. Until its outcome arrives or its deadline
+passes, the daemon still honors `stop` and keeps status and `explain`
+current; input, focus changes, pause, reload, command completions, and inserts
+wait so that what is typed, and how it is recorded for undo, keeps its order.
+Certification should stop the service during a long paced insert and confirm
+that it exits promptly.
+
 ### Expansion latency interpretation
 
 The daemon publishes separate rolling percentiles for matcher/preparation

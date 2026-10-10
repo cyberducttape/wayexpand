@@ -36,6 +36,23 @@ impl Waker {
     pub fn fd(&self) -> Arc<OwnedFd> {
         Arc::clone(&self.fd)
     }
+
+    /// Wait up to `timeout` for a wakeup and consume it. Used while the
+    /// reactor is not polling a capture source.
+    pub fn wait(&self, timeout: std::time::Duration) {
+        let mut fds = [rustix::event::PollFd::new(
+            &*self.fd,
+            rustix::event::PollFlags::IN,
+        )];
+        let timeout = rustix::event::Timespec {
+            tv_sec: i64::try_from(timeout.as_secs()).unwrap_or(i64::MAX),
+            tv_nsec: i64::from(timeout.subsec_nanos()),
+        };
+        if rustix::event::poll(&mut fds, Some(&timeout)).is_ok_and(|ready| ready > 0) {
+            let mut buffer = [0_u8; 8];
+            let _ = rustix::io::read(&*self.fd, &mut buffer);
+        }
+    }
 }
 
 /// A waker installed after construction, for components (such as the control
@@ -59,6 +76,20 @@ mod tests {
             tv_nsec: 0,
         };
         rustix::event::poll(&mut fds, Some(&timeout)).unwrap() > 0
+    }
+
+    #[test]
+    fn wait_returns_on_wake_and_consumes_it() {
+        let waker = Waker::new().unwrap();
+        let started = std::time::Instant::now();
+        waker.wait(std::time::Duration::from_millis(20));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(20));
+
+        waker.wake();
+        let started = std::time::Instant::now();
+        waker.wait(std::time::Duration::from_secs(5));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(!readable(&waker.fd()));
     }
 
     #[test]

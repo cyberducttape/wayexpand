@@ -203,6 +203,10 @@ impl Daemon {
                     &self.control,
                     &mut self.focus_state,
                 )?;
+                if self.serialized_output() {
+                    self.start_evdev_output(event)?;
+                    return Ok(Step::Next);
+                }
                 let result = if let Some(mut backend) = self.injector.take() {
                     // Match immediately. The release/quiet gates are only
                     // needed if the matcher actually produced text that

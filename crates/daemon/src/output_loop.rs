@@ -21,7 +21,8 @@ use tracing::{info, warn};
 use wayexpand_backend_libei::{LibeiInjector, LibeiOptions};
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{
-    InjectorCapabilities, InjectorError, InjectorErrorKind, KeyEventState, Modifiers, TextInjector,
+    ExpansionResult, InjectorCapabilities, InjectorError, InjectorErrorKind, KeyEventState,
+    Modifiers, TextInjector, TransactionOutcome,
 };
 
 use crate::{control, input_loop::wait_for_retry, status};
@@ -36,8 +37,9 @@ pub struct OutputConnectError {
 const ASYNC_OUTPUT_QUEUE_CAPACITY: usize = 64;
 
 /// Fixed allowance for one backend operation to be acknowledged, on top of
-/// any paced typing time. The daemon reactor waits for the acknowledgement,
-/// so a wedged portal or compositor must not stall it indefinitely.
+/// any paced typing time. Output waits for the acknowledgement before the
+/// next input is processed, so a wedged portal or compositor must not hold
+/// that up indefinitely.
 const OUTPUT_COMPLETION_BASE: Duration = Duration::from_secs(5);
 
 /// How long to wait for one operation that types `chars` characters. Paced
@@ -64,10 +66,11 @@ pub struct OutputFailure {
 /// Observable lifetime state for a serialized output worker. A cancelled
 /// worker can still be inside a backend call; callers must wait for this state
 /// to become stopped before reconnecting the same output route.
-#[derive(Clone, Debug)]
 pub struct OutputWorkerState {
     running: Arc<AtomicBool>,
     retired_at: Option<std::time::Instant>,
+    /// Present only while the worker is the live output route.
+    submitter: Option<TransactionSubmitter>,
 }
 
 impl OutputWorkerState {
@@ -75,10 +78,19 @@ impl OutputWorkerState {
         self.running.load(Ordering::Acquire)
     }
 
-    /// Mark the worker as retired now, for stall reporting.
+    /// Mark the worker as retired now, for stall reporting. This drops the
+    /// transaction submitter: a remaining sender would keep the worker
+    /// waiting for commands, so it would never report stopped.
     pub fn retire(mut self) -> Self {
         self.retired_at = Some(std::time::Instant::now());
+        self.submitter = None;
         self
+    }
+
+    /// Submits whole transactions without waiting for them, for the live
+    /// worker only.
+    pub fn submitter(&self) -> Option<&TransactionSubmitter> {
+        self.submitter.as_ref()
     }
 
     pub fn retired_at(&self) -> Option<std::time::Instant> {
@@ -150,7 +162,63 @@ enum OutputCommand {
     Key(u32, Completion),
     KeyWithModifiers(u32, Modifiers, Completion),
     KeyEvent(u32, Modifiers, KeyEventState, Completion),
+    /// A whole expansion transaction, applied on the worker and reported as
+    /// one outcome, so the reactor need not wait for each step.
+    Transaction(Box<ExpansionResult>, SyncSender<TransactionOutcome>),
     Shutdown,
+}
+
+/// Starts transactions on the serialized output worker without waiting for
+/// them. The reactor keeps the returned [`SubmittedTransaction`] as pending
+/// state and continues servicing stop and status while the backend types.
+pub struct TransactionSubmitter {
+    sender: SyncSender<OutputCommand>,
+    cancel: Arc<AtomicBool>,
+    failure_sender: SyncSender<OutputFailure>,
+    capabilities: InjectorCapabilities,
+    name: &'static str,
+}
+
+/// A transaction accepted by the worker, awaiting its outcome.
+pub struct SubmittedTransaction {
+    pub outcome: Receiver<TransactionOutcome>,
+    pub deadline: std::time::Instant,
+}
+
+impl TransactionSubmitter {
+    pub fn submit(&self, result: &ExpansionResult) -> Result<SubmittedTransaction, InjectorError> {
+        let (completion, outcome) = sync_channel(1);
+        let chars = result.matched_text.chars().count()
+            + result.insert.chars().count()
+            + usize::from(result.reinsert_after.is_some()) * 2
+            + result.cursor_offset.unwrap_or(0);
+        enqueue_command(
+            &self.sender,
+            OutputCommand::Transaction(Box::new(result.clone()), completion),
+            self.name,
+        )?;
+        Ok(SubmittedTransaction {
+            outcome,
+            deadline: std::time::Instant::now() + completion_deadline(&self.capabilities, chars),
+        })
+    }
+
+    /// The transaction was not acknowledged in time. Its outcome is
+    /// unknown: stop the worker from taking further work and report the
+    /// failure like a synchronous timeout. Returns the timeout error.
+    pub fn abandon_after_timeout(&self) -> InjectorError {
+        self.cancel.store(true, Ordering::Release);
+        let message = "output backend did not acknowledge the transaction in time".to_owned();
+        let _ = self.failure_sender.try_send(OutputFailure {
+            message: message.clone(),
+            retryable: true,
+        });
+        InjectorError {
+            backend: self.name,
+            message,
+            retryable: true,
+        }
+    }
 }
 
 /// A serialized TextInjector actor. Each operation carries a completion
@@ -235,6 +303,7 @@ fn enqueue_command(
 /// drained by the daemon reactor so worker failures trigger normal recovery.
 pub fn spawn_async_injector(
     backend: Box<dyn TextInjector>,
+    waker: Option<crate::waker::Waker>,
 ) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
     let capabilities = backend.capabilities();
     let name = backend.name();
@@ -244,9 +313,17 @@ pub fn spawn_async_injector(
     let worker_failure_sender = failure_sender.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
+    let submitter = TransactionSubmitter {
+        sender: sender.clone(),
+        cancel: Arc::clone(&cancel),
+        failure_sender: failure_sender.clone(),
+        capabilities,
+        name,
+    };
     let worker_state = OutputWorkerState {
         running: Arc::new(AtomicBool::new(true)),
         retired_at: None,
+        submitter: Some(submitter),
     };
     let worker_running = Arc::clone(&worker_state.running);
     let worker = thread::Builder::new()
@@ -280,6 +357,30 @@ pub fn spawn_async_injector(
                         backend.inject_key_event(keycode, modifiers, state),
                         completion,
                     ),
+                    OutputCommand::Transaction(result, completion) => {
+                        let outcome = crate::latency::apply(backend.as_mut(), &result);
+                        // As for single operations: a rejected expansion
+                        // leaves the session healthy; any other failure
+                        // stops the actor and triggers recovery.
+                        let failed = outcome
+                            .source()
+                            .filter(|error| error.kind() != InjectorErrorKind::ExpansionRejected);
+                        if let Some(error) = failed {
+                            let _ = worker_failure_sender.try_send(OutputFailure {
+                                message: error.message.clone(),
+                                retryable: error.retryable,
+                            });
+                        }
+                        let stop = failed.is_some();
+                        let _ = completion.send(outcome);
+                        if let Some(waker) = &waker {
+                            waker.wake();
+                        }
+                        if stop {
+                            break;
+                        }
+                        continue;
+                    }
                     OutputCommand::Shutdown => break,
                 };
                 // A rejected expansion (unrepresentable text, a sensitive or
@@ -606,7 +707,7 @@ mod tests {
     #[test]
     fn rejected_expansion_keeps_the_output_worker_running() {
         let (mut injector, failures, worker_state) =
-            spawn_async_injector(Box::new(RejectOnceInjector { rejected: false })).unwrap();
+            spawn_async_injector(Box::new(RejectOnceInjector { rejected: false }), None).unwrap();
 
         let error = injector
             .replace(":a", "secret")
@@ -652,7 +753,7 @@ mod tests {
         let backend = SlowInjector {
             calls: Arc::clone(&calls),
         };
-        let (mut injector, failures, _) = spawn_async_injector(Box::new(backend)).unwrap();
+        let (mut injector, failures, _) = spawn_async_injector(Box::new(backend), None).unwrap();
         let started = std::time::Instant::now();
         injector.replace(":a", "replacement").unwrap();
         assert!(started.elapsed() >= Duration::from_millis(70));
@@ -692,7 +793,8 @@ mod tests {
 
     #[test]
     fn backend_failure_is_returned_to_the_transaction_caller() {
-        let (mut injector, failures, _) = spawn_async_injector(Box::new(FailingInjector)).unwrap();
+        let (mut injector, failures, _) =
+            spawn_async_injector(Box::new(FailingInjector), None).unwrap();
         let error = injector
             .replace(":a", "replacement")
             .expect_err("backend failure must not be reported as queue admission success");
@@ -709,12 +811,14 @@ mod tests {
     fn shutdown_does_not_join_a_worker_stuck_in_backend_teardown() {
         let started = Arc::new(AtomicBool::new(false));
         let release = Arc::new(AtomicBool::new(false));
-        let (injector, _, worker_state) =
-            spawn_async_injector(Box::new(BlockingShutdownInjector {
+        let (injector, _, worker_state) = spawn_async_injector(
+            Box::new(BlockingShutdownInjector {
                 started: Arc::clone(&started),
                 release: Arc::clone(&release),
-            }))
-            .unwrap();
+            }),
+            None,
+        )
+        .unwrap();
 
         let started_at = std::time::Instant::now();
         injector.shutdown();

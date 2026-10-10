@@ -22,11 +22,36 @@ pub(crate) fn process_event(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
-    if let InputEvent::Key(chord) = event.clone() {
+    if let InputEvent::Key(chord) = event {
+        // Undo is a transaction too: do not consume the undo record until
+        // there is an injector and the replacement has been applied. This
+        // preserves retryability across backend reconnects and failures.
+        if let Some(result) = process_key_event(engine, chord, injector.is_some(), policy) {
+            if let Some(backend) = injector.as_deref_mut() {
+                let outcome = latency::apply(backend, &result);
+                return finish_undo(engine, result, outcome);
+            }
+        }
+        return Ok(());
+    }
+    // Check policy before executing deferred commands.
+    let pending = latency::measure_matcher(|| engine.process_deferred(event));
+    apply_pending_results(engine, pending, injector, policy, active_backend)
+}
+
+/// Match a key event and queue its hotkey actions. Returns the undo
+/// transaction to apply, prepared only when an injector is available.
+pub(crate) fn process_key_event(
+    engine: &mut ExpansionEngine,
+    chord: wayexpand_core::KeyChord,
+    injector_available: bool,
+    policy: &wayexpand_core::OrganizationPolicy,
+) -> Option<ExpansionResult> {
+    {
         // Invalidate any pending asynchronous expansions before processing
         // the hotkey. This also updates undo validity: undo is only preserved
         // for the undo chord itself; all other keys invalidate it.
-        let _ = latency::measure_matcher(|| engine.process(event));
+        let _ = latency::measure_matcher(|| engine.process(InputEvent::Key(chord.clone())));
 
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
@@ -54,45 +79,41 @@ pub(crate) fn process_event(
                 );
             }
         }
-        // Undo is a transaction too: do not consume the undo record until
-        // there is an injector and the replacement has been applied. This
-        // preserves retryability across backend reconnects and failures.
-        if injector.is_some() {
-            if let Some(result) = engine.prepare_undo(&chord) {
-                if let Some(backend) = injector.as_deref_mut() {
-                    let outcome = latency::apply(backend, &result);
-                    if !outcome.is_applied() {
-                        // Only a transaction known not to have started may
-                        // retain the undo record for a retry. After a
-                        // possibly partial one, replaying the undo would
-                        // erase text the user never typed, so drop it.
-                        if !matches!(
-                            outcome,
-                            wayexpand_core::TransactionOutcome::NotApplied { .. }
-                        ) {
-                            engine.commit_undo(&result);
-                        }
-                        return Err(Box::new(EventError {
-                            result,
-                            source: outcome,
-                        }));
-                    }
-                    if let wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
-                        ref source,
-                    } = outcome
-                    {
-                        warn!(%source, "undo applied but cursor repositioning failed");
-                    }
-                    engine.commit_undo(&result);
-                    info!("expansion undone");
-                }
-            }
-        }
-        return Ok(());
     }
-    // Check policy before executing deferred commands.
-    let pending = latency::measure_matcher(|| engine.process_deferred(event));
-    apply_pending_results(engine, pending, injector, policy, active_backend)
+    injector_available
+        .then(|| engine.prepare_undo(&chord))
+        .flatten()
+}
+
+/// Record the outcome of an undo transaction in the engine.
+pub(crate) fn finish_undo(
+    engine: &mut ExpansionEngine,
+    result: ExpansionResult,
+    outcome: wayexpand_core::TransactionOutcome,
+) -> std::result::Result<(), Box<EventError>> {
+    if !outcome.is_applied() {
+        // Only a transaction known not to have started may retain the undo
+        // record for a retry. After a possibly partial one, replaying the
+        // undo would erase text the user never typed, so drop it.
+        if !matches!(
+            outcome,
+            wayexpand_core::TransactionOutcome::NotApplied { .. }
+        ) {
+            engine.commit_undo(&result);
+        }
+        return Err(Box::new(EventError {
+            result,
+            source: outcome,
+        }));
+    }
+    if let wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } =
+        outcome
+    {
+        warn!(%source, "undo applied but cursor repositioning failed");
+    }
+    engine.commit_undo(&result);
+    info!("expansion undone");
+    Ok(())
 }
 
 /// Apply deferred expansion results after policy pre-approval.
@@ -323,6 +344,64 @@ pub(crate) fn restore_abandoned_results(
     }
 }
 
+/// Apply organization policy to a ready expansion. A blocked expansion is
+/// returned to the matcher and must not be output.
+pub(crate) fn expansion_allowed(
+    engine: &mut ExpansionEngine,
+    result: &ExpansionResult,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> bool {
+    // Use explicit provenance instead of heuristic: command_backed is set by engine
+    if policy::check_and_log_expansion_violations(
+        policy,
+        result.insert.len(),
+        result.command_backed,
+        active_backend,
+    ) {
+        // In safe_mode, block the expansion
+        engine.restore_deferred_result(result);
+        return false;
+    }
+    true
+}
+
+/// Record the outcome of an expansion transaction in the engine. Failures
+/// are returned for recovery; the expansion is never replayed.
+pub(crate) fn finish_expansion(
+    engine: &mut ExpansionEngine,
+    result: ExpansionResult,
+    outcome: wayexpand_core::TransactionOutcome,
+) -> std::result::Result<(), Box<EventError>> {
+    match outcome {
+        wayexpand_core::TransactionOutcome::Applied => {}
+        wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } => {
+            warn!(%source, "expansion applied but cursor repositioning failed");
+        }
+        wayexpand_core::TransactionOutcome::NotApplied { .. } => {
+            engine.restore_deferred_result(&result);
+            return Err(Box::new(EventError {
+                result,
+                source: outcome,
+            }));
+        }
+        wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+            warn!("expansion transaction may have partially applied; refusing automatic retry");
+            return Err(Box::new(EventError {
+                result,
+                source: outcome,
+            }));
+        }
+    }
+    engine.commit_applied_expansion(&result);
+    info!(
+        trigger_chars = result.trigger.chars().count(),
+        insert_bytes = result.insert.len(),
+        "expansion injected"
+    );
+    Ok(())
+}
+
 pub(crate) fn apply_results(
     engine: &mut ExpansionEngine,
     results: Vec<ExpansionResult>,
@@ -331,50 +410,13 @@ pub(crate) fn apply_results(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     for result in results {
-        // Check if expansion violates policy and log if needed
-        // Use explicit provenance instead of heuristic: command_backed is set by engine
-        if policy::check_and_log_expansion_violations(
-            policy,
-            result.insert.len(),
-            result.command_backed,
-            active_backend,
-        ) {
-            // In safe_mode, block the expansion
-            engine.restore_deferred_result(&result);
+        if !expansion_allowed(engine, &result, policy, active_backend) {
             continue;
         }
 
         if let Some(backend) = injector.as_deref_mut() {
-            let inject_result = latency::apply(backend, &result);
-
-            match inject_result {
-                wayexpand_core::TransactionOutcome::Applied => {}
-                wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
-                    ref source,
-                } => {
-                    warn!(%source, "expansion applied but cursor repositioning failed");
-                }
-                wayexpand_core::TransactionOutcome::NotApplied { .. } => {
-                    engine.restore_deferred_result(&result);
-                    return Err(Box::new(EventError {
-                        result,
-                        source: inject_result,
-                    }));
-                }
-                wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
-                    warn!("expansion transaction may have partially applied; refusing automatic retry");
-                    return Err(Box::new(EventError {
-                        result,
-                        source: inject_result,
-                    }));
-                }
-            }
-            engine.commit_applied_expansion(&result);
-            info!(
-                trigger_chars = result.trigger.chars().count(),
-                insert_bytes = result.insert.len(),
-                "expansion injected"
-            );
+            let outcome = latency::apply(backend, &result);
+            finish_expansion(engine, result, outcome)?;
         } else {
             engine.restore_deferred_result(&result);
             info!(
