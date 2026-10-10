@@ -38,8 +38,8 @@ pub use backend::{
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    validate_command_config, AppFilter, CommandConfig, CommandEnvironment, Config, ConfigError,
-    ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
+    validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment, Config,
+    ConfigError, ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
     OrganizationPolicy, Settings,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonOperation};

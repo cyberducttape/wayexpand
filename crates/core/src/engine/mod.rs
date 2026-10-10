@@ -321,6 +321,7 @@ impl ExpansionEngine {
         };
         let enforcement = self.config.organization.effective_enforcement_policy();
         if !self.config.settings.allow_clipboard
+            || self.config.settings.clipboard_mode != crate::ClipboardMode::Prefetch
             || enforcement.disable_clipboard
             || self.clipboard.is_none()
         {

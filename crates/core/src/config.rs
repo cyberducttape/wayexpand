@@ -169,11 +169,30 @@ pub struct Settings {
     /// passwords and other secrets. Organization policy can still block it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub allow_clipboard: bool,
+    /// Clipboard expansion consistency policy. Prefetch is the historical
+    /// behavior; Fresh reads at render time and Disabled rejects the
+    /// clipboard template variable even when allow_clipboard is true.
+    #[serde(default)]
+    pub clipboard_mode: ClipboardMode,
     /// Record local usage statistics (snippet IDs, counts, and dates; never
     /// text) next to the configuration. On by default; nothing leaves the
     /// machine.
     #[serde(default = "default_usage_stats", skip_serializing_if = "is_true")]
     pub usage_stats: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardMode {
+    Fresh,
+    Prefetch,
+    Disabled,
+}
+
+impl Default for ClipboardMode {
+    fn default() -> Self {
+        Self::Prefetch
+    }
 }
 
 fn default_usage_stats() -> bool {
@@ -229,6 +248,7 @@ impl Default for Settings {
             fcitx5_direct_commit: false,
             template_env: Vec::new(),
             allow_clipboard: false,
+            clipboard_mode: ClipboardMode::Prefetch,
             usage_stats: true,
         }
     }
@@ -614,8 +634,11 @@ impl Config {
         TemplateContext {
             env: std::sync::Arc::new(env),
             snippets,
-            clipboard: clipboard
-                .filter(|_| self.settings.allow_clipboard && !enforcement.disable_clipboard),
+            clipboard: clipboard.filter(|_| {
+                self.settings.allow_clipboard
+                    && self.settings.clipboard_mode != ClipboardMode::Disabled
+                    && !enforcement.disable_clipboard
+            }),
             ..TemplateContext::system()
         }
     }
@@ -635,9 +658,8 @@ impl Config {
                     .collect(),
             ),
             snippets,
-            clipboard: self
-                .settings
-                .allow_clipboard
+            clipboard: (self.settings.allow_clipboard
+                && self.settings.clipboard_mode != ClipboardMode::Disabled)
                 .then(|| ClipboardReader(std::sync::Arc::new(|| Some(String::new())))),
             validating: true,
             ..TemplateContext::default()

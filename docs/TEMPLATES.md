@@ -58,20 +58,21 @@ because the clipboard often holds passwords. Enable it explicitly:
 ```toml
 [settings]
 allow_clipboard = true
+clipboard_mode = "fresh" # prefetch (default), fresh, or disabled
 
 [[expansion]]
 trigger = ":quote"
 replacement = "> {{clipboard}}"
 ```
 
-The daemon reads the clipboard with `wl-paste` (from wl-clipboard) only for a
-snippet that uses the variable, with a 150 ms limit, and never logs the
-contents. So the expansion does not wait for that read, it starts as soon as
-the typed text can only become such a trigger (at least two characters, with
-no other snippet still possible); the value is used for that one expansion
-and erased after two seconds if the trigger is not completed. Nothing watches
-the clipboard in the background. If the clipboard cannot be read, the snippet
-does not expand. The IBus engine does not support the clipboard variable.
+The daemon reads the clipboard with `wl-paste` (from wl-clipboard) with a
+150 ms limit and never logs the contents. `prefetch` starts the read as soon
+as the typed text can only become such a trigger; the value is used once and
+erased after two seconds if the trigger is not completed. `fresh` skips that
+early read and reads at render time. `disabled` blocks the variable even when
+`allow_clipboard` is enabled. Nothing watches the clipboard in the
+background. If the clipboard cannot be read, the snippet does not expand.
+The IBus engine does not support the clipboard variable.
 
 ## Form fields (interactive snippets)
 
