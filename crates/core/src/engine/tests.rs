@@ -1315,6 +1315,86 @@ fn apply_erases_before_inserting() {
     assert_eq!(injector.calls, ["erase::x", "insert:value"]);
 }
 
+struct FailingNonAtomicInjector {
+    fail_on_erase: bool,
+    fail_on_insert: bool,
+    calls: Vec<String>,
+}
+
+impl crate::TextInjector for FailingNonAtomicInjector {
+    fn name(&self) -> &'static str {
+        "failing-non-atomic-test"
+    }
+
+    fn erase(&mut self, trigger: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("erase:{trigger}"));
+        if self.fail_on_erase {
+            return Err(crate::InjectorError {
+                backend: self.name(),
+                message: "injected erase failure".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn insert(&mut self, text: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("insert:{text}"));
+        if self.fail_on_insert {
+            return Err(crate::InjectorError {
+                backend: self.name(),
+                message: "injected insert failure after partial output".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn failure_injection_result() -> ExpansionResult {
+    ExpansionResult {
+        snippet_id: String::new(),
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "replacement".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    }
+}
+
+#[test]
+fn non_atomic_failure_during_erase_is_unknown_and_never_applied() {
+    let mut injector = FailingNonAtomicInjector {
+        fail_on_erase: true,
+        fail_on_insert: false,
+        calls: Vec::new(),
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &failure_injection_result());
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::UnknownPartialFailure { .. }
+    ));
+    assert_eq!(injector.calls, ["erase::x"]);
+}
+
+#[test]
+fn non_atomic_failure_during_insert_is_unknown_and_not_replayed() {
+    let mut injector = FailingNonAtomicInjector {
+        fail_on_erase: false,
+        fail_on_insert: true,
+        calls: Vec::new(),
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &failure_injection_result());
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::UnknownPartialFailure { .. }
+    ));
+    assert_eq!(injector.calls, ["erase::x", "insert:replacement"]);
+}
+
 struct AtomicInjector {
     calls: Vec<String>,
 }
