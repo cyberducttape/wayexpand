@@ -74,6 +74,9 @@ pub struct PendingExpansionResult {
     pub(super) max_replacement_size: usize,
     pub(super) config_index: usize,
     pub(super) generation: u64,
+    /// Focus context at the moment the trigger was consumed. Deferred
+    /// command results must not be rendered after this context changes.
+    pub(super) captured_window: Option<crate::WindowContext>,
     pub(super) propagate_case: bool,
     pub(super) cache_ms: u64,
     pub(super) cached_output: Option<String>,

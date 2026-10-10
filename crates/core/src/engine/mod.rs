@@ -501,6 +501,7 @@ impl ExpansionEngine {
         if (pending.command.is_some() && pending.generation != self.input_generation)
             || self.user_paused
             || self.sensitive_focus
+            || (pending.command.is_some() && pending.captured_window != self.current_window)
         {
             return Err(CommandError::StaleInput);
         }
@@ -567,6 +568,7 @@ impl ExpansionEngine {
         if (pending.command.is_some() && pending.generation != self.input_generation)
             || self.user_paused
             || self.sensitive_focus
+            || (pending.command.is_some() && pending.captured_window != self.current_window)
         {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::StaleInput);
@@ -957,6 +959,7 @@ impl ExpansionEngine {
             max_replacement_size: self.config.organization.max_replacement_size,
             config_index,
             generation: plan.generation,
+            captured_window: self.current_window.clone(),
             propagate_case: plan.propagate_case,
             cache_ms: plan.command.as_ref().map_or(0, |command| command.cache_ms),
             cached_output: plan.command.as_ref().and_then(|command| {
