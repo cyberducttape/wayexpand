@@ -20,7 +20,9 @@ use wayexpand_core::{
     window_update_channel, WindowContext, WindowTracker, WindowUpdateReceiver, WindowUpdateSender,
 };
 
-const TRACKER_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// How long one tracker poll may block. It bounds how quickly the supervisor
+/// notices shutdown; KWin health checks run on their own interval.
+const TRACKER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const TRACKER_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const TRACKER_MAX_BACKOFF: Duration = Duration::from_secs(30);
 const TRACKER_STABLE_INTERVAL: Duration = Duration::from_secs(30);
@@ -168,6 +170,14 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         info!("window tracker connected (KWin scripting bridge)");
         let connected_at = Instant::now();
         loop {
+            // The handle's Drop sets `stop` and joins this thread while the
+            // receiver is still alive, so a failed send cannot be relied on
+            // to end this loop. Without this check, daemon shutdown hung on
+            // a connected tracker until systemd killed it.
+            if stop.load(Ordering::Acquire) {
+                connected.store(false, Ordering::Release);
+                return;
+            }
             match tracker.next_window_timeout(TRACKER_POLL_INTERVAL) {
                 Ok(Some(window)) => {
                     if sender.send(window).is_err() {
@@ -392,6 +402,57 @@ mod tests {
         assert!(!connected.load(Ordering::Acquire));
         drop(receiver);
         supervisor.join().unwrap();
+    }
+
+    struct IdleTracker;
+
+    impl WindowTracker for IdleTracker {
+        fn name(&self) -> &'static str {
+            "idle-window-tracker"
+        }
+
+        fn next_window_timeout(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<Option<WindowContext>>, wayexpand_core::WindowTrackerError> {
+            thread::sleep(timeout);
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn connected_supervisor_stops_while_the_receiver_is_alive() {
+        let (sender, receiver) = window_update_channel();
+        let connected = Arc::new(AtomicBool::new(false));
+        let supervisor_connected = Arc::clone(&connected);
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = Arc::clone(&stop);
+        let supervisor = thread::spawn(move || {
+            supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                supervisor_stop,
+                || Ok::<_, &'static str>(()),
+                || Ok::<_, &'static str>(IdleTracker),
+            );
+        });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !connected.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(connected.load(Ordering::Acquire));
+
+        // Mirror WindowTrackerHandle::drop: stop, then join with the
+        // receiver still in scope.
+        let stopping = Instant::now();
+        stop.store(true, Ordering::Release);
+        supervisor.join().unwrap();
+        assert!(
+            stopping.elapsed() < Duration::from_secs(1),
+            "supervisor took {:?} to stop",
+            stopping.elapsed()
+        );
+        drop(receiver);
     }
 
     #[test]
