@@ -1269,7 +1269,7 @@ fn a_font_scale_change_persists_without_consuming_the_undo_history() {
 /// out-of-range index, a mismatched `Grid`/`ScrollArea` id, or a
 /// borrow-order mistake in a dialog that is only reachable by clicking.
 #[test]
-fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
+fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
     let path =
         std::env::temp_dir().join(format!("wayexpand-gui-render-{}.toml", std::process::id()));
     let config = Config {
@@ -1349,7 +1349,7 @@ fn every_panel_and_dialog_renders_for_both_languages_and_settings_tabs() {
     app.pending_action = Some(PendingAction::Delete);
 
     let ctx = egui::Context::default();
-    for language in [Language::English, Language::German] {
+    for language in [Language::English, Language::German, Language::Indonesian] {
         // Set the pair directly rather than through `set_language`: that
         // would persist to the real user preferences file.
         app.language = language;
@@ -1437,7 +1437,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     let mut app = GuiApp::load(path.clone()).unwrap();
     assert!(app.config.expansion.is_empty());
     let ctx = egui::Context::default();
-    for language in [Language::English, Language::German] {
+    for language in [Language::English, Language::German, Language::Indonesian] {
         app.language = language;
         app.strings.set_language(language);
         let input = egui::RawInput {
