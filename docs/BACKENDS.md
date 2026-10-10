@@ -310,6 +310,16 @@ acknowledgement that expansions may run in password fields; it is not a claim
 that evdev has acquired field awareness. Use `--source=input-method` when
 password-field protection is required.
 
+**Keyboard-layout synchronization:**
+The evdev source creates a local XKB state when it starts. It does not receive
+the compositor's active-layout notifications, so changing layouts in the
+desktop session can desynchronize trigger interpretation until the evdev
+service is restarted. `wayexpand status` and `wayexpand doctor --json` expose
+this conservatively as `capture_layout_aware=false`; that is a capability
+statement, not evidence that the current layout matches the compositor.
+Avoid evdev for workflows that require layout-switch correctness, or restart
+it after changing the desktop layout and certify the target layout explicitly.
+
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.
 For a match completed by a key-down event, the application can therefore see
