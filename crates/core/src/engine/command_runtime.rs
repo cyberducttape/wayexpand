@@ -261,8 +261,11 @@ fn run_command_unix(
             // On Linux this observation uses waitid(WNOWAIT), so the
             // leader remains a zombie and its PID/PGID cannot be recycled
             // while the process group is cleaned up. Only reap after the
-            // group kill; no fixed delay is needed to establish that
-            // guarantee.
+            // group kill. The short delay is a one-time grace period, not a
+            // polling interval: it lets a just-started descendant finish
+            // deliberately moving into its own session (setsid) before the
+            // leader's group is killed.
+            thread::sleep(Duration::from_millis(10));
             guard.kill_group();
             break guard.reap().map_err(|error| CommandError::WaitFailed {
                 operation: ProcessWaitOperation::Reap,

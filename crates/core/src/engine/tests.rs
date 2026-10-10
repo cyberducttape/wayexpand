@@ -2688,16 +2688,7 @@ fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     thread::sleep(Duration::from_millis(1200));
     let _ = std::fs::remove_file(&escaped_marker);
 
-    // Depending on shell/job-control behavior, group cleanup may also close
-    // the inherited descriptor before the detached holder exits. Both that
-    // outcome and an incomplete pipe are safe; accepting either keeps this
-    // test focused on the invariant that the late holder cannot delay or
-    // contribute output to the command result.
-    match output {
-        Err(CommandError::IncompleteOutput) => {}
-        Ok(text) => assert_eq!(text, "ready"),
-        Err(error) => panic!("unexpected command result: {error:?}"),
-    }
+    assert_eq!(output, Err(CommandError::IncompleteOutput));
     assert!(
         elapsed < Duration::from_millis(1000),
         "detached stdout holder delayed command output for {elapsed:?}"
