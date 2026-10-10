@@ -119,6 +119,10 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "matcher_latency_p99_us",
             "matcher_latency_sample_count",
             "matcher_latency_window_count",
+            "output_health",
+            "output_retiring_workers",
+            "output_stalled_ms",
+            "output_uncertain_total",
             "paused",
             "source",
             "state",
@@ -132,7 +136,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=6\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=7\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

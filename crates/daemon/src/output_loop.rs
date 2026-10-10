@@ -67,11 +67,22 @@ pub struct OutputFailure {
 #[derive(Clone, Debug)]
 pub struct OutputWorkerState {
     running: Arc<AtomicBool>,
+    retired_at: Option<std::time::Instant>,
 }
 
 impl OutputWorkerState {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
+    }
+
+    /// Mark the worker as retired now, for stall reporting.
+    pub fn retire(mut self) -> Self {
+        self.retired_at = Some(std::time::Instant::now());
+        self
+    }
+
+    pub fn retired_at(&self) -> Option<std::time::Instant> {
+        self.retired_at
     }
 }
 
@@ -235,6 +246,7 @@ pub fn spawn_async_injector(
     let worker_cancel = Arc::clone(&cancel);
     let worker_state = OutputWorkerState {
         running: Arc::new(AtomicBool::new(true)),
+        retired_at: None,
     };
     let worker_running = Arc::clone(&worker_state.running);
     let worker = thread::Builder::new()

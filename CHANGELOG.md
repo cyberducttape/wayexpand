@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Daemon status (schema 7) reports output-route health: `output_health`
+  (`ok`, `recovering`, `stalled`), a count of transactions with an unknown
+  outcome, and the number and age of retired output workers that block
+  reconnection. `wayexpand doctor` shows them with restart guidance and
+  treats a stalled route as unhealthy.
 - `wayexpand insert --verified <trigger>` binds an insert to the window
   focused when the command runs and fails instead of falling back when that
   window cannot be identified exactly. The new organization policy

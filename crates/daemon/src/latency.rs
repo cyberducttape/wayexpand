@@ -136,7 +136,9 @@ pub fn matcher_snapshot() -> Snapshot {
 pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
     let mode = output_mode(injector.status_detail());
     let size = output_size_bucket(result.insert.chars().count());
-    measure(mode, size, || ExpansionEngine::apply(injector, result))
+    let outcome = measure(mode, size, || ExpansionEngine::apply(injector, result));
+    crate::output_health::note_outcome(&outcome);
+    outcome
 }
 
 pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {

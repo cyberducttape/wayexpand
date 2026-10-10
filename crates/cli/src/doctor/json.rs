@@ -9,7 +9,9 @@ use super::files::existing_control_socket_is_healthy;
 use super::policy::{
     load_policy, print_capabilities_diagnostics_json, print_policy_diagnostics_json,
 };
-use super::status::{read_daemon_status, status_as_json, status_schema_compatible};
+use super::status::{
+    output_health_from_status, read_daemon_status, status_as_json, status_schema_compatible,
+};
 use crate::*;
 
 /// Stable, automation-friendly diagnostic output for service managers and
@@ -115,6 +117,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "state": snapshot.get("state"),
                     "source": snapshot.get("source"),
                     "backend": snapshot.get("backend"),
+                    "output": output_health_from_status(&snapshot),
                     "capabilities": {
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
                         "composition_awareness": snapshot.get("capture_composition_aware"),
@@ -153,7 +156,8 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && display_session_available()
         && (selection_ok || setup_recommendation["ready"].as_bool().unwrap_or(false))
         && socket_valid
-        && broker["healthy"].as_bool().unwrap_or(false);
+        && broker["healthy"].as_bool().unwrap_or(false)
+        && daemon["output"]["health"].as_str() != Some("stalled");
     println!(
         "{}",
         serde_json::json!({
@@ -233,6 +237,9 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
     let mut readiness_blockers = Vec::new();
     if !live_route {
         readiness_blockers.push("no compatible, current, connected daemon route");
+    }
+    if daemon["output"]["health"].as_str() == Some("stalled") {
+        readiness_blockers.push("stalled output worker blocks output reconnection");
     }
     for (name, label) in [
         ("sensitive_field_detection", "sensitive-field detection"),

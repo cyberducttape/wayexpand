@@ -7,6 +7,7 @@ mod events;
 mod focus;
 mod input_loop;
 mod latency;
+mod output_health;
 mod output_loop;
 mod policy;
 mod reactor;

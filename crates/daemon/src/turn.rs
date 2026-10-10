@@ -356,6 +356,7 @@ impl Daemon {
     pub(crate) fn recover_output(&mut self) -> Result<()> {
         self.retiring_output_workers
             .retain(OutputWorkerState::is_running);
+        self.publish_retiring_output_workers();
         if !self.retiring_output_workers.is_empty() {
             // The previous actor may still be inside an uninterruptible
             // compositor/portal call. Do not create a replacement route until
@@ -493,9 +494,20 @@ impl Daemon {
     pub(crate) fn retire_output_injector(&mut self) {
         if self.injector.take().is_some() {
             if let Some(worker) = self.output_worker.take() {
-                self.retiring_output_workers.push(worker);
+                self.retiring_output_workers.push(worker.retire());
+                self.publish_retiring_output_workers();
             }
         }
+    }
+
+    fn publish_retiring_output_workers(&self) {
+        crate::output_health::set_retiring(
+            self.retiring_output_workers.len(),
+            self.retiring_output_workers
+                .iter()
+                .filter_map(OutputWorkerState::retired_at)
+                .min(),
+        );
     }
 
     /// Answer a pending `explain` request from the live engine state, adding

@@ -147,6 +147,28 @@ journalctl --user -u wayexpand-input-method.service -f
 
 **Permanent errors** (validation or protocol problems) require operator action and are not retried indefinitely. Check `wayexpand doctor` output for what's wrong.
 
+### Output route stalled
+
+**Situation:** `wayexpand doctor` prints `Output route: stalled`, or
+`wayexpand status` shows `output_health=stalled`; nothing expands.
+
+**Why this happens:** an output operation did not finish within its deadline
+and the backend is still inside a compositor or portal call. WayExpand will
+not open a new output connection until that call returns, because a late
+operation could otherwise type into whichever window is now focused. Some
+backends never return from a wedged call.
+
+**What to do:**
+1. Restart the daemon; this is the controlled reset and discards the stuck
+   call. `doctor` names the unit, for example:
+```sh
+systemctl --user restart wayexpand-evdev.service
+```
+2. Check the text you were editing. `output_uncertain_total` counts
+   expansions that may have been partially typed; they are never retried.
+3. If it recurs, capture `journalctl --user -u <unit>` around the stall for a
+   bug report.
+
 ## Compositor-Specific Issues
 
 ### KDE Plasma (KWin) — app_filter / window tracking issues

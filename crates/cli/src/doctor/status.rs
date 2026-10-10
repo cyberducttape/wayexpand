@@ -47,6 +47,9 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "usage_flush_max_duration_us"
                         | "usage_flush_failures_total"
                         | "usage_queue_rejected_total"
+                        | "output_uncertain_total"
+                        | "output_retiring_workers"
+                        | "output_stalled_ms"
                 ) =>
             {
                 match value.parse::<u64>() {
@@ -97,6 +100,67 @@ pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> 
             "key_passthrough": value("inject_key_passthrough"),
         },
     })
+}
+
+/// Output-route health from a daemon status snapshot, with recovery
+/// guidance when a retired output worker blocks reconnection.
+pub(crate) fn output_health_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+    let health = snapshot
+        .get("output_health")
+        .and_then(serde_json::Value::as_str);
+    let unit = match snapshot.get("source").and_then(serde_json::Value::as_str) {
+        Some("evdev") => "wayexpand-evdev.service",
+        Some("input-method") => "wayexpand-input-method.service",
+        _ => "wayexpand.service",
+    };
+    let recovery = (health == Some("stalled")).then(|| {
+        format!(
+            "a retired output worker is still inside a compositor or portal call, so output \
+             will not reconnect (a late operation could otherwise type into another window); \
+             restart the daemon with `systemctl --user restart {unit}`"
+        )
+    });
+    serde_json::json!({
+        "health": health,
+        "uncertain_transactions_total": snapshot.get("output_uncertain_total"),
+        "retiring_workers": snapshot.get("output_retiring_workers"),
+        "stalled_ms": snapshot.get("output_stalled_ms"),
+        "recovery": recovery,
+    })
+}
+
+/// Print the running daemon's output health. Returns false only when the
+/// daemon reports a stalled output route; an unreachable daemon is not a
+/// failure here (doctor also runs before the service is started).
+pub(crate) fn print_output_health_diagnostics() -> bool {
+    let Some(snapshot) = read_daemon_status()
+        .ok()
+        .and_then(|response| status_as_json(&response).ok())
+    else {
+        return true;
+    };
+    let output = output_health_from_status(&snapshot);
+    let Some(health) = output["health"].as_str() else {
+        return true;
+    };
+    println!(
+        "Output route: {health} ({} uncertain transaction(s) since start)",
+        output["uncertain_transactions_total"].as_u64().unwrap_or(0)
+    );
+    if output["uncertain_transactions_total"].as_u64().unwrap_or(0) > 0 {
+        println!(
+            "Output warning: some expansions may have been partially typed; they were not \
+             retried. Check recently edited text."
+        );
+    }
+    if let Some(recovery) = output["recovery"].as_str() {
+        println!(
+            "Output problem: stalled for {}ms; {recovery}",
+            output["stalled_ms"].as_u64().unwrap_or(0)
+        );
+        return false;
+    }
+    true
 }
 
 pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {

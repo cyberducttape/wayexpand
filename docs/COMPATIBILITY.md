@@ -371,6 +371,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
+- `daemon.output` (object): Output-route health from the daemon status: `health`, `uncertain_transactions_total`, `retiring_workers`, `stalled_ms`, and `recovery` (restart guidance naming the running unit when `health` is `stalled`, otherwise null). A stalled route makes `healthy` false and adds a `production_readiness` blocker.
 - `production_readiness` (object): Derived safety summary for the connected daemon route. `status` is `unavailable`, `limited`, or `uncertified`; `certified` remains false until reviewed compositor/client evidence is collected. `blockers` names each missing guarantee rather than inferring readiness from daemon connectivity.
 - `production_readiness.capabilities` (object): Negotiated live-route guarantees for sensitive-field detection, external IME/preedit awareness, local dead-key/Compose tracking, key pass-through, exact window identity, atomic replacement, and full Unicode injection. External IME/preedit awareness is separate and is not implied by local composition tracking.
 - `action_broker` (object): Named-action runtime dependency status; `required` is false when the configuration has no named actions, and `healthy` is required for doctor health when it is true
@@ -434,7 +435,7 @@ operators can distinguish a running process from newly installed binaries.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 6,
+  "status_schema": 7,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -485,7 +486,11 @@ operators can distinguish a running process from newly installed binaries.
   "matcher_latency_p99_us": 0,
   "usage_flush_max_duration_us": 0,
   "usage_flush_failures_total": 0,
-  "usage_queue_rejected_total": 0
+  "usage_queue_rejected_total": 0,
+  "output_health": "ok",
+  "output_uncertain_total": 0,
+  "output_retiring_workers": 0,
+  "output_stalled_ms": 0
 }
 ```
 
@@ -526,6 +531,10 @@ operators can distinguish a running process from newly installed binaries.
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
 - `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable
+- `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
+- `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
+- `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
+- `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
 
 These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 

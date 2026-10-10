@@ -117,11 +117,13 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
     println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking is KWin-only (fails closed elsewhere).");
     let config_ok = print_config_diagnostics(&config_path);
     let control_socket_ok = print_control_socket_diagnostics();
+    let output_ok = crate::doctor::status::print_output_health_diagnostics();
     let policy_ok = print_policy_diagnostics();
     let broker_ok = print_broker_diagnostics(Config::load(&config_path).ok().as_ref());
     let capture_ready = print_backend_diagnostics(true);
     print_capabilities_diagnostics();
-    if !config_ok || !control_socket_ok || !policy_ok || !broker_ok || !capture_ready {
+    if !config_ok || !control_socket_ok || !output_ok || !policy_ok || !broker_ok || !capture_ready
+    {
         bail!("doctor found configuration, runtime, or backend problems");
     }
     Ok(())
