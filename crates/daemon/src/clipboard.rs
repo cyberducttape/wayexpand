@@ -129,13 +129,9 @@ fn start_prefetch(shared: &Arc<Shared>, read: &ReadClipboard, max_age: Duration)
                 slot.value = Prefetched::Ready(Instant::now(), value);
             }
             worker_shared.ready.notify_all();
-            // Erase an unused value instead of keeping clipboard contents
-            // around until the next interaction.
-            std::thread::sleep(max_age);
-            let mut slot = lock(&worker_shared);
-            if slot.generation == generation {
-                slot.value = Prefetched::Empty;
-            }
+            // Expiration is checked lazily by start_prefetch/take_or_read.
+            // Do not keep an otherwise idle OS thread alive just to clear a
+            // timestamped value.
         });
     if spawned.is_err() {
         let mut slot = lock(shared);
