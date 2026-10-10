@@ -125,6 +125,19 @@ missing completion event is evidence that backend or portal teardown blocked;
 it must be investigated before certification. Do not include typed secrets or
 replacement text in soak logs.
 
+### Expansion latency interpretation
+
+The daemon publishes separate rolling percentiles for matcher/preparation
+time and completed output transactions, including profiles by output mode and
+replacement size. These are not full key-event-to-application-paint
+measurements: evdev key-release and quiet-period waits, command completion, and
+desktop rendering must be included by the real-session certification driver.
+Record those stages separately for input-method-v2, libei, and evdev. The
+release review target for static snippets is p50 < 30 ms, p95 < 75 ms, and
+p99 < 150 ms, with command-backed and clipboard-backed snippets reported in
+separate populations. Treat any unexpected text modification as a failure,
+regardless of latency.
+
 ### Exact service-limit validation
 
 The packaged capture units enforce `MemoryMax=256M`, `TasksMax=32`, and
