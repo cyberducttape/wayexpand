@@ -15,7 +15,7 @@ automatisierte End-to-End-Zertifizierung freigegeben. Prüfen Sie vor dem
 produktiven Einsatz `wayexpand doctor` und die
 [Support-Matrix](docs/SUPPORT_MATRIX.md).
 
-![WayExpand-Editor mit Live-Vorschau: aus „Hi Jordan, ;ty … ;sig“ wird eine vollständige Antwort mit Signatur](docs/images/wayexpand-editor-try-it-live.png)
+![WayExpand-Editor im Farbschema „Retro 80s Neon“ mit Matcher-Vorschau: aus „Hi Jordan, ;ty …“ wird eine vollständige Support-Antwort](docs/images/wayexpand-editor-try-it-live.png)
 
 ### Das Besondere
 

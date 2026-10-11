@@ -12,7 +12,7 @@ signature. Type `;ty` and get your support reply — with the cursor waiting
 where you need to keep typing. Dates, addresses, templates, team snippets:
 local, offline, no account, no telemetry.
 
-![WayExpand's editor with its live preview field: typing "Hi Jordan, ;ty … ;sig" expanded into a full reply and signature, "2 expansions · 107 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
+![WayExpand's editor in the Retro 80s Neon color pack, with the Matcher preview: typing "Hi Jordan, ;ty …" expanded into a full support reply, "1 expansion · 47 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
 
 ### What makes it different
 
@@ -27,7 +27,7 @@ local, offline, no account, no telemetry.
   tracking (currently KDE Plasma); elsewhere, or without the service, Enter
   copies it to the clipboard. No trigger to remember.
 
-  ![The quick-insert picker: a search box with "re" typed and matching snippets ranked below](docs/images/wayexpand-quick-insert-picker.png)
+  ![The quick-insert picker in the Retro 80s Neon color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
 
 - **One click to turn on.** The first-run screen detects your desktop and
   enables the safest input path it finds. It never grants raw keyboard access
@@ -92,7 +92,7 @@ accept portal consent for you.
 
 ## Your first minute
 
-![WayExpand's first-run screen with three steps: Turn on WayExpand, Add your first snippet, Try it](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run screen in the Retro 80s Neon color pack with three steps: Turn on WayExpand, Add your first snippet, Try it](docs/images/wayexpand-first-run.png)
 
 1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
    terminal.
