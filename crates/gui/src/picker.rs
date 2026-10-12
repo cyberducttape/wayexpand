@@ -194,7 +194,7 @@ impl PickerApp {
         if self.cached_revision.as_ref() != Some(&self.config_revision) {
             self.preview_cache.clear();
         }
-        let mut ranked: Vec<(i64, usize)> = self
+        let ranked: Vec<(i64, usize)> = self
             .config
             .expansion
             .iter()
@@ -209,12 +209,7 @@ impl PickerApp {
                 .map(|score| (score, index))
             })
             .collect();
-        ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        self.result_indices = ranked
-            .into_iter()
-            .take(MAX_RESULTS)
-            .map(|(_, index)| index)
-            .collect();
+        self.result_indices = top_ranked(ranked, MAX_RESULTS);
         self.cached_query = Some(query);
         self.cached_revision = Some(self.config_revision.clone());
     }
@@ -684,12 +679,46 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
     })
 }
 
+/// Indices of the `limit` best `(score, index)` pairs: best score first,
+/// then library order. Only the kept results are fully sorted, so a large
+/// library pays O(n) per query change instead of O(n log n).
+fn top_ranked(mut ranked: Vec<(i64, usize)>, limit: usize) -> Vec<usize> {
+    let order = |a: &(i64, usize), b: &(i64, usize)| b.0.cmp(&a.0).then(a.1.cmp(&b.1));
+    if limit == 0 {
+        return Vec::new();
+    }
+    if ranked.len() > limit {
+        ranked.select_nth_unstable_by(limit - 1, order);
+        ranked.truncate(limit);
+    }
+    ranked.sort_unstable_by(order);
+    ranked.into_iter().map(|(_, index)| index).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         focus_returned_to_target, focus_target_from_response, picker_expansion_is_eligible,
-        picker_focus_state, score, FocusInfo, FocusTarget,
+        picker_focus_state, score, top_ranked, FocusInfo, FocusTarget,
     };
+
+    #[test]
+    fn top_ranked_matches_a_full_sort() {
+        // Many ties exercise the library-order tie-break across the cut.
+        let ranked: Vec<(i64, usize)> = (0..500)
+            .map(|index| ((index * 37 % 11) as i64, index))
+            .collect();
+        let mut expected = ranked.clone();
+        expected.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for limit in [0, 1, 60, 499, 500, 600] {
+            let want: Vec<usize> = expected
+                .iter()
+                .take(limit)
+                .map(|&(_, index)| index)
+                .collect();
+            assert_eq!(top_ranked(ranked.clone(), limit), want, "limit {limit}");
+        }
+    }
     use wayexpand_core::{ExpansionConfig, MatchMode};
 
     #[test]
