@@ -23,24 +23,50 @@ pub(crate) fn default_backup_destination(source: &Path) -> PathBuf {
 }
 
 pub(crate) fn create_backup(source: &Path, destination: &Path) -> Result<()> {
-    let metadata = fs::metadata(source)
+    // Inspect the opened file, not the path, so the size checked below
+    // belongs to the same file that is copied. O_NONBLOCK keeps a FIFO from
+    // blocking the open before the regular-file check can reject it.
+    let mut source_file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(source)
+        .with_context(|| format!("opening configuration {}", source.display()))?;
+    let metadata = source_file
+        .metadata()
         .with_context(|| format!("reading configuration {}", source.display()))?;
     if !metadata.is_file() {
         bail!("configuration is not a regular file: {}", source.display());
     }
 
-    let mut source_file = fs::File::open(source)
-        .with_context(|| format!("opening configuration {}", source.display()))?;
     let mut destination_file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(destination)
         .with_context(|| format!("creating configuration backup {}", destination.display()))?;
-    if let Err(error) = io::copy(&mut source_file, &mut destination_file) {
+    // A backup is only reported once it is complete and durable; anything
+    // less is removed so an incomplete file is never mistaken for one.
+    let written = io::copy(&mut source_file, &mut destination_file).and_then(|copied| {
+        if copied != metadata.len() {
+            return Err(io::Error::other(format!(
+                "copied {copied} of {} bytes; the configuration changed during backup",
+                metadata.len()
+            )));
+        }
+        destination_file.sync_all()
+    });
+    if let Err(error) = written {
+        drop(destination_file);
         let _ = fs::remove_file(destination);
         return Err(error)
             .with_context(|| format!("writing configuration backup {}", destination.display()));
     }
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .with_context(|| format!("syncing backup directory {}", parent.display()))?;
     Ok(())
 }

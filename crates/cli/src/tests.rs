@@ -83,6 +83,32 @@ fn production_readiness_reports_limited_live_capabilities() {
 }
 
 #[test]
+fn backup_rejects_a_fifo_source_without_blocking_and_copies_files_exactly() {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("wayexpand-backup-fifo-{suffix}"));
+    fs::create_dir(&directory).unwrap();
+    let fifo = directory.join("config.toml");
+    let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+    // SAFETY: `path` is a valid NUL-terminated path for this call.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    let error = create_backup(&fifo, &directory.join("fifo.bak")).unwrap_err();
+    assert!(error.to_string().contains("not a regular file"));
+    assert!(!directory.join("fifo.bak").exists());
+
+    let source = directory.join("source.toml");
+    fs::write(&source, "[[expansion]]\n").unwrap();
+    create_backup(&source, &directory.join("source.bak")).unwrap();
+    assert_eq!(
+        fs::read(directory.join("source.bak")).unwrap(),
+        fs::read(&source).unwrap()
+    );
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
 fn backup_refuses_existing_destination_atomically() {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
