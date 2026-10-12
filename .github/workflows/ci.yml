@@ -342,7 +342,10 @@ jobs:
             && git cat-file -e "$base^{commit}" 2>/dev/null; then
             bash scripts/check-commit-identity.sh "$base..HEAD"
           else
-            bash scripts/check-commit-identity.sh HEAD
+            # Dispatched and scheduled runs (releases, experimental builds)
+            # have no push range. History predates this policy and includes
+            # dependency-bot commits, so check the commit being built.
+            bash scripts/check-commit-identity.sh 'HEAD^!'
           fi
       - name: Install metadata validators
         run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils libwayland-dev libxkbcommon-dev pkg-config

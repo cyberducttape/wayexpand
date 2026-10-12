@@ -220,9 +220,32 @@ mod tests {
                 false,
             );
         };
+        // Latency, usage, and output counters are process-wide and other
+        // tests update them concurrently; compare only what the publisher
+        // sets.
+        let published = |control: &control::ControlServer| {
+            control
+                .status_text()
+                .lines()
+                .filter(|line| {
+                    ![
+                        "injection_latency_",
+                        "matcher_latency_",
+                        "usage_",
+                        "output_",
+                    ]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix))
+                })
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
         publish(&mut publisher);
-        let full = control.status_text();
-        assert!(full.contains("inject_atomic_replace=true"), "{full}");
+        let full = published(&control);
+        assert!(
+            full.iter().any(|line| line == "inject_atomic_replace=true"),
+            "{full:?}"
+        );
 
         // An output reconnect publishes directly, without capabilities.
         status::set_daemon_status_direct(
@@ -233,9 +256,9 @@ mod tests {
             Path::new("/tmp/config.toml"),
             true,
         );
-        assert_ne!(control.status_text(), full);
+        assert_ne!(published(&control), full);
 
         publish(&mut publisher);
-        assert_eq!(control.status_text(), full);
+        assert_eq!(published(&control), full);
     }
 }
