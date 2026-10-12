@@ -165,11 +165,27 @@ impl ExpansionEngine {
         // cluster (the input-method route derives its byte deletion from
         // surrounding text). Keep matcher state aligned with the document,
         // including decomposed accents and emoji sequences.
-        let buffered: String = self.buffer.iter().collect();
-        let scalar_count = buffered
-            .graphemes(true)
-            .next_back()
-            .map_or(0, |grapheme| grapheme.chars().count());
+        let mut trailing = self.buffer.iter().rev();
+        let scalar_count = match (trailing.next(), trailing.next()) {
+            (None, _) => 0,
+            // Two ASCII scalars form one cluster only as CR LF, so the common
+            // case needs no segmentation of the whole buffer.
+            (Some(last), previous)
+                if last.is_ascii()
+                    && previous.is_none_or(|previous| {
+                        previous.is_ascii() && !(*previous == '\r' && *last == '\n')
+                    }) =>
+            {
+                1
+            }
+            _ => {
+                let buffered: String = self.buffer.iter().collect();
+                buffered
+                    .graphemes(true)
+                    .next_back()
+                    .map_or(0, |grapheme| grapheme.chars().count())
+            }
+        };
         for _ in 0..scalar_count {
             self.buffer.pop_back();
         }
@@ -281,15 +297,15 @@ impl ExpansionEngine {
     }
 
     /// Find a trigger suffix in NFC form while retaining the corresponding
-    /// raw scalar length. NFC input takes the allocation-free trie path; only
-    /// non-NFC buffers need a normalized view and grapheme-to-source map.
+    /// raw scalar length. NFC input takes the allocation-free trie path; other
+    /// buffers need a normalized view of the trailing graphemes and a map
+    /// back to their source positions.
     fn find_match_suffix(&self) -> Option<MatchSuffix> {
-        if self
-            .buffer
-            .iter()
-            .copied()
-            .nfc()
-            .eq(self.buffer.iter().copied())
+        // The quick check proves almost all text is NFC without composing
+        // it. `No` and `Maybe` take the bounded normalized path below, which
+        // is also correct for text that turns out to be NFC already.
+        if unicode_normalization::is_nfc_quick(self.buffer.iter().copied())
+            == unicode_normalization::IsNormalized::Yes
         {
             let (index, length) = self
                 .matcher
@@ -302,16 +318,27 @@ impl ExpansionEngine {
             });
         }
 
+        // Normalize whole graphemes from the end, and only as many as the
+        // longest trigger can consume; earlier text cannot affect the match.
+        // Reverse segmentation still sees the full buffer as context.
         let raw: String = self.buffer.iter().collect();
+        let limit = self.matcher.max_trigger_chars();
         let mut normalized = Vec::new();
         let mut source_starts = Vec::new();
-        let mut raw_start = 0;
-        for grapheme in raw.graphemes(true) {
-            let cluster: Vec<char> = grapheme.nfc().collect();
-            normalized.extend(cluster.iter().copied());
-            source_starts.extend(std::iter::repeat_n(raw_start, cluster.len()));
-            raw_start += grapheme.chars().count();
+        let mut raw_end = self.buffer.len();
+        for grapheme in raw.graphemes(true).rev() {
+            if normalized.len() >= limit {
+                break;
+            }
+            let raw_start = raw_end - grapheme.chars().count();
+            let cluster_start = normalized.len();
+            normalized.extend(grapheme.nfc());
+            normalized[cluster_start..].reverse();
+            source_starts.resize(normalized.len(), raw_start);
+            raw_end = raw_start;
         }
+        normalized.reverse();
+        source_starts.reverse();
         let (index, length) = self.matcher.find_suffix(normalized.iter().rev().copied())?;
         let normalized_start = normalized.len().checked_sub(length)?;
         let raw_start = *source_starts.get(normalized_start)?;
@@ -428,7 +455,7 @@ impl ExpansionEngine {
                     if results.len() >= MAX_RESULTS_PER_EVENT
                         || result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT
                     {
-                        self.clear_buffer();
+                        self.discard_after_result_limit();
                         break;
                     }
                     result_bytes = result_bytes.saturating_add(bytes);
@@ -436,7 +463,7 @@ impl ExpansionEngine {
                 }
             }
             if results.len() >= MAX_RESULTS_PER_EVENT {
-                self.clear_buffer();
+                self.discard_after_result_limit();
                 break;
             }
             self.push_buffered(character);
@@ -453,7 +480,7 @@ impl ExpansionEngine {
                     if let Some(output) = P::take(self, config_index, length, None) {
                         let bytes = P::output_bytes(&output);
                         if result_bytes.saturating_add(bytes) > MAX_RESULT_BYTES_PER_EVENT {
-                            self.clear_buffer();
+                            self.discard_after_result_limit();
                             break;
                         }
                         result_bytes = result_bytes.saturating_add(bytes);
@@ -466,5 +493,14 @@ impl ExpansionEngine {
             }
         }
         results
+    }
+
+    /// Stop matching for the rest of an event that exceeded its result
+    /// budget. The skipped text is still in the document but must not
+    /// complete a trigger later, so it is dropped like evicted context: a
+    /// word-boundary trigger typed next cannot match as if it began the input.
+    fn discard_after_result_limit(&mut self) {
+        self.clear_buffer();
+        self.buffer_truncated = true;
     }
 }

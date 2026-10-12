@@ -4,6 +4,19 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- An input event that exceeds the per-event expansion budget now treats its
+  skipped text as unknown context, so a word-boundary trigger typed next no
+  longer matches as if it began the input.
+- Per-keystroke matching on long buffers is faster: an NFC quick check
+  replaces full-buffer normalization, non-NFC text normalizes only the
+  trailing graphemes the longest trigger can use, and Backspace after ASCII
+  no longer segments the whole buffer (a full 4096-character buffer drops
+  from about 160 µs to 7 µs per keystroke and Backspace).
+- `wayexpand backup` now syncs the backup and its directory to disk, verifies
+  the copied length, and removes an incomplete backup instead of reporting
+  success.
+- The snippet picker selects its visible results with a partial sort instead
+  of sorting every match on each query change.
 - The Indonesian GUI locale is now translated. It previously shared the
   English text for every string, so selecting Bahasa Indonesia showed
   English; a test now rejects shared English/Indonesian string arms.

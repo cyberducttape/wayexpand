@@ -60,6 +60,28 @@ fn bench_matcher(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_long_buffer_keystroke(c: &mut Criterion) {
+    let mut group = c.benchmark_group("long_buffer_keystroke");
+    let config = Config::parse(
+        "[settings]\nmax_buffer_chars = 4096\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"value\"",
+    )
+    .expect("benchmark configuration should validate");
+    // Plain ASCII prose, and text with decomposed accents that is not NFC.
+    for (name, unit) in [("ascii", "lorem ipsum "), ("nfd", "cafe\u{301} ")] {
+        let mut engine =
+            ExpansionEngine::new(config.clone()).expect("benchmark engine should initialize");
+        let filler = unit.repeat(4096 / unit.chars().count() + 1);
+        engine.process(InputEvent::Text(filler));
+        group.bench_function(BenchmarkId::new("type_and_backspace", name), |bench| {
+            bench.iter(|| {
+                black_box(engine.process(InputEvent::Text("a".into())));
+                black_box(engine.process(InputEvent::Backspace));
+            });
+        });
+    }
+    group.finish();
+}
+
 fn bench_matcher_construction(c: &mut Criterion) {
     let mut group = c.benchmark_group("matcher_construction_amplified");
 
@@ -86,5 +108,10 @@ fn bench_matcher_construction(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_matcher, bench_matcher_construction);
+criterion_group!(
+    benches,
+    bench_matcher,
+    bench_long_buffer_keystroke,
+    bench_matcher_construction
+);
 criterion_main!(benches);

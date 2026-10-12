@@ -10,6 +10,8 @@ const NO_VALUE: u32 = u32::MAX;
 pub struct Matcher {
     root: Trie,
     forward: Trie,
+    /// Longest trigger in scalar values: the most `find_suffix` can consume.
+    max_trigger_chars: usize,
 }
 
 impl Default for Matcher {
@@ -112,7 +114,9 @@ impl Matcher {
     {
         let mut root = TrieBuilder::new();
         let mut forward = TrieBuilder::new();
+        let mut max_trigger_chars = 0;
         for (index, trigger) in triggers.into_iter().enumerate() {
+            max_trigger_chars = max_trigger_chars.max(trigger.chars().count());
             // Effective triggers are capped far below u32::MAX by config
             // validation; refuse rather than wrap if a caller exceeds it.
             let index = u32::try_from(index)
@@ -125,7 +129,14 @@ impl Matcher {
         Self {
             root: root.freeze(),
             forward: forward.freeze(),
+            max_trigger_chars,
         }
+    }
+
+    /// Length of the longest trigger, in scalar values. `find_suffix` never
+    /// reads more characters than this, so callers may bound their input.
+    pub fn max_trigger_chars(&self) -> usize {
+        self.max_trigger_chars
     }
 
     /// Walks the forward trie along `trigger`, returning the node it ends on.

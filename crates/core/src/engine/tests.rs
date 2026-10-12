@@ -974,6 +974,26 @@ fn expansion_results_are_bounded_per_text_event() {
 }
 
 #[test]
+fn result_budget_treats_skipped_text_as_unknown_context() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"\n\
+         [[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\nmatch_mode = \"word-boundary\"",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut text = ":x".repeat(MAX_RESULTS_PER_EVENT + 1);
+    text.push_str("word");
+    assert_eq!(
+        engine.process(InputEvent::Text(text)).len(),
+        MAX_RESULTS_PER_EVENT
+    );
+
+    // "word" is in the document even though the event stopped matching, so
+    // ":sig" typed next may be embedded in a word and must not expand.
+    assert!(engine.process(InputEvent::Text(":sig ".into())).is_empty());
+}
+
+#[test]
 fn duplicate_triggers_are_rejected() {
     let config = "[[expansion]]\ntrigger = \":x\"\nreplacement = \"a\"\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"b\"";
     assert!(matches!(
