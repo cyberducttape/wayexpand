@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Ansible and Puppet fleet guides no longer restart every account's user
+  service on snippet changes (running daemons reload fleet snippets on their
+  own). They validate the merged configuration as each listed desktop user,
+  restart only after a policy change and only where logind reports a running
+  user manager, and deploy `policy.toml` as `0644`; the previous `0600`
+  example made the policy unreadable to user services, which then refused
+  to start. The self-restarting `:restart-daemon` example snippet is removed.
 - An input event that exceeds the per-event expansion budget now treats its
   skipped text as unknown context, so a word-boundary trigger typed next no
   longer matches as if it began the input.

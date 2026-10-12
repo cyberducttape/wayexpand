@@ -21,6 +21,15 @@ WayExpand fleet configuration uses three independent layers:
 
 Each layer is loaded independently. Files within a layer are merged alphabetically. Duplicate triggers between layers are rejected with clear error messages showing source provenance.
 
+How a running daemon picks up changes:
+
+- **Snippet files** (`/etc/wayexpand/snippets.d/`): the shipped user services
+  run the daemon in fleet mode, which watches these directories and reloads
+  automatically. A reload that fails validation is refused and the last good
+  configuration stays active. No restart is needed.
+- **Organization policy** (`/etc/wayexpand/policy.toml`): read only when the
+  daemon starts. A policy change needs a restart of running user services.
+
 ## Puppet Module Example
 
 ### Directory Structure
@@ -30,13 +39,14 @@ wayexpand/
 ├── files/
 │   ├── 01-sre-core.toml
 │   ├── 02-kubernetes.toml
-│   └── 03-incident-response.toml
+│   ├── 03-incident-response.toml
+│   ├── policy.toml
+│   └── wayexpand-restart-active.sh
 ├── templates/
 │   └── organization.toml.epp
 ├── manifests/
 │   ├── init.pp
 │   ├── config.pp
-│   ├── service.pp
 │   └── params.pp
 └── README.md
 ```
@@ -56,11 +66,10 @@ class wayexpand::params {
   $snippet_group = 'root'
   $snippet_mode = '0644'
   
-  $service_names = [
-    'wayexpand-input-method.service',
-    'wayexpand-evdev.service',
-  ]
-  
+  # Desktop accounts that run WayExpand. List them explicitly: system and
+  # service accounts have no desktop session or user manager.
+  $desktop_users = []
+
   # Organization metadata for templated snippets
   $organization_name = 'ACME Inc'
   $organization_id = 'acme-prod-2026'
@@ -134,6 +143,17 @@ class wayexpand::config (
     }),
     require => File[$config_dir],
   }
+
+  # User services read the policy as the desktop user, so it must be readable
+  # (0644). It must not be group- or world-writable. A policy that exists but
+  # cannot be read stops the daemon from starting.
+  file { '/etc/wayexpand/policy.toml':
+    ensure => file,
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0644',
+    source => 'puppet:///modules/wayexpand/policy.toml',
+  }
 }
 ```
 
@@ -145,7 +165,8 @@ class wayexpand::config (
 class wayexpand (
   Boolean $manage_config = true,
   Boolean $validate_config = true,
-  Boolean $reload_service = true,
+  Boolean $restart_on_policy_change = true,
+  Array[String] $desktop_users = $wayexpand::params::desktop_users,
 ) inherits wayexpand::params {
 
   # Include configuration management
@@ -153,30 +174,39 @@ class wayexpand (
     include wayexpand::config
   }
 
-  # Validate merged fleet configuration after deployment
+  # The merged result depends on each user's personal snippets, so validate
+  # as each desktop user. Users without a personal configuration are skipped.
+  # Snippet changes need no restart: running daemons reload them on their own.
   if $validate_config {
-    exec { 'wayexpand-validate-fleet':
-      command     => '/usr/bin/wayexpand validate --fleet --json',
-      refreshonly => true,
-      onlyif      => '/usr/bin/test -d /etc/wayexpand/snippets.d',
-      subscribe   => [
-        File["${wayexpand::params::config_dir}/01-sre-core.toml"],
-        File["${wayexpand::params::config_dir}/02-kubernetes.toml"],
-        File["${wayexpand::params::config_dir}/03-incident-response.toml"],
-        File["${wayexpand::params::config_dir}/organization.toml"],
-      ],
-      require     => Package['wayexpand'],
-      notify      => Exec['wayexpand-reload-all-users'],
+    $desktop_users.each |String $user| {
+      exec { "wayexpand-validate-fleet-${user}":
+        provider    => shell,
+        user        => $user,
+        command     => "HOME=\"\$(getent passwd ${user} | cut -d: -f6)\"; export HOME; test ! -f \"\$HOME/.config/wayexpand/expansions.toml\" || /usr/bin/wayexpand validate --fleet --json",
+        refreshonly => true,
+        subscribe   => Class['wayexpand::config'],
+        require     => Package['wayexpand'],
+        before      => Exec['wayexpand-restart-active-users'],
+      }
     }
   }
 
-  # Reload daemon for all active users
-  if $reload_service {
-    exec { 'wayexpand-reload-all-users':
-      command     => '/usr/local/bin/wayexpand-reload-all-users.sh',
-      refreshonly => true,
-      onlyif      => '/usr/bin/test -f /usr/local/bin/wayexpand-reload-all-users.sh',
-    }
+  file { '/usr/local/sbin/wayexpand-restart-active.sh':
+    ensure => file,
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0755',
+    source => 'puppet:///modules/wayexpand/wayexpand-restart-active.sh',
+  }
+
+  # The policy is read only at daemon startup. Restart services that are
+  # already running, and only for users whose user manager is running.
+  exec { 'wayexpand-restart-active-users':
+    command     => "/usr/local/sbin/wayexpand-restart-active.sh ${desktop_users.join(' ')}",
+    refreshonly => true,
+    noop        => !$restart_on_policy_change,
+    subscribe   => File['/etc/wayexpand/policy.toml'],
+    require     => File['/usr/local/sbin/wayexpand-restart-active.sh'],
   }
 }
 ```
@@ -221,27 +251,46 @@ category = "environment"
 app_filter = ["app_id_glob:*gitlab*", "app_id_glob:*jenkins*", "app_id_glob:*terraform*"]
 ```
 
-### files/reload-wrapper.sh
+### files/policy.toml
 
-Place this at `/usr/local/bin/wayexpand-reload-all-users.sh`:
+```toml
+[organization]
+safe_mode = true
+max_replacement_size = 65536
+allowed_backends = ["input-method-v2", "libei"]
+```
 
-```bash
-#!/bin/bash
-# Reload WayExpand daemon for all active users
-# Called by Puppet after organization snippet updates
+See [Organization Policy](ORGANIZATION_POLICY.md) for every field.
 
-set -e
+### files/wayexpand-restart-active.sh
 
-ACTIVE_USERS=$(who | awk '{print $1}' | sort | uniq)
+Installed as `/usr/local/sbin/wayexpand-restart-active.sh` and run only after a
+policy change. A user service can only be managed while that user's systemd
+manager and session bus are running, so each user is checked with logind
+first. `try-restart` leaves stopped or never-enabled services alone.
 
-for user in $ACTIVE_USERS; do
-  if [[ "$user" != "root" && ! "$user" =~ ^(sync|shutdown|halt|nobody)$ ]]; then
-    echo "Reloading WayExpand for user: $user"
-    su - "$user" -c "systemctl --user restart wayexpand-input-method.service" || true
-  fi
+```sh
+#!/bin/sh
+# Restart running WayExpand services for the listed desktop users.
+set -eu
+
+status=0
+for user in "$@"; do
+    state=$(loginctl show-user "$user" --property=State --value 2>/dev/null) || continue
+    case "$state" in
+        active|online) ;;
+        *) continue ;;
+    esac
+    runtime_dir=$(loginctl show-user "$user" --property=RuntimePath --value)
+    [ -S "$runtime_dir/bus" ] || continue
+    echo "Restarting running WayExpand services for $user"
+    runuser -u "$user" -- env \
+        XDG_RUNTIME_DIR="$runtime_dir" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+        systemctl --user try-restart \
+        wayexpand-input-method.service wayexpand-evdev.service || status=1
 done
-
-echo "WayExpand fleet reload complete"
+exit "$status"
 ```
 
 ## Hiera Configuration
@@ -252,7 +301,10 @@ echo "WayExpand fleet reload complete"
 ---
 wayexpand::manage_config: true
 wayexpand::validate_config: true
-wayexpand::reload_service: true
+wayexpand::restart_on_policy_change: true
+wayexpand::desktop_users:
+  - alice
+  - bob
 wayexpand::organization_name: "ACME Inc"
 wayexpand::organization_id: "acme-prod-2026"
 wayexpand::oncall_contact: "oncall@acme.example.com"
@@ -264,7 +316,7 @@ wayexpand::oncall_contact: "oncall@acme.example.com"
 ---
 wayexpand::manage_config: true
 wayexpand::validate_config: true
-wayexpand::reload_service: true
+wayexpand::restart_on_policy_change: true
 wayexpand::organization_name: "ACME Production"
 wayexpand::organization_id: "acme-prod-2026"
 wayexpand::oncall_contact: "sre-oncall@acme.example.com"
@@ -342,21 +394,21 @@ puppet resource changes | grep wayexpand
 # Check for duplicate triggers
 grep -rn "^trigger = " /etc/wayexpand/snippets.d/ | cut -d: -f3 | sort | uniq -d
 
-# View validation output
+# View validation output (run as the affected desktop user)
 wayexpand validate --fleet --json 2>&1
 ```
 
-### Daemon doesn't reload
+### Changes not picked up
 
 ```bash
-# Check if reload script exists and is executable
-ls -la /usr/local/bin/wayexpand-reload-all-users.sh
+# As the desktop user: ask the running daemon to reload now
+wayexpand reload
 
-# Test manually
-/usr/local/bin/wayexpand-reload-all-users.sh
+# A refused reload names the problem; the last good configuration stays active
+journalctl --user -u wayexpand-input-method.service -n 20 | grep -i reload
 
-# Check journalctl
-journalctl --user -u wayexpand-input-method.service -n 20
+# As root, after a policy change
+/usr/local/sbin/wayexpand-restart-active.sh alice
 ```
 
 ### Puppet runs fail
@@ -394,7 +446,6 @@ class wayexpand::git_snippets (
     command     => 'cp /opt/wayexpand-snippets/*.toml /etc/wayexpand/snippets.d/',
     refreshonly => true,
     require     => Vcsrepo['/opt/wayexpand-snippets'],
-    notify      => Exec['wayexpand-reload-all-users'],
   }
 }
 ```
@@ -419,10 +470,14 @@ define wayexpand::snippet_from_cmdb (
     owner   => root,
     group   => root,
     mode    => '0644',
-    notify  => Exec['wayexpand-reload-all-users'],
   }
 }
 ```
+
+Running daemons reload generated files automatically. Declare these resources
+inside `wayexpand::config`, or have them notify the per-user
+`wayexpand-validate-fleet-*` execs, so a duplicate trigger is reported by the
+Puppet run rather than only in each user's journal.
 
 ## See Also
 
