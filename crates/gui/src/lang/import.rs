@@ -241,14 +241,29 @@ impl Strings {
             (Language::English, "{{datetime}}") => "UTC date and time",
             (Language::Indonesian, "{{datetime}}") => "Tanggal dan waktu UTC",
             (Language::German, "{{datetime}}") => "Datum und Uhrzeit (UTC)",
+            (Language::English, "{{local_date}}") => "Date in the system time zone",
+            (Language::Indonesian, "{{local_date}}") => "Tanggal dalam zona waktu sistem",
+            (Language::German, "{{local_date}}") => "Datum (Systemzeitzone)",
+            (Language::English, "{{local_time}}") => "Time in the system time zone",
+            (Language::Indonesian, "{{local_time}}") => "Waktu dalam zona waktu sistem",
+            (Language::German, "{{local_time}}") => "Uhrzeit (Systemzeitzone)",
+            (Language::English, "{{local_datetime}}") => {
+                "Date and time in the system time zone, with its UTC offset"
+            }
+            (Language::Indonesian, "{{local_datetime}}") => {
+                "Tanggal dan waktu dalam zona waktu sistem, dengan selisih UTC"
+            }
+            (Language::German, "{{local_datetime}}") => {
+                "Datum und Uhrzeit (Systemzeitzone, mit UTC-Versatz)"
+            }
             (Language::English, "{{date+1d}}") => {
-                "Tomorrow's date (also -1d, +1w; date, time or datetime; d/w/h/m units)"
+                "Tomorrow's date (also -1d, +1w; date, time, datetime and local_ forms; d/w/h/m units)"
             }
             (Language::Indonesian, "{{date+1d}}") => {
-                "Tanggal besok (juga -1d, +1w; date, time, atau datetime; satuan d/w/h/m)"
+                "Tanggal besok (juga -1d, +1w; date, time, datetime, dan bentuk local_; satuan d/w/h/m)"
             }
             (Language::German, "{{date+1d}}") => {
-                "Morgiges Datum (auch -1d, +1w; date, time oder datetime; Einheiten d/w/h/m)"
+                "Morgiges Datum (auch -1d, +1w; date, time, datetime und local_-Varianten; Einheiten d/w/h/m)"
             }
             (Language::English, "{{cursor}}") => {
                 "Place the cursor here after expanding (libei and wlroots backends)"

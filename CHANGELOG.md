@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added `{{local_date}}`, `{{local_time}}`, and `{{local_datetime}}` (with UTC
+  offset), which render in the system time zone and accept the same `+3d`-style
+  offsets. `{{date}}`, `{{time}}`, and `{{datetime}}` remain UTC.
+- Snippets using a backward date offset such as `{{date-1d}}` no longer fail
+  validation; validation rendered templates at the Unix epoch, where the
+  offset underflowed.
 - The Ansible and Puppet fleet guides no longer restart every account's user
   service on snippet changes (running daemons reload fleet snippets on their
   own). They validate the merged configuration as each listed desktop user,

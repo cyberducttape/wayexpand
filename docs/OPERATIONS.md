@@ -82,7 +82,8 @@ so a trigger followed by a letter cannot flash-expand and become part of a
 larger word. Boundary checks are Unicode-aware and treat letters, numbers, and
 `_` as word characters.
 
-Available values are `{{date}}`, `{{time}}`, `{{datetime}}`, `{{username}}`,
+Available values are `{{date}}`, `{{time}}`, `{{datetime}}` (UTC),
+`{{local_date}}`, `{{local_time}}`, `{{local_datetime}}` (system time zone), `{{username}}`,
 `{{hostname}}`, `{{unix_timestamp}}`, `{{newline}}`, and `{{tab}}`. Unknown
 variables make validation fail before a configuration reload is activated.
 Template values are rendered only when an expansion matches.

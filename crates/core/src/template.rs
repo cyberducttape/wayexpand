@@ -325,13 +325,13 @@ fn render_nested(
         }
         let mut included_stopped = false;
         let value = match name {
-            "date" => format_date(context.unix_timestamp),
-            "time" => format_time(context.unix_timestamp),
-            "datetime" => format!(
-                "{}T{}Z",
-                format_date(context.unix_timestamp),
-                format_time(context.unix_timestamp)
-            ),
+            "date" | "time" | "datetime" | "local_date" | "local_time" | "local_datetime" => {
+                format_clock(name, context.unix_timestamp).ok_or_else(|| {
+                    TemplateError::DateArithmeticOverflow {
+                        name: name.to_owned(),
+                    }
+                })?
+            }
             "username" => context.username.as_str().to_owned(),
             "hostname" => context.hostname.as_str().to_owned(),
             "unix_timestamp" => context.unix_timestamp.to_string(),
@@ -395,18 +395,24 @@ fn render_nested(
                         .ok_or_else(|| TemplateError::DateArithmeticOverflow {
                             name: other.to_owned(),
                         })?;
-                    match base {
-                        "date" => format_date(adjusted),
-                        "time" => format_time(adjusted),
-                        "datetime" => {
-                            format!("{}T{}Z", format_date(adjusted), format_time(adjusted))
-                        }
-                        _ => {
-                            return Err(TemplateError::UnknownVariable {
-                                name: other.to_owned(),
-                            })
-                        }
+                    if !matches!(
+                        base,
+                        "date"
+                            | "time"
+                            | "datetime"
+                            | "local_date"
+                            | "local_time"
+                            | "local_datetime"
+                    ) {
+                        return Err(TemplateError::UnknownVariable {
+                            name: other.to_owned(),
+                        });
                     }
+                    format_clock(base, adjusted).ok_or_else(|| {
+                        TemplateError::DateArithmeticOverflow {
+                            name: other.to_owned(),
+                        }
+                    })?
                 }
                 None => {
                     return Err(TemplateError::UnknownVariable {
@@ -514,8 +520,68 @@ fn push_bounded(
     Ok(false)
 }
 
-fn format_time(timestamp: u64) -> String {
-    let seconds = timestamp % 86_400;
+/// Render a clock variable. The plain names are UTC; the `local_` names use
+/// the system time zone's offset at that instant, so DST is honored for date
+/// offsets too. `None` if the instant cannot be represented.
+fn format_clock(name: &str, timestamp: u64) -> Option<String> {
+    match name {
+        "date" | "time" | "datetime" => format_clock_with_offset(name, timestamp, None),
+        "local_date" | "local_time" | "local_datetime" => format_clock_with_offset(
+            &name["local_".len()..],
+            timestamp,
+            Some(local_utc_offset(timestamp)?),
+        ),
+        _ => None,
+    }
+}
+
+/// `offset` is seconds east of UTC; `None` renders UTC with a `Z` suffix.
+fn format_clock_with_offset(name: &str, timestamp: u64, offset: Option<i64>) -> Option<String> {
+    // Signed: a local instant west of UTC may precede the Unix epoch.
+    let shifted = i64::try_from(timestamp)
+        .ok()?
+        .checked_add(offset.unwrap_or(0))?;
+    Some(match name {
+        "date" => format_signed_date(shifted),
+        "time" => format_signed_time(shifted),
+        "datetime" => {
+            let zone = match offset {
+                None => "Z".to_owned(),
+                Some(offset) => {
+                    let sign = if offset < 0 { '-' } else { '+' };
+                    let minutes = offset.unsigned_abs() / 60;
+                    format!("{sign}{:02}:{:02}", minutes / 60, minutes % 60)
+                }
+            };
+            format!(
+                "{}T{}{zone}",
+                format_signed_date(shifted),
+                format_signed_time(shifted)
+            )
+        }
+        _ => return None,
+    })
+}
+
+/// Seconds east of UTC for the system time zone at `timestamp`.
+fn local_utc_offset(timestamp: u64) -> Option<i64> {
+    let time = libc::time_t::try_from(timestamp).ok()?;
+    let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: both pointers are valid for the call; localtime_r is the
+    // reentrant variant and fully initializes `local` when it succeeds.
+    let result = unsafe { libc::localtime_r(&time, local.as_mut_ptr()) };
+    if result.is_null() {
+        return None;
+    }
+    // SAFETY: localtime_r returned non-null, so `local` is initialized.
+    let offset = unsafe { local.assume_init() }.tm_gmtoff;
+    // `tm_gmtoff` is a C long: already i64 on 64-bit targets, i32 elsewhere.
+    #[allow(clippy::useless_conversion)]
+    Some(i64::from(offset))
+}
+
+fn format_signed_time(timestamp: i64) -> String {
+    let seconds = timestamp.rem_euclid(86_400);
     format!(
         "{:02}:{:02}:{:02}",
         seconds / 3_600,
@@ -525,8 +591,11 @@ fn format_time(timestamp: u64) -> String {
 }
 
 pub(crate) fn format_date(timestamp: u64) -> String {
-    let days = (timestamp / 86_400) as i64;
-    let (year, month, day) = civil_from_days(days);
+    format_signed_date(i64::try_from(timestamp).unwrap_or(i64::MAX))
+}
+
+fn format_signed_date(timestamp: i64) -> String {
+    let (year, month, day) = civil_from_days(timestamp.div_euclid(86_400));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
@@ -633,6 +702,56 @@ mod tests {
             .unwrap(),
             "Hi ada on workstation 1970-01-01 00:00:00\n"
         );
+    }
+
+    #[test]
+    fn local_clock_variables_apply_the_utc_offset() {
+        // 2024-01-01T00:30:00Z
+        let timestamp = 1_704_069_000;
+        assert_eq!(
+            format_clock_with_offset("datetime", timestamp, None).as_deref(),
+            Some("2024-01-01T00:30:00Z")
+        );
+        // West of UTC the local calendar day is still the previous one.
+        assert_eq!(
+            format_clock_with_offset("date", timestamp, Some(-5 * 3_600)).as_deref(),
+            Some("2023-12-31")
+        );
+        assert_eq!(
+            format_clock_with_offset("datetime", timestamp, Some(-5 * 3_600)).as_deref(),
+            Some("2023-12-31T19:30:00-05:00")
+        );
+        assert_eq!(
+            format_clock_with_offset("datetime", timestamp, Some(5 * 3_600 + 45 * 60)).as_deref(),
+            Some("2024-01-01T06:15:00+05:45")
+        );
+        // Validation renders at the epoch; a western zone must still format.
+        assert_eq!(
+            format_clock_with_offset("datetime", 0, Some(-8 * 3_600)).as_deref(),
+            Some("1969-12-31T16:00:00-08:00")
+        );
+    }
+
+    #[test]
+    fn local_clock_variables_render_with_the_system_offset() {
+        let context = TemplateContext {
+            unix_timestamp: 1_704_069_000,
+            ..TemplateContext::default()
+        };
+        let offset = local_utc_offset(context.unix_timestamp).unwrap();
+        assert_eq!(
+            render_template("{{local_datetime}}", &context).unwrap(),
+            format_clock_with_offset("datetime", context.unix_timestamp, Some(offset)).unwrap()
+        );
+        let tomorrow = context.unix_timestamp + 86_400;
+        assert_eq!(
+            render_template("{{local_date+1d}}", &context).unwrap(),
+            format_clock_with_offset("date", tomorrow, Some(local_utc_offset(tomorrow).unwrap()))
+                .unwrap()
+        );
+        for template in ["{{local_date}}", "{{local_time}}", "{{local_datetime-1w}}"] {
+            render_template(template, &context).unwrap();
+        }
     }
 
     #[test]

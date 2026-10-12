@@ -78,7 +78,8 @@ install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
 Danach können Sie die Datei bearbeiten oder `wayexpand-gui` verwenden.
 Templates unterstützen unter anderem `{{username}}`, `{{hostname}}`,
 `{{date}}`, `{{time}}`, `{{datetime}}`, `{{newline}}` und
-`{{cursor}}`. Datum und Zeit werden in UTC berechnet.
+`{{cursor}}`. `{{date}}`, `{{time}}` und `{{datetime}}` verwenden UTC;
+`{{local_date}}`, `{{local_time}}` und `{{local_datetime}}` die Systemzeitzone.
 
 Weitere Felder, Limits, Befehle, App-Filter und Fleet-Konfiguration:
 [docs/CONFIGURATION_LIMITS.md](docs/CONFIGURATION_LIMITS.md),

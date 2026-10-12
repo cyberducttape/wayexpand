@@ -818,3 +818,23 @@ fn command_limit_messages_match_the_published_limits() {
     let cache = validate_command_config(&command(1, limits.max_cache_ms + 1)).unwrap_err();
     assert!(cache.contains(&limits.max_cache_ms.to_string()), "{cache}");
 }
+
+#[test]
+fn backward_date_offsets_and_local_clock_variables_validate() {
+    // Validation once rendered at the Unix epoch, where `{{date-1d}}`
+    // underflowed and was rejected although it always renders at runtime.
+    for replacement in [
+        "{{date-1d}}",
+        "{{datetime-1w}}",
+        "{{time-90m}}",
+        "{{local_date}}",
+        "{{local_time}}",
+        "{{local_datetime}}",
+        "{{local_date-1d}}",
+    ] {
+        Config::parse(&format!(
+            "[[expansion]]\ntrigger = \":t\"\nreplacement = \"{replacement}\""
+        ))
+        .unwrap_or_else(|error| panic!("{replacement} should validate: {error}"));
+    }
+}

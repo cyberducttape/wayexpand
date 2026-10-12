@@ -11,8 +11,9 @@ others must be enabled explicitly and can be disabled by organization policy.
 
 | Variable | Value |
 | --- | --- |
-| `{{date}}`, `{{time}}`, `{{datetime}}` | Current UTC date (`YYYY-MM-DD`), time (`HH:MM:SS`), or both (ISO 8601) |
-| `{{date+3d}}`, `{{time-90m}}`, `{{datetime+1w}}` | The same with an offset in `m`, `h`, `d`, or `w` |
+| `{{date}}`, `{{time}}`, `{{datetime}}` | Current UTC date (`YYYY-MM-DD`), time (`HH:MM:SS`), or both (ISO 8601, ending in `Z`) |
+| `{{local_date}}`, `{{local_time}}`, `{{local_datetime}}` | The same in the system time zone; `local_datetime` ends with the UTC offset, for example `2026-10-11T09:30:00-06:00` |
+| `{{date+3d}}`, `{{time-90m}}`, `{{local_datetime+1w}}` | Any of the above with an offset in `m`, `h`, `d`, or `w` |
 | `{{unix_timestamp}}` | Seconds since 1970-01-01 UTC |
 | `{{username}}`, `{{hostname}}` | The login name and the machine's host name |
 | `{{newline}}`, `{{tab}}` | A line break or a tab |

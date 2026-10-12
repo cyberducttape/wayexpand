@@ -665,6 +665,12 @@ impl Config {
                 && self.settings.clipboard_mode != ClipboardMode::Disabled)
                 .then(|| ClipboardReader(std::sync::Arc::new(|| Some(String::new())))),
             validating: true,
+            // Render at the current time, as expansion does. At the epoch, a
+            // backward date offset such as `{{date-1d}}` would underflow and
+            // be rejected even though it always renders at runtime.
+            unix_timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs()),
             ..TemplateContext::default()
         }
     }

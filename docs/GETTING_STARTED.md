@@ -275,7 +275,7 @@ includes, allowlisted environment variables, and the opt-in clipboard.
 ```toml
 [[expansion]]
 trigger = ";;date"
-replacement = "{{date}}"  # Today's date in UTC
+replacement = "{{local_date}}"  # Today's date in your time zone; {{date}} is UTC
 ```
 
 **Code snippet:**
