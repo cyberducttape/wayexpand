@@ -121,7 +121,10 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 
 : >"$output"
 driver_status=0
-matrix_started=$(date +%s)
+# Milliseconds: whole seconds could report a full second elapsed when the
+# clock crosses a boundary right after the start, before any cell ran.
+matrix_started_ms=$(date +%s%3N)
+matrix_deadline_ms=$((matrix_deadline_seconds * 1000))
 matrix_deadline_reached=0
 while IFS= read -r scenario; do
     [ -n "$scenario" ] || continue
@@ -141,9 +144,9 @@ while IFS= read -r scenario; do
             cell_key="$scenario|$layout_profile|$target_app"
             safe_log=$(printf '%s' "$cell_key" | tr '|' '_')
             log="$log_dir/$safe_log.log"
-            elapsed_seconds=$(( $(date +%s) - matrix_started ))
+            elapsed_ms=$(( $(date +%s%3N) - matrix_started_ms ))
             if [ "$matrix_deadline_reached" -eq 1 ] \
-                || [ "$elapsed_seconds" -ge "$matrix_deadline_seconds" ]; then
+                || [ "$elapsed_ms" -ge "$matrix_deadline_ms" ]; then
                 result=UNVERIFIED
                 driver_status=1
                 matrix_deadline_reached=1
