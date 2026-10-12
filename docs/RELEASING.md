@@ -173,6 +173,10 @@ those pins with moving version tags during release-workflow maintenance.
 | Source distribution | `wayexpand-<version>.tar.gz` | Any | Registry access required; no project source replacement config |
 | Offline build | `wayexpand-<version>-vendored.tar.gz` | `CARGO_NET_OFFLINE=true` | All dependencies included, no network required |
 
+Uncertified builds go through the separate experimental channel described in
+[Packaging](PACKAGING.md#experimental-builds), never through this release
+workflow: certified releases keep the compositor certification gate.
+
 Do not call a release stable while [`docs/SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md)
 still marks key pass-through or a compositor's coverage as unsupported or
 experimental. Release notes must name known backend limitations and any

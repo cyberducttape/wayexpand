@@ -26,6 +26,28 @@ downloads. Release publication remains gated on compositor certification.
 | Fedora/RHEL | `.rpm` | Build locally from source/spec | No release asset or Copr repository currently published |
 | aarch64 | `wayexpand` | Build locally from source | No release archive currently published |
 
+### Experimental builds
+
+The manually triggered **Experimental build** workflow
+(`.github/workflows/experimental.yml`) produces x86_64 and aarch64 archives
+plus a `.deb` and `.rpm` from any ref, without a Rust toolchain on the target
+machine. These builds pass the full CI suite but skip real-compositor
+certification, so they make no compatibility claim and are not for managed
+fleets. By default the workflow only uploads workflow artifacts; with
+`publish` enabled it creates a GitHub prerelease tagged
+`experimental-<label>` that is never marked as the latest release.
+
+Each build carries its commit in every name:
+
+- binaries report `<version>-dev+<commit>`;
+- packages are versioned `<version>+exp.<date>.g<commit>` after an already
+  tagged version, or `<version>~exp.<date>.g<commit>` before one, so dpkg and
+  rpm always upgrade them to the next certified release;
+- file names use `<version>-exp.<date>.g<commit>`.
+
+Verify a download with its `.sha256` file and
+`gh attestation verify <file> --repo cyberducttape/wayexpand`.
+
 ## Building Locally
 
 ### Arch Linux (packaging preview)

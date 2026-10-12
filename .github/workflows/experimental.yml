@@ -1,0 +1,188 @@
+name: Experimental build
+
+# Uncertified builds for people who want to try WayExpand without a Rust
+# toolchain. This workflow never runs on its own: it is started by hand, it
+# skips the real-compositor certification gate that certified releases
+# require, and it labels every artifact as experimental. By default it only
+# uploads workflow artifacts; set `publish` to create a GitHub prerelease.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to build"
+        required: true
+        default: main
+        type: string
+      publish:
+        description: "Publish a GitHub prerelease (otherwise artifacts only)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: experimental-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Verify
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ inputs.ref }}
+
+  identity:
+    name: Experimental version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
+      label: ${{ steps.version.outputs.label }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - id: version
+        run: |
+          scripts/prepare-experimental-build.sh >>"$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+  linux-aarch64:
+    name: Linux aarch64 experimental build
+    needs: [ci, identity]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      LABEL: ${{ needs.identity.outputs.label }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: 1.96.0
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Build release binaries natively on arm64
+        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+      - name: Package aarch64 archive
+        run: scripts/package-release-binaries.sh "$LABEL" aarch64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wayexpand-experimental-linux-aarch64
+          path: |
+            wayexpand-*-linux-aarch64.tar.gz
+            wayexpand-*-linux-aarch64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-x86_64:
+    name: Linux x86_64 experimental build
+    needs: [ci, identity, linux-aarch64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      LABEL: ${{ needs.identity.outputs.label }}
+      PACKAGE_VERSION: ${{ needs.identity.outputs.package_version }}
+      COMMIT: ${{ needs.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: 1.96.0
+      - name: Install build and package dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config build-essential debhelper devscripts dpkg-dev rpm
+      - name: Build release binaries
+        run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+      - name: Package x86_64 archive
+        run: scripts/package-release-binaries.sh "$LABEL" x86_64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wayexpand-experimental-linux-aarch64
+      - name: Stamp the experimental version into package metadata
+        run: scripts/prepare-experimental-build.sh --apply
+      - name: Generate vendored dependencies (offline package builds)
+        run: mkdir -p .cargo && cargo vendor --locked vendor/ > .cargo/config.toml
+      - name: Build Debian and RPM packages
+        # The RPM is built from an exported tree without .git; pass the commit
+        # so its binaries still report `<version>-dev+<commit>`.
+        run: WAYEXPAND_BUILD_SHA="${COMMIT:0:12}" scripts/build-release-packages.sh "$PACKAGE_VERSION"
+      - name: Give packages filename-safe experimental names
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          renamed=0
+          for package in wayexpand_*.deb wayexpand-*.rpm; do
+            target=${package//"$PACKAGE_VERSION"/"$LABEL"}
+            if [ "$target" != "$package" ]; then
+              mv -- "$package" "$target"
+            fi
+            rm -f -- "$package.sha256"
+            sha256sum -- "$target" >"$target.sha256"
+            renamed=$((renamed + 1))
+          done
+          test "$renamed" -eq 2
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            wayexpand-*.tar.gz
+            wayexpand_*.deb
+            wayexpand-*.rpm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wayexpand-experimental-${{ needs.identity.outputs.label }}
+          path: |
+            wayexpand-*.tar.gz
+            wayexpand-*.tar.gz.sha256
+            wayexpand_*.deb
+            wayexpand_*.deb.sha256
+            wayexpand-*.rpm
+            wayexpand-*.rpm.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish experimental prerelease
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@71d29a04ae7c63895f38299d7a5e05d238f7f445 # v2.5.1
+        with:
+          tag_name: experimental-${{ needs.identity.outputs.label }}
+          target_commitish: ${{ needs.identity.outputs.commit }}
+          name: Experimental build ${{ needs.identity.outputs.label }} (uncertified)
+          prerelease: true
+          make_latest: false
+          body: |
+            **Experimental, uncertified build.** It passed the full CI suite but
+            not real-compositor certification, so no desktop or backend
+            combination is claimed to work. Do not deploy it to managed fleets.
+
+            Built from commit ${{ needs.identity.outputs.commit }}. Binaries report
+            `<version>-dev+<commit>`; packages are versioned
+            `${{ needs.identity.outputs.package_version }}`, so a later certified
+            release upgrades them.
+
+            Before enabling a service, run `wayexpand doctor` and read
+            [docs/SUPPORT_MATRIX.md](https://github.com/${{ github.repository }}/blob/${{ needs.identity.outputs.commit }}/docs/SUPPORT_MATRIX.md).
+            Verify downloads with the `.sha256` files and
+            `gh attestation verify <file> --repo ${{ github.repository }}`.
+          files: |
+            wayexpand-*.tar.gz
+            wayexpand-*.tar.gz.sha256
+            wayexpand_*.deb
+            wayexpand_*.deb.sha256
+            wayexpand-*.rpm
+            wayexpand-*.rpm.sha256

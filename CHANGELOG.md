@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added a manually triggered experimental build channel: uncertified x86_64
+  and aarch64 archives plus `.deb` and `.rpm` packages from any ref, with
+  checksums and build provenance attestations. Artifacts are labeled with
+  their commit and versioned so the next certified release upgrades them;
+  publishing a GitHub prerelease is opt-in and never marked latest. Certified
+  releases keep the compositor certification gate.
 - Added `{{local_date}}`, `{{local_time}}`, and `{{local_datetime}}` (with UTC
   offset), which render in the system time zone and accept the same `+3d`-style
   offsets. `{{date}}`, `{{time}}`, and `{{datetime}}` remain UTC.
