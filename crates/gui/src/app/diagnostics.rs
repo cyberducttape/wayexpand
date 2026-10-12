@@ -83,6 +83,38 @@ impl GuiApp {
                 .color(palette.muted),
         );
         if let Some(capabilities) = self.daemon_capabilities {
+            if let Some(assurance) = capabilities.insertion_assurance {
+                let color = match assurance {
+                    runtime::InsertionAssurance::Verified => palette.success,
+                    runtime::InsertionAssurance::Compatibility => palette.warning,
+                    runtime::InsertionAssurance::Blocked => palette.danger,
+                    runtime::InsertionAssurance::Unavailable => palette.muted,
+                };
+                theme::card(ui, palette, |ui| {
+                    ui.colored_label(color, self.strings.insertion_pill(assurance));
+                    ui.add(
+                        egui::Label::new(self.strings.insertion_explanation(
+                            assurance,
+                            capabilities.focus_tracked == Some(true),
+                        ))
+                        .wrap(),
+                    );
+                    if let Some(refused) = capabilities.output_refused_total.filter(|n| *n > 0) {
+                        ui.colored_label(
+                            palette.warning,
+                            self.strings
+                                .output_refused_notice(refused, capabilities.output_last_refusal),
+                        );
+                    }
+                    if let Some(uncertain) = capabilities.output_uncertain_total.filter(|n| *n > 0)
+                    {
+                        ui.colored_label(
+                            palette.danger,
+                            self.strings.output_uncertain_notice(uncertain),
+                        );
+                    }
+                });
+            }
             if capabilities.capture_sensitive_focus != Some(true) {
                 theme::card(ui, palette, |ui| {
                     ui.colored_label(palette.danger, self.strings.sensitive_field_warning());

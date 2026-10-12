@@ -159,7 +159,9 @@ Normal setup uses compatibility modes instead of exposing protocol names:
   distinction.
 - **Maximum compatibility** uses evdev with a detected libei/EIS path (or a
   KDE/GNOME portal candidate after explicit authorization) and warns that
-  password-field awareness is unavailable.
+  password-field awareness is unavailable. Its keystroke output cannot verify
+  what it erases, so typed expansions stay refused until the user sets
+  `compatibility_mode` (see [Insertion guarantees](../SECURITY.md#insertion-guarantees)).
 - **Experimental** opts into input-method-v2 and clearly identifies its
   unsupported non-text-key and IME/preedit behavior.
 
@@ -175,7 +177,12 @@ executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
 Missing driver or session metadata fails the job; hosted CI is never treated as
-a substitute for a real compositor session. Workflow artifacts are evidence
+a substitute for a real compositor session. Runners certifying a keystroke
+route (`evdev+libei`, `evdev+wlroots`) must give consent in the configuration
+their driver uses: `compatibility_mode = "tracked-focus"` on KDE and
+`"untracked-focus"` where no window tracker exists. Without it the daemon
+reports `insertion_assurance=blocked` and refuses every typed scenario.
+Workflow artifacts are evidence
 records only; the support matrix should not mark a compositor certified until a
 reviewed artifact reports `certified: true` for the relevant compositor,
 backend, layout, and client set.

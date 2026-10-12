@@ -50,6 +50,15 @@
     "matcher_latency_p99_us": "integer",
     "usage_flush_max_duration_us": "integer",
     "usage_flush_failures_total": "integer",
-    "usage_queue_rejected_total": "integer"
+    "usage_queue_rejected_total": "integer",
+    "output_health": "string",
+    "output_uncertain_total": "integer",
+    "output_retiring_workers": "integer",
+    "output_stalled_ms": "integer",
+    "insertion_assurance": "string",
+    "compatibility_mode": "string",
+    "focus_assurance": "string",
+    "output_refused_total": "integer",
+    "output_last_refusal": "string"
   }
 }

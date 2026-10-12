@@ -155,6 +155,42 @@ Do not use evdev where a lossless replacement guarantee is required. The
 architectural boundary and the risks of an `EVIOCGRAB` proxy are documented in
 [docs/adr/0001-evdev-best-effort-semantics.md](docs/adr/0001-evdev-best-effort-semantics.md).
 
+### Insertion guarantees
+
+WayExpand distinguishes verified insertion from compatibility-mode
+insertion, and reports which one is active (`insertion_assurance` in
+`wayexpand status --json`, the `doctor` "Insertion" line, and the GUI and TUI
+headers).
+
+- **Verified routes** (input-method-v2 and IBus) erase a trigger only after
+  checking the field's own surrounding text, and their edit is bound to that
+  field by the protocol, so it cannot land in another window.
+- **Keystroke routes** (evdev capture with libei or wlroots output) erase with
+  Backspace without seeing the field's text. They never erase unless the user
+  sets `compatibility_mode` (in the primary config, the user layer, or the
+  organization layer; curated packs cannot set it):
+  - `tracked-focus` erases only while the window tracker (KDE) reports the
+    same exact window, checked immediately before the first keystroke;
+  - `untracked-focus` also erases when no tracker can confirm focus, and is
+    labeled as such everywhere the route is shown.
+
+  In every mode, a focus change detected between matching the trigger and
+  typing refuses the expansion, as does a tracker that disconnects or stops.
+- **Refusals** happen before anything is typed: nothing is erased or
+  inserted, the expansion is not retried, and it is counted in
+  `output_refused_total` with its reason in `output_last_refusal`.
+- **Uncertain writes** are never retried. When a keystroke route fails or
+  stops acknowledging partway through an expansion, the daemon counts it in
+  `output_uncertain_total`, reports it in `doctor` and the GUI, and reconnects
+  without replaying it.
+
+Limits: focus tracking is only as current as the compositor's reports, so a
+focus change in the last moments before typing, or one the compositor has
+not yet reported, cannot be detected; and a keystroke route cannot detect a
+cursor moved by mouse within the same window. These are the reasons keystroke
+routes require explicit consent. Organizations can forbid them entirely with
+`minimum_replacement_guarantee = "verified"` in safe mode.
+
 Backends must document their permission requirements explicitly:
 
 - direct libei/EIS requires an explicitly configured `LIBEI_SOCKET`; portal

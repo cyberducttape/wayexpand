@@ -69,6 +69,13 @@ evidence exists.
 | `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
+The evdev routes type keystrokes and cannot verify what they erase. They
+replace triggers only with the user's `compatibility_mode` consent:
+`tracked-focus` on KDE, where the KWin tracker confirms the focused window
+before typing, or `untracked-focus` on Sway, Hyprland, and GNOME, which have
+no tracker. Without consent they report `insertion_assurance=blocked` and
+refuse typed expansions. See [Insertion guarantees](../SECURITY.md#insertion-guarantees).
+
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not
 evidence for layout-independent text injection. Certification checks

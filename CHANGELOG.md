@@ -4,6 +4,26 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- **Insertion guarantees.** Keystroke routes (evdev capture with libei or
+  wlroots output) no longer erase text they cannot verify unless the user
+  opts in with the new `[settings] compatibility_mode`: `tracked-focus`
+  (erase only while the KDE window tracker confirms the trigger's exact
+  window, checked immediately before typing) or `untracked-focus` (also
+  without a tracker). A focus change between matching and typing, or a
+  tracker that stops, refuses the expansion in every mode. Refusals happen
+  before the first keystroke, are never retried, and are counted.
+  Curated packs cannot grant this consent. **Upgrade note:** evdev users must
+  set `compatibility_mode` (or use Settings > Engine in the GUI); until then
+  `doctor` reports insertion as blocked and typed expansions are refused.
+  Verified routes (input-method-v2, IBus) are unchanged.
+- Daemon status schema 8 adds `insertion_assurance`
+  (`verified`/`compatibility`/`blocked`/`unavailable`), `compatibility_mode`,
+  `focus_assurance`, `output_refused_total`, and `output_last_refusal`.
+  `doctor` explains the active guarantee and flags a blocked route; the GUI
+  toolbar, diagnostics, and Engine settings and the TUI header show whether
+  insertion is verified or in compatibility mode, along with refused and
+  uncertain expansions. The CLI status contract fixtures now also cover the
+  schema 7 `output_*` fields they had missed.
 - Added a manually triggered experimental build channel: uncertified x86_64
   and aarch64 archives plus `.deb` and `.rpm` packages from any ref, with
   checksums and build provenance attestations. Artifacts are labeled with

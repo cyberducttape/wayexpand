@@ -62,7 +62,10 @@ pub(crate) fn drain_pending_window_events(
     focus_state: &mut FocusState,
 ) -> Result<()> {
     let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
-    if let Some(window_opt) = backend_lifecycle::drain_pending_window_events(receiver) {
+    if let Some((window_opt, stamp)) = backend_lifecycle::drain_pending_window_events(receiver) {
+        // The engine now reflects this snapshot; keystroke output compares
+        // the live focus identity against it before typing.
+        crate::assurance::GuardState::global().set_stamp(stamp);
         process_event(
             engine,
             InputEvent::WindowChanged(window_opt),

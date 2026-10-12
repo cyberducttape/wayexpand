@@ -50,6 +50,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "output_uncertain_total"
                         | "output_retiring_workers"
                         | "output_stalled_ms"
+                        | "output_refused_total"
                 ) =>
             {
                 match value.parse::<u64>() {
@@ -129,9 +130,53 @@ pub(crate) fn output_health_from_status(snapshot: &serde_json::Value) -> serde_j
     })
 }
 
-/// Print the running daemon's output health. Returns false only when the
-/// daemon reports a stalled output route; an unreachable daemon is not a
-/// failure here (doctor also runs before the service is started).
+/// How the daemon's output route is assured, with a plain explanation of
+/// what that means for the user's text.
+pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+    let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
+    let assurance = text("insertion_assurance");
+    let mode = text("compatibility_mode").unwrap_or("off");
+    let focus = text("focus_assurance");
+    let explanation = match assurance {
+        Some("verified") => Some(
+            "verified: the input method checks the field's own text before replacing a \
+             trigger, and the edit is bound to that field"
+                .to_owned(),
+        ),
+        Some("compatibility") => Some(format!(
+            "compatibility mode ({mode}): keystrokes erase the trigger without seeing the \
+             field's text; {}",
+            if focus == Some("tracker") {
+                "the window tracker confirms focus immediately before typing"
+            } else {
+                "focus cannot be confirmed right now, so the text may land in whatever has focus"
+            }
+        )),
+        Some("blocked") => Some(
+            "blocked: this keystroke route cannot verify what it erases, so typed expansions \
+             are refused. Use a verified route (`wayexpand setup`), or opt in with \
+             `compatibility_mode = \"tracked-focus\"` (requires the KDE window tracker) or \
+             `\"untracked-focus\"` under [settings]"
+                .to_owned(),
+        ),
+        Some("unavailable") => Some("no output route is connected".to_owned()),
+        _ => None,
+    };
+    let last_refusal = text("output_last_refusal").filter(|reason| *reason != "none");
+    serde_json::json!({
+        "assurance": assurance,
+        "compatibility_mode": text("compatibility_mode"),
+        "focus": focus,
+        "refused_total": snapshot.get("output_refused_total"),
+        "last_refusal": last_refusal,
+        "explanation": explanation,
+    })
+}
+
+/// Print the running daemon's output health. Returns false when the daemon
+/// reports a stalled output route or refuses all typed expansions; an
+/// unreachable daemon is not a failure here (doctor also runs before the
+/// service is started).
 pub(crate) fn print_output_health_diagnostics() -> bool {
     let Some(snapshot) = read_daemon_status()
         .ok()
@@ -139,9 +184,24 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     else {
         return true;
     };
+    let insertion = insertion_from_status(&snapshot);
+    if let Some(explanation) = insertion["explanation"].as_str() {
+        println!("Insertion: {explanation}");
+    }
+    if let Some(refused) = insertion["refused_total"]
+        .as_u64()
+        .filter(|total| *total > 0)
+    {
+        println!(
+            "Insertion refusals: {refused} expansion(s) refused before typing (last: {}); \
+             nothing was erased or inserted for them",
+            insertion["last_refusal"].as_str().unwrap_or("unknown")
+        );
+    }
+    let insertion_ok = insertion["assurance"].as_str() != Some("blocked");
     let output = output_health_from_status(&snapshot);
     let Some(health) = output["health"].as_str() else {
-        return true;
+        return insertion_ok;
     };
     println!(
         "Output route: {health} ({} uncertain transaction(s) since start)",
@@ -160,7 +220,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         );
         return false;
     }
-    true
+    insertion_ok
 }
 
 pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {

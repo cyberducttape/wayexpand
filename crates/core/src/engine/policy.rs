@@ -35,6 +35,11 @@ impl ExpansionEngine {
     }
 
     /// Whether libei portal restoration tokens may be read and persisted.
+    /// Whether keystroke routes may erase text they cannot verify.
+    pub fn compatibility_mode(&self) -> crate::CompatibilityMode {
+        self.config.settings.compatibility_mode
+    }
+
     pub fn libei_token_persistence(&self) -> bool {
         self.config.settings.libei_token_persistence
     }

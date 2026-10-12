@@ -59,6 +59,8 @@ impl Daemon {
             return Ok(ControlFlow::Break(()));
         }
         self.config.reload_if_changed();
+        // After any reload this turn: outputs use the consent now in effect.
+        crate::assurance::GuardState::global().set_mode(self.config.engine.compatibility_mode());
         for (action, result) in self.config.engine.drain_completed_hotkeys() {
             match result {
                 Ok(()) => info!(chord = %action.chord, "hotkey action completed"),

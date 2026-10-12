@@ -13,29 +13,89 @@ use crate::{InputEvent, Modifiers, WindowContext};
 /// Create a latest-value channel for focused-window snapshots. Window focus
 /// changes are state, not a log: if producers outpace consumers, intermediate
 /// snapshots are coalesced instead of accumulating an unbounded queue.
+///
+/// The channel also numbers focus identities (see [`FocusWitness`]) so output
+/// can confirm, immediately before typing, that focus has not moved since a
+/// trigger was matched, even when that snapshot has not been received yet.
 pub fn window_update_channel() -> (WindowUpdateSender, WindowUpdateReceiver) {
     let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
-    let latest = Arc::new(Mutex::new(None));
+    let state = Arc::new(Mutex::new(WindowChannelState {
+        senders: 1,
+        ..WindowChannelState::default()
+    }));
     (
         WindowUpdateSender {
-            latest: Arc::clone(&latest),
+            state: Arc::clone(&state),
             wake: wake_sender,
         },
         WindowUpdateReceiver {
-            latest,
+            state,
             wake: wake_receiver,
         },
     )
 }
 
-#[derive(Clone)]
+#[derive(Default)]
+struct WindowChannelState {
+    latest: Option<Option<WindowContext>>,
+    /// Identity of the most recently published snapshot; titles are ignored
+    /// because applications change them while the user types.
+    identity: Option<(Option<String>, Option<String>)>,
+    /// Bumped whenever the published identity changes or the last sender
+    /// goes away, never for a title-only update.
+    sequence: u64,
+    senders: usize,
+}
+
+impl WindowChannelState {
+    fn stamp(&self) -> FocusStamp {
+        FocusStamp {
+            sequence: self.sequence,
+            exact: self.senders > 0
+                && self.identity.as_ref().is_some_and(|(_, instance)| {
+                    instance.as_deref().is_some_and(|id| !id.is_empty())
+                }),
+        }
+    }
+}
+
+fn lock_state(state: &Mutex<WindowChannelState>) -> std::sync::MutexGuard<'_, WindowChannelState> {
+    state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub struct WindowUpdateSender {
-    latest: Arc<Mutex<Option<Option<WindowContext>>>>,
+    state: Arc<Mutex<WindowChannelState>>,
     wake: SyncSender<()>,
 }
 
+impl Clone for WindowUpdateSender {
+    fn clone(&self) -> Self {
+        lock_state(&self.state).senders += 1;
+        Self {
+            state: Arc::clone(&self.state),
+            wake: self.wake.clone(),
+        }
+    }
+}
+
+impl Drop for WindowUpdateSender {
+    fn drop(&mut self) {
+        let mut state = lock_state(&self.state);
+        state.senders = state.senders.saturating_sub(1);
+        if state.senders == 0 {
+            // A tracker that stops without reporting "no window" (for
+            // example a panicked thread) must not leave its last window
+            // looking confirmed.
+            state.identity = None;
+            state.sequence = state.sequence.wrapping_add(1);
+        }
+    }
+}
+
 pub struct WindowUpdateReceiver {
-    latest: Arc<Mutex<Option<Option<WindowContext>>>>,
+    state: Arc<Mutex<WindowChannelState>>,
     wake: Receiver<()>,
 }
 
@@ -46,10 +106,17 @@ impl WindowUpdateSender {
     /// Publish the current focus snapshot, replacing any older pending one.
     /// `None` is a real update meaning that no focused window is known.
     pub fn send(&self, window: Option<WindowContext>) -> Result<(), WindowUpdateSendError> {
-        *self
-            .latest
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(window);
+        {
+            let mut state = lock_state(&self.state);
+            let identity = window
+                .as_ref()
+                .map(|window| (window.app_id.clone(), window.instance_id.clone()));
+            if identity != state.identity {
+                state.identity = identity;
+                state.sequence = state.sequence.wrapping_add(1);
+            }
+            state.latest = Some(window);
+        }
         match self.wake.try_send(()) {
             Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
             Err(mpsc::TrySendError::Disconnected(())) => Err(WindowUpdateSendError),
@@ -57,19 +124,65 @@ impl WindowUpdateSender {
     }
 }
 
+/// The focus identity a snapshot belonged to: compare it with a
+/// [`FocusWitness`] later to learn whether focus moved in between.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FocusStamp {
+    sequence: u64,
+    /// The tracker reported an exact window instance, not only an
+    /// application, so "unchanged" really means the same window.
+    exact: bool,
+}
+
+/// Result of checking a [`FocusStamp`] against the tracker's current state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusCheck {
+    /// The same exact window is still focused, as far as the tracker knows.
+    Unchanged,
+    /// Focus moved, became unknown, or the tracker stopped.
+    Changed,
+    /// Nothing changed, but the stamp never identified an exact window.
+    Unconfirmed,
+}
+
+/// Live view of a window-update channel's focus identity, shareable with
+/// threads that write output.
+#[derive(Clone)]
+pub struct FocusWitness {
+    state: Arc<Mutex<WindowChannelState>>,
+}
+
+impl FocusWitness {
+    pub fn check(&self, stamp: FocusStamp) -> FocusCheck {
+        let current = lock_state(&self.state).stamp();
+        if current.sequence != stamp.sequence {
+            FocusCheck::Changed
+        } else if stamp.exact && current.exact {
+            FocusCheck::Unchanged
+        } else {
+            FocusCheck::Unconfirmed
+        }
+    }
+}
+
 impl WindowUpdateReceiver {
-    fn take_latest(&self) -> Option<Option<WindowContext>> {
-        self.latest
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take()
+    fn take_latest(&self) -> Option<(Option<WindowContext>, FocusStamp)> {
+        let mut state = lock_state(&self.state);
+        let stamp = state.stamp();
+        state.latest.take().map(|window| (window, stamp))
     }
 
     pub fn try_recv(&self) -> Result<Option<WindowContext>, TryRecvError> {
+        self.try_recv_stamped().map(|(window, _)| window)
+    }
+
+    /// Like `try_recv`, also returning the focus identity of that snapshot,
+    /// read atomically with it.
+    pub fn try_recv_stamped(&self) -> Result<(Option<WindowContext>, FocusStamp), TryRecvError> {
         loop {
             self.wake.try_recv()?;
-            if let Some(window) = self.take_latest() {
-                return Ok(window);
+            if let Some(update) = self.take_latest() {
+                return Ok(update);
             }
             // A concurrent publisher may have placed a wake token just after
             // this receiver consumed the latest snapshot. Consume that stale
@@ -85,9 +198,15 @@ impl WindowUpdateReceiver {
         loop {
             self.wake
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))?;
-            if let Some(window) = self.take_latest() {
+            if let Some((window, _)) = self.take_latest() {
                 return Ok(window);
             }
+        }
+    }
+
+    pub fn focus_witness(&self) -> FocusWitness {
+        FocusWitness {
+            state: Arc::clone(&self.state),
         }
     }
 }
@@ -311,6 +430,15 @@ pub trait TextInjector: Send {
     /// that have no additional runtime mode may use the stable default.
     fn status_detail(&self) -> &'static str {
         ""
+    }
+    /// Last check before an output transaction's first keystroke. `erases`
+    /// says whether the transaction deletes text. A refusal must be a
+    /// non-retryable error and guarantees that nothing was written, so the
+    /// transaction reports as not applied. The default admits everything;
+    /// the daemon wraps keystroke-synthesis backends with its assurance
+    /// policy.
+    fn admit(&self, _erases: bool) -> Result<(), InjectorError> {
+        Ok(())
     }
     /// Remove the exact trigger text immediately before the cursor.
     ///
@@ -737,6 +865,63 @@ fn discover_uinput() -> (BackendState, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn focused(app: &str, instance: Option<&str>, title: &str) -> Option<WindowContext> {
+        Some(WindowContext {
+            app_id: Some(app.into()),
+            title: Some(title.into()),
+            instance_id: instance.map(Into::into),
+        })
+    }
+
+    #[test]
+    fn focus_witness_ignores_titles_and_detects_window_changes() {
+        let (sender, receiver) = window_update_channel();
+        let witness = receiver.focus_witness();
+        sender.send(focused("editor", Some("w1"), "draft")).unwrap();
+        let (_, stamp) = receiver.try_recv_stamped().unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Unchanged);
+
+        // Editors retitle themselves while the user types.
+        sender
+            .send(focused("editor", Some("w1"), "draft *"))
+            .unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Unchanged);
+
+        // Detected before the reactor receives the snapshot.
+        sender.send(focused("editor", Some("w2"), "draft")).unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Changed);
+        let (_, stamp) = receiver.try_recv_stamped().unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Unchanged);
+
+        sender.send(None).unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Changed);
+    }
+
+    #[test]
+    fn focus_witness_never_confirms_app_only_identity_or_a_stopped_tracker() {
+        let (sender, receiver) = window_update_channel();
+        let witness = receiver.focus_witness();
+        assert_eq!(
+            witness.check(FocusStamp::default()),
+            FocusCheck::Unconfirmed
+        );
+
+        sender.send(focused("terminal", None, "shell")).unwrap();
+        let (_, stamp) = receiver.try_recv_stamped().unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Unconfirmed);
+        sender.send(focused("browser", None, "page")).unwrap();
+        assert_eq!(witness.check(stamp), FocusCheck::Changed);
+
+        sender.send(focused("editor", Some("w1"), "draft")).unwrap();
+        let (_, stamp) = receiver.try_recv_stamped().unwrap();
+        let clone = sender.clone();
+        drop(sender);
+        assert_eq!(witness.check(stamp), FocusCheck::Unchanged);
+        // The last tracker handle going away is a change, even unannounced.
+        drop(clone);
+        assert_eq!(witness.check(stamp), FocusCheck::Changed);
+    }
 
     #[test]
     fn window_updates_coalesce_to_the_latest_snapshot() {

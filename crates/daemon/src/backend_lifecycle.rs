@@ -17,7 +17,8 @@ use std::{
 use tracing::{info, warn};
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_core::{
-    window_update_channel, WindowContext, WindowTracker, WindowUpdateReceiver, WindowUpdateSender,
+    window_update_channel, FocusStamp, WindowContext, WindowTracker, WindowUpdateReceiver,
+    WindowUpdateSender,
 };
 
 /// How long one tracker poll may block. It bounds how quickly the supervisor
@@ -229,15 +230,17 @@ fn wait_for_tracker_retry(stop: &AtomicBool, sender: &WindowUpdateSender, delay:
 /// Drain any pending window-change events from the tracker's receiver.
 /// This prevents app-filter races where a focus change arrives between
 /// input-event wait and processing.
-/// Returns the latest window context if any changes were pending.
+/// Returns the latest window context if any changes were pending, with the
+/// focus identity it was published under.
 pub fn drain_pending_window_events(
     window_tracker: Option<&WindowUpdateReceiver>,
-) -> Option<Option<WindowContext>> {
+) -> Option<(Option<WindowContext>, FocusStamp)> {
     if let Some(receiver) = window_tracker {
-        return match receiver.try_recv() {
-            Ok(window) => Some(window),
+        return match receiver.try_recv_stamped() {
+            Ok(update) => Some(update),
             Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+            // The witness already reports a stopped tracker as changed.
+            Err(mpsc::TryRecvError::Disconnected) => Some((None, FocusStamp::default())),
         };
     }
     None
@@ -510,7 +513,7 @@ mod tests {
             }))
             .unwrap();
 
-        let latest = drain_pending_window_events(Some(&receiver));
+        let latest = drain_pending_window_events(Some(&receiver)).map(|(window, _)| window);
         assert_eq!(
             latest,
             Some(Some(WindowContext {
@@ -526,6 +529,9 @@ mod tests {
         let (sender, receiver) = window_update_channel();
         drop(sender);
 
-        assert_eq!(drain_pending_window_events(Some(&receiver)), Some(None));
+        assert_eq!(
+            drain_pending_window_events(Some(&receiver)).map(|(window, _)| window),
+            Some(None)
+        );
     }
 }

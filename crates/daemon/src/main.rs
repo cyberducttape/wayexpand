@@ -1,4 +1,5 @@
 mod args;
+mod assurance;
 mod backend_lifecycle;
 mod build_info;
 mod clipboard;
@@ -442,6 +443,13 @@ fn main() -> Result<()> {
     };
 
     let window_tracker = backend_lifecycle::spawn_window_tracker();
+    let output_guard = assurance::GuardState::global();
+    output_guard.set_mode(config.engine.compatibility_mode());
+    output_guard.set_witness(
+        window_tracker
+            .as_ref()
+            .map(|tracker| tracker.receiver.focus_witness()),
+    );
     let focus_state = FocusState::new(config.engine.current_window().cloned());
     publish_focus_snapshot(&control, &focus_state);
 

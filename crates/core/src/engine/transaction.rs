@@ -89,6 +89,9 @@ impl ExpansionEngine {
     ) -> Result<(), InjectorError> {
         let capabilities = injector.capabilities();
         let trailing_chars = usize::from(result.reinsert_after.is_some());
+        // Checked first and before anything is typed, so a refusal is a clean
+        // "not applied" rather than an uncertain partial write.
+        injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
         let output_chars = result.insert.chars().count() + trailing_chars;
         if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
             return Err(InjectorError {

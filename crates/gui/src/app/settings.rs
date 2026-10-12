@@ -8,6 +8,7 @@ impl GuiApp {
     pub(crate) fn open_settings(&mut self) {
         self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
         self.settings_undo_chord = self.config.settings.undo_chord.clone().unwrap_or_default();
+        self.settings_compatibility_mode = self.config.settings.compatibility_mode;
         self.settings_error = None;
         self.settings_open = true;
     }
@@ -93,6 +94,7 @@ impl GuiApp {
         let undo_chord_input = self.settings_undo_chord.trim();
         candidate.settings.undo_chord =
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
+        candidate.settings.compatibility_mode = self.settings_compatibility_mode;
         if let Err(error) = candidate.validate() {
             let detail = error.safe_summary();
             self.status = Status::error(self.strings.status_settings_rejected(&detail));
@@ -287,6 +289,36 @@ impl GuiApp {
             RichText::new(self.strings.undo_chord_help())
                 .small()
                 .color(palette.muted),
+        );
+
+        ui.add_space(10.0);
+        ui.label(self.strings.compatibility_mode_label());
+        ui.horizontal_wrapped(|ui| {
+            for mode in [
+                wayexpand_core::CompatibilityMode::Off,
+                wayexpand_core::CompatibilityMode::TrackedFocus,
+                wayexpand_core::CompatibilityMode::UntrackedFocus,
+            ] {
+                if theme::chip_scaled(
+                    ui,
+                    palette,
+                    self.strings.compatibility_mode_option(mode),
+                    self.settings_compatibility_mode == mode,
+                    self.settings_font_scale.multiplier(),
+                )
+                .clicked()
+                {
+                    self.settings_compatibility_mode = mode;
+                }
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.strings.compatibility_mode_help())
+                    .small()
+                    .color(palette.muted),
+            )
+            .wrap(),
         );
 
         if let Some(error) = self.settings_error.clone() {

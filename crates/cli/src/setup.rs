@@ -188,6 +188,9 @@ pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
             );
             println!("It observes every keyboard event, including password fields; it has no password-field signal.");
             println!("Portal consent may be requested by libei; raw-input permissions are not changed by setup.");
+            println!("Its keystroke output cannot see the text it erases, so typed expansions stay refused until you allow it:");
+            println!("  set compatibility_mode = \"tracked-focus\" (KDE window tracker confirms focus before typing)");
+            println!("  or \"untracked-focus\" under [settings], or use Settings > Engine in wayexpand-gui.");
             enable_user_service("wayexpand-evdev.service")?;
         }
         _ => bail!("unknown setup backend {backend:?}; choose ibus, input-method, or evdev"),

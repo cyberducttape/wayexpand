@@ -10,7 +10,8 @@ use super::policy::{
     load_policy, print_capabilities_diagnostics_json, print_policy_diagnostics_json,
 };
 use super::status::{
-    output_health_from_status, read_daemon_status, status_as_json, status_schema_compatible,
+    insertion_from_status, output_health_from_status, read_daemon_status, status_as_json,
+    status_schema_compatible,
 };
 use crate::*;
 
@@ -118,6 +119,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "source": snapshot.get("source"),
                     "backend": snapshot.get("backend"),
                     "output": output_health_from_status(&snapshot),
+                    "insertion": insertion_from_status(&snapshot),
                     "capabilities": {
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
                         "composition_awareness": snapshot.get("capture_composition_aware"),
@@ -157,7 +159,8 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && (selection_ok || setup_recommendation["ready"].as_bool().unwrap_or(false))
         && socket_valid
         && broker["healthy"].as_bool().unwrap_or(false)
-        && daemon["output"]["health"].as_str() != Some("stalled");
+        && daemon["output"]["health"].as_str() != Some("stalled")
+        && daemon["insertion"]["assurance"].as_str() != Some("blocked");
     println!(
         "{}",
         serde_json::json!({
@@ -240,6 +243,10 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
     }
     if daemon["output"]["health"].as_str() == Some("stalled") {
         readiness_blockers.push("stalled output worker blocks output reconnection");
+    }
+    if daemon["insertion"]["assurance"].as_str() == Some("blocked") {
+        readiness_blockers
+            .push("typed expansions are refused: keystroke route without compatibility consent");
     }
     for (name, label) in [
         ("sensitive_field_detection", "sensitive-field detection"),

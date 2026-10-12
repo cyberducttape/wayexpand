@@ -62,6 +62,7 @@ mod dialogs_editor;
 mod editor;
 mod editor_chrome;
 mod import;
+mod insertion;
 mod sidebar;
 mod status_messages;
 mod toolbar;

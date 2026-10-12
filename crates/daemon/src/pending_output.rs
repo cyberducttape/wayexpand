@@ -368,6 +368,15 @@ mod tests {
 
     impl Harness {
         fn new(fail: bool) -> Self {
+            Self::build(fail, None)
+        }
+
+        /// The backend behind the assurance gate, as production connects it.
+        fn guarded(guard: Arc<crate::assurance::GuardState>) -> Self {
+            Self::build(false, Some(guard))
+        }
+
+        fn build(fail: bool, guard: Option<Arc<crate::assurance::GuardState>>) -> Self {
             static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let directory = std::env::temp_dir().join(format!(
                 "wayexpand-pending-output-{}-{}",
@@ -391,15 +400,17 @@ mod tests {
             let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
             let calls = Arc::new(Mutex::new(Vec::new()));
             let waker = waker::Waker::new().unwrap();
-            let (injector, failures, worker) = spawn_async_injector(
-                Box::new(GatedInjector {
-                    gate: Arc::clone(&gate),
-                    calls: Arc::clone(&calls),
-                    fail,
-                }),
-                Some(waker.clone()),
-            )
-            .unwrap();
+            let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
+                gate: Arc::clone(&gate),
+                calls: Arc::clone(&calls),
+                fail,
+            });
+            let backend = match guard {
+                Some(guard) => crate::assurance::AssuredInjector::wrap(backend, guard),
+                None => backend,
+            };
+            let (injector, failures, worker) =
+                spawn_async_injector(backend, Some(waker.clone())).unwrap();
             let config = ReloadableConfig::load_with_policy(
                 &path,
                 wayexpand_core::OrganizationPolicy::default(),
@@ -522,6 +533,37 @@ mod tests {
             Step::Stop
         ));
         assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn refused_keystroke_output_types_nothing_and_keeps_the_route_healthy() {
+        let guard = Arc::new(crate::assurance::GuardState::default());
+        let mut harness = Harness::guarded(Arc::clone(&guard));
+        harness.open_gate();
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![
+                    OutputJob::Expansion(result(":a", "first")),
+                    OutputJob::Expansion(result(":b", "second")),
+                ],
+                Vec::new(),
+            )
+            .unwrap();
+        harness.run_until_resolved();
+
+        assert!(harness.calls.lock().unwrap().is_empty(), "nothing typed");
+        // As for any failed job, the rest of the batch is not output.
+        assert_eq!(guard.refused_total(), 1);
+        // A refusal is not a transport failure: no reconnect, no retry.
+        assert!(harness.daemon.injector.is_some());
+        assert!(harness
+            .daemon
+            .output_failures
+            .as_ref()
+            .is_some_and(|failures| failures.try_recv().is_err()));
+        assert_eq!(harness.daemon.connection_state, "connected");
     }
 
     #[test]

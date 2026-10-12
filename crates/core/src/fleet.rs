@@ -285,6 +285,23 @@ impl FleetConfig {
             .find(|(_, provenance)| settings_source_allowed(provenance, policy))
             .map(|(settings, _)| settings.clone())
             .unwrap_or_default();
+        // Consent to unverified keystroke erasure belongs to the user (primary
+        // config or user layer) or the administrator (organization layer),
+        // never to a curated pack. Unlike other settings it is therefore not
+        // taken wholesale from the last settings layer.
+        let compatibility_mode = std::iter::once(base.settings.compatibility_mode)
+            .chain(
+                fleet
+                    .settings_sources
+                    .iter()
+                    .filter(|(_, provenance)| {
+                        matches!(provenance.layer.as_str(), "user" | "organization")
+                    })
+                    .map(|(settings, _)| settings.compatibility_mode),
+            )
+            .rev()
+            .find(|mode| *mode != crate::CompatibilityMode::Off)
+            .unwrap_or_default();
         // Packs that must be signed but do not verify against a trusted,
         // root-owned signers file.
         let unsigned_packs: BTreeMap<String, String> = if policy.require_signed_packs {
@@ -414,6 +431,7 @@ impl FleetConfig {
         if !fleet_settings.is_default() {
             merged.config.settings = fleet_settings;
         }
+        merged.config.settings.compatibility_mode = compatibility_mode;
         fleet.config = merged.config;
         // These fields are reported alongside the active arrays by the CLI;
         // recompute them after policy filtering and base-layer composition so
@@ -1002,6 +1020,61 @@ replacement = "third"
                 layer: layer.to_string(),
             },
         ));
+    }
+
+    #[test]
+    fn only_the_user_or_administrator_can_grant_compatibility_consent() {
+        let consenting = |layer: &str| {
+            (
+                crate::Settings {
+                    compatibility_mode: crate::CompatibilityMode::UntrackedFocus,
+                    ..crate::Settings::default()
+                },
+                Provenance {
+                    file: "settings.toml".to_string(),
+                    layer: layer.to_string(),
+                },
+            )
+        };
+        let merged_mode = |layers: &[&str], base: &str| {
+            let mut merger = ConfigMerger::new();
+            for layer in layers {
+                merger.settings.push(consenting(layer));
+            }
+            let fleet = merger.merge().unwrap();
+            FleetConfig::apply_base_and_policy(
+                fleet,
+                Config::parse(base).unwrap(),
+                &OrganizationPolicy::default(),
+            )
+            .unwrap()
+            .config
+            .settings
+            .compatibility_mode
+        };
+        let off = crate::CompatibilityMode::Off;
+        let untracked = crate::CompatibilityMode::UntrackedFocus;
+
+        assert_eq!(merged_mode(&["pack:approved"], ""), off);
+        assert_eq!(merged_mode(&["user"], ""), untracked);
+        assert_eq!(merged_mode(&["organization"], ""), untracked);
+        // The primary config's consent survives a later settings layer that
+        // does not mention it, such as a pack tuning the buffer size.
+        let base = "[settings]\ncompatibility_mode = \"tracked-focus\"\n";
+        let mut merger = ConfigMerger::new();
+        add_settings_candidate(&mut merger, 512, "pack:approved");
+        let fleet = merger.merge().unwrap();
+        let merged = FleetConfig::apply_base_and_policy(
+            fleet,
+            Config::parse(base).unwrap(),
+            &OrganizationPolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(merged.config.settings.max_buffer_chars, 512);
+        assert_eq!(
+            merged.config.settings.compatibility_mode,
+            crate::CompatibilityMode::TrackedFocus
+        );
     }
 
     #[test]

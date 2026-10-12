@@ -1107,6 +1107,43 @@ fn settings_editor_rejects_out_of_range_buffer_limit() {
 }
 
 #[test]
+fn compatibility_consent_is_saved_and_withdrawn_from_the_settings_editor() {
+    let directory = std::env::temp_dir().join(format!(
+        "wayexpand-gui-compatibility-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.join("expansions.toml");
+    let mut app = GuiApp::load(path.clone()).unwrap();
+
+    app.open_settings();
+    app.settings_compatibility_mode = wayexpand_core::CompatibilityMode::TrackedFocus;
+    app.save_settings(&egui::Context::default());
+    assert_eq!(
+        Config::load(&path).unwrap().settings.compatibility_mode,
+        wayexpand_core::CompatibilityMode::TrackedFocus
+    );
+
+    app.open_settings();
+    assert_eq!(
+        app.settings_compatibility_mode,
+        wayexpand_core::CompatibilityMode::TrackedFocus
+    );
+    app.settings_compatibility_mode = wayexpand_core::CompatibilityMode::Off;
+    app.save_settings(&egui::Context::default());
+    assert_eq!(
+        Config::load(&path).unwrap().settings.compatibility_mode,
+        wayexpand_core::CompatibilityMode::Off
+    );
+    assert!(!fs::read_to_string(&path)
+        .unwrap()
+        .contains("compatibility_mode"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn a_non_numeric_buffer_limit_is_reported_without_touching_the_configuration() {
     let path =
         std::env::temp_dir().join(format!("wayexpand-gui-buffer-{}.toml", std::process::id()));
@@ -1343,6 +1380,11 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         inject_full_unicode: Some(true),
         inject_cursor_reposition: Some(true),
         inject_key_passthrough: Some(true),
+        insertion_assurance: Some(runtime::InsertionAssurance::Compatibility),
+        focus_tracked: Some(false),
+        output_refused_total: Some(2),
+        output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
+        output_uncertain_total: Some(1),
     });
     app.import_open = true;
     app.settings_open = true;

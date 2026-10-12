@@ -28,6 +28,8 @@ struct App {
     searching: bool,
     message: String,
     paused: bool,
+    /// How the daemon's output route replaces triggers, from its status.
+    insertion: Option<InsertionAssurance>,
     prompt: Option<Prompt>,
     input: String,
     confirm_delete: Option<usize>,
@@ -35,7 +37,7 @@ struct App {
     external_edit: bool,
     last_status_poll: Instant,
     status_requests: Option<SyncSender<()>>,
-    status_results: Option<Receiver<Option<bool>>>,
+    status_results: Option<Receiver<StatusSummary>>,
     status_in_flight: bool,
     /// Cached visible_indices result and the query that produced it
     visible_cache: Option<(String, Vec<usize>)>,
@@ -66,6 +68,7 @@ impl App {
             searching: false,
             message: "Ready".into(),
             paused: false,
+            insertion: None,
             prompt: None,
             input: String::new(),
             confirm_delete: None,
@@ -446,10 +449,11 @@ impl App {
     fn refresh_daemon_state(&mut self) {
         if let Some(results) = self.status_results.as_ref() {
             match results.try_recv() {
-                Ok(paused) => {
-                    if let Some(paused) = paused {
+                Ok(summary) => {
+                    if let Some(paused) = summary.paused {
                         self.paused = paused;
                     }
+                    self.insertion = summary.insertion;
                     self.status_in_flight = false;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
@@ -481,10 +485,13 @@ impl App {
             .name("wayexpand-tui-status".into())
             .spawn(move || {
                 while request_receiver.recv().is_ok() {
-                    let paused = control_command(wayexpand_core::DaemonOperation::Status)
+                    let summary = control_command(wayexpand_core::DaemonOperation::Status)
                         .ok()
-                        .and_then(|status| paused_from_status(&status));
-                    if result_sender.send(paused).is_err() {
+                        .map_or_else(StatusSummary::default, |status| StatusSummary {
+                            paused: paused_from_status(&status),
+                            insertion: insertion_from_status(&status),
+                        });
+                    if result_sender.send(summary).is_err() {
                         break;
                     }
                 }
@@ -545,9 +552,9 @@ fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     // tick made the TUI flicker, noticeably so over SSH.
     let mut needs_draw = true;
     loop {
-        let paused = app.paused;
+        let (paused, insertion) = (app.paused, app.insertion);
         app.refresh_daemon_state();
-        if needs_draw || app.paused != paused {
+        if needs_draw || app.paused != paused || app.insertion != insertion {
             draw(stdout, app)?;
             needs_draw = false;
         }
@@ -852,6 +859,20 @@ fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
         ResetColor,
         Print("  "),
         Print(if app.paused { "[PAUSED]" } else { "[ACTIVE]" }),
+        Print("  "),
+        SetForegroundColor(match app.insertion {
+            Some(InsertionAssurance::Verified) => Color::Green,
+            Some(InsertionAssurance::Compatibility) => Color::Yellow,
+            Some(InsertionAssurance::Blocked) => Color::Red,
+            None => Color::DarkGrey,
+        }),
+        Print(match app.insertion {
+            Some(InsertionAssurance::Verified) => "[VERIFIED INSERTION]",
+            Some(InsertionAssurance::Compatibility) => "[COMPATIBILITY: ERASE UNVERIFIED]",
+            Some(InsertionAssurance::Blocked) => "[BLOCKED: TYPED EXPANSIONS REFUSED]",
+            None => "",
+        }),
+        ResetColor,
         Print("\n"),
         SetForegroundColor(Color::DarkGrey),
         Print("/ search   j/k move   n new   e edit   D description   t tags   a preview app   m mode   d+d delete   u undo   space toggle   p pause   r reload   q quit"),
@@ -951,6 +972,31 @@ fn control_command(operation: wayexpand_core::DaemonOperation) -> Result<String>
 
 fn paused_from_status(response: &str) -> Option<bool> {
     DaemonStatus::parse(response).bool_field("paused")
+}
+
+/// What one daemon status poll reports to the TUI.
+#[derive(Default)]
+struct StatusSummary {
+    paused: Option<bool>,
+    insertion: Option<InsertionAssurance>,
+}
+
+/// Whether trigger replacement is verified against the field's text, relies
+/// on unverified keystrokes, or is refused. `None` when no route replaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InsertionAssurance {
+    Verified,
+    Compatibility,
+    Blocked,
+}
+
+fn insertion_from_status(response: &str) -> Option<InsertionAssurance> {
+    match DaemonStatus::parse(response).field("insertion_assurance")? {
+        "verified" => Some(InsertionAssurance::Verified),
+        "compatibility" => Some(InsertionAssurance::Compatibility),
+        "blocked" => Some(InsertionAssurance::Blocked),
+        _ => None,
+    }
 }
 
 /// Present tags for editing as plain `a, b` text whenever that form parses

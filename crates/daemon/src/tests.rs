@@ -94,11 +94,13 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "command_queue_depth",
             "command_queue_rejected_total",
             "command_timeout_total",
+            "compatibility_mode",
             "config",
             "config_state",
             "daemon_commit",
             "expansion_command_in_flight",
             "expansion_command_queue_depth",
+            "focus_assurance",
             "hotkey_in_flight",
             "hotkey_queue_depth",
             "inject_atomic_replace",
@@ -114,12 +116,15 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "injection_latency_profiles",
             "injection_latency_sample_count",
             "injection_latency_window_count",
+            "insertion_assurance",
             "matcher_latency_p50_us",
             "matcher_latency_p95_us",
             "matcher_latency_p99_us",
             "matcher_latency_sample_count",
             "matcher_latency_window_count",
             "output_health",
+            "output_last_refusal",
+            "output_refused_total",
             "output_retiring_workers",
             "output_stalled_ms",
             "output_uncertain_total",
@@ -136,7 +141,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=7\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=8\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

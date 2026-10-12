@@ -371,6 +371,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.configured` (bool): Socket path available (either env var or XDG_RUNTIME_DIR)
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
+- `daemon.insertion` (object): Insertion assurance from the daemon status: `assurance`, `compatibility_mode`, `focus`, `refused_total`, `last_refusal` (null when none), and `explanation` (a plain-language description of the guarantee). A `blocked` route makes `healthy` false and adds a `production_readiness` blocker. Added with status schema 8.
 - `daemon.output` (object): Output-route health from the daemon status: `health`, `uncertain_transactions_total`, `retiring_workers`, `stalled_ms`, and `recovery` (restart guidance naming the running unit when `health` is `stalled`, otherwise null). A stalled route makes `healthy` false and adds a `production_readiness` blocker.
 - `production_readiness` (object): Derived safety summary for the connected daemon route. `status` is `unavailable`, `limited`, or `uncertified`; `certified` remains false until reviewed compositor/client evidence is collected. `blockers` names each missing guarantee rather than inferring readiness from daemon connectivity.
 - `production_readiness.capabilities` (object): Negotiated live-route guarantees for sensitive-field detection, external IME/preedit awareness, local dead-key/Compose tracking, key pass-through, exact window identity, atomic replacement, and full Unicode injection. External IME/preedit awareness is separate and is not implied by local composition tracking.
@@ -435,7 +436,7 @@ operators can distinguish a running process from newly installed binaries.
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 7,
+  "status_schema": 8,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -490,7 +491,12 @@ operators can distinguish a running process from newly installed binaries.
   "output_health": "ok",
   "output_uncertain_total": 0,
   "output_retiring_workers": 0,
-  "output_stalled_ms": 0
+  "output_stalled_ms": 0,
+  "insertion_assurance": "verified",
+  "compatibility_mode": "off",
+  "focus_assurance": "protocol",
+  "output_refused_total": 0,
+  "output_last_refusal": "none"
 }
 ```
 
@@ -535,6 +541,11 @@ operators can distinguish a running process from newly installed binaries.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
 - `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
+- `insertion_assurance` (string): What the output route promises before it erases a trigger. `verified`: the route checks the field's own text first (input-method-v2, IBus). `compatibility`: a keystroke route (libei, wlroots virtual keyboard) that erases without seeing the text, allowed by `compatibility_mode`. `blocked`: a keystroke route without that consent; typed expansions are refused. `unavailable`: no route that can replace text. Added in status schema 8.
+- `compatibility_mode` (string): The configured consent, `off`, `tracked-focus`, or `untracked-focus` (see `Settings::compatibility_mode`). Added in status schema 8.
+- `focus_assurance` (string): How focus is bound for output. `protocol` on verified routes; on keystroke routes, `tracker` while a window tracker confirms the exact focused window and `unconfirmed` otherwise; `none` without a route. Added in status schema 8.
+- `output_refused_total` (integer): Outputs refused before their first keystroke since daemon start: no consent, a focus change after the match, or focus no tracker could confirm. Nothing was erased or inserted for them and they are never retried. Added in status schema 8.
+- `output_last_refusal` (string): Reason for the most recent refusal: `compatibility-mode-off`, `focus-changed`, `focus-unconfirmed`, or `none`. Added in status schema 8.
 
 These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 
@@ -664,6 +675,15 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::clipboard_mode` (`prefetch`, `fresh`, or `disabled`; default
   `prefetch`) — controls whether clipboard-backed templates may use a bounded
   prefetch snapshot, read at render time, or be blocked.
+- `Settings::compatibility_mode` (`off`, `tracked-focus`, or
+  `untracked-focus`; default `off`, omitted from saved TOML when `off`) —
+  consent for keystroke routes (evdev capture with libei or wlroots output) to
+  erase triggers they cannot verify. `off` refuses typed expansions on those
+  routes; `tracked-focus` also requires a window tracker to confirm the exact
+  focused window immediately before typing; `untracked-focus` allows erasing
+  when no tracker can confirm focus. A detected focus change is refused in
+  every mode. Only the primary config, the user layer, and the organization
+  layer can set it; curated packs cannot. Verified routes ignore it.
 - `ExpansionConfig::aliases` (list of strings, default empty, omitted from
   saved TOML and JSON when empty) — additional triggers for the same
   replacement. Older readers that reject unknown fields will not load a

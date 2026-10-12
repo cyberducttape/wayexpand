@@ -166,6 +166,18 @@ fn tui_status_uses_the_shared_daemon_status_contract() {
     assert_eq!(paused_from_status("running\npaused=true\n"), Some(true));
     assert_eq!(paused_from_status("running\npaused=false\n"), Some(false));
     assert_eq!(paused_from_status("running\npaused=maybe\n"), None);
+    assert_eq!(
+        insertion_from_status("running\ninsertion_assurance=compatibility\n"),
+        Some(InsertionAssurance::Compatibility)
+    );
+    assert_eq!(
+        insertion_from_status("running\ninsertion_assurance=blocked\n"),
+        Some(InsertionAssurance::Blocked)
+    );
+    assert_eq!(
+        insertion_from_status("running\ninsertion_assurance=unavailable\n"),
+        None
+    );
     assert_eq!(paused_from_status("running\nwarning: paused=true\n"), None);
 }
 

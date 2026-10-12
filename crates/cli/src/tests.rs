@@ -130,12 +130,12 @@ fn backup_refuses_existing_destination_atomically() {
 #[test]
 fn status_json_preserves_types_and_ignores_banner() {
     let value = status_as_json(
-        "running\nsource=stdin\nstatus_schema=7\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\n",
+        "running\nsource=stdin\nstatus_schema=8\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\n",
     )
     .unwrap();
     assert_eq!(value["response"], "running");
     assert_eq!(value["source"], "stdin");
-    assert_eq!(value["status_schema"], 7);
+    assert_eq!(value["status_schema"], 8);
     assert_eq!(value["daemon_commit"], "test-commit");
     assert_eq!(value["paused"], true);
     assert_eq!(value["command_queue_depth"], 3);
@@ -143,6 +143,57 @@ fn status_json_preserves_types_and_ignores_banner() {
     assert_eq!(value["capture_sensitive_focus"], false);
     assert_eq!(value["window_tracker_connected"], true);
     assert_eq!(value["inject_full_unicode"], true);
+}
+
+#[test]
+fn doctor_explains_verified_compatibility_and_blocked_insertion() {
+    let insertion =
+        |status: serde_json::Value| crate::doctor::status::insertion_from_status(&status);
+    let verified = insertion(serde_json::json!({
+        "insertion_assurance": "verified",
+        "compatibility_mode": "off",
+        "focus_assurance": "protocol",
+        "output_refused_total": 0,
+        "output_last_refusal": "none",
+    }));
+    assert!(verified["explanation"]
+        .as_str()
+        .unwrap()
+        .starts_with("verified:"));
+    assert!(verified["last_refusal"].is_null());
+
+    let compatibility = insertion(serde_json::json!({
+        "insertion_assurance": "compatibility",
+        "compatibility_mode": "untracked-focus",
+        "focus_assurance": "unconfirmed",
+        "output_refused_total": 2,
+        "output_last_refusal": "focus-changed",
+    }));
+    let explanation = compatibility["explanation"].as_str().unwrap();
+    assert!(explanation.contains("without seeing the field's text"));
+    assert!(explanation.contains("focus cannot be confirmed"));
+    assert_eq!(compatibility["refused_total"], 2);
+    assert_eq!(compatibility["last_refusal"], "focus-changed");
+
+    let blocked = insertion(serde_json::json!({
+        "insertion_assurance": "blocked",
+        "compatibility_mode": "off",
+    }));
+    assert!(blocked["explanation"]
+        .as_str()
+        .unwrap()
+        .contains("compatibility_mode"));
+    let readiness = crate::doctor::json::production_readiness(&serde_json::json!({
+        "insertion": blocked,
+    }));
+    assert!(readiness["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|blocker| blocker
+            .as_str()
+            .unwrap()
+            .contains("typed expansions are refused")));
 }
 
 #[test]
@@ -179,11 +230,14 @@ fn doctor_reports_stalled_output_with_route_specific_recovery() {
 #[test]
 fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
     assert!(status_schema_compatible(
-        &serde_json::json!({ "status_schema": 7 })
+        &serde_json::json!({ "status_schema": 8 })
     ));
     assert!(!status_schema_compatible(&serde_json::json!({})));
     assert!(!status_schema_compatible(
-        &serde_json::json!({ "status_schema": 8 })
+        &serde_json::json!({ "status_schema": 7 })
+    ));
+    assert!(!status_schema_compatible(
+        &serde_json::json!({ "status_schema": 9 })
     ));
     assert!(!status_schema_compatible(
         &serde_json::json!({ "status_schema": "1" })
@@ -220,7 +274,7 @@ fn status_json_matches_documented_stable_contract() {
          source=input-method\n\
          backend=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=7\n\
+         status_schema=8\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -264,7 +318,16 @@ fn status_json_matches_documented_stable_contract() {
          matcher_latency_p99_us=0\n\
          usage_flush_max_duration_us=25\n\
          usage_flush_failures_total=1\n\
-         usage_queue_rejected_total=2";
+         usage_queue_rejected_total=2\n\
+         output_health=ok\n\
+         output_uncertain_total=1\n\
+         output_retiring_workers=0\n\
+         output_stalled_ms=0\n\
+         insertion_assurance=verified\n\
+         compatibility_mode=off\n\
+         focus_assurance=protocol\n\
+         output_refused_total=3\n\
+         output_last_refusal=focus-changed";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
@@ -307,6 +370,12 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["usage_flush_max_duration_us"], 25);
     assert_eq!(value["usage_flush_failures_total"], 1);
     assert_eq!(value["usage_queue_rejected_total"], 2);
+    assert_eq!(value["output_uncertain_total"], 1);
+    assert_eq!(value["insertion_assurance"], "verified");
+    assert_eq!(value["compatibility_mode"], "off");
+    assert_eq!(value["focus_assurance"], "protocol");
+    assert_eq!(value["output_refused_total"], 3);
+    assert_eq!(value["output_last_refusal"], "focus-changed");
 }
 
 #[test]
@@ -398,6 +467,15 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "usage_flush_max_duration_us",
             "usage_flush_failures_total",
             "usage_queue_rejected_total",
+            "output_health",
+            "output_uncertain_total",
+            "output_retiring_workers",
+            "output_stalled_ms",
+            "insertion_assurance",
+            "compatibility_mode",
+            "focus_assurance",
+            "output_refused_total",
+            "output_last_refusal",
         ]
         .into_iter()
         .collect()

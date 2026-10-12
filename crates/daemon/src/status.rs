@@ -100,9 +100,22 @@ pub fn daemon_status_body_with_runtime_capabilities(
     let matcher_latency = crate::latency::matcher_snapshot();
     let injection_latency_profiles = crate::latency::profiles_json();
     let usage_metrics = crate::usage::metrics_snapshot();
+    let guard = crate::assurance::GuardState::global();
+    // A route that cannot replace at all (including no connected route)
+    // makes no insertion promise.
+    let connected =
+        injection.replacement_guarantee != wayexpand_core::ReplacementGuarantee::Unsupported;
+    let assurance = crate::assurance::Assurance::of(connected.then_some(&injection), guard.mode());
+    let focus_assurance = match assurance {
+        crate::assurance::Assurance::Verified => "protocol",
+        crate::assurance::Assurance::Unavailable => "none",
+        crate::assurance::Assurance::Compatibility | crate::assurance::Assurance::Blocked => {
+            guard.focus_assurance()
+        }
+    };
     let output_health = crate::output_health::snapshot();
     StatusBody(format!(
-        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\nwindow_tracker_connected={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_queue_rejected_total={}\noutput_health={}\noutput_uncertain_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}",
+        "source={source}\nbackend={backend}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\nwindow_tracker_connected={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_queue_rejected_total={}\noutput_health={}\noutput_uncertain_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\ninsertion_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}",
         build_info::COMMIT,
         paused,
         config_path.display(),
@@ -152,6 +165,11 @@ pub fn daemon_status_body_with_runtime_capabilities(
         output_health.uncertain_total,
         output_health.retiring_workers,
         output_health.stalled_ms,
+        assurance.as_str(),
+        guard.mode().as_str(),
+        focus_assurance,
+        guard.refused_total(),
+        guard.last_refusal().map_or("none", crate::assurance::Refusal::as_str),
     ))
 }
 

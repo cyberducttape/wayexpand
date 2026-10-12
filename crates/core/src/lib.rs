@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 7;
+pub const CONTROL_STATUS_SCHEMA: u32 = 8;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 
@@ -31,16 +31,17 @@ mod template;
 mod usage;
 
 pub use backend::{
-    discover_backends, window_update_channel, BackendKind, BackendState, BackendStatus,
-    InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource, InputSourceCapabilities,
-    InputSourceError, KeyEventState, ReplacementGuarantee, TextInjector, WindowTracker,
-    WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError, WindowUpdateSender,
+    discover_backends, window_update_channel, BackendKind, BackendState, BackendStatus, FocusCheck,
+    FocusStamp, FocusWitness, InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource,
+    InputSourceCapabilities, InputSourceError, KeyEventState, ReplacementGuarantee, TextInjector,
+    WindowTracker, WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError,
+    WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment, Config,
-    ConfigError, ConfigRevision, ExpansionConfig, FontScale, HotkeyConfig, LoadedConfig, MatchMode,
-    OrganizationPolicy, Settings,
+    validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment,
+    CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig, FontScale,
+    HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};

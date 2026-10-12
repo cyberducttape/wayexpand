@@ -520,7 +520,28 @@ impl std::fmt::Display for OutputConnectError {
 impl std::error::Error for OutputConnectError {}
 
 /// Connect to the specified output backend.
+///
+/// Both backends type keystrokes without seeing the target's text, so every
+/// connection is wrapped in the assurance gate here: no caller can obtain one
+/// that erases without the user's compatibility-mode consent and a focus check.
 pub fn connect_output_backend(
+    name: &str,
+    persist_portal_token: bool,
+    fcitx5_direct_commit: bool,
+    portal_token_path_arg: Option<&Path>,
+) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
+    connect_unguarded_output_backend(
+        name,
+        persist_portal_token,
+        fcitx5_direct_commit,
+        portal_token_path_arg,
+    )
+    .map(|injector| {
+        crate::assurance::AssuredInjector::wrap(injector, crate::assurance::GuardState::global())
+    })
+}
+
+fn connect_unguarded_output_backend(
     name: &str,
     persist_portal_token: bool,
     fcitx5_direct_commit: bool,

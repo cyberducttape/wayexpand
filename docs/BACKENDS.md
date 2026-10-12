@@ -15,6 +15,14 @@ The first production backend should be selected as a complete pair, not as an
 isolated injector. A text expander needs both a source of input and a safe way
 to erase and insert text.
 
+Injectors declare how safely they erase (`ReplacementGuarantee`). Routes that
+verify the field's text (input-method-v2, IBus) replace triggers directly.
+Keystroke injectors (libei, wlroots virtual keyboard) are wrapped by the
+daemon's assurance gate when they connect: they erase only with the user's
+`compatibility_mode` consent and a focus check immediately before typing, and
+a refusal leaves the text untouched. See "Insertion guarantees" in
+[SECURITY.md](../SECURITY.md#insertion-guarantees).
+
 ## libei and the RemoteDesktop portal
 
 This is the preferred cross-desktop direction. The portal creates a user-
