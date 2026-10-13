@@ -9,8 +9,11 @@ all-features = true
 
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The previous unmaintained GUI parser advisories are absent from the current
-# locked dependency graph; keep no blanket advisory exemptions.
+# serde_yaml 0.9.34 is still required by the configuration compatibility
+# surface; its only transitive dependency, unsafe-libyaml, is unmaintained and
+# has no safe upstream replacement. Keep this narrowly scoped until the YAML
+# compatibility path can migrate.
+ignore = ["RUSTSEC-2024-0449"]
 
 [licenses]
 confidence-threshold = 0.8
