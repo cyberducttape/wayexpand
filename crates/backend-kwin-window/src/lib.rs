@@ -194,13 +194,11 @@ impl KwinWindowTracker {
         let nonce = u64::from_le_bytes(nonce_bytes);
         let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce:x}");
         let (sender, receiver) = window_update_channel();
-        let connection = bounded_session_connection(
-            zbus::connection::Builder::session()?
-                .method_timeout(DBUS_METHOD_TIMEOUT)
-                .name(bus_name.clone())?,
+        let owner_connection = bounded_session_connection(
+            zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
             DBUS_CONNECTION_TIMEOUT,
         )?;
-        let kwin_owner: String = connection
+        let kwin_owner: String = owner_connection
             .call_method(
                 Some("org.freedesktop.DBus"),
                 "/org/freedesktop/DBus",
@@ -210,12 +208,25 @@ impl KwinWindowTracker {
             )?
             .body()
             .deserialize()?;
-        connection.object_server().at(
-            "/WindowTracker",
-            WindowTrackerService {
-                sender: Mutex::new(sender),
-                kwin_owner,
-            },
+        drop(owner_connection);
+
+        // Register the callback object on the builder before the connection is
+        // exposed on the bus. KWin reports workspace.activeWindow immediately
+        // when the script starts; registering through object_server().at()
+        // after build() leaves a race where that first callback can arrive
+        // before the interface is ready and the initial focus is lost.
+        let connection = bounded_session_connection(
+            zbus::connection::Builder::session()?
+                .method_timeout(DBUS_METHOD_TIMEOUT)
+                .name(bus_name.clone())?
+                .serve_at(
+                    "/WindowTracker",
+                    WindowTrackerService {
+                        sender: Mutex::new(sender),
+                        kwin_owner,
+                    },
+                )?,
+            DBUS_CONNECTION_TIMEOUT,
         )?;
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce:x}");
