@@ -23,7 +23,7 @@ use std::sync::{
 use tracing::warn;
 use wayexpand_core::{
     CompatibilityMode, FocusCheck, FocusStamp, FocusWitness, InjectorCapabilities, InjectorError,
-    KeyEventState, Modifiers, ReplacementGuarantee, TextInjector,
+    KeyEventState, Modifiers, OutputCheckpoint, ReplacementGuarantee, TextInjector,
 };
 
 /// Why an output was refused before anything was typed.
@@ -228,6 +228,20 @@ impl GuardState {
         Refusal::from_code(self.last_refusal.load(Ordering::Relaxed))
     }
 
+    /// Stops a keystroke stream that is already running when the tracker
+    /// reports a different window than the one the output was admitted for.
+    /// Unconfirmed focus was already decided by `decide` before typing.
+    fn focus_checkpoint(guard: Arc<Self>) -> OutputCheckpoint {
+        OutputCheckpoint::new(move || {
+            if guard.focus() == FocusCheck::Changed {
+                warn!("focused window changed while typing; stopping output");
+                Err("the focused window changed while typing".into())
+            } else {
+                Ok(())
+            }
+        })
+    }
+
     /// How focus is confirmed for keystroke routes right now.
     pub(crate) fn focus_assurance(&self) -> &'static str {
         match self.focus() {
@@ -250,6 +264,8 @@ impl AssuredInjector {
         inner: Box<dyn TextInjector>,
         guard: Arc<GuardState>,
     ) -> Box<dyn TextInjector> {
+        let mut inner = inner;
+        inner.set_output_checkpoint(GuardState::focus_checkpoint(Arc::clone(&guard)));
         Box::new(Self { inner, guard })
     }
 
@@ -274,6 +290,13 @@ impl TextInjector for AssuredInjector {
 
     fn status_detail(&self) -> &'static str {
         self.inner.status_detail()
+    }
+
+    fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+        // Keep the focus check; add the caller's (for example cancellation).
+        self.inner.set_output_checkpoint(
+            GuardState::focus_checkpoint(Arc::clone(&self.guard)).and(checkpoint),
+        );
     }
 
     fn admit(&self, erases: bool) -> Result<(), InjectorError> {
@@ -401,6 +424,85 @@ mod tests {
 
     fn refused_before_typing(outcome: &TransactionOutcome) -> bool {
         matches!(outcome, TransactionOutcome::NotApplied { source } if !source.retryable)
+    }
+
+    /// Types one character at a time, running the installed checkpoint
+    /// before each like the libei keysym fallback, and moves focus to
+    /// another window after `switch_after` characters.
+    struct PacedKeystrokes {
+        typed: Arc<Mutex<String>>,
+        checkpoint: OutputCheckpoint,
+        focus_sender: wayexpand_core::WindowUpdateSender,
+        switch_after: usize,
+    }
+
+    impl TextInjector for PacedKeystrokes {
+        fn name(&self) -> &'static str {
+            "paced"
+        }
+
+        fn capabilities(&self) -> InjectorCapabilities {
+            InjectorCapabilities {
+                insertion_mode: "test paced keystrokes",
+                full_unicode: true,
+                replacement_guarantee: ReplacementGuarantee::BestEffort,
+                expected_throughput_chars_per_sec: Some(83),
+                ..InjectorCapabilities::default()
+            }
+        }
+
+        fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+            self.checkpoint = checkpoint;
+        }
+
+        fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+            for (index, character) in text.chars().enumerate() {
+                if index == self.switch_after {
+                    self.focus_sender.send(window("w2")).unwrap();
+                }
+                self.checkpoint.check().map_err(|message| InjectorError {
+                    backend: "paced",
+                    message,
+                    retryable: false,
+                })?;
+                self.typed.lock().unwrap().push(character);
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_focus_change_while_typing_stops_the_stream_and_is_never_retried() {
+        let guard = Arc::new(GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("w1")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        let typed = Arc::new(Mutex::new(String::new()));
+        let mut injector = AssuredInjector::wrap(
+            Box::new(PacedKeystrokes {
+                typed: Arc::clone(&typed),
+                checkpoint: OutputCheckpoint::default(),
+                focus_sender: sender,
+                switch_after: 3,
+            }),
+            Arc::clone(&guard),
+        );
+
+        let outcome = ExpansionEngine::apply(injector.as_mut(), &expansion(":sig"));
+
+        // Three characters reached the original window; nothing went to the
+        // new one, and the result is uncertain rather than retried.
+        assert_eq!(*typed.lock().unwrap(), "rep");
+        assert!(
+            matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. }),
+            "{outcome}"
+        );
     }
 
     #[test]

@@ -10,6 +10,44 @@ use std::{fs::OpenOptions, path::Path};
 
 use crate::{InputEvent, Modifiers, WindowContext};
 
+/// A check that paced output backends run before each synthesized character,
+/// so a long keystroke stream stops as soon as continuing is no longer safe
+/// (the focused window changed, or the daemon abandoned the transaction).
+/// A failure is the reason to stop; nothing further may be typed.
+#[derive(Clone, Default)]
+pub struct OutputCheckpoint(Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>);
+
+impl OutputCheckpoint {
+    pub fn new(check: impl Fn() -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(check)))
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        self.0.as_ref().map_or(Ok(()), |check| check())
+    }
+
+    /// Both checks must pass; the first failure wins.
+    pub fn and(self, other: Self) -> Self {
+        match (self.0, other.0) {
+            (None, other) => Self(other),
+            (first, None) => Self(first),
+            (Some(first), Some(second)) => Self::new(move || {
+                first()?;
+                second()
+            }),
+        }
+    }
+}
+
+impl fmt::Debug for OutputCheckpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("OutputCheckpoint")
+            .field(&self.0.is_some())
+            .finish()
+    }
+}
+
 /// Create a latest-value channel for focused-window snapshots. Window focus
 /// changes are state, not a log: if producers outpace consumers, intermediate
 /// snapshots are coalesced instead of accumulating an unbounded queue.
@@ -440,6 +478,10 @@ pub trait TextInjector: Send {
     fn admit(&self, _erases: bool) -> Result<(), InjectorError> {
         Ok(())
     }
+    /// Install a check for backends that type over time. They must call it
+    /// before each synthesized character and stop with a non-retryable error
+    /// when it fails. Backends that write in one burst may ignore it.
+    fn set_output_checkpoint(&mut self, _checkpoint: OutputCheckpoint) {}
     /// Remove the exact trigger text immediately before the cursor.
     ///
     /// Backends may need the original UTF-8 string rather than only its
@@ -516,6 +558,10 @@ pub trait TextInjector: Send {
 }
 
 impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
+    fn shutdown(self: Box<Self>) {
+        (*self).shutdown()
+    }
+
     fn name(&self) -> &'static str {
         (**self).name()
     }
@@ -526,6 +572,16 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
 
     fn capabilities(&self) -> InjectorCapabilities {
         (**self).capabilities()
+    }
+
+    // Every provided method must be forwarded: a default here would silently
+    // replace the boxed backend's own behavior.
+    fn admit(&self, erases: bool) -> Result<(), InjectorError> {
+        (**self).admit(erases)
+    }
+
+    fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+        (**self).set_output_checkpoint(checkpoint)
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
@@ -872,6 +928,62 @@ mod tests {
             title: Some(title.into()),
             instance_id: instance.map(Into::into),
         })
+    }
+
+    #[test]
+    fn boxed_injectors_forward_admission_and_checkpoints() {
+        #[derive(Default)]
+        struct Refusing {
+            checkpoint: Option<OutputCheckpoint>,
+        }
+        impl TextInjector for Refusing {
+            fn name(&self) -> &'static str {
+                "refusing"
+            }
+            fn admit(&self, _erases: bool) -> Result<(), InjectorError> {
+                Err(InjectorError {
+                    backend: "refusing",
+                    message: "refused".into(),
+                    retryable: false,
+                })
+            }
+            fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+                self.checkpoint = Some(checkpoint);
+            }
+            fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+                Ok(())
+            }
+            fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
+                Ok(())
+            }
+        }
+
+        let mut boxed: Box<Box<dyn TextInjector>> =
+            Box::new(Box::new(Refusing::default()) as Box<dyn TextInjector>);
+        // Called through the Box impl, not the trait object.
+        assert!(<Box<Box<dyn TextInjector>> as TextInjector>::admit(&boxed, true).is_err());
+        <Box<Box<dyn TextInjector>> as TextInjector>::set_output_checkpoint(
+            &mut boxed,
+            OutputCheckpoint::new(|| Err("stop".into())),
+        );
+        assert!(<Box<Box<dyn TextInjector>> as TextInjector>::admit(&boxed, false).is_err());
+    }
+
+    #[test]
+    fn output_checkpoints_combine_and_report_the_first_failure() {
+        let pass = OutputCheckpoint::new(|| Ok(()));
+        let fail = OutputCheckpoint::new(|| Err("focus".into()));
+        assert_eq!(OutputCheckpoint::default().check(), Ok(()));
+        assert_eq!(
+            pass.clone().and(OutputCheckpoint::default()).check(),
+            Ok(())
+        );
+        assert_eq!(pass.and(fail.clone()).check(), Err("focus".into()));
+        assert_eq!(
+            fail.and(OutputCheckpoint::new(|| Err("cancelled".into())))
+                .check(),
+            Err("focus".into())
+        );
     }
 
     #[test]

@@ -305,6 +305,7 @@ pub fn spawn_async_injector(
     backend: Box<dyn TextInjector>,
     waker: Option<crate::waker::Waker>,
 ) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
+    let mut backend = backend;
     let capabilities = backend.capabilities();
     let name = backend.name();
     let status_detail = backend.status_detail();
@@ -313,6 +314,17 @@ pub fn spawn_async_injector(
     let worker_failure_sender = failure_sender.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
+    // Cancellation (an abandoned transaction deadline, or shutdown) must also
+    // stop a paced keystroke stream that is already running, not only the
+    // commands still queued behind it.
+    let checkpoint_cancel = Arc::clone(&cancel);
+    backend.set_output_checkpoint(wayexpand_core::OutputCheckpoint::new(move || {
+        if checkpoint_cancel.load(Ordering::Acquire) {
+            Err("output was cancelled after its deadline".into())
+        } else {
+            Ok(())
+        }
+    }));
     let submitter = TransactionSubmitter {
         sender: sender.clone(),
         cancel: Arc::clone(&cancel),
@@ -723,6 +735,82 @@ mod tests {
         fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
             Ok(())
         }
+    }
+
+    /// Types one character every 10 ms, running the checkpoint before each,
+    /// like the libei keysym fallback.
+    struct PacedInjector {
+        typed: Arc<Mutex<String>>,
+        checkpoint: wayexpand_core::OutputCheckpoint,
+    }
+
+    impl TextInjector for PacedInjector {
+        fn name(&self) -> &'static str {
+            "paced"
+        }
+
+        fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+            self.checkpoint = checkpoint;
+        }
+
+        fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+            for character in text.chars() {
+                self.checkpoint.check().map_err(|message| InjectorError {
+                    backend: "paced",
+                    message,
+                    retryable: false,
+                })?;
+                self.typed.lock().unwrap().push(character);
+                thread::sleep(Duration::from_millis(10));
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn abandoning_a_transaction_stops_a_running_keystroke_stream() {
+        let typed = Arc::new(Mutex::new(String::new()));
+        let (_injector, _failures, worker) = spawn_async_injector(
+            Box::new(PacedInjector {
+                typed: Arc::clone(&typed),
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
+            }),
+            None,
+        )
+        .unwrap();
+        let submitter = worker.submitter().unwrap();
+        let result = ExpansionResult {
+            snippet_id: String::new(),
+            trigger: String::new(),
+            matched_text: String::new(),
+            insert: "x".repeat(200),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+            folded_suffix_chars: 0,
+        };
+        let transaction = submitter.submit(&result).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        submitter.abandon_after_timeout();
+        let typed_at_cancel = typed.lock().unwrap().len();
+
+        let outcome = transaction
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the worker reports the interrupted transaction");
+        assert!(!outcome.is_applied(), "{outcome}");
+        // At most the character already being typed may follow cancellation.
+        let typed_after = typed.lock().unwrap().len();
+        assert!(
+            typed_after <= typed_at_cancel + 1,
+            "{typed_at_cancel} -> {typed_after}"
+        );
+        assert!(typed_after < 200);
     }
 
     #[test]

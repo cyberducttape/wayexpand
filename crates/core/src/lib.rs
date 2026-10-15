@@ -33,9 +33,9 @@ mod usage;
 pub use backend::{
     discover_backends, window_update_channel, BackendKind, BackendState, BackendStatus, FocusCheck,
     FocusStamp, FocusWitness, InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource,
-    InputSourceCapabilities, InputSourceError, KeyEventState, ReplacementGuarantee, TextInjector,
-    WindowTracker, WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError,
-    WindowUpdateSender,
+    InputSourceCapabilities, InputSourceError, KeyEventState, OutputCheckpoint,
+    ReplacementGuarantee, TextInjector, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
+    WindowUpdateSendError, WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{

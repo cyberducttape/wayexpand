@@ -129,6 +129,8 @@ pub enum LibeiError {
     TextTooLarge { length: usize, maximum: usize },
     #[error("text contains unsupported control character U+{0:04X}")]
     ControlCharacter(u32),
+    #[error("typing stopped before the end of the text: {0}")]
+    Interrupted(String),
     #[error(
         "keysym fallback for {characters} characters would take about {estimated_ms} ms; \
          use an ei_text-capable backend or shorten the replacement"
@@ -178,6 +180,8 @@ pub struct LibeiInjector {
     tab_keycode: u32,
     _portal: Option<PortalKeepalive>,
     fcitx5: Option<fcitx5::Client>,
+    /// Run before every paced keysym character; a failure stops typing.
+    checkpoint: wayexpand_core::OutputCheckpoint,
 }
 
 /// Controls how the RemoteDesktop portal session is restored.
@@ -336,6 +340,7 @@ impl LibeiInjector {
             tab_keycode,
             _portal: portal,
             fcitx5: fcitx5_direct_commit.then(fcitx5::Client::connect).flatten(),
+            checkpoint: wayexpand_core::OutputCheckpoint::default(),
         })
     }
 
@@ -498,6 +503,10 @@ impl LibeiInjector {
         };
         let mut chars = text.chars().peekable();
         while let Some(c) = chars.next() {
+            // Each character lands at least 12 ms after the previous one, so
+            // focus can move or the transaction can be abandoned mid-text:
+            // stop before typing anything more into the wrong place.
+            self.checkpoint.check().map_err(LibeiError::Interrupted)?;
             let stroke = match c {
                 '\n' => KeyStroke {
                     keycode: typer.return_keycode,
@@ -715,6 +724,10 @@ impl TextInjector for LibeiInjector {
         }
     }
 
+    fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+        self.checkpoint = checkpoint;
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         self.sync_server_state()
             .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))
@@ -808,7 +821,12 @@ impl TextInjector for LibeiInjector {
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
-        self.sync_server_state()
+        // Cursor keys follow the typed text; they must not reach a window
+        // that took focus while the text was being typed.
+        self.checkpoint
+            .check()
+            .map_err(LibeiError::Interrupted)
+            .and_then(|()| self.sync_server_state())
             .and_then(|()| self.send_left_arrows(count))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
