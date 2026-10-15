@@ -114,12 +114,16 @@ the actual keymap and observed behavior.
 
 The workflow's backend column identifies the path a runner driver exercises;
 it does not mean that path is currently eligible for production certification.
-At present, IBus and both evdev paths are explicitly ineligible because they
-cannot meet the safety contract. The workflow therefore runs
-input-method-v2 as the production-required path on KDE. GNOME's compositor
-does not offer input-method-v2, so GNOME is exercised on IBus as an optional
-job, and Sway and Hyprland remain compatibility-only candidate jobs; none of
-the three blocks a release. Input-method-v2 is
+Both evdev paths are explicitly ineligible because they cannot meet the
+safety contract, and IBus is ineligible everywhere except GNOME. The workflow
+therefore runs input-method-v2 as the production-required path on KDE.
+GNOME's compositor does not offer input-method-v2, so GNOME certifies on
+IBus as an optional job, and its evidence records what IBus still does not
+provide (`certification_limitations`): replacement is verified against the
+surrounding text but not atomic, application filters are unavailable without
+a window tracker, and external IME composition is unsupported. Sway and
+Hyprland remain compatibility-only candidate jobs; none of the three blocks
+a release. Input-method-v2 is
 still ineligible until the live daemon demonstrates the complete capability
 contract above. Therefore the workflow is a fail-closed candidate-path test,
 and its release gate requires durable certification evidence only for routes
@@ -129,7 +133,7 @@ certified until its required evidence exists and passes.
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
 | KDE Plasma / KWin | input-method-v2 (production-required); KWin window tracker available for app-filter scenarios | Production-required candidate; requires live local dead-key/Compose tracking and the full input/output contract |
-| GNOME | IBus (optional) | Evidence only: IBus is ineligible for production certification because it lacks atomic replacement, exact window identity, and composition awareness |
+| GNOME | IBus (optional) | Eligible; certified evidence lists its limitations: non-atomic (verified) replacement, no application filters, no external IME composition |
 | Sway | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
 | Hyprland | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
 

@@ -8,9 +8,10 @@ All notable changes to WayExpand are documented here.
   and Hyprland; KDE on input-method-v2 is the only production-required
   certification. GNOME's compositor does not offer input-method-v2, so the
   previous required GNOME job could never pass and would have blocked every
-  release. IBus evidence is recorded but cannot be marked certified, because
-  IBus lacks atomic replacement, exact window identity, and composition
-  awareness.
+  release. IBus evidence can certify GNOME (only GNOME); certified evidence
+  records `certification_limitations`: verified but non-atomic replacement,
+  no application filters without a window tracker, and no external IME
+  composition.
 - The Action Broker re-validates an action's program immediately before
   each launch (owner, permissions, parent directories, and that the path
   still resolves to the validated file) instead of only when the policy

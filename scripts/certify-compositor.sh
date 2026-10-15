@@ -211,11 +211,20 @@ status_required=true
 backend_probe_valid=1
 backend_certification_eligible=true
 backend_certification_block_reason=''
+# Guarantees a certified route still does not provide. Recorded in the
+# evidence so a certification never implies more than the route delivers.
+certification_limitations=''
 case "$backend" in
     ibus)
         status_required=false
-        backend_certification_eligible=false
-        backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'
+        if [ "$compositor" = gnome ]; then
+            # GNOME offers no input-method-v2 route; IBus is its certified
+            # path, with these limits stated rather than assumed away.
+            certification_limitations='IBus replaces triggers after verifying the surrounding text but not atomically; GNOME has no window tracker, so application filters are unavailable; external IME composition is not supported'
+        else
+            backend_certification_eligible=false
+            backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'
+        fi
         if ! printf '%s' "$doctor_json" | jq -e '.healthy == true and .ibus.installed == true' >/dev/null 2>&1; then
             backend_probe_valid=0
             doctor_probe_valid=0
@@ -362,6 +371,7 @@ if [ "$format" = json ]; then
         --argjson backend_probe_valid "$backend_probe_valid" \
         --arg backend_certification_eligible "$backend_certification_eligible" \
         --arg backend_certification_block_reason "$backend_certification_block_reason" \
+        --arg certification_limitations "$certification_limitations" \
         --arg certification_status "$certification_status" \
         '{schema: 2, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
@@ -385,6 +395,7 @@ if [ "$format" = json ]; then
           backend_probe_valid: ($backend_probe_valid == 1),
           backend_certification_eligible: ($backend_certification_eligible == "true"),
           backend_certification_block_reason: $backend_certification_block_reason,
+          certification_limitations: $certification_limitations,
           doctor: $doctor, daemon_status: $status, scenarios: $scenarios[0]}' >"$output"
 else
 {
@@ -395,6 +406,9 @@ else
     printf '%s\n' "- expected_desktop: $expected_desktop"
     printf '%s\n' "- detected_desktop: $detected_desktop"
     printf '%s\n' "- backend: $backend"
+    if [ -n "$certification_limitations" ]; then
+        printf '%s\n' "- certification_limitations: $certification_limitations"
+    fi
     printf '%s\n' "- keyboard_layout: $keyboard_layout"
     required_layout_profiles=$(jq -r '.required_layout_profiles | map("`" + . + "`") | join(", ")' "$matrix")
     printf '%s\n' "- required_layout_profiles: $required_layout_profiles"

@@ -414,4 +414,31 @@ if "$project_dir/scripts/certify-compositor.sh" \
     exit 1
 fi
 
+# GNOME has no input-method-v2 route; IBus evidence certifies it, and the
+# evidence states the guarantees IBus still lacks.
+gnome_cli="$test_root/gnome-certification-cli"
+cat >"$gnome_cli" <<EOF
+#!/bin/sh
+case "\${1-} \${2-}" in
+    "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"GNOME","wayexpand_commit":"test-commit","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit"}' ;;
+    *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
+esac
+EOF
+chmod 0755 "$gnome_cli"
+gnome_json="$test_root/gnome-certification.json"
+XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
+    "$project_dir/scripts/certify-compositor.sh" \
+    --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
+    --target-apps "$target_apps" --cli "$gnome_cli" --format json \
+    --results "$results" --output "$gnome_json"
+jq -e '
+    .certified == true and .status == "certified" and
+    .compositor == "gnome" and .backend == "ibus" and
+    .backend_certification_eligible == true and
+    .backend_certification_block_reason == "" and
+    (.certification_limitations | contains("not atomically")) and
+    (.certification_limitations | contains("application filters are unavailable"))
+' "$gnome_json" >/dev/null
+
 printf '%s\n' 'certification contract test passed'
