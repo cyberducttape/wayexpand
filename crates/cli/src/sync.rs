@@ -403,6 +403,21 @@ fn redact_git_diagnostic(value: &str) -> String {
         .collect()
 }
 
+/// Interpret `git ls-remote --exit-code`: 0 lists the branch and 2 means
+/// the remote has no such branch. Anything else (authentication, DNS, an
+/// unreachable host) is a failure, not an empty remote, and must not lead
+/// sync to skip fetching and verifying the remote before pushing.
+fn remote_branch_listed(listing: &Output) -> Result<bool> {
+    match listing.status.code() {
+        Some(0) => Ok(true),
+        Some(2) => Ok(false),
+        _ => bail!(
+            "could not query the origin remote: {}",
+            redact_git_diagnostic(String::from_utf8_lossy(&listing.stderr).trim())
+        ),
+    }
+}
+
 /// Make the configuration directory a library repository.
 pub(crate) fn init(config_path: &Path, remote_url: Option<&str>) -> Result<PathBuf> {
     let directory = config_path
@@ -596,12 +611,11 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     };
     let before = git_ok(&directory, &["rev-parse", "HEAD"])?;
     let branch = git_ok(&directory, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let remote_has_branch = git(
+    let listing = git(
         &directory,
         &["ls-remote", "--exit-code", "--heads", "origin", &branch],
-    )?
-    .status
-    .success();
+    )?;
+    let remote_has_branch = remote_branch_listed(&listing)?;
     if remote_has_branch {
         // Fetch first and inspect the remote tree before anything from it is
         // checked out: a remote must not be able to place arbitrary files,
@@ -1248,6 +1262,29 @@ mod tests {
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
         drop(lock);
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn remote_query_failures_are_errors_not_a_missing_branch() {
+        use std::os::unix::process::ExitStatusExt;
+        let listing = |code: i32, stderr: &str| Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert!(remote_branch_listed(&listing(0, "")).unwrap());
+        assert!(!remote_branch_listed(&listing(2, "")).unwrap());
+        let error = remote_branch_listed(&listing(
+            128,
+            "fatal: could not read from https://alice:topsecret@example.invalid/lib.git",
+        ))
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("could not query the origin remote"),
+            "{message}"
+        );
+        assert!(!message.contains("topsecret"), "{message}");
     }
 
     #[test]
