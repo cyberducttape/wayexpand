@@ -61,6 +61,10 @@ pub struct ControlServer {
     path: Option<PathBuf>,
     socket_identity: Option<(u64, u64)>,
     listener: Option<JoinHandle<()>>,
+    /// A second handle to the listening socket, used to wake a blocked
+    /// accept at shutdown without depending on the socket path still
+    /// existing.
+    listener_socket: Option<UnixListener>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +110,7 @@ impl ControlServer {
             path: None,
             socket_identity: None,
             listener: None,
+            listener_socket: None,
         }
     }
 
@@ -116,7 +121,11 @@ impl ControlServer {
         let Some(requested_path) = socket_path() else {
             return Ok(Self::detached());
         };
-        let path = secure_socket_path(&requested_path)?;
+        Self::start_at(&requested_path, require_verified_insert)
+    }
+
+    fn start_at(requested_path: &std::path::Path, require_verified_insert: bool) -> Result<Self> {
+        let path = secure_socket_path(requested_path)?;
         validate_socket_parent(&path)?;
         #[cfg(target_os = "linux")]
         let (_socket_parent, operation_path) = open_socket_parent(&path)?;
@@ -173,6 +182,9 @@ impl ControlServer {
         rustix::process::umask(previous_umask);
         let listener = listener_result
             .with_context(|| format!("binding control socket {}", path.display()))?;
+        let listener_socket = listener
+            .try_clone()
+            .context("duplicating the control socket for shutdown")?;
         fs::set_permissions(&operation_path, fs::Permissions::from_mode(0o600))?;
         let metadata = fs::symlink_metadata(&operation_path)?;
         let socket_identity = Some((metadata.dev(), metadata.ino()));
@@ -268,6 +280,7 @@ impl ControlServer {
             path: Some(path),
             socket_identity,
             listener: Some(listener),
+            listener_socket: Some(listener_socket),
         })
     }
 
@@ -339,11 +352,18 @@ impl ControlServer {
 impl Drop for ControlServer {
     fn drop(&mut self) {
         self.stop_requested.store(true, Ordering::Release);
-        // `incoming()` blocks in accept. A local connection wakes it so the
-        // listener can observe stop_requested and exit before the socket is
-        // removed. The connection is intentionally otherwise empty.
-        if let Some(path) = &self.path {
-            let _ = UnixStream::connect(path);
+        // `incoming()` blocks in accept. Shutting the listening socket down
+        // makes accept fail at once, even when the socket path is gone (a
+        // cleaned runtime directory); connecting to the path would then fail
+        // and leave the join below waiting forever. The connection remains a
+        // fallback.
+        let woken = self.listener_socket.as_ref().is_some_and(|socket| {
+            rustix::net::shutdown(socket, rustix::net::Shutdown::Both).is_ok()
+        });
+        if !woken {
+            if let Some(path) = &self.path {
+                let _ = UnixStream::connect(path);
+            }
         }
         if let Some(listener) = self.listener.take() {
             let _ = listener.join();
@@ -615,6 +635,35 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn shutdown_completes_when_the_socket_path_was_removed() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-control-removed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("wayexpand.sock");
+        let server = ControlServer::start_at(&path, false).unwrap();
+        // For example, a session cleanup removed the runtime directory.
+        fs::remove_file(&path).unwrap();
+
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(server);
+            let _ = done.send(());
+        });
+        assert!(
+            finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "control server shutdown hung after its socket path was removed"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
 
     fn request(
         command: &str,

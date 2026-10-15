@@ -4,6 +4,19 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The experimental build workflow now builds only the branch or tag it is
+  dispatched on, and release runs must name a `vX.Y.Z` tag of this
+  repository before any job checks code out. A free-form ref could name a
+  fork's pull-request commit and run it with the workflows' cache, release,
+  secret, and attestation privileges (CodeQL alert 11).
+- The daemon no longer starts one Tokio worker per CPU for D-Bus: zbus's
+  blocking API (used by the KWin tracker) built a CPU-sized runtime, which
+  took a 16-core KDE session to 31 of the units' 32 allowed tasks and would
+  exceed the limit on larger machines. The Action Broker likewise sizes its
+  runtime and blocking pool to its unit instead of the CPU count.
+- Daemon shutdown no longer hangs when the control socket file has been
+  removed (for example by a runtime-directory cleanup); the listener is
+  woken through its own socket rather than by connecting to the path.
 - **Insertion guarantees.** Keystroke routes (evdev capture with libei or
   wlroots output) no longer erase text they cannot verify unless the user
   opts in with the new `[settings] compatibility_mode`: `tracked-focus`
@@ -25,7 +38,7 @@ All notable changes to WayExpand are documented here.
   uncertain expansions. The CLI status contract fixtures now also cover the
   schema 7 `output_*` fields they had missed.
 - Added a manually triggered experimental build channel: uncertified x86_64
-  and aarch64 archives plus `.deb` and `.rpm` packages from any ref, with
+  and aarch64 archives plus `.deb` and `.rpm` packages from the dispatched branch or tag, with
   checksums and build provenance attestations. Artifacts are labeled with
   their commit and versioned so the next certified release upgrades them;
   publishing a GitHub prerelease is opt-in and never marked latest. Certified
