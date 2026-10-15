@@ -38,14 +38,18 @@ git archive --format=tar --mtime='1970-01-01 00:00:00' \
     --prefix="wayexpand-${version}/" \
     "HEAD^{tree}" | gzip -n > "${tmpdir}/wayexpand-${version}.tar.gz"
 
-if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" \
-    | grep -E "^wayexpand-${version}/(\.cargo/config\.toml|vendor/)" >/dev/null; then
+# Inspect a saved listing rather than piping tar into grep: with pipefail,
+# `grep -q` exits at its first match, tar dies of SIGPIPE, and the pipeline
+# reports failure exactly when the forbidden entry is present.
+clean_listing="${tmpdir}/clean-contents.txt"
+tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" >"$clean_listing"
+if grep -Eq "^wayexpand-${version}/(\.cargo/config\.toml|vendor/)" "$clean_listing"; then
     printf '%s\n' "ERROR: clean tarball contains vendored Cargo configuration or vendor/" >&2
     exit 1
 fi
 
 # Verify .git is not in archive
-if tar -tzf "${tmpdir}/wayexpand-${version}.tar.gz" | grep -q '\.git/'; then
+if grep -Eq '(^|/)\.git(/|$)' "$clean_listing"; then
     printf '%s\n' "ERROR: .git directory found in clean tarball" >&2
     exit 1
 fi
@@ -74,22 +78,21 @@ cd ..
 tar -czf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" "wayexpand-${version}"
 
 # Verify .git is not in vendored archive
-if tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" | grep -q '\.git/'; then
+vendored_listing="${tmpdir}/vendored-contents.txt"
+tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" >"$vendored_listing"
+if grep -Eq '(^|/)\.git(/|$)' "$vendored_listing"; then
     printf '%s\n' "ERROR: .git directory found in vendored tarball" >&2
     exit 1
 fi
-if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
-    | grep -F "wayexpand-${version}/debian/rules" >/dev/null; then
+if ! grep -Fxq "wayexpand-${version}/debian/rules" "$vendored_listing"; then
     printf '%s\n' "ERROR: Debian packaging metadata missing from vendored tarball" >&2
     exit 1
 fi
-if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
-    | grep -F "wayexpand-${version}/.cargo/config.toml" >/dev/null; then
+if ! grep -Fxq "wayexpand-${version}/.cargo/config.toml" "$vendored_listing"; then
     printf '%s\n' "ERROR: Cargo source replacement config missing from vendored tarball" >&2
     exit 1
 fi
-if ! tar -tzf "${tmpdir}/wayexpand-${version}-vendored.tar.gz" \
-    | grep -E "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" >/dev/null; then
+if ! grep -Eq "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" "$vendored_listing"; then
     printf '%s\n' "ERROR: vendored crates missing from vendored tarball" >&2
     exit 1
 fi
