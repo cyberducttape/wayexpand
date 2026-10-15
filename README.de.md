@@ -35,15 +35,26 @@ produktiven Einsatz `wayexpand doctor` und die
 
 ## Schnellstart
 
-### Ubuntu
+### Experimentelle Pakete
+
+Das PPA veröffentlicht derzeit keine WayExpand-Pakete. Unzertifizierte
+Builds erscheinen als GitHub-Vorabversionen *Experimental build …* auf der
+[Release-Seite](https://github.com/cyberducttape/wayexpand/releases), mit
+Archiven für x86_64 und aarch64, einem `.deb` und einem `.rpm` (jeweils mit
+`.sha256`-Prüfsumme). Sie benötigen keine Rust-Toolchain:
 
 ```bash
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
+sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
+tar -xzf wayexpand-*-linux-x86_64.tar.gz
+./wayexpand-*-linux-x86_64/scripts/install-release.sh
+# oder: sudo apt install ./wayexpand_*_amd64.deb
 wayexpand doctor
 wayexpand-gui
 ```
+
+Auf Tastenanschlag-Wegen (evdev) bleiben getippte Erweiterungen aus, bis Sie
+sie mit `compatibility_mode` erlauben; `wayexpand doctor` erklärt, was der
+aktive Weg garantiert.
 
 ### Aus Quellen
 

@@ -13,10 +13,12 @@ packagers and source-build users need a compatible toolchain.
 
 ## Quick Reference
 
-**Current publication status:** the v1.3.3 GitHub release has no downloadable
-assets, and the Launchpad PPA currently publishes no WayExpand binaries. Treat
-all package formats below as build/packaging paths, not as currently available
-downloads. Release publication remains gated on compositor certification.
+**Current publication status:** experimental (uncertified) builds with
+x86_64 and aarch64 archives, a `.deb`, and an `.rpm` are published as GitHub
+prereleases (see [Experimental builds](#experimental-builds)). The v1.3.3
+release itself has no downloadable assets, and the Launchpad PPA currently
+publishes no WayExpand binaries. Certified releases remain gated on
+compositor certification.
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|

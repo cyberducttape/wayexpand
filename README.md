@@ -47,7 +47,7 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
-| Distribution packages | Build and release workflows exist; check the release page for published artifacts |
+| Distribution packages | Experimental (uncertified) `.deb`, `.rpm`, and archives on the release page; certified releases pending |
 
 ## Install
 
@@ -56,6 +56,28 @@ and packages are only supported when they are present on the [GitHub Releases
 page](https://github.com/cyberducttape/wayexpand/releases); do not infer
 availability from the release workflow alone. Review the [support
 matrix](docs/SUPPORT_MATRIX.md) before deploying desktop integration.
+
+### Experimental prebuilt packages
+
+Uncertified builds are published as GitHub prereleases named
+*Experimental build …* on the [releases page](https://github.com/cyberducttape/wayexpand/releases).
+They pass the full CI suite but not real-desktop certification, and need no
+Rust toolchain. Each includes x86_64 and aarch64 archives, a `.deb`, and an
+`.rpm`, with `.sha256` files and build provenance:
+
+```sh
+sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
+tar -xzf wayexpand-*-linux-x86_64.tar.gz
+./wayexpand-*-linux-x86_64/scripts/install-release.sh
+# or: sudo apt install ./wayexpand_*_amd64.deb
+# or: sudo dnf install ./wayexpand-*.x86_64.rpm
+```
+
+On keystroke routes (evdev), typed expansions stay off until you allow them
+with `compatibility_mode`; `wayexpand doctor` explains what the active route
+guarantees. See [Insertion guarantees](SECURITY.md#insertion-guarantees).
+
+### From source
 
 For a source installation (Rust 1.95+ required):
 
@@ -81,11 +103,9 @@ wayexpand status --json
 wayexpand test ';;hello'
 ```
 
-The release workflow is configured to attach `.deb`, `.rpm`, and architecture
-archives after its certification gates pass. Check the actual release page
-before following package-install commands; a configured workflow is not
-evidence that an artifact has been published. See [Packaging](docs/PACKAGING.md)
-for source-build and Launchpad status.
+Certified releases attach the same package set once their certification
+gates pass. See [Packaging](docs/PACKAGING.md) for experimental builds,
+source builds, and Launchpad status.
 
 The installers never run as root, enable services, grant raw-input access, or
 accept portal consent for you.

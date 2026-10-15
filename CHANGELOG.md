@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- First-run configuration setup creates every missing directory (including
+  a missing `~/.config`) with mode 0700. Under Ubuntu's default 0002 user
+  umask it created group-writable ancestors and then refused to load the
+  configuration it had just written as insecure. The insecure-parent error
+  now also says how to fix it.
+- The README and Packaging guide point to the experimental prebuilt
+  packages, and the German README no longer tells users to install from the
+  PPA, which publishes no WayExpand binaries.
 - GNOME certification now runs on the IBus route and is optional, like Sway
   and Hyprland; KDE on input-method-v2 is the only production-required
   certification. GNOME's compositor does not offer input-method-v2, so the
