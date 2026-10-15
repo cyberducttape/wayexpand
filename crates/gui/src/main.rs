@@ -173,6 +173,7 @@ struct GuiApp {
     settings_buffer: String,
     settings_undo_chord: String,
     settings_compatibility_mode: wayexpand_core::CompatibilityMode,
+    settings_keystroke_limit: String,
     settings_font_scale: FontScale,
     settings_error: Option<String>,
     dark_mode: bool,
@@ -330,6 +331,7 @@ impl GuiApp {
         let settings_buffer = config.settings.max_buffer_chars.to_string();
         let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
         let settings_compatibility_mode = config.settings.compatibility_mode;
+        let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
         let prefs = load_gui_prefs();
         let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
@@ -385,6 +387,7 @@ impl GuiApp {
             settings_buffer,
             settings_undo_chord,
             settings_compatibility_mode,
+            settings_keystroke_limit,
             settings_font_scale,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),

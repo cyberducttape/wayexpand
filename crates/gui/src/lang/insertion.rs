@@ -138,6 +138,40 @@ impl Strings {
         }
     }
 
+    pub fn keystroke_limit(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Longest keystroke-typed replacement",
+            Language::German => "Längste per Tastenanschlag getippte Ersetzung",
+            Language::Indonesian => "Penggantian terpanjang yang diketik per tombol",
+        }
+    }
+
+    pub fn keystroke_limit_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), longer replacements are refused. 250 is about 3 seconds; anything you type meanwhile is mixed into the replacement."
+            }
+            Language::German => {
+                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden längere Ersetzungen abgelehnt. 250 sind etwa 3 Sekunden; was Sie währenddessen tippen, landet in der Ersetzung."
+            }
+            Language::Indonesian => {
+                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian yang lebih panjang ditolak. 250 sekitar 3 detik; apa pun yang Anda ketik selama itu tercampur ke penggantian."
+            }
+        }
+    }
+
+    pub fn status_keystroke_limit_not_a_number(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => format!("keystroke limit must be a whole number ({detail})"),
+            Language::German => {
+                format!("Tastenanschlag-Limit muss eine ganze Zahl sein ({detail})")
+            }
+            Language::Indonesian => {
+                format!("batas penekanan tombol harus berupa bilangan bulat ({detail})")
+            }
+        }
+    }
+
     pub fn compatibility_mode_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Keystroke routes (compatibility mode)",

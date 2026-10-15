@@ -86,9 +86,9 @@ const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// defaults to 12ms); below roughly this, compositors and toolkits start
 /// dropping keys out of a burst.
 const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
-/// Refuse a keysym fallback that would occupy the synchronous injection path
-/// for roughly three seconds or more. Native `ei_text` is unaffected.
-const MAX_KEYSYM_FALLBACK_CHARS: usize = 250;
+// The keysym fallback refuses replacements longer than
+// `LibeiOptions::keystroke_max_chars` (default 250, about three seconds of
+// typing). Native `ei_text` is unaffected.
 
 // XKB keycodes carry the legacy X11 offset of 8 over the Linux evdev codes
 // that `ei_keyboard.key()` expects (see the existing KEY_BACKSPACE handling
@@ -182,6 +182,7 @@ pub struct LibeiInjector {
     fcitx5: Option<fcitx5::Client>,
     /// Run before every paced keysym character; a failure stops typing.
     checkpoint: wayexpand_core::OutputCheckpoint,
+    keystroke_max_chars: usize,
 }
 
 /// Controls how the RemoteDesktop portal session is restored.
@@ -193,6 +194,9 @@ pub struct LibeiOptions {
     /// Token path selected by the service. `None` keeps the standalone XDG
     /// default used by CLI/library callers.
     pub portal_token_path: Option<PathBuf>,
+    /// Longest replacement the keysym fallback will type (paced at 12 ms per
+    /// key). Longer replacements are refused before anything is typed.
+    pub keystroke_max_chars: usize,
 }
 
 impl Default for LibeiOptions {
@@ -201,6 +205,7 @@ impl Default for LibeiOptions {
             persist_portal_token: true,
             fcitx5_direct_commit: false,
             portal_token_path: None,
+            keystroke_max_chars: wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS,
         }
     }
 }
@@ -232,6 +237,7 @@ impl LibeiInjector {
     /// dialog and grants desktop input-control capability for the session.
     pub fn connect(options: LibeiOptions) -> Result<Self, LibeiError> {
         let fcitx5_direct_commit = options.fcitx5_direct_commit;
+        let keystroke_max_chars = options.keystroke_max_chars.max(1);
         let (stream, portal) = if let Some(socket) = std::env::var_os("LIBEI_SOCKET") {
             let socket = PathBuf::from(socket);
             let socket = if socket.is_relative() {
@@ -341,6 +347,7 @@ impl LibeiInjector {
             _portal: portal,
             fcitx5: fcitx5_direct_commit.then(fcitx5::Client::connect).flatten(),
             checkpoint: wayexpand_core::OutputCheckpoint::default(),
+            keystroke_max_chars,
         })
     }
 
@@ -399,7 +406,7 @@ impl LibeiInjector {
     fn ensure_representable(&self, text: &str) -> Result<(), LibeiError> {
         if let TextMode::Keysym(typer) = &self.mode {
             let characters = text.chars().count();
-            if characters > MAX_KEYSYM_FALLBACK_CHARS {
+            if characters > self.keystroke_max_chars {
                 return Err(LibeiError::FallbackTooSlow {
                     characters,
                     estimated_ms: (characters.saturating_sub(1) as u64)
@@ -697,7 +704,7 @@ impl TextInjector for LibeiInjector {
             // replace method still applies ensure_representable before any raw
             // erase, so this optimistic capability cannot make fallback unsafe.
             max_text_chars: if keysym_fallback && !direct_commit {
-                MAX_KEYSYM_FALLBACK_CHARS
+                self.keystroke_max_chars
             } else {
                 0
             },

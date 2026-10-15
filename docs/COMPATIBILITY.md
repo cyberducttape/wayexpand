@@ -684,6 +684,11 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   when no tracker can confirm focus. A detected focus change is refused in
   every mode. Only the primary config, the user layer, and the organization
   layer can set it; curated packs cannot. Verified routes ignore it.
+- `Settings::keystroke_max_chars` (integer 1–5000, default 250, omitted from
+  saved TOML at the default) — the longest replacement a keystroke-typed
+  route (the libei keysym fallback) accepts; longer ones are refused before
+  anything is erased. It is reported as `inject_max_text_chars`. Older
+  readers that reject unknown fields will not load a config that sets it.
 - `ExpansionConfig::aliases` (list of strings, default empty, omitted from
   saved TOML and JSON when empty) — additional triggers for the same
   replacement. Older readers that reject unknown fields will not load a

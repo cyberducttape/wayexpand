@@ -187,6 +187,28 @@ pub struct Settings {
     /// saved configs still load in older readers.
     #[serde(skip_serializing_if = "CompatibilityMode::is_off")]
     pub compatibility_mode: CompatibilityMode,
+    /// Longest replacement, in characters, that a paced keystroke route (the
+    /// libei keysym fallback, about 83 characters a second) will type.
+    /// Longer replacements are refused before anything is typed. Omitted when
+    /// it is the default so saved configs still load in older readers.
+    #[serde(
+        default = "default_keystroke_max_chars",
+        skip_serializing_if = "is_default_keystroke_max_chars"
+    )]
+    pub keystroke_max_chars: usize,
+}
+
+/// About three seconds of paced typing.
+pub const DEFAULT_KEYSTROKE_MAX_CHARS: usize = 250;
+/// About a minute of paced typing.
+pub const MAX_KEYSTROKE_MAX_CHARS: usize = 5_000;
+
+fn default_keystroke_max_chars() -> usize {
+    DEFAULT_KEYSTROKE_MAX_CHARS
+}
+
+fn is_default_keystroke_max_chars(value: &usize) -> bool {
+    *value == DEFAULT_KEYSTROKE_MAX_CHARS
 }
 
 /// Consent for replacement on routes that type keystrokes without seeing the
@@ -292,6 +314,7 @@ impl Default for Settings {
             clipboard_mode: ClipboardMode::Prefetch,
             usage_stats: true,
             compatibility_mode: CompatibilityMode::Off,
+            keystroke_max_chars: DEFAULT_KEYSTROKE_MAX_CHARS,
         }
     }
 }

@@ -385,6 +385,31 @@ fn pre_category_config_without_new_fields_still_parses() {
 }
 
 #[test]
+fn keystroke_limit_defaults_validates_and_is_omitted_at_its_default() {
+    let config = Config::parse("").unwrap();
+    assert_eq!(
+        config.settings.keystroke_max_chars,
+        DEFAULT_KEYSTROKE_MAX_CHARS
+    );
+    assert!(!toml::to_string(&config)
+        .unwrap()
+        .contains("keystroke_max_chars"));
+
+    let config = Config::parse("[settings]\nkeystroke_max_chars = 1000\n").unwrap();
+    assert_eq!(config.settings.keystroke_max_chars, 1000);
+    assert!(toml::to_string(&config)
+        .unwrap()
+        .contains("keystroke_max_chars = 1000"));
+
+    for value in [0, MAX_KEYSTROKE_MAX_CHARS + 1] {
+        let error =
+            Config::parse(&format!("[settings]\nkeystroke_max_chars = {value}\n")).unwrap_err();
+        assert!(matches!(error, ConfigError::InvalidKeystrokeLimit { .. }));
+        assert!(error.safe_summary().contains("keystroke_max_chars"));
+    }
+}
+
+#[test]
 fn generated_expansion_ids_are_unique_and_round_trip() {
     let config = Config::parse(
         "[[expansion]]\ntrigger=':one'\nreplacement='one'\n[[expansion]]\ntrigger=':two'\nreplacement='two'\n",

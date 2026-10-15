@@ -94,10 +94,17 @@ impl ExpansionEngine {
         injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
         let output_chars = result.insert.chars().count() + trailing_chars;
         if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
+            // Keystroke typing is limited by the user's `keystroke_max_chars`
+            // setting rather than by the protocol, so say how to raise it.
+            let hint = if capabilities.insertion_mode.contains("keysym") {
+                " (raise keystroke_max_chars to allow longer keystroke typing)"
+            } else {
+                ""
+            };
             return Err(InjectorError {
                 backend: injector.name(),
                 message: format!(
-                    "replacement requires {output_chars} characters but {} supports at most {}",
+                    "replacement requires {output_chars} characters but {} supports at most {}{hint}",
                     capabilities.insertion_mode, capabilities.max_text_chars
                 ),
                 retryable: false,

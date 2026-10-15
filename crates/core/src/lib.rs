@@ -42,6 +42,7 @@ pub use config::{
     validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment,
     CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig, FontScale,
     HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings,
+    DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};

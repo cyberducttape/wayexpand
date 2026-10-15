@@ -1233,6 +1233,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
         outcome,
         crate::TransactionOutcome::NotApplied { ref source }
             if source.message.contains("supports at most 250")
+                && source.message.contains("keystroke_max_chars")
     ));
     assert!(injector.calls.is_empty());
 }

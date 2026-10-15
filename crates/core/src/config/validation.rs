@@ -21,6 +21,13 @@ impl Config {
         if !(1..=4096).contains(&self.settings.max_buffer_chars) {
             return Err(ConfigError::InvalidBufferLimit);
         }
+        if !(1..=crate::config::MAX_KEYSTROKE_MAX_CHARS)
+            .contains(&self.settings.keystroke_max_chars)
+        {
+            return Err(ConfigError::InvalidKeystrokeLimit {
+                maximum: crate::config::MAX_KEYSTROKE_MAX_CHARS,
+            });
+        }
         let undo_chord = self
             .settings
             .undo_chord

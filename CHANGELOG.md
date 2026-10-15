@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The 250-character limit on replacements typed key by key (the libei
+  keysym fallback used with xdg-desktop-portal-kde) is now the
+  `[settings] keystroke_max_chars` setting (1–5000, default 250), also under
+  Settings > Engine in the GUI. The refusal message names the setting.
+  Typing takes about 12 ms per character.
 - First-run configuration setup creates every missing directory (including
   a missing `~/.config`) with mode 0700. Under Ubuntu's default 0002 user
   umask it created group-writable ancestors and then refused to load the

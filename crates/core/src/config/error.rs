@@ -78,6 +78,8 @@ pub enum ConfigError {
     },
     #[error("max_buffer_chars must be between 1 and 4096")]
     InvalidBufferLimit,
+    #[error("keystroke_max_chars must be between 1 and {maximum}")]
+    InvalidKeystrokeLimit { maximum: usize },
     #[error("settings.undo_chord is empty, ambiguous, or contains an unknown modifier")]
     InvalidUndoChord,
     #[error("configuration contains {count} expansions; maximum is {maximum}")]
@@ -205,6 +207,9 @@ impl ConfigError {
                 format!("duplicate trigger in expansions {first} and {second}")
             }
             Self::InvalidBufferLimit => "max_buffer_chars is outside the allowed range".into(),
+            Self::InvalidKeystrokeLimit { maximum } => {
+                format!("keystroke_max_chars must be between 1 and {maximum}")
+            }
             Self::InvalidUndoChord => "settings.undo_chord is invalid".into(),
             Self::TooManyExpansions { count, maximum } => {
                 format!("too many expansions ({count}; maximum {maximum})")

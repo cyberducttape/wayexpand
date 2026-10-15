@@ -1300,6 +1300,47 @@ fn a_non_numeric_buffer_limit_is_reported_without_touching_the_configuration() {
 }
 
 #[test]
+fn keystroke_limit_is_saved_validated_and_omitted_at_its_default() {
+    let directory =
+        std::env::temp_dir().join(format!("wayexpand-gui-keystroke-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.join("expansions.toml");
+    let mut app = GuiApp::load(path.clone()).unwrap();
+
+    app.open_settings();
+    assert_eq!(app.settings_keystroke_limit, "250");
+    app.settings_keystroke_limit = "1000".into();
+    app.save_settings(&egui::Context::default());
+    assert_eq!(
+        Config::load(&path).unwrap().settings.keystroke_max_chars,
+        1000
+    );
+
+    app.open_settings();
+    app.settings_keystroke_limit = "a lot".into();
+    app.save_settings(&egui::Context::default());
+    assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+    assert!(app.settings_open);
+
+    app.settings_keystroke_limit = "5001".into();
+    app.save_settings(&egui::Context::default());
+    assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+    assert_eq!(
+        Config::load(&path).unwrap().settings.keystroke_max_chars,
+        1000
+    );
+
+    app.settings_keystroke_limit = "250".into();
+    app.save_settings(&egui::Context::default());
+    assert!(!fs::read_to_string(&path)
+        .unwrap()
+        .contains("keystroke_max_chars"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn escape_closes_one_dialog_at_a_time_and_keeps_a_loaded_import() {
     let path =
         std::env::temp_dir().join(format!("wayexpand-gui-dialogs-{}.toml", std::process::id()));

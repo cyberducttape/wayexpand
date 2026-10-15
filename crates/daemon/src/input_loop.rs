@@ -101,11 +101,15 @@ pub fn connect_input_method_session(
     // Establish pass-through before creating the input-method source. This
     // ordering is the keyboard-safety boundary: once the source exists, the
     // compositor is allowed to grant it an exclusive keyboard grab.
+    // Key pass-through only; it never types replacement text.
     let key_injector = match connect_output_backend(
         "libei",
-        persist_portal_token,
-        false,
-        portal_token_path,
+        crate::output_loop::OutputConnectOptions {
+            persist_portal_token,
+            fcitx5_direct_commit: false,
+            portal_token_path,
+            keystroke_max_chars: wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS,
+        },
     ) {
         Ok(key_injector) => key_injector,
         Err(error) if error.retryable => {

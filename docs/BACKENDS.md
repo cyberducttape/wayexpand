@@ -97,10 +97,21 @@ For long replacements (multi-paragraph code blocks, long administrative text),
 the total insertion time becomes noticeable:
 
 - 100-character replacement: ~1.2 seconds
-- 250-character replacement: ~3 seconds (the hard fallback limit)
+- 250-character replacement: ~3 seconds (the default limit)
 
-Longer replacements are rejected before any erase or insertion because the
-fallback is synchronous and capped at 250 characters.
+Longer replacements are rejected before any erase or insertion. The limit is
+`[settings] keystroke_max_chars` (default 250, at most 5000; also under
+Settings > Engine in the GUI):
+
+```toml
+[settings]
+keystroke_max_chars = 1000   # about 12 seconds of typing
+```
+
+Raising it trades speed for reach: anything you type while a long
+replacement is being typed is mixed into it, and a focus change or the
+insertion timeout stops it partway. A changed limit reconnects the libei
+output on the next configuration reload.
 
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.

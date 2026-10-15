@@ -9,6 +9,7 @@ impl GuiApp {
         self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
         self.settings_undo_chord = self.config.settings.undo_chord.clone().unwrap_or_default();
         self.settings_compatibility_mode = self.config.settings.compatibility_mode;
+        self.settings_keystroke_limit = self.config.settings.keystroke_max_chars.to_string();
         self.settings_error = None;
         self.settings_open = true;
     }
@@ -89,8 +90,20 @@ impl GuiApp {
                 return;
             }
         };
+        let keystroke_max_chars = match self.settings_keystroke_limit.trim().parse::<usize>() {
+            Ok(value) => value,
+            Err(error) => {
+                let detail = self
+                    .strings
+                    .status_keystroke_limit_not_a_number(&error.to_string());
+                self.status = Status::error(self.strings.status_settings_invalid(&detail));
+                self.settings_error = Some(detail);
+                return;
+            }
+        };
         let mut candidate = self.config.clone();
         candidate.settings.max_buffer_chars = max_buffer_chars;
+        candidate.settings.keystroke_max_chars = keystroke_max_chars;
         let undo_chord_input = self.settings_undo_chord.trim();
         candidate.settings.undo_chord =
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
@@ -289,6 +302,22 @@ impl GuiApp {
             RichText::new(self.strings.undo_chord_help())
                 .small()
                 .color(palette.muted),
+        );
+
+        ui.add_space(10.0);
+        ui.label(self.strings.keystroke_limit());
+        ui.add(
+            TextEdit::singleline(&mut self.settings_keystroke_limit)
+                .margin(theme::FIELD_MARGIN)
+                .desired_width(120.0),
+        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.strings.keystroke_limit_help())
+                    .small()
+                    .color(palette.muted),
+            )
+            .wrap(),
         );
 
         ui.add_space(10.0);

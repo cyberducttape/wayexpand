@@ -35,6 +35,11 @@ impl ExpansionEngine {
     }
 
     /// Whether libei portal restoration tokens may be read and persisted.
+    /// Longest replacement a paced keystroke route will type.
+    pub fn keystroke_max_chars(&self) -> usize {
+        self.config.settings.keystroke_max_chars
+    }
+
     /// Whether keystroke routes may erase text they cannot verify.
     pub fn compatibility_mode(&self) -> crate::CompatibilityMode {
         self.config.settings.compatibility_mode

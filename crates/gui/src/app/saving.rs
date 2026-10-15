@@ -208,6 +208,8 @@ impl GuiApp {
                 let previous = std::mem::replace(&mut self.config, candidate);
                 self.remember_undo(previous);
                 self.settings_buffer = self.config.settings.max_buffer_chars.to_string();
+                self.settings_keystroke_limit =
+                    self.config.settings.keystroke_max_chars.to_string();
                 self.settings_undo_chord =
                     self.config.settings.undo_chord.clone().unwrap_or_default();
                 self.settings_open = false;
