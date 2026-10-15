@@ -1,35 +1,70 @@
 use super::{
     read_portal_token_if_enabled, store_portal_token_if_enabled, LibeiError, LibeiOptions,
 };
-use std::{os::unix::net::UnixStream, time::Duration};
+use std::{os::unix::net::UnixStream, sync::OnceLock, time::Duration};
 
+/// One Tokio runtime for every portal session in the process.
+///
+/// ashpd caches a single D-Bus connection process-wide, and zbus runs that
+/// connection's reader on the runtime that was current when it was opened.
+/// A runtime per session therefore broke every later session: once the first
+/// was closed its runtime stopped, the cached connection had no reader, and a
+/// reconnect waited for portal replies until it timed out and the daemon
+/// exited. A runtime that lives as long as the process keeps the connection
+/// served for reconnects.
+fn portal_runtime() -> Result<&'static tokio::runtime::Runtime, LibeiError> {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    if let Some(runtime) = RUNTIME.get() {
+        return Ok(runtime);
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(1)
+        .thread_name("wayexpand-portal")
+        .enable_all()
+        .build()
+        .map_err(|error| LibeiError::Portal(error.to_string()))?;
+    // A concurrent first caller may have won; its runtime is used and this
+    // one is dropped unused.
+    Ok(RUNTIME.get_or_init(|| runtime))
+}
+
+/// Keeps a RemoteDesktop portal session open, and closes it when dropped.
 pub(super) struct PortalKeepalive {
-    pub(super) _proxy: ashpd::desktop::remote_desktop::RemoteDesktop,
-    pub(super) _session: ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
-    // Keep the Tokio reactor alive until the portal proxies have been dropped.
-    pub(super) _runtime: tokio::runtime::Runtime,
+    proxy: Option<ashpd::desktop::remote_desktop::RemoteDesktop>,
+    session: Option<ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>>,
 }
 
 impl PortalKeepalive {
-    /// Close the portal session before shutting down its Tokio runtime.
-    ///
-    /// `Runtime::shutdown_timeout` bounds runtime teardown even when a portal
-    /// implementation leaves a task pending. This keeps the lifecycle
-    /// explicit while retaining a hard upper bound for the daemon.
+    /// Close the portal session, waiting a bounded time for the portal.
     pub(super) fn close(self) {
-        let PortalKeepalive {
-            _proxy: proxy,
-            _session: session,
-            _runtime: runtime,
-        } = self;
-        // Construct the timer inside the runtime context. Constructing
-        // tokio::time::timeout outside block_on() panics because no reactor
-        // is current on the daemon's shutdown worker thread.
-        let _ = runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), session.close()).await
+        drop(self);
+    }
+}
+
+impl Drop for PortalKeepalive {
+    /// A session that is only dropped would stay open on the shared D-Bus
+    /// connection, and the portal may refuse or prompt for the next one, so
+    /// every exit path (including a failed handshake) closes it.
+    fn drop(&mut self) {
+        let proxy = self.proxy.take();
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let Ok(runtime) = portal_runtime() else {
+            return;
+        };
+        let closing = runtime.spawn(async move {
+            let _ = tokio::time::timeout(Duration::from_secs(2), session.close()).await;
+            drop(proxy);
         });
-        drop(proxy);
-        runtime.shutdown_timeout(Duration::from_secs(2));
+        // Wait for the close unless this thread is already inside a Tokio
+        // runtime, where blocking would panic; the task then finishes on its
+        // own.
+        if tokio::runtime::Handle::try_current().is_err() {
+            let _ = runtime
+                .block_on(async { tokio::time::timeout(Duration::from_secs(3), closing).await });
+        }
     }
 }
 
@@ -43,11 +78,7 @@ pub(super) fn connect_portal(
         PersistMode,
     };
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| LibeiError::Portal(error.to_string()))?;
-    let (stream, proxy, session) = runtime.block_on(async {
+    let (stream, proxy, session) = portal_runtime()?.block_on(async {
         tokio::time::timeout(Duration::from_secs(30), async {
             let proxy: RemoteDesktop = RemoteDesktop::new()
                 .await
@@ -115,9 +146,20 @@ pub(super) fn connect_portal(
     Ok((
         stream,
         Some(PortalKeepalive {
-            _proxy: proxy,
-            _session: session,
-            _runtime: runtime,
+            proxy: Some(proxy),
+            session: Some(session),
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_portal_session_shares_one_runtime() {
+        // A later session must reach the cached D-Bus connection's reader,
+        // which runs on the runtime that opened it.
+        let first = super::portal_runtime().unwrap() as *const tokio::runtime::Runtime;
+        let second = super::portal_runtime().unwrap() as *const tokio::runtime::Runtime;
+        assert_eq!(first, second);
+    }
 }

@@ -667,8 +667,8 @@ fn modifier_keycodes(modifiers: Modifiers) -> Vec<u32> {
 
 impl TextInjector for LibeiInjector {
     fn shutdown(mut self: Box<Self>) {
-        // Remove the portal keepalive before dropping the injector so its
-        // session can be closed while the Tokio runtime is still available.
+        // Close the portal session after the EIS connection is dropped, so
+        // the portal never sees a live client on a closed session.
         let portal = self._portal.take();
         drop(self);
         if let Some(portal) = portal {

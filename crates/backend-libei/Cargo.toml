@@ -18,7 +18,7 @@ futures-lite.workspace = true
 libc.workspace = true
 reis = "0.7.1"
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"] }
 rustix = { version = "1", features = ["event", "process"] }
 unicode-segmentation.workspace = true
 xkbcommon-rs = { workspace = true, features = ["server"] }

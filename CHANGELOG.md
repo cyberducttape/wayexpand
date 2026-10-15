@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The libei output route can reconnect inside a running daemon. Every
+  reconnect through the RemoteDesktop portal used to stall for 30 seconds
+  and end the daemon: ashpd caches one D-Bus connection per process, and
+  its reader ran on a per-session Tokio runtime that closing the first
+  session shut down. Portal sessions now share a runtime that lives as long
+  as the process, and a session is closed on every exit path.
 - The 250-character limit on replacements typed key by key (the libei
   keysym fallback used with xdg-desktop-portal-kde) is now the
   `[settings] keystroke_max_chars` setting (1–5000, default 250), also under
