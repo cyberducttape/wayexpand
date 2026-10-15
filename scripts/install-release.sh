@@ -120,15 +120,35 @@ done
 install -m 0644 "$release_dir/systemd"/*.service "$stage_dir/systemd/"
 install -m 0644 "$release_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$release_dir/ibus/component/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
-if [ ! -d "$library_dir/$version" ]; then
+# Name the install by its content, not only its version: a corrected archive
+# with the same version string must never reuse binaries installed earlier.
+payload_hash=$("$release_dir/scripts/hash-install-payload.sh" "$stage_dir")
+case "$payload_hash" in
+    ''|*[!0-9a-f]*)
+        printf '%s\n' 'error: could not determine a safe install payload identity' >&2
+        exit 1
+        ;;
+esac
+if [ "${#payload_hash}" -ne 64 ]; then
+    printf '%s\n' 'error: could not determine a valid install payload hash' >&2
+    exit 1
+fi
+version="$version-$payload_hash"
+if [ ! -e "$library_dir/$version" ] && [ ! -L "$library_dir/$version" ]; then
     mv "$stage_dir" "$library_dir/$version"
 else
-    for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
-        if [ ! -x "$library_dir/$version/bin/$binary" ]; then
-            printf '%s\n' "error: existing version directory is incomplete: $library_dir/$version" >&2
-            exit 1
-        fi
-    done
+    if [ -L "$library_dir/$version" ] || [ ! -d "$library_dir/$version" ]; then
+        printf '%s\n' "error: existing version path is not a real directory: $library_dir/$version" >&2
+        exit 1
+    fi
+    existing_hash=$("$release_dir/scripts/hash-install-payload.sh" "$library_dir/$version") || {
+        printf '%s\n' "error: existing version directory is incomplete or unsafe: $library_dir/$version" >&2
+        exit 1
+    }
+    if [ "$existing_hash" != "$payload_hash" ]; then
+        printf '%s\n' "error: existing version directory does not match its payload identity: $library_dir/$version" >&2
+        exit 1
+    fi
     rm -rf "$stage_dir"
 fi
 service_was_enabled=0

@@ -20,6 +20,7 @@ install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
 install -m 0600 "$project_dir/broker.toml.example" "$release_dir/broker.toml.example"
 install -m 0755 "$project_dir/scripts/install-release.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-xdg-systemd-dropins.sh" "$release_dir/scripts/"
+install -m 0755 "$project_dir/scripts/hash-install-payload.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/uninstall-user.sh" "$release_dir/scripts/"
 install -m 0755 "$project_dir/scripts/install-evdev-permissions.sh" "$release_dir/scripts/"
 install -m 0644 "$project_dir/udev/71-wayexpand-evdev.rules" "$release_dir/udev/"
@@ -74,6 +75,12 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ -L "$test_root/home/.local/lib/wayexpand/current" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
+# Install directories are named by version and payload content.
+first_version=$(readlink "$test_root/home/.local/lib/wayexpand/current")
+case "$first_version" in
+    0.0.0-*) [ "${#first_version}" -eq $((6 + 64)) ] ;;
+    *) printf '%s\n' "unexpected install directory: $first_version" >&2; exit 1 ;;
+esac
 [ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
@@ -119,7 +126,7 @@ if PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/con
     printf '%s\n' 'installer accepted a service startup failure' >&2
     exit 1
 fi
-[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = 0.0.0 ]
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = "$first_version" ]
 
 enable_failure_release="$test_root/wayexpand-0.0.2-linux-x86_64"
 cp -R "$release_dir" "$enable_failure_release"
@@ -137,7 +144,25 @@ if PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/con
     printf '%s\n' 'installer accepted a systemctl enable failure' >&2
     exit 1
 fi
-[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = 0.0.0 ]
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = "$first_version" ]
+
+# A corrected archive with the same version string must not reuse the
+# binaries installed from the earlier one.
+corrected_release="$test_root/corrected/wayexpand-0.0.0-linux-x86_64"
+mkdir -p "$test_root/corrected"
+cp -R "$release_dir" "$corrected_release"
+printf '#!/bin/sh\necho corrected\n' >"$corrected_release/bin/wayexpand-daemon"
+printf '#!/bin/sh\nexit 0\n' >"$stub_bin/systemctl"
+chmod 0755 "$stub_bin/systemctl"
+PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$corrected_release/scripts/install-release.sh" >/dev/null
+corrected_version=$(readlink "$test_root/home/.local/lib/wayexpand/current")
+[ "$corrected_version" != "$first_version" ]
+grep -Fx 'echo corrected' "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" >/dev/null
+# Reinstalling identical content reuses its verified directory.
+PATH="$stub_bin:$PATH" HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    "$corrected_release/scripts/install-release.sh" >/dev/null
+[ "$(readlink "$test_root/home/.local/lib/wayexpand/current")" = "$corrected_version" ]
 
 cat >"$stub_bin/systemctl" <<'EOF'
 #!/bin/sh
