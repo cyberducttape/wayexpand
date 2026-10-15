@@ -47,8 +47,10 @@ jobs:
           # Raw evdev is a compatibility fallback, not a production-safe
           # certification route: it cannot observe sensitive fields or make
           # replacement atomic, so KDE is validated on input-method-v2.
+          # GNOME's compositor does not offer input-method-v2; it is
+          # exercised on IBus and is not production-required.
           targets='kde input-method-v2 true
-          gnome input-method-v2 true
+          gnome ibus false
           sway evdev+wlroots false
           hyprland evdev+wlroots false'
           missing=()
