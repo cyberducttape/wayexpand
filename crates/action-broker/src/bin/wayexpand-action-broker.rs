@@ -447,8 +447,29 @@ fn validate_config_ancestors(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Runtime threads, sized to the unit's `TasksMax=32` rather than the CPU
+/// count: the `#[tokio::main]` default of one worker per core cannot even
+/// start on large machines. Blocking-pool tasks queue beyond the limit.
+const RUNTIME_WORKER_THREADS: usize = 2;
+const MAX_BLOCKING_THREADS: usize = 24;
+/// The main thread and the audit writer, outside the Tokio runtime.
+#[cfg(test)]
+const OTHER_THREADS: usize = 2;
+// Every concurrently running action owns one blocking thread; one more
+// accepts connections.
+const _: () = assert!(MAX_CONCURRENT_ACTIONS < MAX_BLOCKING_THREADS);
+
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(RUNTIME_WORKER_THREADS)
+        .max_blocking_threads(MAX_BLOCKING_THREADS)
+        .enable_all()
+        .build()
+        .map_err(|error| anyhow!("could not start the broker runtime: {error}"))?
+        .block_on(run())
+}
+
+async fn run() -> Result<()> {
     // Initialize logging. Do not set RUST_LOG here: the Tokio runtime's
     // worker threads already exist, and mutating the environment while
     // other threads may read it is unsound.
@@ -736,6 +757,24 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_threads_fit_the_service_task_limit() {
+        let unit = include_str!("../../../../systemd/wayexpand-action-broker.service");
+        let tasks_max: usize = unit
+            .lines()
+            .find_map(|line| line.strip_prefix("TasksMax="))
+            .expect("broker unit sets TasksMax")
+            .parse()
+            .unwrap();
+        // Leave room for short-lived threads such as the ones std spawns
+        // while resolving a process launch.
+        let budget = OTHER_THREADS + RUNTIME_WORKER_THREADS + MAX_BLOCKING_THREADS + 4;
+        assert!(
+            budget <= tasks_max,
+            "{budget} threads exceed TasksMax={tasks_max}"
+        );
+    }
 
     #[tokio::test]
     async fn action_slots_reject_work_after_the_fixed_limit() {

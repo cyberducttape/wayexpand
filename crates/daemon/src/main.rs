@@ -159,7 +159,19 @@ struct Daemon {
     usage: usage::UsageRecorder,
 }
 
+/// Tokio runtime workers for D-Bus clients. zbus's blocking API drives its
+/// connections on a lazily built multi-threaded Tokio runtime whenever its
+/// `tokio` feature is enabled (here by the portal library), and Tokio
+/// defaults to one worker per CPU. The KWin tracker would then add a thread
+/// per core, which alone exceeds the units' `TasksMax=32` on large machines.
+const DBUS_RUNTIME_WORKERS: &str = "2";
+
 fn main() -> Result<()> {
+    // Must run before any thread exists: the environment is process-global.
+    // An operator-provided value still wins.
+    if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
+        std::env::set_var("TOKIO_WORKER_THREADS", DBUS_RUNTIME_WORKERS);
+    }
     // `fmt::init()` falls back to ERROR-only when RUST_LOG is unset, which
     // silently dropped every warning (policy violations, rejected reloads,
     // reconnects) from the journal. Default to info; RUST_LOG still wins.
