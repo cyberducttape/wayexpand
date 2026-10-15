@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Action Broker re-validates an action's program immediately before
+  each launch (owner, permissions, parent directories, and that the path
+  still resolves to the validated file) instead of only when the policy
+  loads, so a change made after loading is refused rather than executed.
 - `wayexpand sync` no longer treats a failed remote query (authentication,
   DNS, connectivity) as "the remote has no branch", which skipped fetching
   and verifying the remote before pushing; it reports the redacted Git error.

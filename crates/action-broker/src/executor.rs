@@ -62,6 +62,32 @@ impl ActionExecutor {
             });
         }
 
+        if self.config.require_absolute_paths {
+            // The program was validated when the policy loaded; its owner,
+            // permissions, or a parent directory may have changed since.
+            // Re-check immediately before launch and require that the path
+            // still resolves to the program that was validated.
+            let still_valid = crate::path_security::validate_absolute_program(
+                &request.action_id,
+                &action_config.program,
+            )
+            .and_then(|()| {
+                let resolved = std::fs::canonicalize(&action_config.program)
+                    .map_err(|error| format!("program cannot be resolved: {error}"))?;
+                if resolved.as_os_str() == std::ffi::OsStr::new(&action_config.program) {
+                    Ok(())
+                } else {
+                    Err("program path now resolves to a different file".to_owned())
+                }
+            });
+            if let Err(reason) = still_valid {
+                return Err(ActionError::ActionBlocked {
+                    action_id: request.action_id.clone(),
+                    reason: format!("program failed revalidation before launch: {reason}"),
+                });
+            }
+        }
+
         let mut cmd = Command::new(&action_config.program);
 
         for arg in &action_config.args {
@@ -238,6 +264,61 @@ mod tests {
 
         let result = executor.execute(request).await;
         assert!(matches!(result, Err(ActionError::ActionNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn executor_revalidates_the_program_immediately_before_launch() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-revalidate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let program = directory.join("action.sh");
+        std::fs::write(&program, "#!/bin/sh\necho ok\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "action".to_string(),
+            ActionConfig {
+                program: program.to_string_lossy().into_owned(),
+                args: vec![],
+                timeout_ms: 5000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let request = || ActionRequest {
+            action_id: "action".to_string(),
+            timeout_ms: 5000,
+            inherit_env: false,
+            env_vars: vec![],
+            stdout_capture: true,
+        };
+        assert!(executor.execute(request()).await.is_ok());
+
+        // Made group-writable after the policy loaded: refused at launch.
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o770)).unwrap();
+        let result = executor.execute(request()).await;
+        assert!(
+            matches!(&result, Err(ActionError::ActionBlocked { reason, .. }) if reason.contains("revalidation")),
+            "{result:?}"
+        );
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[tokio::test]
