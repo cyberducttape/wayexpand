@@ -4,6 +4,13 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
+# Never reach the invoking user's real systemd manager or session bus, even
+# where a test leaves systemctl unstubbed: any real `systemctl --user` then
+# fails instead of stopping or disabling the developer's own services.
+isolated_runtime="$test_root/runtime"
+mkdir -m 0700 "$isolated_runtime"
+export XDG_RUNTIME_DIR="$isolated_runtime"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
 mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component"
@@ -263,7 +270,14 @@ fi
 
 # A missing user systemd bus must not weaken the same invariant: a manually
 # launched daemon is still an active input process and blocks uninstall.
-mv "$stub_bin/systemctl" "$stub_bin/systemctl-disabled"
+# Simulate the missing bus with a stub. Moving the stub away would expose the
+# real systemctl, which disabled the developer's own service in the past.
+cat >"$stub_bin/systemctl" <<'EOF'
+#!/bin/sh
+printf '%s\n' 'Failed to connect to user scope bus via local transport: No such file or directory' >&2
+exit 1
+EOF
+chmod 0755 "$stub_bin/systemctl"
 cat >"$stub_bin/ps" <<'EOF'
 #!/bin/sh
 printf '%s\n' '4242 /tmp/wayexpand-daemon --config /tmp/test.toml'

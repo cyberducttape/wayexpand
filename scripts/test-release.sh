@@ -9,6 +9,13 @@ case "$target_dir" in
 esac
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
+# Never reach the invoking user's real systemd manager or session bus, even
+# where a test leaves systemctl unstubbed: any real `systemctl --user` then
+# fails instead of stopping or disabling the developer's own services.
+isolated_runtime="$test_root/runtime"
+mkdir -m 0700 "$isolated_runtime"
+export XDG_RUNTIME_DIR="$isolated_runtime"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 # The source archive is used by release packaging and by PKGBUILD's checksum.
 # Keep gzip and archive entry timestamps fixed so rebuilding the same tree is
