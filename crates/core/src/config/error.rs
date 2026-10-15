@@ -147,9 +147,11 @@ impl ConfigError {
                 "configuration changed externally; reload before saving".into()
             }
             Self::Busy { .. } => "configuration is busy; another writer holds its lock".into(),
-            Self::InsecureParent { mode, .. } => {
-                format!("parent directory is insecure (mode {mode:04o})")
-            }
+            Self::InsecureParent { mode, .. } => format!(
+                "parent directory is insecure (mode {mode:04o}): a directory above the \
+                 configuration is writable by other users; remove that access with \
+                 `chmod go-w` on it"
+            ),
             Self::InsecureParentOwner { uid, .. } => {
                 format!("parent directory owner is not trusted (uid {uid})")
             }

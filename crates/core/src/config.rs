@@ -7,7 +7,7 @@ use std::{
     fs,
     io::{Read, Write},
     os::fd::{AsRawFd, OwnedFd},
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -732,10 +732,18 @@ impl Config {
                     .filter(|parent| !parent.as_os_str().is_empty())
                 {
                     let parent_exists = parent.exists();
-                    fs::create_dir_all(parent).map_err(|source| ConfigError::Read {
-                        path: parent.display().to_string(),
-                        source,
-                    })?;
+                    // Every directory created here (including a missing
+                    // ~/.config) is private. With the umask alone, Ubuntu's
+                    // default 0002 would create group-writable ancestors that
+                    // the loader then rejects as insecure.
+                    std::fs::DirBuilder::new()
+                        .recursive(true)
+                        .mode(0o700)
+                        .create(parent)
+                        .map_err(|source| ConfigError::Read {
+                            path: parent.display().to_string(),
+                            source,
+                        })?;
                     if !parent_exists {
                         fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(
                             |source| ConfigError::Read {

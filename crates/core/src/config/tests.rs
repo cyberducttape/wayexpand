@@ -838,3 +838,31 @@ fn backward_date_offsets_and_local_clock_variables_validate() {
         .unwrap_or_else(|error| panic!("{replacement} should validate: {error}"));
     }
 }
+
+#[test]
+fn first_run_setup_creates_every_missing_directory_privately() {
+    let root = std::env::temp_dir().join(format!(
+        "wayexpand-ensure-config-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    // A fresh account without ~/.config yet.
+    let path = root.join("home/.config/wayexpand/expansions.toml");
+
+    Config::ensure_user_config(&path).expect("first-run setup loads what it created");
+
+    for directory in ["home", "home/.config", "home/.config/wayexpand"] {
+        let mode = fs::metadata(root.join(directory))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "{directory} was created with mode {mode:o}");
+    }
+    let _ = fs::remove_dir_all(root);
+}
