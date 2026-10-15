@@ -5,15 +5,15 @@ name: Experimental build
 # skips the real-compositor certification gate that certified releases
 # require, and it labels every artifact as experimental. By default it only
 # uploads workflow artifacts; set `publish` to create a GitHub prerelease.
+#
+# It always builds the commit it was dispatched on (a branch or tag of this
+# repository, chosen in the "Use workflow from" selector), never an arbitrary
+# ref: a free-form ref could name a fork's pull-request commit and run it with
+# this workflow's cache, release, and attestation privileges.
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Branch, tag, or commit to build"
-        required: true
-        default: main
-        type: string
       publish:
         description: "Publish a GitHub prerelease (otherwise artifacts only)"
         required: true
@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: experimental-${{ inputs.ref }}
+  group: experimental-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
     name: Verify
     uses: ./.github/workflows/ci.yml
     with:
-      checkout_ref: ${{ inputs.ref }}
+      checkout_ref: ${{ github.sha }}
 
   identity:
     name: Experimental version
@@ -45,12 +45,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - id: version
         run: |
           scripts/prepare-experimental-build.sh >>"$GITHUB_OUTPUT"
-          printf 'commit=%s\n' "$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
 
   linux-aarch64:
     name: Linux aarch64 experimental build
@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.identity.outputs.commit }}
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: 1.96.0
@@ -99,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.identity.outputs.commit }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:

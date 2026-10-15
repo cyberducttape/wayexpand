@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_ref:
-        description: "Existing tag or branch to build and publish"
+        description: "Existing vX.Y.Z release tag of this repository to build and publish"
         required: true
         type: string
       launchpad_series:
@@ -20,14 +20,38 @@ permissions:
   actions: read
 
 jobs:
+  # Runs before any job checks code out. A free-form ref could name a fork's
+  # pull-request commit, which would then run with this workflow's secrets,
+  # cache, release, and attestation privileges.
+  release-ref:
+    name: Require a release tag of this repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify the release ref is a vX.Y.Z tag here
+        env:
+          RELEASE_REF: ${{ inputs.release_ref || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release ref must be a vX.Y.Z tag (got $RELEASE_REF)" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_REF" >/dev/null
+
   ci:
     name: Verify
+    needs: release-ref
     uses: ./.github/workflows/ci.yml
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 
   certification:
     name: Real compositor certification
+    needs: release-ref
     uses: ./.github/workflows/certification.yml
     secrets: inherit
     with:
@@ -190,7 +214,9 @@ jobs:
             | grep -E "^wayexpand-${version}/vendor/[^/]+/\.cargo-checksum\.json$" >/dev/null
       - name: Build unsigned Launchpad source package
         if: ${{ inputs.launchpad_series != '' }}
-        run: bash scripts/build-launchpad-source.sh "${RELEASE_REF_NAME#v}" "${{ inputs.launchpad_series }}"
+        env:
+          LAUNCHPAD_SERIES: ${{ inputs.launchpad_series }}
+        run: bash scripts/build-launchpad-source.sh "${RELEASE_REF_NAME#v}" "$LAUNCHPAD_SERIES"
       - name: Generate SBOM (Software Bill of Materials)
         shell: bash
         run: |

@@ -30,7 +30,7 @@ downloads. Release publication remains gated on compositor certification.
 
 The manually triggered **Experimental build** workflow
 (`.github/workflows/experimental.yml`) produces x86_64 and aarch64 archives
-plus a `.deb` and `.rpm` from any ref, without a Rust toolchain on the target
+plus a `.deb` and `.rpm` from the branch or tag it is dispatched on, without a Rust toolchain on the target
 machine. These builds pass the full CI suite but skip real-compositor
 certification, so they make no compatibility claim and are not for managed
 fleets. By default the workflow only uploads workflow artifacts; with
