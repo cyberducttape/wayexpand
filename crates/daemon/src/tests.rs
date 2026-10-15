@@ -627,15 +627,7 @@ fn reconnect_backoff_is_bounded() {
 
 #[test]
 fn unsupported_output_backend_fails_without_retry() {
-    let error = match connect_output_backend(
-        "unknown",
-        crate::output_loop::OutputConnectOptions {
-            persist_portal_token: true,
-            fcitx5_direct_commit: false,
-            portal_token_path: None,
-            keystroke_max_chars: wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS,
-        },
-    ) {
+    let error = match connect_output_backend("unknown", true, false, None) {
         Ok(_) => panic!("unknown backend unexpectedly connected"),
         Err(error) => error,
     };

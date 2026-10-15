@@ -31,11 +31,12 @@ mod template;
 mod usage;
 
 pub use backend::{
-    discover_backends, window_update_channel, BackendKind, BackendState, BackendStatus, FocusCheck,
-    FocusStamp, FocusWitness, InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource,
-    InputSourceCapabilities, InputSourceError, KeyEventState, OutputCheckpoint,
-    ReplacementGuarantee, TextInjector, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
-    WindowUpdateSendError, WindowUpdateSender,
+    discover_backends, keystroke_max_chars, set_keystroke_max_chars, window_update_channel,
+    BackendKind, BackendState, BackendStatus, FocusCheck, FocusStamp, FocusWitness,
+    InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource, InputSourceCapabilities,
+    InputSourceError, KeyEventState, OutputCheckpoint, ReplacementGuarantee, TextInjector,
+    WindowTracker, WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError,
+    WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{

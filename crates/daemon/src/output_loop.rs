@@ -457,7 +457,13 @@ impl TextInjector for AsyncInjector {
     }
 
     fn capabilities(&self) -> InjectorCapabilities {
-        self.capabilities
+        let mut capabilities = self.capabilities;
+        // Only paced keystroke modes advertise a limit, and it is the live
+        // setting, which a reload can change after this snapshot was taken.
+        if capabilities.max_text_chars > 0 {
+            capabilities.max_text_chars = wayexpand_core::keystroke_max_chars();
+        }
+        capabilities
     }
 
     fn status_detail(&self) -> &'static str {
@@ -538,16 +544,26 @@ impl std::error::Error for OutputConnectError {}
 /// that erases without the user's compatibility-mode consent and a focus check.
 pub fn connect_output_backend(
     name: &str,
-    options: OutputConnectOptions<'_>,
+    persist_portal_token: bool,
+    fcitx5_direct_commit: bool,
+    portal_token_path_arg: Option<&Path>,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
-    connect_unguarded_output_backend(name, options).map(|injector| {
+    connect_unguarded_output_backend(
+        name,
+        persist_portal_token,
+        fcitx5_direct_commit,
+        portal_token_path_arg,
+    )
+    .map(|injector| {
         crate::assurance::AssuredInjector::wrap(injector, crate::assurance::GuardState::global())
     })
 }
 
 fn connect_unguarded_output_backend(
     name: &str,
-    options: OutputConnectOptions<'_>,
+    persist_portal_token: bool,
+    fcitx5_direct_commit: bool,
+    portal_token_path_arg: Option<&Path>,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
     match name {
         "wlroots" => WlrootsInjector::connect()
@@ -557,10 +573,9 @@ fn connect_unguarded_output_backend(
                 message: format!("connecting wlroots output backend: {error}"),
             }),
         "libei" => LibeiInjector::connect(LibeiOptions {
-            persist_portal_token: options.persist_portal_token,
-            fcitx5_direct_commit: options.fcitx5_direct_commit,
-            portal_token_path: options.portal_token_path.map(Path::to_path_buf),
-            keystroke_max_chars: options.keystroke_max_chars,
+            persist_portal_token,
+            fcitx5_direct_commit,
+            portal_token_path: portal_token_path_arg.map(Path::to_path_buf),
         })
         .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
         .map_err(|error| OutputConnectError {
@@ -579,8 +594,6 @@ pub struct OutputConnectOptions<'a> {
     pub persist_portal_token: bool,
     pub fcitx5_direct_commit: bool,
     pub portal_token_path: Option<&'a Path>,
-    /// Longest replacement a paced keystroke route will type.
-    pub keystroke_max_chars: usize,
 }
 
 /// Connect to an output backend with exponential backoff retry.
@@ -595,7 +608,12 @@ pub fn connect_output_with_retry(
     let status_backend = wayexpand_backend_selection::injection_status_label(backend);
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        match connect_output_backend(backend, options) {
+        match connect_output_backend(
+            backend,
+            options.persist_portal_token,
+            options.fcitx5_direct_commit,
+            options.portal_token_path,
+        ) {
             Ok(injector) => {
                 status::set_daemon_status_with_mode(
                     control,
@@ -757,6 +775,55 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    struct KeystrokeLimitedInjector;
+
+    impl TextInjector for KeystrokeLimitedInjector {
+        fn name(&self) -> &'static str {
+            "keystroke-limited"
+        }
+
+        fn capabilities(&self) -> InjectorCapabilities {
+            InjectorCapabilities {
+                max_text_chars: wayexpand_core::keystroke_max_chars(),
+                ..InjectorCapabilities::default()
+            }
+        }
+
+        fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_reloaded_keystroke_limit_applies_to_the_connected_route() {
+        // The limit is read live instead of reconnecting: KDE's portal does
+        // not grant a second session to a running process.
+        let (injector, _failures, _worker) =
+            spawn_async_injector(Box::new(KeystrokeLimitedInjector), None).unwrap();
+        wayexpand_core::set_keystroke_max_chars(1000);
+        assert_eq!(injector.capabilities().max_text_chars, 1000);
+        wayexpand_core::set_keystroke_max_chars(wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS);
+        assert_eq!(
+            injector.capabilities().max_text_chars,
+            wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS
+        );
+
+        // A route without a keystroke limit never gains one.
+        let (unlimited, _failures, _worker) = spawn_async_injector(
+            Box::new(PacedInjector {
+                typed: Arc::default(),
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
+            }),
+            None,
+        )
+        .unwrap();
+        assert_eq!(unlimited.capabilities().max_text_chars, 0);
     }
 
     #[test]

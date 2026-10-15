@@ -110,8 +110,8 @@ keystroke_max_chars = 1000   # about 12 seconds of typing
 
 Raising it trades speed for reach: anything you type while a long
 replacement is being typed is mixed into it, and a focus change or the
-insertion timeout stops it partway. A changed limit reconnects the libei
-output on the next configuration reload.
+insertion timeout stops it partway. A changed limit applies to the running
+daemon on the next configuration reload.
 
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.

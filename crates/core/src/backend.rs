@@ -1,6 +1,7 @@
 use std::{
     fmt,
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex,
     },
@@ -9,6 +10,23 @@ use std::{
 use std::{fs::OpenOptions, path::Path};
 
 use crate::{InputEvent, Modifiers, WindowContext};
+
+/// The longest replacement a paced keystroke route (one that types each
+/// character as a key press) accepts, from `Settings::keystroke_max_chars`.
+/// It is process-wide and read at the moment of typing, so the daemon applies
+/// a reloaded value to the connected route without reconnecting it: a portal
+/// session cannot always be re-established while the process runs.
+static KEYSTROKE_MAX_CHARS: AtomicUsize = AtomicUsize::new(crate::DEFAULT_KEYSTROKE_MAX_CHARS);
+
+/// Set the keystroke-typing limit (clamped to at least one character).
+pub fn set_keystroke_max_chars(limit: usize) {
+    KEYSTROKE_MAX_CHARS.store(limit.max(1), Ordering::Relaxed);
+}
+
+/// The current keystroke-typing limit; see [`set_keystroke_max_chars`].
+pub fn keystroke_max_chars() -> usize {
+    KEYSTROKE_MAX_CHARS.load(Ordering::Relaxed)
+}
 
 /// A check that paced output backends run before each synthesized character,
 /// so a long keystroke stream stops as soon as continuing is no longer safe
@@ -426,7 +444,8 @@ pub struct InjectorCapabilities {
     /// Stable name for the negotiated insertion protocol or mode.
     pub insertion_mode: &'static str,
     /// Maximum number of Unicode scalar values accepted by this mode. Zero
-    /// means that the backend does not advertise a mode-specific limit.
+    /// means that the backend does not advertise a mode-specific limit. Only
+    /// paced keystroke modes set it, to [`keystroke_max_chars`].
     pub max_text_chars: usize,
     /// Approximate sustained output rate when the mode is paced.
     pub expected_throughput_chars_per_sec: Option<u32>,

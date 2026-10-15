@@ -147,9 +147,6 @@ struct Daemon {
     reconnect_delay: Duration,
     output_retry_at: Option<Instant>,
     output_retry_delay: Duration,
-    /// The keystroke limit the current output route was connected with; a
-    /// different value after a reload reconnects the route to apply it.
-    connected_keystroke_max_chars: usize,
     output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
     output_worker: Option<OutputWorkerState>,
     retiring_output_workers: Vec<OutputWorkerState>,
@@ -318,6 +315,7 @@ fn main() -> Result<()> {
         })
         .map_err(|error| anyhow::anyhow!("could not start signal handler: {error}"))?;
     info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
+    wayexpand_core::set_keystroke_max_chars(config.engine.keystroke_max_chars());
     if let Some(socket) = control.path() {
         info!(path = %socket.display(), "control socket ready");
     } else {
@@ -384,7 +382,6 @@ fn main() -> Result<()> {
                         persist_portal_token: config.engine.libei_token_persistence(),
                         fcitx5_direct_commit: config.engine.fcitx5_direct_commit(),
                         portal_token_path: portal_token_path.as_deref(),
-                        keystroke_max_chars: config.engine.keystroke_max_chars(),
                     },
                 )?
                 else {
@@ -475,7 +472,6 @@ fn main() -> Result<()> {
     if let Some(handle) = usage.clear_handle() {
         control.set_usage_clear_handle(handle);
     }
-    let config_keystroke_max_chars = config.engine.keystroke_max_chars();
     let mut daemon = Daemon {
         control,
         policy,
@@ -500,7 +496,6 @@ fn main() -> Result<()> {
         reconnect_delay,
         output_retry_at,
         output_retry_delay,
-        connected_keystroke_max_chars: config_keystroke_max_chars,
         output_failures,
         output_worker,
         retiring_output_workers: Vec::new(),

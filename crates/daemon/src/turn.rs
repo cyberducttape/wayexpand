@@ -61,23 +61,8 @@ impl Daemon {
         self.config.reload_if_changed();
         // After any reload this turn: outputs use the consent now in effect.
         crate::assurance::GuardState::global().set_mode(self.config.engine.compatibility_mode());
-        // A changed keystroke limit is fixed into the connected backend (and
-        // the capabilities published from it), so reconnect to apply it.
-        let keystroke_max_chars = self.config.engine.keystroke_max_chars();
-        if keystroke_max_chars != self.connected_keystroke_max_chars {
-            self.connected_keystroke_max_chars = keystroke_max_chars;
-            if self.injector.is_some() && !self.input_method_mode && self.backend_name == "libei" {
-                info!(
-                    keystroke_max_chars,
-                    "keystroke limit changed; reconnecting the output route"
-                );
-                self.retire_output_injector();
-                self.output_failures = None;
-                self.connection_state = "reconnecting";
-                self.output_retry_at = Some(Instant::now());
-                self.output_retry_delay = Duration::from_millis(250);
-            }
-        }
+        // Read by keystroke routes as they type, so no reconnect is needed.
+        wayexpand_core::set_keystroke_max_chars(self.config.engine.keystroke_max_chars());
         for (action, result) in self.config.engine.drain_completed_hotkeys() {
             match result {
                 Ok(()) => info!(chord = %action.chord, "hotkey action completed"),
@@ -401,12 +386,9 @@ impl Daemon {
         {
             match connect_output_backend(
                 self.backend_name,
-                OutputConnectOptions {
-                    persist_portal_token: self.config.engine.libei_token_persistence(),
-                    fcitx5_direct_commit: self.config.engine.fcitx5_direct_commit(),
-                    portal_token_path: self.portal_token_path.as_deref(),
-                    keystroke_max_chars: self.config.engine.keystroke_max_chars(),
-                },
+                self.config.engine.libei_token_persistence(),
+                self.config.engine.fcitx5_direct_commit(),
+                self.portal_token_path.as_deref(),
             ) {
                 Ok(backend) => {
                     if self.evdev_mode && self.backend_name == "libei" {

@@ -440,7 +440,6 @@ mod tests {
                 reconnect_delay: Duration::from_millis(250),
                 output_retry_at: None,
                 output_retry_delay: Duration::from_millis(250),
-                connected_keystroke_max_chars: wayexpand_core::DEFAULT_KEYSTROKE_MAX_CHARS,
                 output_failures: Some(failures),
                 output_worker: Some(worker),
                 retiring_output_workers: Vec::new(),
