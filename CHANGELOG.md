@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reconnecting no longer stalls the daemon. Output and input-method key
+  pass-through reconnects (which can wait up to 30 seconds on the portal)
+  run on a worker thread, and retry backoff waits on the reactor's waker
+  instead of sleeping, so stop, reload, status, and inserts are handled
+  throughout.
 - The libei output route can reconnect inside a running daemon. Every
   reconnect through the RemoteDesktop portal used to stall for 30 seconds
   and end the daemon: ashpd caches one D-Bus connection per process, and

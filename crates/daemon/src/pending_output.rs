@@ -440,6 +440,9 @@ mod tests {
                 reconnect_delay: Duration::from_millis(250),
                 output_retry_at: None,
                 output_retry_delay: Duration::from_millis(250),
+                output_connect: None,
+                input_connect: None,
+                input_retry_at: None,
                 output_failures: Some(failures),
                 output_worker: Some(worker),
                 retiring_output_workers: Vec::new(),
@@ -653,5 +656,42 @@ mod tests {
             assert!(Instant::now() < deadline, "retired worker never stopped");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn output_reconnect_runs_off_the_reactor_and_is_collected_later() {
+        let mut harness = Harness::new(false);
+        harness.daemon.retire_output_injector();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while harness
+            .daemon
+            .retiring_output_workers
+            .iter()
+            .any(OutputWorkerState::is_running)
+        {
+            assert!(Instant::now() < deadline, "retired worker never stopped");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // An unknown backend fails permanently, which stands in for a portal
+        // that times out: the turn that starts it must return at once.
+        harness.daemon.backend_name = "unknown";
+        harness.daemon.output_retry_at = Some(Instant::now());
+        let started = Instant::now();
+        while harness.daemon.output_connect.is_none() {
+            harness.daemon.recover_output().unwrap();
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let error = loop {
+            match harness.daemon.recover_output() {
+                Ok(()) => {
+                    assert!(Instant::now() < deadline, "reconnect result never arrived");
+                    harness.daemon.waker.wait(Duration::from_millis(50));
+                }
+                Err(error) => break error,
+            }
+        };
+        assert!(error.to_string().contains("unknown output backend"));
+        assert!(harness.daemon.output_connect.is_none());
     }
 }

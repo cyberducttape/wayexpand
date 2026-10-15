@@ -8,6 +8,7 @@ mod events;
 mod focus;
 mod input_loop;
 mod latency;
+mod output_connect;
 mod output_health;
 mod output_loop;
 mod pending_output;
@@ -31,12 +32,12 @@ use events::{
 };
 use focus::{drain_pending_window_events, focus_token, publish_focus_snapshot, FocusState};
 use input_loop::{
-    connect_evdev_with_retry, connect_input_method_session, connect_input_method_with_retry,
-    input_poll_interval, next_retry_delay, spawn_stdin_reader, wait_for_retry,
+    connect_evdev_with_retry, connect_input_method_with_retry, input_poll_interval,
+    next_retry_delay, spawn_stdin_reader,
 };
 use output_loop::{
-    connect_output_backend, connect_output_with_retry, shutdown_injector, spawn_async_injector,
-    OutputConnectOptions, OutputWorkerState,
+    connect_output_with_retry, shutdown_injector, spawn_async_injector, OutputConnectOptions,
+    OutputWorkerState,
 };
 use reload::ReloadableConfig;
 use signal_hook::{
@@ -147,6 +148,12 @@ struct Daemon {
     reconnect_delay: Duration,
     output_retry_at: Option<Instant>,
     output_retry_delay: Duration,
+    /// An output reconnect running off the reactor; see `output_connect`.
+    output_connect: Option<output_connect::BackgroundConnect>,
+    /// The input-method key pass-through reconnect running off the reactor.
+    input_connect: Option<output_connect::BackgroundConnect>,
+    /// When the next input-source reconnect is due, after a failed attempt.
+    input_retry_at: Option<Instant>,
     output_failures: Option<mpsc::Receiver<output_loop::OutputFailure>>,
     output_worker: Option<OutputWorkerState>,
     retiring_output_workers: Vec<OutputWorkerState>,
@@ -496,6 +503,9 @@ fn main() -> Result<()> {
         reconnect_delay,
         output_retry_at,
         output_retry_delay,
+        output_connect: None,
+        input_connect: None,
+        input_retry_at: None,
         output_failures,
         output_worker,
         retiring_output_workers: Vec::new(),

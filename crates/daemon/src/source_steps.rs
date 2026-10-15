@@ -2,6 +2,10 @@
 //! asks for the next turn or stops the daemon; shared maintenance, status,
 //! and output recovery run before it in `main`.
 
+use crate::input_loop::{
+    attach_key_pass_through, check_input_method_policy, key_pass_through_failure,
+};
+use crate::output_connect::{BackgroundConnect, ConnectRequest};
 use crate::*;
 
 /// What the reactor loop does after an input step.
@@ -13,17 +17,69 @@ pub(crate) enum Step {
 }
 
 impl Daemon {
+    /// Wait out a scheduled input reconnect on the waker rather than in a
+    /// sleep, so stop, reload, and control requests keep their turns.
+    /// Returns whether the retry is still pending.
+    fn waiting_for_input_retry(&mut self, poll_interval: Duration) -> bool {
+        let Some(deadline) = self.input_retry_at else {
+            return false;
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            self.input_retry_at = None;
+            return false;
+        }
+        self.waker.wait(remaining.min(poll_interval));
+        true
+    }
+
+    /// Schedule the next input reconnect with exponential backoff.
+    fn schedule_input_retry(&mut self) {
+        self.input_retry_at = Some(Instant::now() + self.reconnect_delay);
+        self.reconnect_delay = next_retry_delay(self.reconnect_delay);
+    }
+
     /// Reconnect the input-method source if needed, then wait for and process one event.
     pub(crate) fn input_method_step(&mut self, poll_interval: Duration) -> Result<Step> {
         if self.input_method.is_none() {
-            match connect_input_method_session(
-                &self.control,
-                &self.path,
-                self.config.healthy(),
-                self.config.engine.libei_token_persistence(),
-                self.portal_token_path.as_deref(),
-                &self.policy,
-            ) {
+            // The libei key pass-through goes through the portal, which can
+            // take up to 30 seconds, so it connects on a worker and this step
+            // only starts the attempt or collects its result.
+            let connected = if let Some(connect) = &self.input_connect {
+                let Some(result) = connect.poll() else {
+                    self.waker.wait(poll_interval);
+                    return Ok(Step::Next);
+                };
+                self.input_connect = None;
+                let healthy = self.config.healthy();
+                result
+                    .map_err(|error| {
+                        key_pass_through_failure(&self.control, &self.path, healthy, error)
+                    })
+                    .and_then(|key_injector| {
+                        attach_key_pass_through(&self.control, &self.path, healthy, key_injector)
+                    })
+            } else {
+                if self.waiting_for_input_retry(poll_interval) {
+                    return Ok(Step::Next);
+                }
+                if let Err(error) = check_input_method_policy(&self.policy) {
+                    return Err(anyhow::anyhow!(
+                        "input-method reconnect failed permanently: {error}"
+                    ));
+                }
+                self.input_connect = Some(BackgroundConnect::start(
+                    ConnectRequest {
+                        backend: "libei",
+                        persist_portal_token: self.config.engine.libei_token_persistence(),
+                        fcitx5_direct_commit: false,
+                        portal_token_path: self.portal_token_path.clone(),
+                    },
+                    self.waker.clone(),
+                ));
+                return Ok(Step::Next);
+            };
+            match connected {
                 Ok(source) => {
                     let mut source = source;
                     source.set_wake_fd(Some(self.waker.fd()));
@@ -43,10 +99,7 @@ impl Daemon {
                 }
                 Err(error) if error.is_retryable() => {
                     warn!(%error, "input-method unavailable; retrying");
-                    if !wait_for_retry(&self.control.stop_requested, self.reconnect_delay) {
-                        return Ok(Step::Stop);
-                    }
-                    self.reconnect_delay = next_retry_delay(self.reconnect_delay);
+                    self.schedule_input_retry();
                 }
                 Err(error) => {
                     return Err(anyhow::anyhow!(
@@ -156,6 +209,9 @@ impl Daemon {
     /// Reconnect the evdev source if needed, then wait for and process one event.
     pub(crate) fn evdev_step(&mut self, poll_interval: Duration) -> Result<Step> {
         if self.evdev.is_none() {
+            if self.waiting_for_input_retry(poll_interval) {
+                return Ok(Step::Next);
+            }
             match EvdevSource::connect() {
                 Ok(source) => {
                     let mut source = source;
@@ -176,10 +232,7 @@ impl Daemon {
                 }
                 Err(error) if error.is_retryable() => {
                     warn!(%error, "evdev source unavailable; retrying");
-                    if !wait_for_retry(&self.control.stop_requested, self.reconnect_delay) {
-                        return Ok(Step::Stop);
-                    }
-                    self.reconnect_delay = next_retry_delay(self.reconnect_delay);
+                    self.schedule_input_retry();
                 }
                 Err(error) => {
                     return Err(anyhow::anyhow!(

@@ -29,6 +29,7 @@ const IDLE_STDIN_POLL_INTERVAL: Duration = Duration::from_millis(20);
 pub(crate) const IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 
 pub use crate::output_loop::connect_output_backend;
+use crate::output_loop::OutputConnectError;
 use crate::{control, status};
 
 /// Start the stdin input source used by the testable/pipe-driven daemon mode.
@@ -83,6 +84,20 @@ pub fn connect_input_method_session(
     portal_token_path: Option<&Path>,
     policy: &OrganizationPolicy,
 ) -> Result<InputMethodSource, InputMethodError> {
+    check_input_method_policy(policy)?;
+    // Establish pass-through before creating the input-method source. This
+    // ordering is the keyboard-safety boundary: once the source exists, the
+    // compositor is allowed to grant it an exclusive keyboard grab.
+    let key_injector =
+        connect_output_backend("libei", persist_portal_token, false, portal_token_path).map_err(
+            |error| key_pass_through_failure(control, config_path, config_healthy, error),
+        )?;
+    attach_key_pass_through(control, config_path, config_healthy, key_injector)
+}
+
+/// Refuse input-method capture when policy prohibits its mandatory libei key
+/// pass-through.
+pub fn check_input_method_policy(policy: &OrganizationPolicy) -> Result<(), InputMethodError> {
     if !policy.backend_allowed("libei") {
         let violation = format!(
             "backend 'libei' is not in allowed list: {:?}",
@@ -97,40 +112,43 @@ pub fn connect_input_method_session(
         }
         info!("audit mode permits libei key pass-through with a disallowed backend");
     }
+    Ok(())
+}
 
-    // Establish pass-through before creating the input-method source. This
-    // ordering is the keyboard-safety boundary: once the source exists, the
-    // compositor is allowed to grant it an exclusive keyboard grab.
-    let key_injector = match connect_output_backend(
-        "libei",
-        persist_portal_token,
-        false,
-        portal_token_path,
-    ) {
-        Ok(key_injector) => key_injector,
-        Err(error) if error.retryable => {
-            warn!(%error, "libei unavailable; input-method capture will remain disabled until it recovers");
-            status::set_daemon_status_direct(
-                control,
-                "input-method",
-                "input-method-v2",
-                "reconnecting",
-                config_path,
-                config_healthy,
-            );
-            return Err(InputMethodError::PassThrough {
-                message: error.message,
-                retryable: true,
-            });
+/// Classify a failed libei key pass-through connection for input-method
+/// capture, publishing the reconnecting state when it will be retried.
+pub fn key_pass_through_failure(
+    control: &control::ControlServer,
+    config_path: &Path,
+    config_healthy: bool,
+    error: OutputConnectError,
+) -> InputMethodError {
+    if error.retryable {
+        warn!(%error, "libei unavailable; input-method capture will remain disabled until it recovers");
+        status::set_daemon_status_direct(
+            control,
+            "input-method",
+            "input-method-v2",
+            "reconnecting",
+            config_path,
+            config_healthy,
+        );
+        InputMethodError::PassThrough {
+            message: error.message,
+            retryable: true,
         }
-        Err(error) => {
-            return Err(InputMethodError::Protocol(format!(
-                "libei unavailable: {}",
-                error.message
-            )));
-        }
-    };
+    } else {
+        InputMethodError::Protocol(format!("libei unavailable: {}", error.message))
+    }
+}
 
+/// Create the input-method source on top of a connected key pass-through.
+pub fn attach_key_pass_through(
+    control: &control::ControlServer,
+    config_path: &Path,
+    config_healthy: bool,
+    key_injector: Box<dyn TextInjector>,
+) -> Result<InputMethodSource, InputMethodError> {
     let backend_mode = key_injector.status_detail();
     let source = InputMethodSource::connect_with_key_pass_through(key_injector)?;
     status::set_daemon_status_with_mode(

@@ -5,6 +5,7 @@
 use std::ops::ControlFlow;
 
 use crate::control::InsertRequest;
+use crate::output_connect::{BackgroundConnect, ConnectRequest, ConnectResult};
 use crate::pending_output::{OutputJob, OutputOrigin};
 use crate::*;
 use wayexpand_core::CheckStatus;
@@ -377,6 +378,15 @@ impl Daemon {
         // Output recovery is deliberately one attempt per reactor turn. A
         // portal or compositor outage must not park control, reload, status,
         // or shutdown handling inside an exponential-backoff sleep.
+        // The connection itself runs on a worker (the portal can take up to
+        // 30 seconds), so this turn only starts an attempt or collects one.
+        if let Some(connect) = &self.output_connect {
+            let Some(result) = connect.poll() else {
+                return Ok(());
+            };
+            self.output_connect = None;
+            return self.finish_output_connect(result);
+        }
         if self.injector.is_none()
             && !self.input_method_mode
             && self.backend_name != "none"
@@ -384,52 +394,60 @@ impl Daemon {
                 .output_retry_at
                 .is_some_and(|deadline| Instant::now() >= deadline)
         {
-            match connect_output_backend(
-                self.backend_name,
-                self.config.engine.libei_token_persistence(),
-                self.config.engine.fcitx5_direct_commit(),
-                self.portal_token_path.as_deref(),
-            ) {
-                Ok(backend) => {
-                    if self.evdev_mode && self.backend_name == "libei" {
-                        match spawn_async_injector(backend, Some(self.waker.clone())) {
-                            Ok((backend, failures, worker_state)) => {
-                                self.injector = Some(backend);
-                                self.output_failures = Some(failures);
-                                self.output_worker = Some(worker_state);
-                            }
-                            Err(error) => {
-                                self.output_retry_at =
-                                    Some(Instant::now() + self.output_retry_delay);
-                                self.output_retry_delay = next_retry_delay(self.output_retry_delay);
-                                warn!(%error, backend = self.backend_name, "output worker unavailable; retry scheduled");
-                                return Ok(());
-                            }
+            self.output_connect = Some(BackgroundConnect::start(
+                ConnectRequest {
+                    backend: self.backend_name,
+                    persist_portal_token: self.config.engine.libei_token_persistence(),
+                    fcitx5_direct_commit: self.config.engine.fcitx5_direct_commit(),
+                    portal_token_path: self.portal_token_path.clone(),
+                },
+                self.waker.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Install a finished output connection, or schedule the next attempt.
+    fn finish_output_connect(&mut self, result: ConnectResult) -> Result<()> {
+        match result {
+            Ok(backend) => {
+                if self.evdev_mode && self.backend_name == "libei" {
+                    match spawn_async_injector(backend, Some(self.waker.clone())) {
+                        Ok((backend, failures, worker_state)) => {
+                            self.injector = Some(backend);
+                            self.output_failures = Some(failures);
+                            self.output_worker = Some(worker_state);
                         }
-                    } else {
-                        self.injector = Some(backend);
+                        Err(error) => {
+                            self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
+                            self.output_retry_delay = next_retry_delay(self.output_retry_delay);
+                            warn!(%error, backend = self.backend_name, "output worker unavailable; retry scheduled");
+                            return Ok(());
+                        }
                     }
-                    self.output_retry_at = None;
-                    self.output_retry_delay = Duration::from_millis(250);
-                    self.connection_state = "connected";
-                    set_daemon_status(
-                        &mut self.status_publisher,
-                        &self.control,
-                        self.active_source,
-                        wayexpand_backend_selection::injection_status_label(self.backend_name),
-                        self.connection_state,
-                        &self.path,
-                        self.config.healthy(),
-                    );
-                    info!(backend = self.backend_name, "output backend reconnected");
+                } else {
+                    self.injector = Some(backend);
                 }
-                Err(error) if error.retryable => {
-                    self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
-                    self.output_retry_delay = next_retry_delay(self.output_retry_delay);
-                    warn!(%error, backend = self.backend_name, "output backend unavailable; retry scheduled");
-                }
-                Err(error) => return Err(anyhow::Error::new(error)),
+                self.output_retry_at = None;
+                self.output_retry_delay = Duration::from_millis(250);
+                self.connection_state = "connected";
+                set_daemon_status(
+                    &mut self.status_publisher,
+                    &self.control,
+                    self.active_source,
+                    wayexpand_backend_selection::injection_status_label(self.backend_name),
+                    self.connection_state,
+                    &self.path,
+                    self.config.healthy(),
+                );
+                info!(backend = self.backend_name, "output backend reconnected");
             }
+            Err(error) if error.retryable => {
+                self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
+                self.output_retry_delay = next_retry_delay(self.output_retry_delay);
+                warn!(%error, backend = self.backend_name, "output backend unavailable; retry scheduled");
+            }
+            Err(error) => return Err(anyhow::Error::new(error)),
         }
         Ok(())
     }

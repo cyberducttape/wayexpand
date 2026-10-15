@@ -1,0 +1,132 @@
+//! Output backend connections made off the reactor thread.
+//!
+//! Connecting libei through the RemoteDesktop portal can take up to the
+//! portal's 30-second deadline. A reconnect made on the reactor would stop
+//! it from handling stop requests, reloads, inserts, and status for that
+//! long, so the reactor starts the attempt here and collects the result on a
+//! later turn; the worker wakes it when the attempt ends.
+
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, TryRecvError},
+    thread,
+};
+
+use wayexpand_core::TextInjector;
+
+use crate::output_loop::{connect_output_backend, OutputConnectError};
+use crate::waker::Waker;
+
+pub(crate) type ConnectResult = Result<Box<dyn TextInjector>, OutputConnectError>;
+
+/// What a background attempt connects with; owned so it can cross threads.
+pub(crate) struct ConnectRequest {
+    pub backend: &'static str,
+    pub persist_portal_token: bool,
+    pub fcitx5_direct_commit: bool,
+    pub portal_token_path: Option<PathBuf>,
+}
+
+/// One connection attempt in flight. Dropping it abandons the attempt: an
+/// injector that connects afterwards is dropped by the worker, which closes
+/// its portal session.
+pub(crate) struct BackgroundConnect {
+    result: Receiver<ConnectResult>,
+}
+
+impl BackgroundConnect {
+    pub(crate) fn start(request: ConnectRequest, waker: Waker) -> Self {
+        Self::spawn(waker, move || {
+            connect_output_backend(
+                request.backend,
+                request.persist_portal_token,
+                request.fcitx5_direct_commit,
+                request.portal_token_path.as_deref(),
+            )
+        })
+    }
+
+    fn spawn(waker: Waker, connect: impl FnOnce() -> ConnectResult + Send + 'static) -> Self {
+        let (sender, result) = mpsc::sync_channel(1);
+        let spawned = thread::Builder::new()
+            .name("wayexpand-connect".into())
+            .spawn(move || {
+                let _ = sender.send(connect());
+                waker.wake();
+            });
+        if let Err(error) = spawned {
+            // The closure (and its sender) is gone, so poll() reports this
+            // as a retryable failure on the next turn.
+            tracing::warn!(%error, "could not start output connection worker");
+        }
+        Self { result }
+    }
+
+    /// The attempt's result once it has finished, without waiting.
+    pub(crate) fn poll(&self) -> Option<ConnectResult> {
+        match self.result.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(OutputConnectError {
+                message: "output connection worker ended without a result".into(),
+                retryable: true,
+            })),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn wait_for(connect: &BackgroundConnect) -> ConnectResult {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(result) = connect.poll() {
+                return result;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "connection attempt never finished"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_slow_connection_does_not_block_the_caller_and_wakes_it() {
+        let waker = Waker::new().unwrap();
+        let (release, gate) = mpsc::channel::<()>();
+        let connect = BackgroundConnect::spawn(waker.clone(), move || {
+            let _ = gate.recv();
+            Err(OutputConnectError {
+                message: "portal timed out".into(),
+                retryable: false,
+            })
+        });
+        // Still in flight: the caller gets control back immediately.
+        assert!(connect.poll().is_none());
+        release.send(()).unwrap();
+        let error = match wait_for(&connect) {
+            Err(error) => error,
+            Ok(_) => panic!("the attempt was set up to fail"),
+        };
+        assert!(!error.retryable);
+        assert_eq!(error.message, "portal timed out");
+    }
+
+    #[test]
+    fn a_failed_backend_name_is_reported_through_poll() {
+        let connect = BackgroundConnect::start(
+            ConnectRequest {
+                backend: "unknown",
+                persist_portal_token: false,
+                fcitx5_direct_commit: false,
+                portal_token_path: None,
+            },
+            Waker::new().unwrap(),
+        );
+        assert!(matches!(wait_for(&connect), Err(error) if !error.retryable));
+    }
+}
