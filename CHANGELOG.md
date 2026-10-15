@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand sync` no longer treats a failed remote query (authentication,
+  DNS, connectivity) as "the remote has no branch", which skipped fetching
+  and verifying the remote before pushing; it reports the redacted Git error.
+- Release tarball checks could pass while an archive contained `.git`:
+  `grep -q` closed the pipe, `tar` died of SIGPIPE, and `pipefail` turned
+  the match into a non-match. Archives are now listed to a file and checked
+  there, and the pattern also matches a bare `.git` entry.
+- Compositor certification requires online runners only for
+  production-required compositors. Optional ones (Sway, Hyprland) run when
+  their runner is online instead of failing the preflight, or leaving a job
+  queued with no runner and holding a release behind it.
 - A running keystroke stream (the libei keysym fallback types one character
   every 12 ms) now stops before the next character when the window tracker
   reports a focus change, or when the daemon abandons the transaction after

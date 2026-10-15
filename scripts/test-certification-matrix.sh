@@ -33,9 +33,7 @@ grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
 grep -F -- 'actions: read' "$workflow" >/dev/null
-for compositor in kde gnome sway hyprland; do
-    grep -F -- "compositor: $compositor" "$workflow" >/dev/null
-done
+grep -F -- 'fromJSON(needs.runner-preflight.outputs.matrix)' "$workflow" >/dev/null
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null
 grep -F -- 'scripts/certify-compositor.sh' "$workflow" >/dev/null
 grep -F -- 'continue-on-error: true' "$workflow" >/dev/null
@@ -46,10 +44,7 @@ grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_TARGET_APPS' "$workflow" >/dev/null
-grep -F -- 'backend: input-method-v2' "$workflow" >/dev/null
-grep -F -- 'production_required: true' "$workflow" >/dev/null
-grep -F -- 'production_required: false' "$workflow" >/dev/null
-grep -F -- 'backend: evdev+wlroots' "$workflow" >/dev/null
+
 python3 - "$matrix" "$workflow" <<'PY'
 import json
 import re
@@ -58,13 +53,22 @@ import sys
 matrix_path, workflow_path = sys.argv[1:]
 matrix = json.load(open(matrix_path, encoding="utf-8"))
 workflow = open(workflow_path, encoding="utf-8").read()
-blocks = re.split(r"(?m)^\s*- compositor:\s*", workflow)[1:]
+# The preflight's target table: "compositor backend required" per line.
+table = re.search(r"targets='(.*?)'", workflow, re.S)
+if not table:
+    raise SystemExit("certification preflight target table is missing")
 workflow_flags = {}
-for block in blocks:
-    compositor, _, body = block.partition("\n")
-    match = re.search(r"(?m)^\s*production_required:\s*(true|false)\s*$", body)
-    if match:
-        workflow_flags[compositor.strip()] = match.group(1) == "true"
+workflow_backends = {}
+for line in table.group(1).splitlines():
+    fields = line.split()
+    if len(fields) != 3 or fields[2] not in ("true", "false"):
+        raise SystemExit(f"malformed certification target: {line!r}")
+    workflow_flags[fields[0]] = fields[2] == "true"
+    workflow_backends[fields[0]] = fields[1]
+if "evdev+libei" in workflow_backends.values():
+    raise SystemExit("certification workflow must not certify raw evdev")
+if workflow_backends.get("kde") != "input-method-v2":
+    raise SystemExit("KDE must be certified on the input-method-v2 route")
 
 for target in matrix["targets"]:
     expected = target["production_certification_required"]

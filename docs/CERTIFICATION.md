@@ -176,6 +176,10 @@ desktops as a matrix on manual dispatch and weekly schedule. Each runner must pr
 executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
+The preflight requires an online runner for every production-required
+compositor and fails without one; optional compositors (currently Sway and
+Hyprland) are certified only when their runner is online, so a missing
+optional runner neither fails nor stalls the workflow.
 Missing driver or session metadata fails the job; hosted CI is never treated as
 a substitute for a real compositor session. Runners certifying a keystroke
 route (`evdev+libei`, `evdev+wlroots`) must give consent in the configuration

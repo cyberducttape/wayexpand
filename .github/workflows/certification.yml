@@ -24,8 +24,15 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+    outputs:
+      matrix: ${{ steps.runners.outputs.matrix }}
     steps:
-      - name: Require online compositor runners
+      # Production-required compositors must have an online runner. Optional
+      # ones are certified only when their runner is online: a matrix entry
+      # without any runner would wait in the queue until GitHub cancels it,
+      # holding every release behind an optional platform.
+      - name: Select compositors with online runners
+        id: runners
         env:
           CERTIFICATION_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN }}
         run: |
@@ -36,23 +43,40 @@ jobs:
           fi
           export GH_TOKEN="$CERTIFICATION_RUNNER_TOKEN"
           runners_json="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100")"
+          # compositor, certification backend, production required.
+          # Raw evdev is a compatibility fallback, not a production-safe
+          # certification route: it cannot observe sensitive fields or make
+          # replacement atomic, so KDE is validated on input-method-v2.
+          targets='kde input-method-v2 true
+          gnome input-method-v2 true
+          sway evdev+wlroots false
+          hyprland evdev+wlroots false'
           missing=()
-          for compositor in kde gnome sway hyprland; do
-            if ! jq -e --arg compositor "$compositor" '
+          include='[]'
+          while read -r compositor backend required; do
+            if jq -e --arg compositor "$compositor" '
               any(.[].runners[];
                 .status == "online"
                 and (([.labels[].name] | index("wayexpand-certification")) != null)
                 and (([.labels[].name] | index($compositor)) != null))
             ' <<<"$runners_json" >/dev/null; then
+              include=$(jq -c --arg compositor "$compositor" --arg backend "$backend" \
+                --argjson required "$required" \
+                '. + [{compositor: $compositor, backend: $backend, production_required: $required}]' \
+                <<<"$include")
+            elif [ "$required" = true ]; then
               missing+=("$compositor")
+            else
+              echo "::notice::Skipping optional $compositor certification: no online runner"
             fi
-          done
+          done <<<"$targets"
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Missing online self-hosted certification runners: ${missing[*]}" >&2
-            echo 'Register runners with labels: wayexpand-certification plus each compositor label (kde, gnome, sway, hyprland).' >&2
+            echo "Missing online self-hosted certification runners for required compositors: ${missing[*]}" >&2
+            echo 'Register runners with labels: wayexpand-certification plus the compositor label.' >&2
             exit 1
           fi
-          echo 'All required compositor certification runners are online.'
+          printf 'matrix=%s\n' "$(jq -c '{include: .}' <<<"$include")" >>"$GITHUB_OUTPUT"
+          echo 'All production-required compositor certification runners are online.'
 
   certify:
     name: "${{ matrix.compositor }} certification"
@@ -61,23 +85,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - compositor: kde
-            # Raw evdev is a compatibility fallback, not a production-safe
-            # certification route: it cannot observe sensitive fields or make
-            # replacement atomic. Validate the input-method route instead.
-            backend: input-method-v2
-            production_required: true
-          - compositor: gnome
-            backend: input-method-v2
-            production_required: true
-          - compositor: sway
-            backend: evdev+wlroots
-            production_required: false
-          - compositor: hyprland
-            backend: evdev+wlroots
-            production_required: false
+      matrix: ${{ fromJSON(needs.runner-preflight.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
