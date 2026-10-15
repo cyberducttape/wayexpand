@@ -567,12 +567,149 @@ fn gui_refuses_to_overwrite_an_external_config_change() {
 
     app.save_selected();
 
+    // The same snippet changed on both sides: the external edit is kept on
+    // disk and loaded, the user's version stays in the editor, and the
+    // status says it was not saved.
     assert_eq!(
         Config::load(&path).unwrap().expansion[0].replacement,
         "from external editor"
     );
-    assert_eq!(app.status.tone_for_test(), status::StatusTone::Warning);
-    assert!(app.status.text().contains("changed outside WayExpand"));
+    assert_eq!(app.config.expansion[0].replacement, "from external editor");
+    assert_eq!(app.draft.as_ref().unwrap().replacement, "from gui");
+    assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+    assert!(
+        app.status.text().contains("Not saved: :one"),
+        "{}",
+        app.status.text()
+    );
+    assert!(!app.save_in_flight());
+
+    // Saving again is the explicit choice to overwrite the external edit.
+    app.save_selected();
+    assert_eq!(
+        Config::load(&path).unwrap().expansion[0].replacement,
+        "from gui"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn a_conflicting_save_merges_with_an_external_edit_of_another_snippet() {
+    let path =
+        std::env::temp_dir().join(format!("wayexpand-gui-merge-{}.toml", std::process::id()));
+    let snippet = |trigger: &str| ExpansionConfig {
+        id: ExpansionConfig::new_id(),
+        trigger: trigger.into(),
+        replacement: "original".into(),
+        description: String::new(),
+        tags: Vec::new(),
+        category: String::new(),
+        app_filter: Vec::new(),
+        match_mode: MatchMode::Immediate,
+        command: None,
+        enabled: true,
+        propagate_case: false,
+        aliases: Vec::new(),
+    };
+    let config = Config {
+        expansion: vec![snippet(":mine"), snippet(":theirs")],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.draft.as_mut().unwrap().replacement = "edited in gui".into();
+
+    let mut external = config.clone();
+    external.expansion[1].replacement = "edited elsewhere".into();
+    external.save_atomic(&path).unwrap();
+
+    app.save_selected();
+
+    let saved = Config::load(&path).unwrap();
+    assert_eq!(saved.expansion[0].replacement, "edited in gui");
+    assert_eq!(saved.expansion[1].replacement, "edited elsewhere");
+    assert!(!app.save_in_flight());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn changes_queued_behind_a_save_in_flight_are_all_kept() {
+    let path =
+        std::env::temp_dir().join(format!("wayexpand-gui-queue-{}.toml", std::process::id()));
+    let snippet = |trigger: &str| ExpansionConfig {
+        id: ExpansionConfig::new_id(),
+        trigger: trigger.into(),
+        replacement: "original".into(),
+        description: String::new(),
+        tags: Vec::new(),
+        category: String::new(),
+        app_filter: Vec::new(),
+        match_mode: MatchMode::Immediate,
+        command: None,
+        enabled: true,
+        propagate_case: false,
+        aliases: Vec::new(),
+    };
+    let config = Config {
+        expansion: vec![snippet(":a"), snippet(":b"), snippet(":c")],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+
+    // A save of :a is in flight; two more changes arrive before it lands,
+    // each derived from the in-memory config that does not hold it yet.
+    let mut first = app.config.clone();
+    first.expansion[0].replacement = "a changed".into();
+    app.pending_save = Some(PendingSave {
+        request_id: 9,
+        candidate: first.clone(),
+        base: app.config.clone(),
+        preview_revision: app.preview_revision,
+        intent: SaveIntent::Snippet {
+            is_new: false,
+            index: 0,
+        },
+        attempts: 0,
+    });
+    let mut second = app.config.clone();
+    second.expansion[1].replacement = "b changed".into();
+    app.queue_save_config(
+        second,
+        SaveIntent::Snippet {
+            is_new: false,
+            index: 1,
+        },
+    );
+    let mut third = app.config.clone();
+    third.expansion[2].enabled = false;
+    app.queue_save_config(
+        third,
+        SaveIntent::Toggled {
+            index: 2,
+            enabled: false,
+            trigger: ":c".into(),
+        },
+    );
+
+    let result = runtime::save_config(
+        path.clone(),
+        first,
+        app.config_document.clone(),
+        app.config_revision.clone(),
+    );
+    app.finish_save(9, result);
+
+    let saved = Config::load(&path).unwrap();
+    assert_eq!(saved.expansion[0].replacement, "a changed");
+    assert_eq!(saved.expansion[1].replacement, "b changed");
+    assert!(!saved.expansion[2].enabled);
     fs::remove_file(path).unwrap();
 }
 
@@ -937,8 +1074,10 @@ fn undo_is_refused_while_a_save_is_in_flight() {
     app.pending_save = Some(PendingSave {
         request_id: 7,
         candidate: candidate.clone(),
+        base: app.config.clone(),
         preview_revision: app.preview_revision,
         intent: SaveIntent::Undo,
+        attempts: 0,
     });
     app.undo();
     assert!(app.queued_save.is_none());
@@ -986,11 +1125,13 @@ fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
     app.pending_save = Some(PendingSave {
         request_id: 41,
         candidate: candidate.clone(),
+        base: app.config.clone(),
         preview_revision: app.preview_revision,
         intent: SaveIntent::Snippet {
             is_new: false,
             index: 0,
         },
+        attempts: 0,
     });
 
     // Two edits arriving while the first write is in flight coalesce to

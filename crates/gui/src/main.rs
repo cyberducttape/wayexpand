@@ -227,6 +227,11 @@ struct GuiApp {
     sync_task: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     pending_save: Option<PendingSave>,
     queued_save: Option<PendingSave>,
+    /// A change whose save hit a revision conflict, kept until the disk
+    /// version is reloaded and it is merged or reported as not saved.
+    conflicted_save: Option<PendingSave>,
+    /// When to retry a save that found the configuration lock busy.
+    save_retry_at: Option<Instant>,
     next_save_id: u64,
 }
 
@@ -265,8 +270,14 @@ impl Drop for SetupTask {
 struct PendingSave {
     request_id: u64,
     candidate: Config,
+    /// The in-memory configuration the candidate was derived from. The
+    /// difference between the two is the change; it is replayed onto newer
+    /// configurations rather than writing a stale whole-file snapshot.
+    base: Config,
     preview_revision: u64,
     intent: SaveIntent,
+    /// Busy-lock retries so far.
+    attempts: u8,
 }
 
 /// The two halves of the settings window: display preferences that take
@@ -396,6 +407,8 @@ impl GuiApp {
             sync_task: None,
             pending_save: None,
             queued_save: None,
+            conflicted_save: None,
+            save_retry_at: None,
             next_save_id: 1,
         })
     }

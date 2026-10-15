@@ -398,7 +398,7 @@ pub(crate) fn save_config(
     Ok((revision, document))
 }
 
-fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
+pub(crate) fn load_config_snapshot(path: PathBuf) -> Result<ReloadSnapshot, String> {
     let loaded = Config::load_versioned(&path).map_err(|error| error.safe_summary())?;
     let document = crate::persistence::read_config_document(loaded.source())
         .map_err(|error| error.to_string())?;

@@ -79,7 +79,7 @@ fn source_has_legacy_expansion_ids(source: &str) -> bool {
         })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]

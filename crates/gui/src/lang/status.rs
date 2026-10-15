@@ -259,6 +259,38 @@ impl Strings {
         }
     }
 
+    /// A change that was not written because the same items were changed
+    /// outside WayExpand. The external version is loaded; the editor keeps
+    /// the user's draft.
+    pub fn status_not_saved_conflict(&self, items: &[String]) -> String {
+        let items = items.join(", ");
+        match self.lang {
+            Language::English => format!(
+                "Not saved: {items} also changed outside WayExpand. The external version is loaded and your edits remain in the editor; save again to overwrite, or revert to keep it."
+            ),
+            Language::Indonesian => format!(
+                "Tidak disimpan: {items} juga diubah di luar WayExpand. Versi eksternal dimuat dan suntingan Anda tetap di editor; simpan lagi untuk menimpa, atau kembalikan untuk mempertahankannya."
+            ),
+            Language::German => format!(
+                "Nicht gespeichert: {items} wurde auch außerhalb von WayExpand geändert. Die externe Version ist geladen, Ihre Änderungen bleiben im Editor; erneut speichern zum Überschreiben oder verwerfen, um sie zu behalten."
+            ),
+        }
+    }
+
+    pub fn status_not_saved_busy(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Not saved: another program kept the configuration locked. Your edits remain in the editor; try saving again."
+            }
+            Language::Indonesian => {
+                "Tidak disimpan: program lain terus mengunci konfigurasi. Suntingan Anda tetap di editor; coba simpan lagi."
+            }
+            Language::German => {
+                "Nicht gespeichert: Ein anderes Programm hielt die Konfiguration gesperrt. Ihre Änderungen bleiben im Editor; erneut speichern."
+            }
+        }
+    }
+
     pub fn status_saving(&self) -> &'static str {
         match self.lang {
             Language::English => "Saving configuration…",

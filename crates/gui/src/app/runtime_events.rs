@@ -120,6 +120,12 @@ impl GuiApp {
                         continue;
                     };
                     match *result {
+                        // A change that hit a revision conflict is merged
+                        // into the disk version (or reported) regardless of
+                        // the open draft, which the merge leaves untouched.
+                        Ok(snapshot) if self.conflicted_save.is_some() => {
+                            self.resolve_conflicted_save(snapshot);
+                        }
                         Ok(snapshot) => {
                             if self.config_revision != expected_revision || self.draft_is_dirty() {
                                 self.status = Status::warning(
@@ -130,6 +136,9 @@ impl GuiApp {
                             }
                         }
                         Err(error) => {
+                            // Nothing was written; say so rather than leave
+                            // the change waiting on a reload that failed.
+                            self.conflicted_save = None;
                             self.status = Status::error(self.strings.status_reload_failed(&error));
                         }
                     }
@@ -140,6 +149,7 @@ impl GuiApp {
             }
         }
         let now = Instant::now();
+        self.retry_busy_save(now);
         if now >= self.next_status_poll {
             self.next_status_poll = now + Duration::from_secs(2);
             if self.pending_control == 0 {
@@ -158,6 +168,8 @@ impl GuiApp {
         }
         if self.diagnostics_running || self.pending_control > 0 {
             ctx.request_repaint_after(Duration::from_millis(50));
+        } else if let Some(due) = self.save_retry_at {
+            ctx.request_repaint_after(due.saturating_duration_since(now));
         } else if self.runtime_receiver.is_some() {
             ctx.request_repaint_after(self.next_status_poll.saturating_duration_since(now));
         }

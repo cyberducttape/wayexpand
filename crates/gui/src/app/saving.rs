@@ -26,26 +26,28 @@ impl GuiApp {
     }
 
     pub(crate) fn queue_save_config(&mut self, candidate: Config, intent: SaveIntent) -> bool {
-        if self.pending_save.is_some() {
-            let request_id = self.next_save_id;
-            self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
-            self.queued_save = Some(PendingSave {
-                request_id,
-                candidate,
-                preview_revision: self.preview_revision,
-                intent,
+        let request_id = self.next_save_id;
+        self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
+        let change = PendingSave {
+            request_id,
+            candidate,
+            base: self.config.clone(),
+            preview_revision: self.preview_revision,
+            intent,
+            attempts: 0,
+        };
+        if self.pending_save.is_some() || self.conflicted_save.is_some() {
+            // Candidates are derived from `self.config`, which does not yet
+            // hold the save in flight. Keep every queued change by folding
+            // it into the queue rather than replacing it.
+            self.queued_save = Some(match self.queued_save.take() {
+                Some(queued) => combine_changes(queued, change),
+                None => change,
             });
             self.status = Status::info(self.strings.status_saving());
             return true;
         }
-        let request_id = self.next_save_id;
-        self.next_save_id = self.next_save_id.wrapping_add(1).max(1);
-        self.dispatch_save(PendingSave {
-            request_id,
-            candidate,
-            preview_revision: self.preview_revision,
-            intent,
-        })
+        self.dispatch_save(change)
     }
 
     pub(crate) fn dispatch_save(&mut self, pending: PendingSave) -> bool {
@@ -82,10 +84,39 @@ impl GuiApp {
     }
 
     pub(crate) fn dispatch_queued_save(&mut self) {
-        if self.pending_save.is_none() {
-            if let Some(pending) = self.queued_save.take() {
-                let _ = self.dispatch_save(pending);
+        if self.pending_save.is_some() || self.conflicted_save.is_some() {
+            return;
+        }
+        let Some(mut queued) = self.queued_save.take() else {
+            return;
+        };
+        if queued.base != self.config {
+            // Replay the change onto the configuration that now holds the
+            // earlier save; writing the stale snapshot would revert it.
+            match rebase_change(
+                &queued.base,
+                &queued.candidate,
+                &self.config,
+                Rebase::LocalWins,
+            ) {
+                Ok(rebased) => {
+                    queued.candidate = rebased;
+                    queued.base = self.config.clone();
+                }
+                Err(conflicts) => {
+                    self.status = Status::error(self.strings.status_not_saved_conflict(&conflicts));
+                    return;
+                }
             }
+        }
+        let _ = self.dispatch_save(queued);
+    }
+
+    /// Retry a save deferred by a busy configuration lock, once due.
+    pub(crate) fn retry_busy_save(&mut self, now: Instant) {
+        if self.save_retry_at.is_some_and(|due| now >= due) {
+            self.save_retry_at = None;
+            self.dispatch_queued_save();
         }
     }
 
@@ -107,13 +138,49 @@ impl GuiApp {
         let (revision, document) = match result {
             Ok(result) => result,
             Err(runtime::SaveFailure::Conflict) => {
+                // Keep the change (and anything queued behind it), load the
+                // version on disk, and merge or report it then. A failed save
+                // is never treated as done, and replaying the queue against
+                // the same stale revision could only fail again.
+                let retained = match self.queued_save.take() {
+                    Some(queued) => combine_changes(pending, queued),
+                    None => pending,
+                };
+                self.conflicted_save = Some(retained);
+                if self.runtime_sender.is_none() {
+                    // Headless, like dispatch_save: load and merge in place.
+                    match runtime::load_config_snapshot(self.path.clone()) {
+                        Ok(snapshot) => self.resolve_conflicted_save(snapshot),
+                        Err(error) => {
+                            self.conflicted_save = None;
+                            self.status = Status::error(self.strings.status_reload_failed(&error));
+                        }
+                    }
+                    return;
+                }
                 self.status = Status::warning(self.strings.status_config_changed_externally());
-                self.dispatch_queued_save();
+                self.perform_reload();
+                if self.pending_reload_revision.is_none() {
+                    // The reload could not even start: the change is not
+                    // saved, and the queue must not wait on it forever.
+                    self.conflicted_save = None;
+                    self.status = Status::error(self.strings.status_config_changed_externally());
+                }
                 return;
             }
             Err(runtime::SaveFailure::Busy) => {
+                let mut retry = match self.queued_save.take() {
+                    Some(queued) => combine_changes(pending, queued),
+                    None => pending,
+                };
+                retry.attempts = retry.attempts.saturating_add(1);
+                if retry.attempts > MAX_BUSY_SAVE_RETRIES {
+                    self.status = Status::error(self.strings.status_not_saved_busy());
+                    return;
+                }
+                self.queued_save = Some(retry);
+                self.save_retry_at = Some(Instant::now() + BUSY_SAVE_RETRY_DELAY);
                 self.status = Status::warning(self.strings.status_save_busy());
-                self.dispatch_queued_save();
                 return;
             }
             Err(runtime::SaveFailure::Failed(error)) => {
@@ -306,6 +373,46 @@ impl GuiApp {
         }
     }
 
+    /// Merge a change that hit a revision conflict into the version just
+    /// loaded from disk. Without overlap it is saved on top of the external
+    /// edit; with overlap the external version is loaded, the editor keeps
+    /// the user's draft, and the status says exactly what was not saved.
+    pub(crate) fn resolve_conflicted_save(&mut self, snapshot: runtime::ReloadSnapshot) {
+        let Some(conflicted) = self.conflicted_save.take() else {
+            self.apply_reload_snapshot(snapshot);
+            return;
+        };
+        let merged = rebase_change(
+            &conflicted.base,
+            &conflicted.candidate,
+            &snapshot.config,
+            Rebase::DetectConflicts,
+        );
+        // Adopt the disk version as the base either way, so no later save
+        // can overwrite the external edit without the user seeing it.
+        self.config = snapshot.config;
+        self.config_document = snapshot.document;
+        self.config_revision = snapshot.revision;
+        self.search_index = snapshot.search_index;
+        self.undo.clear();
+        self.undo_bytes = 0;
+        self.invalidate_preview();
+        match merged {
+            Ok(candidate) => {
+                let base = self.config.clone();
+                let _ = self.dispatch_save(PendingSave {
+                    candidate,
+                    base,
+                    ..conflicted
+                });
+            }
+            Err(conflicts) => {
+                self.queued_save = None;
+                self.status = Status::error(self.strings.status_not_saved_conflict(&conflicts));
+            }
+        }
+    }
+
     pub(crate) fn apply_reload_snapshot(&mut self, snapshot: runtime::ReloadSnapshot) {
         let new_config = snapshot.config;
         let new_selected = self
@@ -347,7 +454,7 @@ impl GuiApp {
     /// top undo entry are about to change, so an undo computed now would pop
     /// the wrong entry and could silently discard the in-flight change.
     pub(crate) fn save_in_flight(&self) -> bool {
-        self.pending_save.is_some() || self.queued_save.is_some()
+        self.pending_save.is_some() || self.queued_save.is_some() || self.conflicted_save.is_some()
     }
 
     pub(crate) fn undo(&mut self) {
@@ -367,6 +474,153 @@ impl GuiApp {
             }
         };
         self.queue_save_config(restored, SaveIntent::Undo);
+    }
+}
+
+const MAX_BUSY_SAVE_RETRIES: u8 = 10;
+const BUSY_SAVE_RETRY_DELAY: Duration = Duration::from_millis(200);
+
+/// Fold a later change into an earlier unsaved one. Both were derived from
+/// in-memory configurations; the later edit wins where they touch the same
+/// thing, and nothing either changed is dropped.
+fn combine_changes(earlier: PendingSave, later: PendingSave) -> PendingSave {
+    let candidate = rebase_change(
+        &later.base,
+        &later.candidate,
+        &earlier.candidate,
+        Rebase::LocalWins,
+    )
+    .unwrap_or_else(|_| later.candidate.clone());
+    PendingSave {
+        candidate,
+        base: earlier.base,
+        attempts: earlier.attempts.max(later.attempts),
+        ..later
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rebase {
+    /// Replaying the user's own changes: the newer local edit wins.
+    LocalWins,
+    /// Replaying onto an external edit: anything both sides changed is a
+    /// conflict that must not be overwritten silently.
+    DetectConflicts,
+}
+
+/// Replay the change from `base` to `candidate` onto `onto`, by stable
+/// snippet ID. Returns the triggers (or section names) that conflict.
+pub(crate) fn rebase_change(
+    base: &Config,
+    candidate: &Config,
+    onto: &Config,
+    mode: Rebase,
+) -> Result<Config, Vec<String>> {
+    use std::collections::HashMap;
+    let by_id = |config: &Config| -> HashMap<String, ExpansionConfig> {
+        config
+            .expansion
+            .iter()
+            .map(|expansion| (expansion.id.clone(), expansion.clone()))
+            .collect()
+    };
+    let base_by_id = by_id(base);
+    let candidate_by_id = by_id(candidate);
+    let mut result = onto.clone();
+    let mut conflicts = Vec::new();
+    let detect = mode == Rebase::DetectConflicts;
+    let changed_externally = |id: &str, result: &Config| -> bool {
+        let current = result.expansion.iter().find(|expansion| expansion.id == id);
+        current != base_by_id.get(id)
+    };
+
+    // Removed locally.
+    for (id, original) in &base_by_id {
+        if candidate_by_id.contains_key(id) {
+            continue;
+        }
+        if detect && changed_externally(id, &result) && result.expansion.iter().any(|e| &e.id == id)
+        {
+            conflicts.push(original.trigger.clone());
+            continue;
+        }
+        result.expansion.retain(|expansion| &expansion.id != id);
+    }
+    // Modified or added locally, in candidate order.
+    for (index, expansion) in candidate.expansion.iter().enumerate() {
+        match base_by_id.get(&expansion.id) {
+            Some(original) if original == expansion => {}
+            Some(_) => {
+                if detect && changed_externally(&expansion.id, &result) {
+                    conflicts.push(expansion.trigger.clone());
+                    continue;
+                }
+                match result
+                    .expansion
+                    .iter_mut()
+                    .find(|existing| existing.id == expansion.id)
+                {
+                    Some(existing) => *existing = expansion.clone(),
+                    None => result.expansion.push(expansion.clone()),
+                }
+            }
+            None => match result
+                .expansion
+                .iter()
+                .position(|existing| existing.id == expansion.id)
+            {
+                Some(position) if result.expansion[position] == *expansion => {}
+                Some(position) => {
+                    if detect {
+                        conflicts.push(expansion.trigger.clone());
+                    } else {
+                        result.expansion[position] = expansion.clone();
+                    }
+                }
+                None => {
+                    let position = index.min(result.expansion.len());
+                    result.expansion.insert(position, expansion.clone());
+                }
+            },
+        }
+    }
+    let mut section = |changed: bool, differs_on_disk: bool, name: &str| -> bool {
+        if !changed {
+            return false;
+        }
+        if detect && differs_on_disk {
+            conflicts.push(name.to_owned());
+            return false;
+        }
+        true
+    };
+    if section(
+        candidate.settings != base.settings,
+        onto.settings != base.settings && onto.settings != candidate.settings,
+        "settings",
+    ) {
+        result.settings = candidate.settings.clone();
+    }
+    if section(
+        candidate.hotkey != base.hotkey,
+        onto.hotkey != base.hotkey && onto.hotkey != candidate.hotkey,
+        "hotkeys",
+    ) {
+        result.hotkey = candidate.hotkey.clone();
+    }
+    if section(
+        candidate.organization != base.organization,
+        onto.organization != base.organization && onto.organization != candidate.organization,
+        "organization policy",
+    ) {
+        result.organization = candidate.organization.clone();
+    }
+    if conflicts.is_empty() {
+        Ok(result)
+    } else {
+        conflicts.sort();
+        conflicts.dedup();
+        Err(conflicts)
     }
 }
 

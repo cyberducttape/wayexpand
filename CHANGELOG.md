@@ -4,6 +4,28 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A running keystroke stream (the libei keysym fallback types one character
+  every 12 ms) now stops before the next character when the window tracker
+  reports a focus change, or when the daemon abandons the transaction after
+  its deadline; cursor keys after the text are checked the same way. The
+  result is reported as uncertain and is never retried. Previously the
+  checks ran only before typing began, so later characters could reach a
+  newly focused window or continue after a reported timeout.
+- The core `TextInjector` implementation for `Box` now forwards `admit`,
+  `set_output_checkpoint`, and `shutdown` instead of silently using their
+  defaults.
+- The release installer names each install by version and payload hash and
+  reuses an existing directory only when its content matches, so a
+  corrected archive with the same version no longer keeps the old binaries.
+- GUI saves no longer lose or revert changes: a change queued behind a save
+  in flight is replayed onto it by snippet ID (previously it was written
+  from a stale snapshot and reverted the earlier save, and a third queued
+  change replaced the second). After a revision conflict the change is kept,
+  the disk version is reloaded, and the change is merged when it touches
+  other snippets; when the same snippet changed on both sides, the external
+  version is loaded, the editor keeps the user's draft, and the status says
+  it was not saved. A busy configuration lock is retried instead of
+  dropping the change.
 - The experimental build workflow now builds only the branch or tag it is
   dispatched on, and release runs must name a `vX.Y.Z` tag of this
   repository before any job checks code out. A free-form ref could name a
