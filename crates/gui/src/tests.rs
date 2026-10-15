@@ -577,11 +577,7 @@ fn gui_refuses_to_overwrite_an_external_config_change() {
     assert_eq!(app.config.expansion[0].replacement, "from external editor");
     assert_eq!(app.draft.as_ref().unwrap().replacement, "from gui");
     assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
-    assert!(
-        app.status.text().contains("Not saved: :one"),
-        "{}",
-        app.status.text()
-    );
+    assert!(app.status.text().contains("Not saved: :one"),);
     assert!(!app.save_in_flight());
 
     // Saving again is the explicit choice to overwrite the external edit.
