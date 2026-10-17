@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The daemon's control socket kept accepting requests after a failed
+  accept. One client resetting its connection before it was accepted, or a
+  moment without free file descriptors, ended the listener and left
+  `status`, `stop` and inserts unanswered until restart. The Action Broker
+  no longer spins on accept when out of descriptors.
 - A signal arriving during a poll no longer looks like a lost device or
   connection. evdev reopened every keyboard and reset key state, the
   input-method source and the libei output reconnected, and connect-time

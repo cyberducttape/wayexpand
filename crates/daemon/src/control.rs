@@ -214,7 +214,26 @@ impl ControlServer {
             .name("wayexpand-control-listener".into())
             .spawn(move || {
                 for stream in listener.incoming() {
-                    let Ok(stream) = stream else { break };
+                    let stream = match stream {
+                        Ok(stream) => stream,
+                        // Shutdown (see Drop) makes accept fail on purpose.
+                        Err(_) if stop_flag.load(Ordering::Acquire) => break,
+                        Err(error) => match accept_failure(&error) {
+                            AcceptFailure::Retry => continue,
+                            AcceptFailure::Backoff => {
+                                // Out of descriptors or memory: the pending
+                                // connection stays queued, so wait instead of
+                                // spinning on the same error.
+                                warn!(%error, "control socket accept failed; retrying");
+                                thread::sleep(ACCEPT_BACKOFF);
+                                continue;
+                            }
+                            AcceptFailure::Fatal => {
+                                warn!(%error, "control socket stopped accepting requests");
+                                break;
+                            }
+                        },
+                    };
                     // A connection made by ControlServer::drop only wakes
                     // accept so the listener can terminate. Do not admit it
                     // as a request after shutdown has been published.
@@ -383,6 +402,35 @@ impl Drop for ControlServer {
                 }
             }
         }
+    }
+}
+
+/// How long the listener waits after a resource-exhaustion accept error.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
+#[derive(Debug, PartialEq, Eq)]
+enum AcceptFailure {
+    /// The client went away or a signal interrupted accept.
+    Retry,
+    /// The process is out of descriptors or memory for now.
+    Backoff,
+    /// The listening socket itself is unusable.
+    Fatal,
+}
+
+/// Classify an accept error. Ending the listener on any error, as before,
+/// left the daemon without a control socket for the rest of its life after
+/// one client reset its connection before it was accepted (ECONNABORTED) or
+/// the process briefly ran out of descriptors.
+fn accept_failure(error: &std::io::Error) -> AcceptFailure {
+    use rustix::io::Errno;
+    let Some(code) = error.raw_os_error() else {
+        return AcceptFailure::Fatal;
+    };
+    match Errno::from_raw_os_error(code) {
+        Errno::CONNABORTED | Errno::INTR | Errno::AGAIN | Errno::PROTO => AcceptFailure::Retry,
+        Errno::MFILE | Errno::NFILE | Errno::NOBUFS | Errno::NOMEM => AcceptFailure::Backoff,
+        _ => AcceptFailure::Fatal,
     }
 }
 
@@ -854,6 +902,36 @@ mod tests {
 
         assert!(command.len() <= MAX_COMMAND_BYTES);
         assert!(insert_request(&command).unwrap().is_some());
+    }
+
+    #[test]
+    fn only_an_unusable_socket_stops_the_listener() {
+        let error =
+            |errno: rustix::io::Errno| std::io::Error::from_raw_os_error(errno.raw_os_error());
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::CONNABORTED)),
+            AcceptFailure::Retry
+        );
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::INTR)),
+            AcceptFailure::Retry
+        );
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::MFILE)),
+            AcceptFailure::Backoff
+        );
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::NFILE)),
+            AcceptFailure::Backoff
+        );
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::INVAL)),
+            AcceptFailure::Fatal
+        );
+        assert_eq!(
+            accept_failure(&error(rustix::io::Errno::BADF)),
+            AcceptFailure::Fatal
+        );
     }
 
     #[test]

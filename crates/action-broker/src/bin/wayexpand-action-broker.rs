@@ -459,6 +459,19 @@ const OTHER_THREADS: usize = 2;
 // accepts connections.
 const _: () = assert!(MAX_CONCURRENT_ACTIONS < MAX_BLOCKING_THREADS);
 
+/// Whether an accept failure means the process is out of descriptors or
+/// memory, rather than a single client failing.
+fn accept_error_is_exhaustion(error: &action_broker::ipc::IpcError) -> bool {
+    matches!(
+        error,
+        action_broker::ipc::IpcError::Io(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM)
+            )
+    )
+}
+
 fn main() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(RUNTIME_WORKER_THREADS)
@@ -574,6 +587,13 @@ async fn run() -> Result<()> {
             Ok(Ok(conn)) => conn,
             Ok(Err(e)) => {
                 warn!("failed to accept connection: {}", e);
+                // Running out of descriptors or memory persists, and retrying
+                // at once would spin this loop and flood the log; the queued
+                // client waits. A refused peer or reset client does not delay
+                // the next one.
+                if accept_error_is_exhaustion(&e) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
                 continue;
             }
             Err(e) => {
