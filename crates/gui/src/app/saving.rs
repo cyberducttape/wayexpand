@@ -553,6 +553,14 @@ pub(crate) fn rebase_change(
         match base_by_id.get(&expansion.id) {
             Some(original) if original == expansion => {}
             Some(_) => {
+                // The other side made the same edit: nothing to replay.
+                if result
+                    .expansion
+                    .iter()
+                    .any(|existing| existing == expansion)
+                {
+                    continue;
+                }
                 if detect && changed_externally(&expansion.id, &result) {
                     conflicts.push(expansion.trigger.clone());
                     continue;
@@ -795,5 +803,39 @@ impl UndoEntry {
                     .map_or(0, serialized_estimate),
             );
         structural.saturating_add(payload)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rebase_change, Rebase};
+    use wayexpand_core::Config;
+
+    fn library(replacement: &str) -> Config {
+        Config::parse(&format!(
+            "[[expansion]]\nid = \"11111111-1111-4111-8111-111111111111\"\ntrigger = \":a\"\nreplacement = \"{replacement}\"\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_same_edit_on_both_sides_is_not_a_conflict() {
+        let base = library("old");
+        let edited = library("new");
+        let merged = rebase_change(&base, &edited, &edited, Rebase::DetectConflicts).unwrap();
+        assert_eq!(merged.expansion[0].replacement, "new");
+    }
+
+    #[test]
+    fn different_edits_to_one_snippet_conflict() {
+        let base = library("old");
+        let error = rebase_change(
+            &base,
+            &library("mine"),
+            &library("theirs"),
+            Rebase::DetectConflicts,
+        )
+        .unwrap_err();
+        assert_eq!(error, [":a"]);
     }
 }

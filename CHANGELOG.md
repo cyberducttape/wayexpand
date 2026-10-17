@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI no longer reports a save conflict when the configuration file
+  was changed elsewhere to exactly the edit being saved.
+- A libei portal session that fails or times out after it was created is
+  closed instead of being left open on the shared D-Bus connection.
 - The daemon's control socket kept accepting requests after a failed
   accept. One client resetting its connection before it was accepted, or a
   moment without free file descriptors, ended the listener and left

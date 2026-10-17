@@ -78,16 +78,27 @@ pub(super) fn connect_portal(
         PersistMode,
     };
 
-    let (stream, proxy, session) = portal_runtime()?.block_on(async {
+    let (stream, keepalive) = portal_runtime()?.block_on(async {
         tokio::time::timeout(Duration::from_secs(30), async {
             let proxy: RemoteDesktop = RemoteDesktop::new()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
-            let session = proxy
-                .create_session(Default::default())
-                .await
-                .map_err(|error| LibeiError::Portal(error.to_string()))?;
+            // Owned by a keepalive from here on, so every later failure, and
+            // the timeout dropping this future, closes the session instead of
+            // leaving it open on the shared D-Bus connection.
+            let mut keepalive = PortalKeepalive {
+                proxy: None,
+                session: Some(
+                    proxy
+                        .create_session(Default::default())
+                        .await
+                        .map_err(|error| LibeiError::Portal(error.to_string()))?,
+                ),
+            };
+            let Some(session) = keepalive.session.as_ref() else {
+                return Err(LibeiError::Portal("portal session was not kept".into()));
+            };
 
             let stored_token = read_portal_token_if_enabled(
                 options.persist_portal_token,
@@ -100,7 +111,7 @@ pub(super) fn connect_portal(
             })?;
             proxy
                 .select_devices(
-                    &session,
+                    session,
                     SelectDevicesOptions::default()
                         .set_devices(ashpd::enumflags2::BitFlags::from_flag(DeviceType::Keyboard))
                         .set_restore_token(stored_token.as_deref())
@@ -114,7 +125,7 @@ pub(super) fn connect_portal(
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
 
             let start_response = proxy
-                .start(&session, None, StartOptions::default())
+                .start(session, None, StartOptions::default())
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?
                 .response()
@@ -134,22 +145,17 @@ pub(super) fn connect_portal(
             }
 
             let fd = proxy
-                .connect_to_eis(&session, ConnectToEISOptions::default())
+                .connect_to_eis(session, ConnectToEISOptions::default())
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
-            Ok::<_, LibeiError>((UnixStream::from(fd), proxy, session))
+            keepalive.proxy = Some(proxy);
+            Ok::<_, LibeiError>((UnixStream::from(fd), keepalive))
         })
         .await
         .map_err(|_| LibeiError::Portal("portal session timed out after 30 seconds".into()))?
     })?;
 
-    Ok((
-        stream,
-        Some(PortalKeepalive {
-            proxy: Some(proxy),
-            session: Some(session),
-        }),
-    ))
+    Ok((stream, Some(keepalive)))
 }
 
 #[cfg(test)]
