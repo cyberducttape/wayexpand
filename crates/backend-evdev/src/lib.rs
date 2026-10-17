@@ -569,8 +569,20 @@ fn poll_with_wake(
         tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
         tv_nsec: timeout.subsec_nanos().into(),
     };
-    rustix::event::poll(fds, Some(&timeout))
-        .map_err(|error| EvdevError::Poll(error.to_string()))?;
+    match rustix::event::poll(fds, Some(&timeout)) {
+        Ok(_) => {}
+        // A handled signal (the daemon's SIGTERM/SIGINT handler) interrupts
+        // poll, which is never restarted. That is not a device failure:
+        // reporting it as one made the daemon reopen every keyboard and
+        // reset key state. Report no readiness and let the caller poll again.
+        Err(rustix::io::Errno::INTR) => {
+            for fd in fds.iter_mut() {
+                fd.clear_revents();
+            }
+            return Ok(false);
+        }
+        Err(error) => return Err(EvdevError::Poll(error.to_string())),
+    }
     let woken = wake.is_some()
         && fds
             .last()
@@ -640,6 +652,50 @@ mod tests {
 
         assert!(poll_with_wake(&mut fds, Duration::from_secs(1), Some(&wake)).unwrap());
         assert!(!poll_with_wake(&mut fds, Duration::ZERO, Some(&wake)).unwrap());
+    }
+
+    #[test]
+    fn a_signal_interrupting_the_poll_is_not_a_device_failure() {
+        extern "C" fn ignore(_: libc::c_int) {}
+        // SAFETY: installs a handler that does nothing, without SA_RESTART,
+        // so the signal interrupts poll exactly as the daemon's handler does.
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = ignore as extern "C" fn(libc::c_int) as usize;
+            libc::sigemptyset(&mut action.sa_mask);
+            assert_eq!(
+                libc::sigaction(libc::SIGUSR1, &action, std::ptr::null_mut()),
+                0
+            );
+        }
+        // SAFETY: pthread_self has no preconditions.
+        let target = unsafe { libc::pthread_self() };
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signaller_done = Arc::clone(&done);
+        // Signal until the poll returns, so a signal that lands before poll
+        // starts cannot leave the test waiting for the full timeout.
+        let signaller = std::thread::spawn(move || {
+            while !signaller_done.load(std::sync::atomic::Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(50));
+                // SAFETY: the test thread outlives this loop; it joins us.
+                unsafe { libc::pthread_kill(target, libc::SIGUSR1) };
+            }
+        });
+        let wake = rustix::event::eventfd(
+            0,
+            rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+        )
+        .unwrap();
+        let mut fds = [rustix::event::PollFd::new(
+            &wake,
+            rustix::event::PollFlags::IN,
+        )];
+        let started = std::time::Instant::now();
+        let woken = poll_with_wake(&mut fds, Duration::from_secs(10), Some(&wake));
+        done.store(true, std::sync::atomic::Ordering::Release);
+        signaller.join().unwrap();
+        assert!(!woken.unwrap(), "an interrupted poll reports nothing ready");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

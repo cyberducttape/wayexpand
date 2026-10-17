@@ -4141,6 +4141,7 @@ name = "wayexpand-backend-evdev"
 version = "1.3.3"
 dependencies = [
  "evdev",
+ "libc",
  "rustix 1.1.5",
  "thiserror 2.0.21",
  "tracing",

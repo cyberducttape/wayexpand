@@ -102,11 +102,13 @@ pub(super) fn poll_context(context: &ei::Context, timeout: Duration) -> Result<b
             | rustix::event::PollFlags::HUP
             | rustix::event::PollFlags::NVAL,
     )];
-    if rustix::event::poll(&mut fds, Some(&timeout))
-        .map_err(|error| LibeiError::Handshake(reis::Error::Io(error.into())))?
-        == 0
-    {
-        return Ok(false);
+    match rustix::event::poll(&mut fds, Some(&timeout)) {
+        Ok(0) => return Ok(false),
+        Ok(_) => {}
+        // A handled signal interrupted the wait. That is not a broken EIS
+        // connection, which a retryable error here would retire mid-typing.
+        Err(rustix::io::Errno::INTR) => return Ok(false),
+        Err(error) => return Err(LibeiError::Handshake(reis::Error::Io(error.into()))),
     }
     let revents = fds[0].revents();
     if revents.intersects(

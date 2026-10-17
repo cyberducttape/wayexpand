@@ -20,3 +20,6 @@ wayland-client.workspace = true
 evdev = "0.13"
 wayexpand-core = { path = "../core" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
+
+[dev-dependencies]
+libc.workspace = true

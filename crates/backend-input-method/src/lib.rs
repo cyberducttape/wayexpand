@@ -83,8 +83,12 @@ fn poll_connection_with_wake(
             rustix::event::PollFlags::IN,
         ));
     }
-    if rustix::event::poll(&mut fds, Some(&timeout))? == 0 {
-        return Ok(None);
+    match rustix::event::poll(&mut fds, Some(&timeout)) {
+        Ok(0) => return Ok(None),
+        Ok(_) => {}
+        // A handled signal interrupted the wait; nothing is known to be ready.
+        Err(rustix::io::Errno::INTR) => return Ok(None),
+        Err(error) => return Err(error),
     }
     let connection_flags = fds[0].revents();
     let woken = fds
@@ -927,10 +931,12 @@ fn roundtrip_with_timeout(
                 | rustix::event::PollFlags::HUP
                 | rustix::event::PollFlags::NVAL,
         )];
-        if rustix::event::poll(&mut fds, Some(&timeout))
-            .map_err(|error| InputMethodError::Protocol(error.to_string()))?
-            == 0
-        {
+        let ready = match rustix::event::poll(&mut fds, Some(&timeout)) {
+            // Interrupted by a handled signal: cancel this read and wait again.
+            Err(rustix::io::Errno::INTR) => continue,
+            result => result.map_err(|error| InputMethodError::Protocol(error.to_string()))?,
+        };
+        if ready == 0 {
             return Err(InputMethodError::Timeout(
                 "Wayland registry roundtrip timed out".into(),
             ));

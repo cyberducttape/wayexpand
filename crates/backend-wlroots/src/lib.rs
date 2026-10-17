@@ -330,42 +330,46 @@ fn roundtrip_with_timeout(
 }
 
 fn wait_for_readable(fd: BorrowedFd<'_>, deadline: Instant) -> Result<(), WlrootsError> {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        return Err(WlrootsError::Timeout(
-            "Wayland registry roundtrip timed out".into(),
-        ));
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(WlrootsError::Timeout(
+                "Wayland registry roundtrip timed out".into(),
+            ));
+        }
+        let timeout = rustix::event::Timespec {
+            tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
+            tv_nsec: remaining.subsec_nanos().into(),
+        };
+        let mut fds = [rustix::event::PollFd::new(
+            &fd,
+            rustix::event::PollFlags::IN
+                | rustix::event::PollFlags::ERR
+                | rustix::event::PollFlags::HUP
+                | rustix::event::PollFlags::NVAL,
+        )];
+        let ready = match rustix::event::poll(&mut fds, Some(&timeout)) {
+            // Interrupted by a handled signal: wait out the rest of the deadline.
+            Err(rustix::io::Errno::INTR) => continue,
+            result => result.map_err(|error| WlrootsError::Transport(error.to_string()))?,
+        };
+        if ready == 0 {
+            return Err(WlrootsError::Timeout(
+                "Wayland registry roundtrip timed out".into(),
+            ));
+        }
+        let revents = fds[0].revents();
+        if revents.intersects(
+            rustix::event::PollFlags::ERR
+                | rustix::event::PollFlags::HUP
+                | rustix::event::PollFlags::NVAL,
+        ) {
+            return Err(WlrootsError::Transport(format!(
+                "Wayland connection became unavailable ({revents:?})"
+            )));
+        }
+        return Ok(());
     }
-    let timeout = rustix::event::Timespec {
-        tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
-        tv_nsec: remaining.subsec_nanos().into(),
-    };
-    let mut fds = [rustix::event::PollFd::new(
-        &fd,
-        rustix::event::PollFlags::IN
-            | rustix::event::PollFlags::ERR
-            | rustix::event::PollFlags::HUP
-            | rustix::event::PollFlags::NVAL,
-    )];
-    if rustix::event::poll(&mut fds, Some(&timeout))
-        .map_err(|error| WlrootsError::Transport(error.to_string()))?
-        == 0
-    {
-        return Err(WlrootsError::Timeout(
-            "Wayland registry roundtrip timed out".into(),
-        ));
-    }
-    let revents = fds[0].revents();
-    if revents.intersects(
-        rustix::event::PollFlags::ERR
-            | rustix::event::PollFlags::HUP
-            | rustix::event::PollFlags::NVAL,
-    ) {
-        return Err(WlrootsError::Transport(format!(
-            "Wayland connection became unavailable ({revents:?})"
-        )));
-    }
-    Ok(())
 }
 
 fn tempfile_keymap() -> Result<File, WlrootsError> {

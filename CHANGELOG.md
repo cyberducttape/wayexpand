@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A signal arriving during a poll no longer looks like a lost device or
+  connection. evdev reopened every keyboard and reset key state, the
+  input-method source and the libei output reconnected, and connect-time
+  Wayland roundtrips failed, all on EINTR; an interrupted poll now counts
+  as "nothing ready yet".
 - Backspacing into an expanded replacement could make a word-boundary
   trigger typed before the expansion match again and erase text the user
   had typed (found by the matcher fuzzer). The matcher kept the text that
