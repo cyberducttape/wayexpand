@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Backspacing into an expanded replacement could make a word-boundary
+  trigger typed before the expansion match again and erase text the user
+  had typed (found by the matcher fuzzer). The matcher kept the text that
+  preceded a consumed trigger although the replacement now sits between it
+  and the cursor; it now drops that context and treats what precedes the
+  cursor as unknown, so a word-boundary trigger typed directly against a
+  replacement (`signaturebtw`) no longer expands either.
 - Reconnecting no longer stalls the daemon. Output and input-method key
   pass-through reconnects (which can wait up to 30 seconds on the portal)
   run on a worker thread, and retry backoff waits on the reactor's waker

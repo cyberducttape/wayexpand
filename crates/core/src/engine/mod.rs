@@ -867,9 +867,7 @@ impl ExpansionEngine {
 
         // Cached command: use cache
         if let Some(cached_value) = cached_command {
-            for _ in 0..length {
-                self.buffer.pop_back();
-            }
+            self.consume_matched_text();
             // Commit with cached value (already cached, no re-caching needed)
             return Some(self.commit_expansion(plan, cached_value));
         }
@@ -902,9 +900,7 @@ impl ExpansionEngine {
                     return None;
                 }
                 // Do not consume the trigger until the worker has accepted
-                for _ in 0..length {
-                    self.buffer.pop_back();
-                }
+                self.consume_matched_text();
                 self.last_expansion = None;
                 return None;
             }
@@ -920,9 +916,7 @@ impl ExpansionEngine {
         } else {
             std::mem::take(&mut plan.replacement_text)
         };
-        for _ in 0..length {
-            self.buffer.pop_back();
-        }
+        self.consume_matched_text();
         Some(self.commit_expansion(plan, insert))
     }
 
@@ -946,9 +940,7 @@ impl ExpansionEngine {
         let template_text = plan.replacement_text.clone();
 
         // Consume buffer
-        for _ in 0..length {
-            self.buffer.pop_back();
-        }
+        self.consume_matched_text();
         self.deferred_matches.push(plan.matched_text.clone());
 
         Some(PendingExpansionResult {
@@ -1003,6 +995,19 @@ impl ExpansionEngine {
             });
         }
         Ok(value)
+    }
+
+    /// Drop a matched trigger from the buffer together with everything typed
+    /// before it. The replacement is not mirrored in the buffer, so that
+    /// earlier text is no longer what precedes the cursor: kept, a Backspace
+    /// into the replacement would pop it instead, and it could resurface to
+    /// complete a trigger the document does not contain (and erase the
+    /// user's text in its place). What precedes the cursor is now unknown,
+    /// so a word-boundary trigger typed straight after the replacement does
+    /// not match as if it began the input.
+    fn consume_matched_text(&mut self) {
+        self.clear_buffer();
+        self.buffer_truncated = true;
     }
 
     /// Resets the matcher buffer to a known boundary. Always use this

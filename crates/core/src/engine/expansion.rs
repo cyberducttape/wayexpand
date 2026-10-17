@@ -488,7 +488,7 @@ impl ExpansionEngine {
                     }
                     // Do not allow a replacement to combine with following
                     // input and accidentally trigger again.
-                    self.clear_buffer();
+                    self.consume_matched_text();
                 }
             }
         }

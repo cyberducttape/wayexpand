@@ -5199,3 +5199,47 @@ fn clipboard_prefetch_needs_a_reader_and_policy_permission() {
     type_text(&mut engine, ":cli");
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
+
+#[test]
+fn backspacing_into_a_replacement_cannot_resurface_text_typed_before_the_trigger() {
+    // Found by the matcher fuzzer. The replacement is not in the matcher
+    // buffer, so after "btwtw:btw:" expanded, four Backspaces (deleting
+    // "way:" from the document) used to leave the buffer ending in an old
+    // "btw", and the next boundary character expanded it, erasing "he ".
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \"btw\"\nreplacement = \"by the way\"\nmatch_mode = \"word-boundary\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    for text in ["b", "t", "w", "t", "w", ":", "b", "t", "w"] {
+        assert!(engine.process(InputEvent::Text(text.into())).is_empty());
+    }
+    assert_eq!(engine.process(InputEvent::Text(":".into())).len(), 1);
+    for _ in 0..4 {
+        assert!(engine.process(InputEvent::Backspace).is_empty());
+    }
+    assert!(engine.process(InputEvent::Text("🏽".into())).is_empty());
+}
+
+#[test]
+fn a_word_boundary_trigger_typed_against_a_replacement_does_not_match() {
+    // The document reads "signaturebtw": the trigger is inside a word.
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\n\n[[expansion]]\ntrigger = \"btw\"\nreplacement = \"by the way\"\nmatch_mode = \"word-boundary\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut results = Vec::new();
+    for character in ":sigbtw ".chars() {
+        results.extend(engine.process(InputEvent::Text(character.to_string())));
+    }
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, ":sig");
+    // After a typed boundary (the space above) it matches as usual.
+    let results = ["b", "t", "w", " "]
+        .into_iter()
+        .flat_map(|text| engine.process(InputEvent::Text(text.into())))
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "btw");
+}
