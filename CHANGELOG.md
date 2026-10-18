@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A configuration reload no longer pauses typing. The new configuration
+  was read, validated and turned into a matcher on the daemon's event
+  loop, which at the 10,000-snippet limit held keystrokes, stop and status
+  for about half a second; it is now built on a worker thread while the
+  running configuration keeps expanding, and swapped in when ready (about
+  5 ms on the loop to start it and 6 ms to swap it at that size). Pause,
+  password-field and window state are carried over as of the swap, and a
+  change made during a build is built after it.
 - The daemon status (and `wayexpand status --json`) reports reliability
   counters and memory use: `output_reconnect_total`,
   `input_reconnect_total`, `input_overflow_total` (evdev input dropped

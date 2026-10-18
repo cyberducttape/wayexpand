@@ -9,8 +9,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, TryRecvError},
         Arc,
     },
+    thread,
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
@@ -36,6 +38,49 @@ pub struct ReloadableConfig {
     policy: OrganizationPolicy,
     pub engine: ExpansionEngine,
     healthy: bool,
+    /// The reload being read and built on a worker thread, if any.
+    in_flight: Option<InFlightReload>,
+    /// A change was seen while a build was in flight, so its result is
+    /// already stale; build again once it lands.
+    rebuild_after_in_flight: bool,
+    /// Wakes the reactor when a background build finishes.
+    waker: Option<crate::waker::Waker>,
+}
+
+/// A configuration read, validated, and turned into a matcher off the
+/// reactor. At the snippet limit that takes a few hundred milliseconds,
+/// during which typing would otherwise stall.
+struct InFlightReload {
+    result: Receiver<BuildResult>,
+    /// The file stamp seen when the build started.
+    current: Option<FileStamp>,
+}
+
+struct BuiltConfig {
+    engine: ExpansionEngine,
+    expansions: usize,
+    stamp: Option<FileStamp>,
+}
+
+enum BuildFailure {
+    /// Reading or validating the files failed.
+    Load(anyhow::Error),
+    /// The configuration could not become a matcher.
+    Engine(anyhow::Error),
+}
+
+type BuildResult = Result<BuiltConfig, BuildFailure>;
+
+fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildResult {
+    let (config, stamp) = load_for_mode(path, fleet, policy).map_err(BuildFailure::Load)?;
+    let expansions = config.expansion.len();
+    let engine = ExpansionEngine::new(config)
+        .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
+    Ok(BuiltConfig {
+        engine,
+        expansions,
+        stamp,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,12 +247,21 @@ impl ReloadableConfig {
             policy,
             engine,
             healthy: true,
+            in_flight: None,
+            rebuild_after_in_flight: false,
+            waker: None,
         })
+    }
+
+    /// Wake the reactor through `waker` when a background reload finishes.
+    pub fn set_waker(&mut self, waker: crate::waker::Waker) {
+        self.waker = Some(waker);
     }
 
     /// Parse first, then replace the live engine. Invalid edits leave the old
     /// configuration running and are reported to the operator.
     pub fn reload_if_changed(&mut self) {
+        self.collect_reload();
         let now = Instant::now();
         if self.watch_dirty.swap(false, Ordering::AcqRel) && self.watch_check_after.is_none() {
             self.watch_check_after = Some(now + WATCH_DEBOUNCE);
@@ -239,6 +293,7 @@ impl ReloadableConfig {
     }
 
     pub fn reload_now(&mut self) {
+        self.collect_reload();
         let current = file_stamp(&self.path);
         self.last_integrity_check = Instant::now();
         self.watch_check_after = None;
@@ -247,45 +302,115 @@ impl ReloadableConfig {
         self.reload_current(current);
     }
 
+    /// Start building the configuration on disk off the reactor; its result
+    /// replaces the engine on a later turn (see [`Self::collect_reload`]).
     fn reload_current(&mut self, current: Option<FileStamp>) {
-        match load_for_mode(&self.path, self.fleet, &self.policy) {
-            Ok((config, stable_stamp)) => {
-                let count = config.expansion.len();
-                match ExpansionEngine::new(config) {
-                    Ok(mut engine) => {
-                        let workers_restart_failed =
-                            self.engine.async_commands_enabled() && !engine.enable_async_commands();
-                        if workers_restart_failed {
-                            warn!(
-                                "asynchronous workers could not restart after configuration reload; command-backed actions are disabled"
-                            );
-                        }
-                        // Pause, password-field, composition and window
-                        // state, command restrictions and host hooks all
-                        // carry over; losing any of them would, for
-                        // example, resume matching inside a password field.
-                        engine.inherit_runtime_state(&self.engine);
-                        engine.set_commands_disabled(
-                            self.engine.commands_disabled() || workers_restart_failed,
-                        );
-                        self.engine = engine;
-                        self.stamp = stable_stamp;
-                        self.observed = stable_stamp;
-                        self.last_integrity_check = Instant::now();
-                        self.fleet_signature = standard_fleet_signature();
-                        self.healthy = true;
-                        info!(expansions = count, "configuration reloaded");
-                    }
-                    Err(error) => {
-                        self.healthy = false;
-                        error!(
-                            reason = %safe_reload_error(&anyhow::Error::new(error)),
-                            "configuration reload rejected; keeping previous configuration"
-                        )
-                    }
+        if self.in_flight.is_some() {
+            self.rebuild_after_in_flight = true;
+            return;
+        }
+        let (sender, result) = mpsc::sync_channel(1);
+        let path = self.path.clone();
+        let fleet = self.fleet;
+        let policy = self.policy.clone();
+        let waker = self.waker.clone();
+        let spawned = thread::Builder::new()
+            .name("wayexpand-reload".into())
+            .spawn(move || {
+                // A dropped receiver (daemon stopping) just discards it.
+                let _ = sender.send(build_config(&path, fleet, &policy));
+                if let Some(waker) = waker {
+                    waker.wake();
                 }
-            }
+            });
+        match spawned {
+            Ok(_) => self.in_flight = Some(InFlightReload { result, current }),
             Err(error) => {
+                // Without a worker, reloading inline is slower but correct.
+                warn!(%error, "could not start configuration reload worker; reloading inline");
+                let built = build_config(&self.path, self.fleet, &self.policy);
+                self.apply_reload(built, current);
+            }
+        }
+    }
+
+    /// Apply a finished background reload, without waiting for one that is
+    /// still being built.
+    fn collect_reload(&mut self) {
+        let Some(in_flight) = self.in_flight.as_ref() else {
+            return;
+        };
+        let built = match in_flight.result.try_recv() {
+            Ok(built) => built,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(BuildFailure::Load(anyhow::anyhow!(
+                "configuration reload worker ended without a result"
+            ))),
+        };
+        let current = in_flight.current;
+        self.in_flight = None;
+        self.apply_reload(built, current);
+        if std::mem::take(&mut self.rebuild_after_in_flight) {
+            let current = file_stamp(&self.path);
+            self.observed = current;
+            self.reload_current(current);
+        }
+    }
+
+    /// Wait for a background reload and apply it.
+    #[cfg(test)]
+    pub fn finish_pending_reload(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.in_flight.is_some() || self.rebuild_after_in_flight {
+            assert!(
+                Instant::now() < deadline,
+                "configuration reload never finished"
+            );
+            self.collect_reload();
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Swap in a built engine, carrying the live runtime state over, or
+    /// keep the running configuration and report why the new one was refused.
+    fn apply_reload(&mut self, built: BuildResult, current: Option<FileStamp>) {
+        match built {
+            Ok(BuiltConfig {
+                mut engine,
+                expansions,
+                stamp: stable_stamp,
+            }) => {
+                let workers_restart_failed =
+                    self.engine.async_commands_enabled() && !engine.enable_async_commands();
+                if workers_restart_failed {
+                    warn!(
+                        "asynchronous workers could not restart after configuration reload; command-backed actions are disabled"
+                    );
+                }
+                // Pause, password-field, composition and window state,
+                // command restrictions and host hooks all carry over, as of
+                // now rather than when the build started; losing any of them
+                // would, for example, resume matching inside a password field.
+                engine.inherit_runtime_state(&self.engine);
+                engine.set_commands_disabled(
+                    self.engine.commands_disabled() || workers_restart_failed,
+                );
+                self.engine = engine;
+                self.stamp = stable_stamp;
+                self.observed = stable_stamp;
+                self.last_integrity_check = Instant::now();
+                self.fleet_signature = standard_fleet_signature();
+                self.healthy = true;
+                info!(expansions, "configuration reloaded");
+            }
+            Err(BuildFailure::Engine(error)) => {
+                self.healthy = false;
+                error!(
+                    reason = %safe_reload_error(&error),
+                    "configuration reload rejected; keeping previous configuration"
+                )
+            }
+            Err(BuildFailure::Load(error)) => {
                 self.healthy = false;
                 // Keep the pre-read stamp as the observed value. If the file
                 // changed while it was being read, the next polling cycle
@@ -540,6 +665,7 @@ mod tests {
             "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
         );
         config.reload_now();
+        config.finish_pending_reload();
         assert!(config.healthy());
 
         let result = config
@@ -612,6 +738,7 @@ mod tests {
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, &config_text("new replacement"));
         config.reload_now();
+        config.finish_pending_reload();
         assert!(config.healthy());
 
         let result = config
@@ -631,6 +758,7 @@ mod tests {
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, "[[expansion]]\ntrigger = ");
         config.reload_now();
+        config.finish_pending_reload();
         assert!(!config.healthy());
 
         let result = config
@@ -650,6 +778,7 @@ mod tests {
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         fs::remove_file(&path).unwrap();
         config.reload_now();
+        config.finish_pending_reload();
         let result = config
             .engine
             .process(InputEvent::Text(":x".into()))
@@ -659,6 +788,7 @@ mod tests {
 
         write_config(&path, &config_text("after restore"));
         config.reload_now();
+        config.finish_pending_reload();
         assert!(config.healthy());
         let result = config
             .engine
@@ -666,6 +796,84 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "after restore");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_reload_is_built_off_the_caller_and_swapped_in_later() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        let waker = crate::waker::Waker::new().unwrap();
+        config.set_waker(waker.clone());
+        write_config(&path, &config_text("new"));
+
+        config.reload_now();
+        // The build runs elsewhere; until it is collected, typing keeps
+        // using the running engine instead of waiting for it.
+        assert!(config.in_flight.is_some());
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "old");
+
+        config.finish_pending_reload();
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new");
+        assert!(config.healthy());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn state_changed_while_a_reload_builds_carries_into_the_new_engine() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        write_config(&path, &config_text("new"));
+
+        config.reload_now();
+        // Paused after the build started: the swap must not resume matching.
+        config.engine.process(InputEvent::PauseChanged(true));
+        config.finish_pending_reload();
+        assert!(config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .is_empty());
+        config.engine.process(InputEvent::PauseChanged(false));
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_change_during_a_reload_is_built_after_it() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        write_config(&path, &config_text("first"));
+        config.reload_now();
+        write_config(&path, &config_text("second"));
+        config.reload_now();
+        config.finish_pending_reload();
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "second");
         let _ = fs::remove_file(path);
     }
 
@@ -773,6 +981,7 @@ mod tests {
         config.last_integrity_check = Instant::now() - INTEGRITY_CHECK_INTERVAL;
         config.watch_dirty.store(false, Ordering::Release);
         config.reload_if_changed();
+        config.finish_pending_reload();
 
         let result = config
             .engine
@@ -810,6 +1019,7 @@ mod tests {
         // Reload a changed snippet while the command runs, and keep typing.
         write_config(&path, &format!("{slow}{}", config_text("after")));
         config.reload_now();
+        config.finish_pending_reload();
         let typed = config.engine.process(InputEvent::Text(":x".into()));
         assert_eq!(typed.len(), 1);
         assert_eq!(typed[0].insert, "after");
@@ -870,6 +1080,7 @@ mod tests {
         // Trigger a reload (e.g., from a GUI save).
         write_config(&path, &config_text("reloaded"));
         config.reload_now();
+        config.finish_pending_reload();
         assert!(config.healthy());
 
         // CRITICAL: These states MUST be preserved across the reload.
@@ -900,6 +1111,7 @@ mod tests {
             .process(InputEvent::CompositionChanged { active: true });
         write_config(&path, &config_text("reloaded"));
         config.reload_now();
+        config.finish_pending_reload();
 
         assert!(config.engine.is_composition_active());
         assert!(
