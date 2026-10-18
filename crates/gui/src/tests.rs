@@ -2246,3 +2246,28 @@ fn use_current_app_times_out_when_only_wayexpand_is_focused() {
     let detection = wait_for_other_app(Duration::from_secs(5), &cancelled, |_| unreachable!());
     assert!(matches!(detection, AppDetection::Unavailable));
 }
+
+#[test]
+fn every_template_variable_button_is_described_and_valid() {
+    for language in [Language::English, Language::Indonesian, Language::German] {
+        let strings = crate::lang::Strings::new(language);
+        for (group, variables) in crate::TEMPLATE_VARIABLE_GROUPS {
+            assert!(!strings.template_variable_group(*group).is_empty());
+            for variable in *variables {
+                assert!(
+                    !strings.template_variable_description(variable).is_empty(),
+                    "{language:?} has no description for {variable}"
+                );
+            }
+        }
+    }
+    // Each button inserts a marker the configuration accepts.
+    for (_, variables) in crate::TEMPLATE_VARIABLE_GROUPS {
+        for variable in *variables {
+            // A TOML literal string: the markers contain no single quote.
+            assert!(!variable.contains('\''));
+            let text = format!("[[expansion]]\ntrigger = \":x\"\nreplacement = '{variable}'\n");
+            assert!(Config::parse(&text).is_ok(), "{variable} does not validate");
+        }
+    }
+}

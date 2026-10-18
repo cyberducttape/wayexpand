@@ -293,9 +293,9 @@ impl Strings {
 
     pub fn template_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Insert a safe built-in value into the replacement.",
-            Language::Indonesian => "Sisipkan nilai bawaan yang aman ke dalam teks pengganti.",
-            Language::German => "Fügen Sie einen sicheren integrierten Wert in den Ersatz ein.",
+            Language::English => "Insert a value into the replacement; hover a button for what it does. Edit the inserted text to change a format, length or name.",
+            Language::Indonesian => "Sisipkan nilai ke dalam teks pengganti; arahkan ke tombol untuk penjelasannya. Ubah teks yang disisipkan untuk mengganti format, panjang, atau nama.",
+            Language::German => "Fügt einen Wert in den Ersatz ein; Tooltip zeigt, was er bewirkt. Den eingefügten Text bearbeiten, um Format, Länge oder Namen zu ändern.",
         }
     }
 

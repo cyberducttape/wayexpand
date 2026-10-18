@@ -577,23 +577,31 @@ impl GuiApp {
                     .small()
                     .color(palette.muted),
             );
-            ui.horizontal_wrapped(|ui| {
-                for variable in TEMPLATE_VARIABLES {
-                    if theme::secondary_button(ui, palette, variable)
-                        .on_hover_text(self.strings.template_variable_description(variable))
-                        .clicked()
-                    {
-                        if let Some(draft) = self.draft.as_mut() {
-                            insert_into_replacement_editor(
-                                ui.ctx(),
-                                &mut draft.replacement,
-                                variable,
-                            );
+            for (group, variables) in TEMPLATE_VARIABLE_GROUPS {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(self.strings.template_variable_group(*group))
+                        .small()
+                        .strong(),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    for variable in *variables {
+                        if theme::secondary_button(ui, palette, variable)
+                            .on_hover_text(self.strings.template_variable_description(variable))
+                            .clicked()
+                        {
+                            if let Some(draft) = self.draft.as_mut() {
+                                insert_into_replacement_editor(
+                                    ui.ctx(),
+                                    &mut draft.replacement,
+                                    variable,
+                                );
+                            }
+                            self.invalidate_preview();
                         }
-                        self.invalidate_preview();
                     }
-                }
-            });
+                });
+            }
         });
         ui.horizontal(|ui| {
             ui.label(self.strings.preview_app());

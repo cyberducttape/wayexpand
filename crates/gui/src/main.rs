@@ -102,23 +102,58 @@ fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> 
         certified: contract.is_certified(),
     })
 }
-/// Built-in template variables offered as insert buttons. Their hover
-/// descriptions are translated in `Strings::template_variable_description`.
-const TEMPLATE_VARIABLES: &[&str] = &[
-    "{{date}}",
-    "{{time}}",
-    "{{datetime}}",
-    "{{local_date}}",
-    "{{local_time}}",
-    "{{local_datetime}}",
-    "{{date+1d}}",
-    "{{cursor}}",
-    "{{username}}",
-    "{{hostname}}",
-    "{{unix_timestamp}}",
-    "{{newline}}",
-    "{{tab}}",
+/// Template variables offered as insert buttons, by group. Group names and
+/// hover descriptions are translated in `Strings::template_variable_group`
+/// and `Strings::template_variable_description`.
+const TEMPLATE_VARIABLE_GROUPS: &[(TemplateVariableGroup, &[&str])] = &[
+    (
+        TemplateVariableGroup::DateTime,
+        &[
+            "{{local_date}}",
+            "{{local_time}}",
+            "{{local_datetime}}",
+            "{{local_date:%A %-d %B %Y}}",
+            "{{local_time:%-I:%M %p}}",
+            "{{date+1d}}",
+            "{{date}}",
+            "{{time}}",
+            "{{datetime}}",
+            "{{unix_timestamp}}",
+        ],
+    ),
+    (
+        TemplateVariableGroup::Random,
+        &[
+            "{{uuid}}",
+            "{{uuid:id}}",
+            "{{random:hex:16}}",
+            "{{random:password:20}}",
+            "{{random:A|B|C}}",
+        ],
+    ),
+    (
+        TemplateVariableGroup::Fields,
+        &["{{field:name}}", "{{choice:name=A|B}}", "{{{{ }}}}"],
+    ),
+    (
+        TemplateVariableGroup::Text,
+        &[
+            "{{cursor}}",
+            "{{newline}}",
+            "{{tab}}",
+            "{{username}}",
+            "{{hostname}}",
+        ],
+    ),
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TemplateVariableGroup {
+    DateTime,
+    Random,
+    Fields,
+    Text,
+}
 
 struct GuiApp {
     path: PathBuf,

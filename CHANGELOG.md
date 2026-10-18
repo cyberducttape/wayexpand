@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The editor's Template variables section groups its buttons (Date and
+  time, Unique and random, Fill in when expanding, Text and system) and
+  adds the new formatted date and time, UUID, random, field, choice and
+  literal-brace markers, each with a hover description of what it does and
+  how to change it.
 - New template variables. `{{date:FORMAT}}` formats any clock variable, with
   or without an offset, using strftime codes with English names (for example
   `{{local_date+1w:%a %b %-d}}`). `{{uuid}}` gives a new version-4 UUID and

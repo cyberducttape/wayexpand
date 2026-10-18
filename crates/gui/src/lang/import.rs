@@ -289,7 +289,97 @@ impl Strings {
             (Language::English, "{{tab}}") => "Tab character",
             (Language::Indonesian, "{{tab}}") => "Karakter tab",
             (Language::German, "{{tab}}") => "Tabulatorzeichen",
+            (Language::English, "{{local_date:%A %-d %B %Y}}") => {
+                "Formatted date, e.g. Friday 9 October 2026. Codes: %Y year, %m month, %B/%b month name, %d day (%-d without zero), %A/%a weekday, %F 2026-10-09. Works on any date or time variable, also with +1d"
+            }
+            (Language::Indonesian, "{{local_date:%A %-d %B %Y}}") => {
+                "Tanggal berformat, mis. Friday 9 October 2026. Kode: %Y tahun, %m bulan, %B/%b nama bulan, %d hari (%-d tanpa nol), %A/%a hari, %F 2026-10-09. Berlaku untuk variabel tanggal atau waktu apa pun, juga dengan +1d"
+            }
+            (Language::German, "{{local_date:%A %-d %B %Y}}") => {
+                "Formatiertes Datum, z. B. Friday 9 October 2026. Codes: %Y Jahr, %m Monat, %B/%b Monatsname, %d Tag (%-d ohne Null), %A/%a Wochentag, %F 2026-10-09. Für jede Datums- oder Zeitvariable, auch mit +1d"
+            }
+            (Language::English, "{{local_time:%-I:%M %p}}") => {
+                "Formatted time, e.g. 2:05 PM. Codes: %H 24-hour, %I 12-hour, %M minute, %S second, %p AM/PM, %:z UTC offset"
+            }
+            (Language::Indonesian, "{{local_time:%-I:%M %p}}") => {
+                "Waktu berformat, mis. 2:05 PM. Kode: %H 24 jam, %I 12 jam, %M menit, %S detik, %p AM/PM, %:z selisih UTC"
+            }
+            (Language::German, "{{local_time:%-I:%M %p}}") => {
+                "Formatierte Uhrzeit, z. B. 2:05 PM. Codes: %H 24 Stunden, %I 12 Stunden, %M Minute, %S Sekunde, %p AM/PM, %:z UTC-Versatz"
+            }
+            (Language::English, "{{uuid}}") => "A new random UUID each time",
+            (Language::Indonesian, "{{uuid}}") => "UUID acak baru setiap kali",
+            (Language::German, "{{uuid}}") => "Jedes Mal eine neue zufällige UUID",
+            (Language::English, "{{uuid:id}}") => {
+                "One random UUID, repeated wherever {{uuid:id}} appears in this expansion; use other names for more"
+            }
+            (Language::Indonesian, "{{uuid:id}}") => {
+                "Satu UUID acak, diulang di mana pun {{uuid:id}} muncul dalam ekspansi ini; gunakan nama lain untuk lebih banyak"
+            }
+            (Language::German, "{{uuid:id}}") => {
+                "Eine zufällige UUID, wiederholt überall, wo {{uuid:id}} in dieser Erweiterung steht; weitere Namen für weitere UUIDs"
+            }
+            (Language::English, "{{random:hex:16}}") => {
+                "16 random characters; change the number (1-256) or the kind: hex, digits, lower, alpha, alnum"
+            }
+            (Language::Indonesian, "{{random:hex:16}}") => {
+                "16 karakter acak; ubah angkanya (1-256) atau jenisnya: hex, digits, lower, alpha, alnum"
+            }
+            (Language::German, "{{random:hex:16}}") => {
+                "16 zufällige Zeichen; Zahl (1-256) oder Art ändern: hex, digits, lower, alpha, alnum"
+            }
+            (Language::English, "{{random:password:20}}") => {
+                "A random 20-character password: letters, digits and -_. without look-alikes"
+            }
+            (Language::Indonesian, "{{random:password:20}}") => {
+                "Kata sandi acak 20 karakter: huruf, angka, dan -_. tanpa karakter yang mirip"
+            }
+            (Language::German, "{{random:password:20}}") => {
+                "Zufälliges Passwort mit 20 Zeichen: Buchstaben, Ziffern und -_. ohne Verwechslungsgefahr"
+            }
+            (Language::English, "{{random:A|B|C}}") => "One of the options, picked at random (2-32 options)",
+            (Language::Indonesian, "{{random:A|B|C}}") => "Salah satu pilihan, dipilih acak (2-32 pilihan)",
+            (Language::German, "{{random:A|B|C}}") => "Eine der Optionen, zufällig gewählt (2-32 Optionen)",
+            (Language::English, "{{field:name}}") => {
+                "Ask for a value when the snippet expands; {{field:name=default}} prefills it. Typed forms need an input-method route; `wayexpand new` works everywhere"
+            }
+            (Language::Indonesian, "{{field:name}}") => {
+                "Minta nilai saat cuplikan diekspansi; {{field:name=default}} mengisinya terlebih dahulu. Formulir yang diketik memerlukan rute input-method; `wayexpand new` berfungsi di mana saja"
+            }
+            (Language::German, "{{field:name}}") => {
+                "Fragt beim Erweitern nach einem Wert; {{field:name=default}} füllt ihn vor. Getippte Formulare brauchen eine Input-Method-Route; `wayexpand new` funktioniert überall"
+            }
+            (Language::English, "{{choice:name=A|B}}") => "A labelled drop-down with 2-32 options",
+            (Language::Indonesian, "{{choice:name=A|B}}") => "Daftar pilihan berlabel dengan 2-32 opsi",
+            (Language::German, "{{choice:name=A|B}}") => "Beschriftete Auswahlliste mit 2-32 Optionen",
+            (Language::English, "{{{{ }}}}") => {
+                "Literal {{ and }}, for Ansible, Helm or GitHub Actions syntax"
+            }
+            (Language::Indonesian, "{{{{ }}}}") => {
+                "{{ dan }} apa adanya, untuk sintaks Ansible, Helm, atau GitHub Actions"
+            }
+            (Language::German, "{{{{ }}}}") => {
+                "Wörtliches {{ und }}, für Ansible-, Helm- oder GitHub-Actions-Syntax"
+            }
             _ => "",
+        }
+    }
+
+    pub fn template_variable_group(&self, group: crate::TemplateVariableGroup) -> &'static str {
+        use crate::TemplateVariableGroup::*;
+        match (self.lang, group) {
+            (Language::English, DateTime) => "Date and time",
+            (Language::Indonesian, DateTime) => "Tanggal dan waktu",
+            (Language::German, DateTime) => "Datum und Uhrzeit",
+            (Language::English, Random) => "Unique and random",
+            (Language::Indonesian, Random) => "Unik dan acak",
+            (Language::German, Random) => "Eindeutig und zufällig",
+            (Language::English, Fields) => "Fill in when expanding",
+            (Language::Indonesian, Fields) => "Isi saat ekspansi",
+            (Language::German, Fields) => "Beim Erweitern ausfüllen",
+            (Language::English, Text) => "Text and system",
+            (Language::Indonesian, Text) => "Teks dan sistem",
+            (Language::German, Text) => "Text und System",
         }
     }
 
