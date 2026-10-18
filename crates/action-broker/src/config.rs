@@ -673,7 +673,22 @@ enabled = true
         use std::os::unix::fs::PermissionsExt;
         use std::path::Path;
 
-        let root = Path::new(&std::env::var("HOME").unwrap()).join(format!(
+        let mut relative = BrokerConfig {
+            default_cwd: Some("relative/path".to_string()),
+            ..BrokerConfig::default()
+        };
+        assert!(relative.validate().is_err());
+
+        // Accepting a directory needs every ancestor owned by this user or
+        // root. Package builders put HOME under a build tree owned by
+        // another account (Launchpad's /build), where the broker rightly
+        // refuses it; there is nowhere private to test acceptance then.
+        let home = std::env::var("HOME").unwrap();
+        if let Err(reason) = crate::path_security::validate_working_directory("HOME", &home) {
+            eprintln!("skipping the accepted-directory case: {reason}");
+            return;
+        }
+        let root = Path::new(&home).join(format!(
             ".wayexpand-private-cwd-root-{}",
             std::process::id()
         ));
@@ -690,9 +705,6 @@ enabled = true
         config.validate_and_canonicalize().unwrap();
         let expected = fs::canonicalize(&directory).unwrap();
         assert_eq!(config.default_cwd.as_deref(), expected.to_str());
-
-        config.default_cwd = Some("relative/path".to_string());
-        assert!(config.validate().is_err());
         fs::remove_dir(directory).unwrap();
         fs::remove_dir(root).unwrap();
     }
