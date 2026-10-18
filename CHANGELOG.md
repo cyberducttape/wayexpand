@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- "Use current app" in the snippet editor no longer always adds WayExpand
+  itself. It took the first window a new KWin tracker reported, which is
+  the editor where the button was clicked. It now waits up to 15 seconds
+  for you to click the target app's window, skipping WayExpand's own
+  windows and the desktop.
+- The KWin window tracker no longer drops and reloads its script every
+  time KWin is slow to answer. Under memory pressure (out-of-memory kills)
+  KWin stalls for seconds, and each 1-second health-check timeout caused a
+  disconnect, a script reload and lost focus state, which then timed out
+  again. Unanswered checks are now tolerated for 10 seconds; a definite
+  "script not loaded" answer still reconnects at once.
 - Command snippets and hotkey actions no longer stay disabled after one
   failed worker restart. A reload started the new engine's command threads
   while the old ones still ran, which could exceed the unit's

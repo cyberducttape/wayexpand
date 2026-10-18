@@ -34,6 +34,13 @@ const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+/// How long health checks may keep failing to get an answer before the
+/// tracker is treated as lost. KWin answers D-Bus on its main thread, which
+/// stalls for seconds under memory pressure; a check that times out is not
+/// evidence that the script stopped, and tearing the tracker down and
+/// reloading the script under the same pressure only failed again. A
+/// definite "not loaded" answer still ends the tracker at once.
+const TRACKER_HEALTH_GRACE: Duration = Duration::from_secs(10);
 /// Upper bound on how long `probe()` waits for the session bus / KWin to
 /// answer before giving up. A local D-Bus round trip normally completes in
 /// well under this; this exists specifically for the case where it does
@@ -131,6 +138,8 @@ pub struct KwinWindowTracker {
     plugin_name: String,
     script_path: std::path::PathBuf,
     next_health_check: Instant,
+    /// When KWin last answered a health check.
+    last_healthy: Instant,
 }
 
 impl KwinWindowTracker {
@@ -274,6 +283,7 @@ impl KwinWindowTracker {
             plugin_name,
             script_path,
             next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
+            last_healthy: Instant::now(),
         })
     }
 
@@ -335,6 +345,30 @@ impl KwinWindowTracker {
     }
 }
 
+#[derive(Debug)]
+enum HealthOutcome {
+    /// KWin answered whether the script is loaded.
+    Answered(bool),
+    /// No answer yet, but still within the grace period.
+    Unanswered,
+    /// No answer for longer than the grace period.
+    Lost(zbus::Error),
+}
+
+fn health_outcome(
+    answer: Result<bool, zbus::Error>,
+    last_healthy: Instant,
+    now: Instant,
+) -> HealthOutcome {
+    match answer {
+        Ok(loaded) => HealthOutcome::Answered(loaded),
+        Err(_) if now.saturating_duration_since(last_healthy) < TRACKER_HEALTH_GRACE => {
+            HealthOutcome::Unanswered
+        }
+        Err(error) => HealthOutcome::Lost(error),
+    }
+}
+
 /// Build the session-bus connection without allowing authentication or socket
 /// setup to strand the tracker supervisor/UI worker indefinitely. `race`
 /// drops the unfinished connection future when the deadline wins.
@@ -385,7 +419,7 @@ impl WindowTracker for KwinWindowTracker {
                 return Ok(None);
             }
             if now >= self.next_health_check {
-                let loaded: bool = self
+                let answer: Result<bool, zbus::Error> = self
                     .connection
                     .call_method(
                         Some("org.kde.KWin"),
@@ -394,12 +428,27 @@ impl WindowTracker for KwinWindowTracker {
                         "isScriptLoaded",
                         &(self.plugin_name.as_str(),),
                     )
-                    .and_then(|reply| reply.body().deserialize())
-                    .map_err(|error| WindowTrackerError {
-                        backend: BACKEND_NAME,
-                        message: format!("checking KWin tracker health failed: {error}"),
-                        retryable: true,
-                    })?;
+                    .and_then(|reply| reply.body().deserialize());
+                let loaded = match health_outcome(answer, self.last_healthy, Instant::now()) {
+                    HealthOutcome::Answered(loaded) => {
+                        self.last_healthy = Instant::now();
+                        loaded
+                    }
+                    HealthOutcome::Unanswered => {
+                        self.next_health_check = Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL;
+                        continue;
+                    }
+                    HealthOutcome::Lost(error) => {
+                        return Err(WindowTrackerError {
+                            backend: BACKEND_NAME,
+                            message: format!(
+                                "checking KWin tracker health failed for {} s: {error}",
+                                TRACKER_HEALTH_GRACE.as_secs()
+                            ),
+                            retryable: true,
+                        })
+                    }
+                };
                 if !loaded {
                     return Err(WindowTrackerError {
                         backend: BACKEND_NAME,
@@ -447,6 +496,31 @@ mod tests {
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
     use wayexpand_core::WindowTracker;
+
+    #[test]
+    fn unanswered_health_checks_are_tolerated_for_the_grace_period() {
+        use super::{health_outcome, HealthOutcome, TRACKER_HEALTH_GRACE};
+        let healthy = Instant::now();
+        let timeout = || zbus::Error::Failure("timed out".into());
+        assert!(matches!(
+            health_outcome(Ok(true), healthy, healthy + Duration::from_secs(60)),
+            HealthOutcome::Answered(true)
+        ));
+        // A definite "not loaded" is reported at once, grace or not.
+        assert!(matches!(
+            health_outcome(Ok(false), healthy, healthy),
+            HealthOutcome::Answered(false)
+        ));
+        // KWin stalls (memory pressure) for a few seconds: keep tracking.
+        assert!(matches!(
+            health_outcome(Err(timeout()), healthy, healthy + Duration::from_secs(4)),
+            HealthOutcome::Unanswered
+        ));
+        assert!(matches!(
+            health_outcome(Err(timeout()), healthy, healthy + TRACKER_HEALTH_GRACE),
+            HealthOutcome::Lost(_)
+        ));
+    }
 
     #[test]
     fn empty_signal_represents_window_disappearance() {

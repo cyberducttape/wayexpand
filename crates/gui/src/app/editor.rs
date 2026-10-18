@@ -644,11 +644,14 @@ impl GuiApp {
                                 let _ = sender.send(AppDetection::Unavailable);
                                 return;
                             }
-                            match tracker.next_window_timeout(std::time::Duration::from_secs(5)) {
-                                Ok(Some(Some(window))) => AppDetection::Found(window),
-                                Ok(Some(None)) => AppDetection::NoWindow,
-                                Ok(None) | Err(_) => AppDetection::Unavailable,
-                            }
+                            // The editor itself is focused when the button
+                            // is clicked; wait for the user to click the
+                            // app the snippet is for.
+                            crate::dialogs::wait_for_other_app(
+                                crate::dialogs::APP_DETECTION_WINDOW,
+                                &worker_cancel,
+                                |wait| tracker.next_window_timeout(wait),
+                            )
                         }
                         Err(_) => AppDetection::Unavailable,
                     };
@@ -691,16 +694,16 @@ impl GuiApp {
                         }
                     }
                 }
-                Ok(AppDetection::NoWindow) => {
-                    self.app_detection = None;
-                    if !detection_cancelled {
-                        self.status = Status::warning(self.strings.status_no_focused_window());
-                    }
-                }
                 Ok(AppDetection::Unavailable) => {
                     self.app_detection = None;
                     if !detection_cancelled {
                         self.status = Status::warning(self.strings.status_detection_unavailable());
+                    }
+                }
+                Ok(AppDetection::TimedOut) => {
+                    self.app_detection = None;
+                    if !detection_cancelled {
+                        self.status = Status::warning(self.strings.status_detection_timed_out());
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {

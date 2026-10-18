@@ -2197,3 +2197,52 @@ fn retrying_a_kept_change_reports_overlap_with_an_external_edit() {
     assert_eq!(app.status.tone_for_test(), StatusTone::Error);
     fs::remove_file(path).unwrap();
 }
+
+fn focused(app_id: &str) -> wayexpand_core::WindowContext {
+    wayexpand_core::WindowContext {
+        app_id: Some(app_id.into()),
+        title: None,
+        instance_id: Some("1".into()),
+    }
+}
+
+#[test]
+fn use_current_app_skips_wayexpand_and_the_desktop() {
+    use crate::dialogs::{wait_for_other_app, AppDetection};
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    // The editor is focused when the button is clicked, then the desktop,
+    // then the picker, and only then the app the user wants.
+    let mut reports = vec![
+        Ok(Some(Some(focused("WayExpand")))),
+        Ok(None),
+        Ok(Some(None)),
+        Ok(Some(Some(focused(
+            "io.github.cyberducttape.WayExpand.Picker",
+        )))),
+        Ok(Some(Some(focused("org.kde.konsole")))),
+    ]
+    .into_iter();
+    let detection = wait_for_other_app(Duration::from_secs(5), &cancelled, |_| {
+        reports.next().unwrap()
+    });
+    match detection {
+        AppDetection::Found(window) => {
+            assert_eq!(window.app_id.as_deref(), Some("org.kde.konsole"))
+        }
+        other => panic!("expected konsole, got {other:?}"),
+    }
+}
+
+#[test]
+fn use_current_app_times_out_when_only_wayexpand_is_focused() {
+    use crate::dialogs::{wait_for_other_app, AppDetection};
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    let detection = wait_for_other_app(Duration::from_millis(50), &cancelled, |wait| {
+        std::thread::sleep(wait.min(Duration::from_millis(10)));
+        Ok(Some(Some(focused("wayexpand"))))
+    });
+    assert!(matches!(detection, AppDetection::TimedOut), "{detection:?}");
+    cancelled.store(true, std::sync::atomic::Ordering::Release);
+    let detection = wait_for_other_app(Duration::from_secs(5), &cancelled, |_| unreachable!());
+    assert!(matches!(detection, AppDetection::Unavailable));
+}

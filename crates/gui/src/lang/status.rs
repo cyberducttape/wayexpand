@@ -467,14 +467,16 @@ impl Strings {
         }
     }
 
-    pub fn status_no_focused_window(&self) -> &'static str {
+    pub fn status_detection_timed_out(&self) -> &'static str {
         match self.lang {
-            Language::English => "No focused window to detect (focus is on the desktop)",
+            Language::English => {
+                "No other app was clicked within 15 seconds; click Use current app, then click the app's window"
+            }
             Language::Indonesian => {
-                "Tidak ada jendela fokus untuk dideteksi (fokus ada di desktop)"
+                "Tidak ada aplikasi lain yang diklik dalam 15 detik; klik Gunakan aplikasi saat ini, lalu klik jendela aplikasinya"
             }
             Language::German => {
-                "Kein fokussiertes Fenster erkennbar (Fokus liegt auf der Arbeitsfläche)"
+                "Innerhalb von 15 Sekunden wurde keine andere App angeklickt; Aktuelle App verwenden und dann das Fenster der App anklicken"
             }
         }
     }

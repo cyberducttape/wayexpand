@@ -806,6 +806,19 @@ use the bounded timeout, and results are
 associated with the draft that started them, so output from an older draft is
 not displayed after the editor changes.
 
+### "Use current app" Always Picked WayExpand
+
+**Symptom:** the button added WayExpand's own app ID, whatever window the
+user had used before. It took the first focus report from a freshly started
+KWin tracker, and that is the window focused when the button is clicked:
+the editor itself. A new tracker has no history of earlier windows.
+
+**Fix:** after the click the editor waits up to 15 seconds for the user to
+click a window of the target app ("Now click a window of the app…"). It
+skips WayExpand's own windows (editor, picker, form) and the desktop, and
+reports a timeout if no other app is clicked. See
+`dialogs::wait_for_other_app`.
+
 ### "Use current app" Button Could Freeze the GUI Indefinitely
 
 **Original symptom:** clicking "Use current app" in the Snippet Editor made

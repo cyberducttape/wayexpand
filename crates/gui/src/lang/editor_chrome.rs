@@ -80,9 +80,9 @@ impl Strings {
 
     pub fn detecting_app(&self) -> &'static str {
         match self.lang {
-            Language::English => "Detecting focused application…",
-            Language::Indonesian => "Mendeteksi aplikasi yang fokus…",
-            Language::German => "Fokussierte Anwendung wird erkannt…",
+            Language::English => "Now click a window of the app…",
+            Language::Indonesian => "Sekarang klik jendela aplikasinya…",
+            Language::German => "Jetzt ein Fenster der App anklicken…",
         }
     }
 

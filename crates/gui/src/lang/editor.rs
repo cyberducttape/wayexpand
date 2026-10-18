@@ -129,9 +129,9 @@ impl Strings {
 
     pub fn detect_app_tooltip(&self) -> &'static str {
         match self.lang {
-            Language::English => "Detect the app you were last focused on before switching to WayExpand (KDE Plasma only for now)",
-            Language::Indonesian => "Deteksi aplikasi yang terakhir Anda fokuskan sebelum beralih ke WayExpand (saat ini hanya KDE Plasma)",
-            Language::German => "Erkennen Sie die App, auf die Sie sich zuletzt konzentriert haben, bevor Sie zu WayExpand wechseln (nur KDE Plasma)",
+            Language::English => "Click this, then click a window of the app this snippet is for within 15 seconds (KDE Plasma only for now)",
+            Language::Indonesian => "Klik ini, lalu klik jendela aplikasi untuk cuplikan ini dalam 15 detik (saat ini hanya KDE Plasma)",
+            Language::German => "Hier klicken und dann innerhalb von 15 Sekunden ein Fenster der App anklicken, für die das Snippet gilt (nur KDE Plasma)",
         }
     }
 
