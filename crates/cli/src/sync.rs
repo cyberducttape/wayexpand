@@ -111,6 +111,30 @@ pub(crate) struct SyncReport {
 }
 
 fn git(directory: &Path, args: &[&str]) -> Result<Output> {
+    let mut stdout = Vec::new();
+    let (status, stderr) = run_git(directory, args, None, &mut |chunk| {
+        stdout.extend_from_slice(chunk);
+        if stdout.len() > MAX_GIT_OUTPUT_BYTES {
+            bail!("git output exceeded the safety limit");
+        }
+        Ok(())
+    })?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// Run git, handing its stdout to `on_stdout` as it arrives (so a listing
+/// can be checked without holding all of it) and optionally feeding it
+/// `stdin`. stderr is diagnostic only and is capped and returned.
+fn run_git(
+    directory: &Path,
+    args: &[&str],
+    stdin: Option<Vec<u8>>,
+    on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<(std::process::ExitStatus, Vec<u8>)> {
     let mut command = Command::new("git");
     configure_process_group(&mut command);
     let mut child = command
@@ -118,30 +142,68 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
         .arg(directory)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("could not run git; is it installed?")?;
     let mut stdout = child.stdout.take().context("git stdout was not captured")?;
     let mut stderr = child.stderr.take().context("git stderr was not captured")?;
+    let stdin_pipe = child.stdin.take();
     let mut supervisor = ChildSupervisor::new(child);
     if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
         supervisor.kill_group();
         let _ = supervisor.reap();
         return Err(error);
     }
-    let mut stdout_bytes = Vec::new();
+    // A writer thread, so a large input cannot deadlock against git's
+    // output; it ends when the input is written or git closes its stdin.
+    let writer = stdin.zip(stdin_pipe).map(|(input, mut pipe)| {
+        thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(&input);
+        })
+    });
+    let result = supervise_git(&mut supervisor, &mut stdout, &mut stderr, args, on_stdout);
+    if result.is_err() {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+    }
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
+    result
+}
+
+fn supervise_git(
+    supervisor: &mut ChildSupervisor,
+    stdout: &mut std::process::ChildStdout,
+    stderr: &mut std::process::ChildStderr,
+    args: &[&str],
+    on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<(std::process::ExitStatus, Vec<u8>)> {
     let mut stderr_bytes = Vec::new();
+    let mut drain = |stdout: &mut std::process::ChildStdout,
+                     stderr: &mut std::process::ChildStderr,
+                     stderr_bytes: &mut Vec<u8>|
+     -> Result<(bool, bool)> {
+        let stdout_eof = drain_git_output(stdout, &mut *on_stdout)?;
+        let stderr_eof = drain_git_output(stderr, &mut |chunk| {
+            stderr_bytes.extend_from_slice(chunk);
+            if stderr_bytes.len() > MAX_GIT_OUTPUT_BYTES {
+                bail!("git output exceeded the safety limit");
+            }
+            Ok(())
+        })?;
+        Ok((stdout_eof, stderr_eof))
+    };
     let deadline = Instant::now() + GIT_TIMEOUT;
-    let status = loop {
-        let stdout_eof = drain_git_output(&mut stdout, &mut stdout_bytes)?;
-        let stderr_eof = drain_git_output(&mut stderr, &mut stderr_bytes)?;
-        if stdout_bytes.len() > MAX_GIT_OUTPUT_BYTES || stderr_bytes.len() > MAX_GIT_OUTPUT_BYTES {
-            supervisor.kill_group();
-            let _ = supervisor.reap();
-            bail!("git output exceeded the safety limit");
-        }
+    loop {
+        let (stdout_eof, stderr_eof) = drain(stdout, stderr, &mut stderr_bytes)?;
         match supervisor.has_exited() {
             Ok(true) => {
                 supervisor.kill_group();
@@ -150,13 +212,7 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
                 let mut stdout_eof = stdout_eof;
                 let mut stderr_eof = stderr_eof;
                 while !(stdout_eof && stderr_eof) && Instant::now() < drain_deadline {
-                    stdout_eof = drain_git_output(&mut stdout, &mut stdout_bytes)?;
-                    stderr_eof = drain_git_output(&mut stderr, &mut stderr_bytes)?;
-                    if stdout_bytes.len() > MAX_GIT_OUTPUT_BYTES
-                        || stderr_bytes.len() > MAX_GIT_OUTPUT_BYTES
-                    {
-                        bail!("git output exceeded the safety limit");
-                    }
+                    (stdout_eof, stderr_eof) = drain(stdout, stderr, &mut stderr_bytes)?;
                     if !(stdout_eof && stderr_eof) {
                         thread::sleep(Duration::from_millis(5));
                     }
@@ -171,24 +227,111 @@ fn git(directory: &Path, args: &[&str]) -> Result<Output> {
                         redact_git_diagnostic(&args.join(" "))
                     );
                 }
-                break status;
+                return Ok((status, stderr_bytes));
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(false) | Err(_) => {
-                supervisor.kill_group();
-                let _ = supervisor.reap();
-                bail!(
-                    "git {} timed out or could not be monitored",
-                    redact_git_diagnostic(&args.join(" "))
-                );
-            }
+            Ok(false) | Err(_) => bail!(
+                "git {} timed out or could not be monitored",
+                redact_git_diagnostic(&args.join(" "))
+            ),
         }
+    }
+}
+
+/// Bounds for a NUL-separated Git listing, read record by record.
+#[derive(Clone, Copy)]
+struct RecordLimits {
+    records: usize,
+    record_bytes: usize,
+}
+
+/// One record per library file: the primary configuration, `.gitignore`, and
+/// at most one `snippets.d` layer per snippet the configuration model allows.
+const MAX_LIBRARY_FILES: usize = wayexpand_core::limits::MAX_EXPANSIONS + 2;
+/// A path up to PATH_MAX plus an `ls-tree` header (mode, type, and a SHA-256
+/// object name).
+const MAX_GIT_RECORD_BYTES: usize = 4096 + 128;
+const LIBRARY_LISTING: RecordLimits = RecordLimits {
+    records: MAX_LIBRARY_FILES,
+    record_bytes: MAX_GIT_RECORD_BYTES,
+};
+/// Outgoing history repeats paths once per commit that touches them (and
+/// `status` may list files outside the library), so these are bounded far
+/// more loosely; only the distinct foreign paths are kept.
+/// Foreign paths named in a refusal; the first few are enough to act on.
+const MAX_REPORTED_FOREIGN_PATHS: usize = 32;
+const OUTGOING_HISTORY_LISTING: RecordLimits = RecordLimits {
+    records: 4_000_000,
+    record_bytes: MAX_GIT_RECORD_BYTES,
+};
+
+/// Run a git command whose stdout is NUL-terminated records (`-z`) and hand
+/// each record to `on_record` as it is read, so a large library is never
+/// held, or refused, as one block of output. Exceeding `limits` fails
+/// closed, as does a failed command or a record that is not UTF-8.
+fn git_records(
+    directory: &Path,
+    args: &[&str],
+    stdin: Option<Vec<u8>>,
+    limits: RecordLimits,
+    mut on_record: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    let mut pending = Vec::new();
+    let mut records = 0_usize;
+    let too_long = || {
+        anyhow::anyhow!(
+            "git reported a path longer than {} bytes",
+            limits.record_bytes
+        )
     };
-    Ok(Output {
-        status,
-        stdout: stdout_bytes,
-        stderr: stderr_bytes,
-    })
+    let mut accept = |record: &[u8]| -> Result<()> {
+        if record.len() > limits.record_bytes {
+            return Err(too_long());
+        }
+        records += 1;
+        if records > limits.records {
+            bail!(
+                "git {} listed more than {} entries (a snippet library has at most {} files)",
+                redact_git_diagnostic(&args.join(" ")),
+                limits.records,
+                MAX_LIBRARY_FILES
+            );
+        }
+        on_record(std::str::from_utf8(record).context("git reported a non-UTF-8 path")?)
+    };
+    let (status, stderr) = run_git(directory, args, stdin, &mut |chunk| {
+        let mut rest = chunk;
+        while let Some(end) = rest.iter().position(|&byte| byte == 0) {
+            if pending.is_empty() {
+                accept(&rest[..end])?;
+            } else {
+                pending.extend_from_slice(&rest[..end]);
+                accept(&pending)?;
+                pending.clear();
+            }
+            rest = &rest[end + 1..];
+        }
+        pending.extend_from_slice(rest);
+        if pending.len() > limits.record_bytes {
+            return Err(too_long());
+        }
+        Ok(())
+    })?;
+    if !status.success() {
+        bail!(
+            "git {} failed: {}",
+            redact_git_diagnostic(&args.join(" ")),
+            redact_git_diagnostic(String::from_utf8_lossy(&stderr).trim())
+        );
+    }
+    // `-z` terminates every record, so anything left is a truncated one.
+    if !pending.is_empty() {
+        bail!(
+            "git {} output ended inside an entry",
+            redact_git_diagnostic(&args.join(" "))
+        );
+    }
+    Ok(())
 }
 
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<()> {
@@ -203,12 +346,15 @@ fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<()> {
     Ok(())
 }
 
-fn drain_git_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> Result<bool> {
+fn drain_git_output<R: Read>(
+    reader: &mut R,
+    output: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<bool> {
     let mut buffer = [0_u8; 8192];
     for _ in 0..64 {
         match reader.read(&mut buffer) {
             Ok(0) => return Ok(true),
-            Ok(count) => output.extend_from_slice(&buffer[..count]),
+            Ok(count) => output(&buffer[..count])?,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
             Err(error) => return Err(error.into()),
         }
@@ -241,19 +387,6 @@ fn git_ok(directory: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
-/// Like `git_ok`, but keeps the output untrimmed for `-z` path lists.
-fn git_ok_raw(directory: &Path, args: &[&str]) -> Result<String> {
-    let output = git(directory, args)?;
-    if !output.status.success() {
-        bail!(
-            "git {} failed: {}",
-            redact_git_diagnostic(&args.join(" ")),
-            redact_git_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
-        );
-    }
-    String::from_utf8(output.stdout).context("git reported a non-UTF-8 path")
 }
 
 fn validate_library(config_path: &Path) -> Result<()> {
@@ -483,7 +616,8 @@ fn commit_library(directory: &Path, primary: &str, message: &str) -> Result<bool
     }
     // The index may already hold unrelated staged files. Commit only the
     // exact library paths that changed, so nothing else can be published.
-    let staged = git_ok_raw(
+    let mut library_paths = Vec::new();
+    git_records(
         directory,
         &[
             "diff",
@@ -496,18 +630,44 @@ fn commit_library(directory: &Path, primary: &str, message: &str) -> Result<bool
             &primary_pathspec,
             "snippets.d",
         ],
+        None,
+        LIBRARY_LISTING,
+        |path| {
+            if is_library_path(path, primary) {
+                library_paths.extend_from_slice(b":(literal)");
+                library_paths.extend_from_slice(path.as_bytes());
+                library_paths.push(0);
+            }
+            Ok(())
+        },
     )?;
-    let library_paths: Vec<String> = staged
-        .split('\0')
-        .filter(|path| is_library_path(path, primary))
-        .map(|path| format!(":(literal){path}"))
-        .collect();
     if library_paths.is_empty() {
         return Ok(false);
     }
-    let mut commit = vec!["commit", "--quiet", "--only", "-m", message, "--"];
-    commit.extend(library_paths.iter().map(String::as_str));
-    git_ok(directory, &commit).context(
+    // The paths go through stdin: a large library's paths would not fit
+    // the argument list.
+    let commit = [
+        "commit",
+        "--quiet",
+        "--only",
+        "-m",
+        message,
+        "--pathspec-from-file=-",
+        "--pathspec-file-nul",
+    ];
+    let output = run_git(directory, &commit, Some(library_paths), &mut |_| Ok(())).and_then(
+        |(status, stderr)| {
+            if status.success() {
+                Ok(())
+            } else {
+                bail!(
+                    "git commit failed: {}",
+                    redact_git_diagnostic(String::from_utf8_lossy(&stderr).trim())
+                )
+            }
+        },
+    );
+    output.context(
         "could not commit; set git user.name and user.email (globally or in the library repository)",
     )?;
     Ok(true)
@@ -525,18 +685,29 @@ fn is_library_path(path: &str, primary: &str) -> bool {
 /// Refuse a tree unless every entry is an allowlisted library path stored as
 /// an ordinary file blob (not a symlink, submodule, or other special mode).
 fn verify_library_tree(directory: &Path, revision: &str, primary: &str) -> Result<()> {
-    let listing = git_ok_raw(directory, &["ls-tree", "-r", "-z", "--full-tree", revision])?;
     let mut foreign = Vec::new();
-    for entry in listing.split('\0').filter(|entry| !entry.is_empty()) {
-        // `<mode> <type> <object>\t<path>`
-        let (header, path) = entry
-            .split_once('\t')
-            .context("git ls-tree reported an unexpected entry")?;
-        let mode = header.split(' ').next().unwrap_or_default();
-        if !matches!(mode, "100644" | "100755") || !is_library_path(path, primary) {
-            foreign.push(path.to_owned());
-        }
-    }
+    git_records(
+        directory,
+        &["ls-tree", "-r", "-z", "--full-tree", revision],
+        None,
+        LIBRARY_LISTING,
+        |entry| {
+            if entry.is_empty() {
+                return Ok(());
+            }
+            // `<mode> <type> <object>\t<path>`
+            let (header, path) = entry
+                .split_once('\t')
+                .context("git ls-tree reported an unexpected entry")?;
+            let mode = header.split(' ').next().unwrap_or_default();
+            if (!matches!(mode, "100644" | "100755") || !is_library_path(path, primary))
+                && foreign.len() < MAX_REPORTED_FOREIGN_PATHS
+            {
+                foreign.push(path.to_owned());
+            }
+            Ok(())
+        },
+    )?;
     if foreign.is_empty() {
         return Ok(());
     }
@@ -553,7 +724,11 @@ fn verify_library_tree(directory: &Path, revision: &str, primary: &str) -> Resul
 /// without one, the whole history would be published and is checked.
 fn verify_outgoing_paths(directory: &Path, base: Option<&str>, primary: &str) -> Result<()> {
     let range = base.map_or_else(|| "HEAD".to_owned(), |base| format!("{base}..HEAD"));
-    let touched = git_ok_raw(
+    // With `-z` and an empty format, every path is NUL-terminated. Paths may
+    // legally contain newlines, so splitting on them as well would let
+    // `expansions.toml\nanything` pass as two allowlisted paths.
+    let mut foreign = std::collections::BTreeSet::new();
+    git_records(
         directory,
         &[
             "log",
@@ -564,19 +739,22 @@ fn verify_outgoing_paths(directory: &Path, base: Option<&str>, primary: &str) ->
             "-z",
             &range,
         ],
+        None,
+        OUTGOING_HISTORY_LISTING,
+        |path| {
+            if !path.is_empty()
+                && !is_library_path(path, primary)
+                && foreign.len() < MAX_REPORTED_FOREIGN_PATHS
+            {
+                foreign.insert(path.to_owned());
+            }
+            Ok(())
+        },
     )?;
-    // With `-z` and an empty format, every path is NUL-terminated. Paths may
-    // legally contain newlines, so splitting on them as well would let
-    // `expansions.toml\nanything` pass as two allowlisted paths.
-    let mut foreign: Vec<&str> = touched
-        .split('\0')
-        .filter(|path| !path.is_empty() && !is_library_path(path, primary))
-        .collect();
     if foreign.is_empty() {
         return Ok(());
     }
-    foreign.sort_unstable();
-    foreign.dedup();
+    let foreign: Vec<String> = foreign.into_iter().collect();
     bail!(
         "refusing to push: outgoing commits change files outside the snippet library ({}); \
          remove them from the history in {}",
@@ -697,12 +875,22 @@ pub(crate) fn status(config_path: &Path) -> Result<String> {
         return Ok("not synchronized (run `wayexpand sync init [--remote URL]`)".into());
     }
     let remote = remote(directory)?.unwrap_or_else(|| "none".into());
-    let changes = git_ok(directory, &["status", "--porcelain"])?;
+    let mut changed = false;
+    git_records(
+        directory,
+        &["status", "--porcelain", "-z"],
+        None,
+        OUTGOING_HISTORY_LISTING,
+        |entry| {
+            changed |= !entry.is_empty();
+            Ok(())
+        },
+    )?;
     let last = git_ok(directory, &["log", "-1", "--format=%cr: %s"]).unwrap_or_default();
     Ok(format!(
         "repository: {}\nremote: {remote}\nlocal changes: {}\nlast commit: {last}",
         directory.display(),
-        if changes.is_empty() { "none" } else { "yes" }
+        if changed { "yes" } else { "none" }
     ))
 }
 
@@ -798,7 +986,11 @@ mod tests {
         set_nonblocking(&stdout).expect("make stdout nonblocking");
         let mut output = Vec::new();
         let started = Instant::now();
-        let _ = drain_git_output(&mut stdout, &mut output).expect("drain output");
+        let _ = drain_git_output(&mut stdout, &mut |chunk| {
+            output.extend_from_slice(chunk);
+            Ok(())
+        })
+        .expect("drain output");
         assert!(started.elapsed() < Duration::from_secs(1));
         let _ = child.kill();
         let _ = child.wait();
@@ -1004,6 +1196,80 @@ mod tests {
         git_ok(&clone, &["commit", "--quiet", "-m", "remote change"]).expect("commit");
         git_ok(&clone, &["push", "--quiet"]).expect("push remote change");
         let _ = std::fs::remove_dir_all(clone);
+    }
+
+    #[test]
+    fn a_library_too_large_for_one_output_block_still_syncs() {
+        let (directory, config_path) = prepare_repository();
+        let remote_directory = test_directory();
+        std::fs::create_dir_all(&remote_directory).expect("create remote directory");
+        git_ok(&remote_directory, &["init", "--quiet", "--bare"]).expect("init bare remote");
+        let remote_url = remote_directory.display().to_string();
+        init(&config_path, Some(&remote_url)).expect("initialize library");
+        // 2,000 layers with long names: the tree listing alone is several
+        // times MAX_GIT_OUTPUT_BYTES, and the paths overflow nothing.
+        let layers = 2_000;
+        let snippets = directory.join("snippets.d");
+        std::fs::create_dir_all(&snippets).expect("create snippets.d");
+        std::fs::set_permissions(&snippets, PermissionsExt::from_mode(0o700))
+            .expect("restrict snippets.d");
+        for index in 0..layers {
+            let layer = snippets.join(format!("{}-{index:04}.toml", "layer".repeat(30)));
+            std::fs::write(
+                &layer,
+                format!("[[expansion]]\ntrigger = \";layer{index}\"\nreplacement = \"ok\"\n"),
+            )
+            .expect("write layer");
+            std::fs::set_permissions(&layer, PermissionsExt::from_mode(0o600))
+                .expect("restrict layer");
+        }
+        let report = sync(&config_path).expect("sync a large library");
+        assert!(report.committed && report.pushed);
+        let mut published = 0;
+        git_records(
+            &remote_directory,
+            &["ls-tree", "-r", "-z", "--name-only", "HEAD"],
+            None,
+            LIBRARY_LISTING,
+            |path| {
+                published += usize::from(path.starts_with("snippets.d/"));
+                Ok(())
+            },
+        )
+        .expect("list the published tree");
+        assert_eq!(published, layers);
+        assert!(status(&config_path)
+            .expect("status of a large library")
+            .contains("local changes: none"));
+        let _ = std::fs::remove_dir_all(directory);
+        let _ = std::fs::remove_dir_all(remote_directory);
+    }
+
+    #[test]
+    fn git_listings_beyond_their_limits_fail_closed() {
+        let (directory, config_path) = prepare_repository();
+        sync(&config_path).expect("sync local library");
+        let listing = |limits| {
+            git_records(
+                &directory,
+                &["ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+                None,
+                limits,
+                |_| Ok(()),
+            )
+        };
+        let entries = RecordLimits {
+            records: 0,
+            record_bytes: MAX_GIT_RECORD_BYTES,
+        };
+        assert!(format!("{:#}", listing(entries).unwrap_err()).contains("more than 0 entries"));
+        let long = RecordLimits {
+            records: MAX_LIBRARY_FILES,
+            record_bytes: 8,
+        };
+        assert!(format!("{:#}", listing(long).unwrap_err()).contains("longer than 8 bytes"));
+        assert!(listing(LIBRARY_LISTING).is_ok());
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

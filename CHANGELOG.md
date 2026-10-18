@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand sync` handles large libraries. Git listings (the tree check,
+  the outgoing-history check, staged paths and `sync status`) were read as
+  one block capped at 128 KiB, so a library of a few hundred long-named
+  `snippets.d` files failed to sync although it was valid. Listings are now
+  checked entry by entry, bounded by the configuration model (at most
+  10,002 library files, 4 KiB per entry), and the commit takes its paths
+  on stdin instead of the argument list.
 - A change the GUI could not save is kept instead of dropped. A failed
   write, a configuration lock that stayed busy, or a reload that failed
   after a save conflict used to discard the pending change (settings,
