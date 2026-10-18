@@ -10,7 +10,9 @@ Build-Depends:
     cargo (>= 1.95),
     pkg-config,
     libwayland-dev,
-    libxkbcommon-dev
+    libxkbcommon-dev,
+    git <!nocheck>,
+    libx11-data <!nocheck>
 
 Package: wayexpand
 Architecture: any

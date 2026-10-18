@@ -3133,7 +3133,7 @@ fn child_process_is_cleaned_up_when_output_exceeds_limit() {
     let pid_file = temp_dir.join(format!("child-cleanup-test-{}.pid", std::process::id()));
 
     let shell_command = format!(
-        r#"{{ echo "pid: $$" > '{}'; python3 -c "import sys; sys.stdout.write('x' * (1024 * 1024 + 1))"; sleep 60; }}"#,
+        r#"{{ echo "pid: $$" > '{}'; head -c 1048577 /dev/zero | tr '\0' x; sleep 60; }}"#,
         pid_file.display()
     );
 

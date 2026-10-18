@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: the Ubuntu package's test run failed on Launchpad builders. The
+  sync tests need `git`, and the input-method Compose tests need an XKB
+  Compose table, so both are now test-only build dependencies and the tests
+  run under `LC_ALL=C.UTF-8`. The command output-limit test made its output
+  with `python3`, which builders lack, so it timed out instead; it now uses
+  `head` and `tr`.
 - Fixed: the snippet list kept widening until it filled the window. The
   search row sized its field from a guessed button width; with the
   editor's button padding the row was wider than the panel, so the
