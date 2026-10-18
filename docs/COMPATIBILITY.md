@@ -497,6 +497,8 @@ operators can distinguish a running process from newly installed binaries.
   "focus_assurance": "protocol",
   "output_refused_total": 0,
   "output_last_refusal": "none",
+  "output_unsupported_total": 0,
+  "output_last_unsupported": "none",
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
   "input_overflow_total": 0,
@@ -552,6 +554,8 @@ operators can distinguish a running process from newly installed binaries.
 - `focus_assurance` (string): How focus is bound for output. `protocol` on verified routes; on keystroke routes, `tracker` while a window tracker confirms the exact focused window and `unconfirmed` otherwise; `none` without a route. Added in status schema 8.
 - `output_refused_total` (integer): Outputs refused before their first keystroke since daemon start: no consent, a focus change after the match, or focus no tracker could confirm. Nothing was erased or inserted for them and they are never retried. Added in status schema 8.
 - `output_last_refusal` (string): Reason for the most recent refusal: `compatibility-mode-off`, `focus-changed`, `focus-unconfirmed`, or `none`. Added in status schema 8.
+- `output_unsupported_total` (integer): Expansions refused before typing because the output route could not type them exactly: a character outside its set (keystroke routes type only ASCII), more characters than it accepts, or a cursor move it cannot make. Not counted in `output_refused_total`. `wayexpand explain` names the cause for a given trigger. Added in 1.3.x without a schema change.
+- `output_last_unsupported` (string): Cause of the most recent of those: `unicode`, `too-long`, `cursor`, or `none`. Added in 1.3.x without a schema change.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
 - `input_overflow_total` (integer): Times evdev input arrived faster than it could be applied and the queue (4,096 events) was dropped, resetting the matcher; always 0 for other sources. Added in 1.2.x without a schema change.

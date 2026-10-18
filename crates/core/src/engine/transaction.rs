@@ -4,7 +4,7 @@
 //! for expansion results that need to maintain undo semantics across async completion.
 
 use super::{ExpansionEngine, ExpansionResult};
-use crate::{InjectorError, TextInjector};
+use crate::{InjectorCapabilities, InjectorError, TextInjector};
 
 /// Result of the multi-stage replacement transaction.
 ///
@@ -82,65 +82,110 @@ pub(super) fn transaction_texts(
     (restore_text, replacement_text)
 }
 
+/// Why an output route cannot type a replacement exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteLimit {
+    /// More characters than the route accepts.
+    TooLong { chars: usize, max: usize },
+    /// A character outside ASCII on a route that types through the keyboard
+    /// layout. `position` counts characters from 1.
+    Unicode { character: char, position: usize },
+    /// The cursor must move back, and the route cannot move it.
+    CursorMove,
+}
+
+impl RouteLimit {
+    /// The refusal message. It names no replacement content, so it is safe
+    /// for logs.
+    pub fn message(self, insertion_mode: &str) -> String {
+        match self {
+            Self::TooLong { chars, max } => {
+                // Keystroke typing is limited by the user's
+                // `keystroke_max_chars` setting rather than by the protocol,
+                // so say how to raise it.
+                let hint = if insertion_mode.contains("keysym") {
+                    " (raise keystroke_max_chars to allow longer keystroke typing)"
+                } else {
+                    ""
+                };
+                format!(
+                    "replacement requires {chars} characters but {insertion_mode} supports at most {max}{hint}"
+                )
+            }
+            Self::Unicode { .. } => {
+                format!("replacement contains Unicode that {insertion_mode} cannot guarantee")
+            }
+            Self::CursorMove => format!(
+                "replacement requests cursor repositioning but {insertion_mode} does not support it"
+            ),
+        }
+    }
+}
+
+/// The first reason `capabilities` cannot type `insert` (plus a reinserted
+/// delimiter) exactly, or `None` when it can. This is the check made before
+/// anything is typed, shared with `explain`.
+pub fn route_limit(
+    capabilities: &InjectorCapabilities,
+    insert: &str,
+    reinsert_after: Option<char>,
+    cursor_offset: Option<usize>,
+) -> Option<RouteLimit> {
+    let trailing_chars = usize::from(reinsert_after.is_some());
+    let output_chars = insert.chars().count() + trailing_chars;
+    if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
+        return Some(RouteLimit::TooLong {
+            chars: output_chars,
+            max: capabilities.max_text_chars,
+        });
+    }
+    if !capabilities.full_unicode {
+        if let Some((index, character)) = insert
+            .chars()
+            .chain(reinsert_after)
+            .enumerate()
+            .find(|(_, character)| !character.is_ascii())
+        {
+            return Some(RouteLimit::Unicode {
+                character,
+                position: index + 1,
+            });
+        }
+    }
+    // Mirror apply(): an offset that resolves to zero never moves the
+    // cursor, so it must not be rejected on backends without that support.
+    let cursor_move = cursor_offset
+        .map(|offset| offset.saturating_add(trailing_chars))
+        .is_some_and(|offset| offset > 0);
+    if cursor_move && !capabilities.cursor_reposition {
+        return Some(RouteLimit::CursorMove);
+    }
+    None
+}
+
 impl ExpansionEngine {
     fn preflight_output<I: TextInjector + ?Sized>(
         injector: &I,
         result: &ExpansionResult,
     ) -> Result<(), InjectorError> {
         let capabilities = injector.capabilities();
-        let trailing_chars = usize::from(result.reinsert_after.is_some());
         // Checked first and before anything is typed, so a refusal is a clean
         // "not applied" rather than an uncertain partial write.
         injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
-        let output_chars = result.insert.chars().count() + trailing_chars;
-        if capabilities.max_text_chars > 0 && output_chars > capabilities.max_text_chars {
-            // Keystroke typing is limited by the user's `keystroke_max_chars`
-            // setting rather than by the protocol, so say how to raise it.
-            let hint = if capabilities.insertion_mode.contains("keysym") {
-                " (raise keystroke_max_chars to allow longer keystroke typing)"
-            } else {
-                ""
-            };
-            return Err(InjectorError {
-                backend: injector.name(),
-                message: format!(
-                    "replacement requires {output_chars} characters but {} supports at most {}{hint}",
-                    capabilities.insertion_mode, capabilities.max_text_chars
-                ),
-                retryable: false,
-            });
-        }
-        if !capabilities.full_unicode
-            && result
-                .insert
-                .chars()
-                .chain(result.reinsert_after)
-                .any(|character| !character.is_ascii())
-        {
-            return Err(InjectorError {
-                backend: injector.name(),
-                message: format!(
-                    "replacement contains Unicode that {} cannot guarantee",
-                    capabilities.insertion_mode
-                ),
-                retryable: false,
-            });
-        }
-        // Mirror apply(): an offset that resolves to zero never moves the
-        // cursor, so it must not be rejected on backends without that support.
-        let cursor_move = result
-            .cursor_offset
-            .map(|offset| offset.saturating_add(trailing_chars))
-            .is_some_and(|offset| offset > 0);
-        if cursor_move && !capabilities.cursor_reposition {
-            return Err(InjectorError {
-                backend: injector.name(),
-                message: format!(
-                    "replacement requests cursor repositioning but {} does not support it",
-                    capabilities.insertion_mode
-                ),
-                retryable: false,
-            });
+        match route_limit(
+            &capabilities,
+            &result.insert,
+            result.reinsert_after,
+            result.cursor_offset,
+        ) {
+            None => {}
+            Some(limit) => {
+                return Err(InjectorError {
+                    backend: injector.name(),
+                    message: limit.message(capabilities.insertion_mode),
+                    retryable: false,
+                })
+            }
         }
         Ok(())
     }

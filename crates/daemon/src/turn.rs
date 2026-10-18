@@ -459,6 +459,7 @@ impl Daemon {
     /// the event loop. The expansion is never replayed.
     pub(crate) fn recover_from_output_error(&mut self, error: EventError) -> Result<()> {
         if error.expansion_rejected() {
+            self.note_unsupported_output(&error);
             warn!(
                 error = %error,
                 trigger_chars = error.result.trigger.chars().count(),
@@ -562,6 +563,29 @@ impl Daemon {
         );
     }
 
+    /// Count an expansion the route refused because it could not type it.
+    pub(crate) fn note_unsupported_output(&self, error: &EventError) {
+        if let Some(limit) = self
+            .output_capabilities()
+            .and_then(|capabilities| error.route_limit(&capabilities))
+        {
+            crate::counters::note_output_unsupported(limit);
+        }
+    }
+
+    /// What the connected output route can type, as status reports it.
+    fn output_capabilities(&self) -> Option<wayexpand_core::InjectorCapabilities> {
+        if self.input_method_mode {
+            let input_method = self.input_method.as_ref()?;
+            Some(input_method_injection_capabilities(
+                TextInjector::capabilities(input_method),
+                input_method.key_pass_through_capabilities(),
+            ))
+        } else {
+            self.injector.as_ref().map(|backend| backend.capabilities())
+        }
+    }
+
     /// Answer a pending `explain` request from the live engine state, adding
     /// what only the daemon knows: whether the output route is connected.
     pub(crate) fn answer_explain_request(&mut self) {
@@ -591,6 +615,11 @@ impl Daemon {
             );
         } else if output_connected {
             explanation.push("output backend", CheckStatus::Pass, "connected");
+            if let Some(capabilities) = self.output_capabilities() {
+                self.config
+                    .engine
+                    .explain_output_route(&mut explanation, &capabilities);
+            }
         } else {
             explanation.push(
                 "output backend",

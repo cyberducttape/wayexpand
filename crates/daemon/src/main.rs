@@ -113,6 +113,22 @@ impl EventError {
         self.source.source().is_some_and(|source| source.retryable)
     }
 
+    /// The route limit that refused this expansion before typing, if that
+    /// is what rejected it (rather than, say, a focus refusal).
+    fn route_limit(
+        &self,
+        capabilities: &wayexpand_core::InjectorCapabilities,
+    ) -> Option<wayexpand_core::RouteLimit> {
+        let source = self.source.source()?;
+        let limit = wayexpand_core::route_limit(
+            capabilities,
+            &self.result.insert,
+            self.result.reinsert_after,
+            self.result.cursor_offset,
+        )?;
+        (source.message == limit.message(capabilities.insertion_mode)).then_some(limit)
+    }
+
     fn expansion_rejected(&self) -> bool {
         matches!(
             &self.source,

@@ -141,6 +141,7 @@ impl Daemon {
                 match result {
                     Ok(()) => self.reconnect_delay = Duration::from_millis(250),
                     Err(error) if error.expansion_rejected() => {
+                        self.note_unsupported_output(&error);
                         warn!(
                             error = %error,
                             trigger_chars = error.result.trigger.chars().count(),

@@ -26,7 +26,7 @@ pub use state::{
     ExpansionResult, InputEvent, MatchPlan, PendingExpansionDispatch, PendingExpansionResult,
     WindowContext,
 };
-pub use transaction::TransactionOutcome;
+pub use transaction::{route_limit, RouteLimit, TransactionOutcome};
 
 use cache::{ClipboardTriggers, CommandCacheEntry};
 use matching::GlobPattern;

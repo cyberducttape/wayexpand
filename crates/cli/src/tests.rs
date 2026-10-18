@@ -328,6 +328,8 @@ fn status_json_matches_documented_stable_contract() {
          focus_assurance=protocol\n\
          output_refused_total=3\n\
          output_last_refusal=focus-changed\n\
+         output_unsupported_total=7\n\
+         output_last_unsupported=unicode\n\
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
          input_overflow_total=3\n\
@@ -382,6 +384,8 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["focus_assurance"], "protocol");
     assert_eq!(value["output_refused_total"], 3);
     assert_eq!(value["output_last_refusal"], "focus-changed");
+    assert_eq!(value["output_unsupported_total"], 7);
+    assert_eq!(value["output_last_unsupported"], "unicode");
     assert_eq!(value["output_reconnect_total"], 1);
     assert_eq!(value["input_reconnect_total"], 2);
     assert_eq!(value["input_overflow_total"], 3);
@@ -488,6 +492,8 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "focus_assurance",
             "output_refused_total",
             "output_last_refusal",
+            "output_unsupported_total",
+            "output_last_unsupported",
             "output_reconnect_total",
             "input_reconnect_total",
             "input_overflow_total",

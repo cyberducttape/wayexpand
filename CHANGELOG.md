@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand explain` now checks whether the output route can type the
+  replacement. It had said "would expand" for a snippet that libei's
+  keysym fallback refuses, such as one containing a pasted no-break space,
+  which can only be typed as ASCII. The explanation names an invisible or
+  look-alike character (no-break space, zero-width space, curly quote) and
+  its position; other characters are not revealed. Status gains
+  `output_unsupported_total` and `output_last_unsupported` (`unicode`,
+  `too-long`, `cursor`), because these refusals were not counted anywhere.
 - File templates: `wayexpand new` fills in a snippet's fields and writes the
   result to a file, so Dockerfiles, Ansible playbooks, Compose files and
   Kubernetes manifests no longer have to be typed into an editor (which

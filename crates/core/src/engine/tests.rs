@@ -5244,3 +5244,67 @@ fn a_word_boundary_trigger_typed_against_a_replacement_does_not_match() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].matched_text, "btw");
 }
+
+#[test]
+fn explain_reports_text_the_output_route_cannot_type() {
+    let keysym = crate::InjectorCapabilities {
+        insertion_mode: "libei keysym fallback",
+        max_text_chars: 1000,
+        cursor_reposition: true,
+        ..crate::InjectorCapabilities::default()
+    };
+    // A no-break space pasted into a command: matches, but keystroke
+    // typing cannot produce it.
+    let engine = explain_engine(
+        "[[expansion]]\ntrigger = \";lftp\"\nreplacement = \"lftp -u secretuser\u{00A0}host\"\n",
+    );
+    let mut explanation = engine.explain(";lftp", "libei");
+    assert!(explanation.would_expand());
+    engine.explain_output_route(&mut explanation, &keysym);
+    let failed = explanation.suppressed_by().unwrap();
+    assert_eq!(failed.name, "output route");
+    assert!(
+        failed
+            .detail
+            .contains("a no-break space (U+00A0) at character 19"),
+        "{}",
+        failed.detail
+    );
+    assert!(!explanation.render_text().contains("secretuser"));
+
+    // Other non-ASCII text is reported without naming the character.
+    let engine = explain_engine("[[expansion]]\ntrigger = \";x\"\nreplacement = \"Grüße\"\n");
+    let mut explanation = engine.explain(";x", "libei");
+    engine.explain_output_route(&mut explanation, &keysym);
+    let detail = &explanation.suppressed_by().unwrap().detail;
+    assert!(
+        detail.contains("a non-ASCII character at character 3"),
+        "{detail}"
+    );
+    assert!(!detail.contains('ü'));
+
+    // ASCII passes; a full-Unicode route passes anything; too long fails.
+    let engine = explain_engine("[[expansion]]\ntrigger = \";a\"\nreplacement = \"plain\"\n");
+    let mut explanation = engine.explain(";a", "libei");
+    engine.explain_output_route(&mut explanation, &keysym);
+    assert!(explanation.would_expand());
+    let short = crate::InjectorCapabilities {
+        max_text_chars: 3,
+        ..keysym
+    };
+    let mut explanation = engine.explain(";a", "libei");
+    engine.explain_output_route(&mut explanation, &short);
+    assert!(explanation
+        .suppressed_by()
+        .unwrap()
+        .detail
+        .contains("requires 5 characters"));
+    let unicode = crate::InjectorCapabilities {
+        full_unicode: true,
+        ..keysym
+    };
+    let engine = explain_engine("[[expansion]]\ntrigger = \";x\"\nreplacement = \"Grüße\"\n");
+    let mut explanation = engine.explain(";x", "libei");
+    engine.explain_output_route(&mut explanation, &unicode);
+    assert!(explanation.would_expand());
+}

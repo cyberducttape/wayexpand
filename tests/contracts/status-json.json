@@ -60,6 +60,8 @@
     "focus_assurance": "string",
     "output_refused_total": "integer",
     "output_last_refusal": "string",
+    "output_unsupported_total": "integer",
+    "output_last_unsupported": "string",
     "output_reconnect_total": "integer",
     "input_reconnect_total": "integer",
     "input_overflow_total": "integer",

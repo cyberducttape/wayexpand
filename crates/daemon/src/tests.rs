@@ -129,11 +129,13 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "memory_rss_kib",
             "output_health",
             "output_last_refusal",
+            "output_last_unsupported",
             "output_reconnect_total",
             "output_refused_total",
             "output_retiring_workers",
             "output_stalled_ms",
             "output_uncertain_total",
+            "output_unsupported_total",
             "paused",
             "source",
             "state",
@@ -1178,4 +1180,71 @@ fn status_response_fits_the_client_read_limit() {
         "status response is {} bytes",
         response.len()
     );
+}
+
+/// Types only ASCII, like the libei keysym fallback.
+struct AsciiOnlyInjector;
+
+impl TextInjector for AsciiOnlyInjector {
+    fn name(&self) -> &'static str {
+        "ascii-test"
+    }
+
+    fn capabilities(&self) -> wayexpand_core::InjectorCapabilities {
+        wayexpand_core::InjectorCapabilities {
+            insertion_mode: "ascii test",
+            cursor_reposition: true,
+            ..wayexpand_core::InjectorCapabilities::default()
+        }
+    }
+
+    fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+        unreachable!("refused before typing")
+    }
+
+    fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+        unreachable!("refused before typing")
+    }
+}
+
+#[test]
+fn text_the_route_cannot_type_is_classified_as_unsupported() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":a\"\nreplacement = \"lftp\u{00A0}host\"\n\n[[expansion]]\ntrigger = \":b\"\nreplacement = \"ok\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let policy = wayexpand_core::OrganizationPolicy::default();
+    let mut injector = AsciiOnlyInjector;
+    let mut evdev = None;
+
+    let error = apply_deferred_evdev_event(
+        &mut engine,
+        InputEvent::Text(":a".into()),
+        &mut injector,
+        &mut evdev,
+        &policy,
+        "ascii-test",
+    )
+    .expect_err("a no-break space cannot be typed through an ASCII route");
+    assert!(error.expansion_rejected());
+    assert_eq!(
+        error.route_limit(&injector.capabilities()),
+        Some(wayexpand_core::RouteLimit::Unicode {
+            character: '\u{00A0}',
+            position: 5
+        })
+    );
+    // A rejection for another reason is not a route limit.
+    let other = EventError {
+        result: error.result.clone(),
+        source: wayexpand_core::TransactionOutcome::NotApplied {
+            source: InjectorError {
+                backend: "ascii-test",
+                message: "focus changed".into(),
+                retryable: false,
+            },
+        },
+    };
+    assert_eq!(other.route_limit(&injector.capabilities()), None);
 }

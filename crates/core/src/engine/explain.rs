@@ -6,8 +6,8 @@
 
 use serde::Serialize;
 
-use super::ExpansionEngine;
-use crate::{render_template_with_cursor, AppFilter, MatchMode};
+use super::{route_limit, ExpansionEngine, RouteLimit};
+use crate::{render_template_with_cursor, AppFilter, InjectorCapabilities, MatchMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -381,6 +381,99 @@ impl ExpansionEngine {
 }
 
 /// Append the organization-policy check and return the explanation.
+impl ExpansionEngine {
+    /// Add whether the output route can type the snippet `explanation`
+    /// resolved to exactly as written: the same check the daemon makes
+    /// before typing. Command and form snippets are skipped, since their
+    /// text is not known until they run.
+    pub fn explain_output_route(
+        &self,
+        explanation: &mut Explanation,
+        capabilities: &InjectorCapabilities,
+    ) {
+        let Some(trigger) = explanation.snippet.as_deref() else {
+            return;
+        };
+        let Some(expansion) = self
+            .config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.answers_to(trigger))
+        else {
+            return;
+        };
+        if expansion.command.is_some()
+            || !crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
+        {
+            return;
+        }
+        let Ok((rendered, cursor_offset)) =
+            render_template_with_cursor(&expansion.replacement, &self.template_context())
+        else {
+            return;
+        };
+        let mode = capabilities.insertion_mode;
+        match route_limit(capabilities, &rendered, None, cursor_offset) {
+            None => explanation.push(
+                "output route",
+                CheckStatus::Pass,
+                format!("{mode} can type the replacement"),
+            ),
+            Some(RouteLimit::Unicode {
+                character,
+                position,
+            }) => explanation.push(
+                "output route",
+                CheckStatus::Fail,
+                format!(
+                    "{mode} types only ASCII, and the replacement has {} at character \
+                     {position}; {}",
+                    describe_non_ascii(character),
+                    if invisible_name(character).is_some() {
+                        "it was probably pasted in by accident: replace it with a plain \
+                         character"
+                    } else {
+                        "remove it, or use an output route with full Unicode support \
+                         (`wayexpand setup`)"
+                    }
+                ),
+            ),
+            Some(limit) => explanation.push("output route", CheckStatus::Fail, limit.message(mode)),
+        }
+    }
+}
+
+/// The name of an easily pasted, invisible or look-alike character.
+fn invisible_name(character: char) -> Option<&'static str> {
+    Some(match character {
+        '\u{00A0}' => "a no-break space",
+        '\u{202F}' => "a narrow no-break space",
+        '\u{2007}' => "a figure space",
+        '\u{2009}' => "a thin space",
+        '\u{200B}' => "a zero-width space",
+        '\u{200C}' => "a zero-width non-joiner",
+        '\u{200D}' => "a zero-width joiner",
+        '\u{2060}' => "a word joiner",
+        '\u{FEFF}' => "a byte-order mark",
+        '\u{00AD}' => "a soft hyphen",
+        '\u{2018}' | '\u{2019}' => "a curly single quote",
+        '\u{201C}' | '\u{201D}' => "a curly double quote",
+        '\u{2013}' => "an en dash",
+        '\u{2014}' => "an em dash",
+        _ => return None,
+    })
+}
+
+/// Name an invisible or look-alike character with its code point; any other
+/// character is described without revealing it, since explanations never
+/// include replacement text.
+fn describe_non_ascii(character: char) -> String {
+    match invisible_name(character) {
+        Some(name) => format!("{name} (U+{:04X})", u32::from(character)),
+        None => "a non-ASCII character".to_owned(),
+    }
+}
+
 fn explanation_with_policy(
     engine: &ExpansionEngine,
     mut explanation: Explanation,
