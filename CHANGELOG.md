@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The libei output no longer lets a stream of server events stall typing.
+  Server updates are applied before anything is typed, without a limit on
+  how many; a bounded batch (512 events, 50 ms) is now applied per attempt,
+  and an expansion is refused rather than typed while more are still
+  queued.
+- A signal no longer cuts a libei wait short. An interrupted poll was
+  reported as the deadline expiring, failing the EIS handshake early; it
+  now waits out the time that is left.
 - The GUI no longer reports a save conflict when the configuration file
   was changed elsewhere to exactly the edit being saved.
 - A libei portal session that fails or times out after it was created is

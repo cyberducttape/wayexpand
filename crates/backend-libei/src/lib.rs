@@ -139,6 +139,11 @@ pub enum LibeiError {
         characters: usize,
         estimated_ms: u64,
     },
+    #[error(
+        "the EIS server is still sending device updates; the expansion was not typed against \
+         keyboard state that may be out of date"
+    )]
+    EventBacklog,
 }
 
 impl LibeiError {
@@ -350,27 +355,34 @@ impl LibeiInjector {
     /// or a replaced device must never be typed through with stale
     /// assumptions, so this rebuilds the keysym map or refuses (fail closed).
     fn sync_server_state(&mut self) -> Result<(), LibeiError> {
-        for event in self.events.drain()? {
+        let Self {
+            events: pump,
+            mode,
+            device,
+            device_unavailable,
+            ..
+        } = self;
+        pump.drain(events::DrainBudget::SYNC, |event| {
             match event {
                 reis::event::EiEvent::KeyboardModifiers(modifiers)
-                    if modifiers.device == self.device =>
+                    if modifiers.device == *device =>
                 {
-                    if let TextMode::Keysym(typer) = &mut self.mode {
+                    if let TextMode::Keysym(typer) = mode {
                         typer.note_modifiers(modifiers.group, modifiers.locked);
                     }
                 }
-                reis::event::EiEvent::DevicePaused(paused) if paused.device == self.device => {
-                    self.device_unavailable = Some("paused by the server");
+                reis::event::EiEvent::DevicePaused(paused) if paused.device == *device => {
+                    *device_unavailable = Some("paused by the server");
                 }
-                reis::event::EiEvent::DeviceResumed(resumed) if resumed.device == self.device => {
-                    if self.device_unavailable == Some("paused by the server") {
-                        self.device_unavailable = None;
+                reis::event::EiEvent::DeviceResumed(resumed) if resumed.device == *device => {
+                    if *device_unavailable == Some("paused by the server") {
+                        *device_unavailable = None;
                     }
                 }
-                reis::event::EiEvent::DeviceRemoved(removed) if removed.device == self.device => {
+                reis::event::EiEvent::DeviceRemoved(removed) if removed.device == *device => {
                     // A keymap change replaces the device; its old keymap
                     // must not be used again.
-                    self.device_unavailable = Some("removed by the server");
+                    *device_unavailable = Some("removed by the server");
                 }
                 reis::event::EiEvent::Disconnected(disconnected) => {
                     return Err(LibeiError::Disconnected(
@@ -381,7 +393,8 @@ impl LibeiInjector {
                 }
                 _ => {}
             }
-        }
+            Ok(())
+        })?;
         if let Some(reason) = self.device_unavailable {
             return Err(LibeiError::DeviceUnavailable(reason));
         }
@@ -916,6 +929,155 @@ mod tests {
     }
 
     #[test]
+    fn a_signal_does_not_cut_the_handshake_deadline_short() {
+        static INTERRUPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        extern "C" fn count(_: libc::c_int) {
+            INTERRUPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        // SAFETY: installs a handler that only bumps an atomic, without
+        // SA_RESTART, so the signal interrupts poll exactly as the daemon's
+        // SIGINT/SIGTERM handler does.
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = count as extern "C" fn(libc::c_int) as usize;
+            libc::sigemptyset(&mut action.sa_mask);
+            assert_eq!(
+                libc::sigaction(libc::SIGUSR2, &action, std::ptr::null_mut()),
+                0
+            );
+        }
+        // SAFETY: pthread_self has no preconditions.
+        let target = unsafe { libc::pthread_self() };
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signaller_done = std::sync::Arc::clone(&done);
+        let signaller = std::thread::spawn(move || {
+            while !signaller_done.load(std::sync::atomic::Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(20));
+                // SAFETY: the test thread outlives this loop; it joins us.
+                unsafe { libc::pthread_kill(target, libc::SIGUSR2) };
+            }
+        });
+        let (client, _server) = UnixStream::pair().unwrap();
+        let context = super::ei::Context::new(client).unwrap();
+        let started = std::time::Instant::now();
+        let result = super::handshake_with_timeout(&context, Duration::from_millis(300));
+        let elapsed = started.elapsed();
+        done.store(true, std::sync::atomic::Ordering::Release);
+        signaller.join().unwrap();
+        assert!(INTERRUPTS.load(std::sync::atomic::Ordering::Relaxed) > 0);
+        assert!(matches!(result, Err(error) if error.to_string().contains("deadline expired")));
+        assert!(
+            elapsed >= Duration::from_millis(290),
+            "the handshake gave up after {elapsed:?} of its 300 ms"
+        );
+    }
+
+    /// A minimal EIS server: completes the handshake, announces `seats`
+    /// seats in one burst, and keeps the connection open until `release`.
+    fn flooding_eis_server(
+        stream: UnixStream,
+        seats: usize,
+        release: std::sync::mpsc::Receiver<()>,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let context = reis::eis::Context::new(stream).unwrap();
+            let mut handshaker = reis::handshake::EisHandshaker::new(&context, 1);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let response = 'handshake: loop {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "client never finished the handshake"
+                );
+                let _ = context.read();
+                while let Some(request) = context.pending_request() {
+                    let reis::PendingRequestResult::Request(request) = request else {
+                        panic!("client sent an unparseable handshake request");
+                    };
+                    if let Some(response) = handshaker.handle_request(request).unwrap() {
+                        break 'handshake response;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            let converter = reis::request::EisRequestConverter::new(&context, response, 1);
+            let _seats: Vec<_> = (0..seats)
+                .map(|_| {
+                    converter.handle().add_seat(
+                        Some("seat"),
+                        reis::request::DeviceCapability::Keyboard.into(),
+                    )
+                })
+                .collect();
+            while let Err(error) = context.flush() {
+                assert_eq!(error, rustix::io::Errno::AGAIN, "flush failed");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let _ = release.recv();
+        })
+    }
+
+    #[test]
+    fn a_flood_of_server_events_is_drained_in_bounded_batches_without_losing_any() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let (release, released) = std::sync::mpsc::channel();
+        let server = flooding_eis_server(server, 300, released);
+        let context = super::ei::Context::new(client).unwrap();
+        let (_connection, mut pump) =
+            super::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
+        // Let the whole burst arrive, so the first drain meets a flood.
+        std::thread::sleep(Duration::from_millis(200));
+        let budget = super::events::DrainBudget {
+            events: 100,
+            time: Duration::from_secs(5),
+        };
+        let mut seats = 0;
+        let mut batches = 0;
+        loop {
+            let mut batch = 0;
+            let result = pump.drain(budget, |event| {
+                batch += 1;
+                if matches!(event, reis::event::EiEvent::SeatAdded(_)) {
+                    seats += 1;
+                }
+                Ok(())
+            });
+            assert!(batch <= budget.events, "one drain handled {batch} events");
+            batches += 1;
+            match result {
+                Ok(()) => break,
+                Err(super::LibeiError::EventBacklog) => {}
+                Err(error) => panic!("unexpected drain failure: {error}"),
+            }
+            assert!(batches < 50, "the flood never finished draining");
+        }
+        assert!(batches > 1, "the flood should not fit one bounded drain");
+        assert_eq!(seats, 300, "every event is delivered across the batches");
+        release.send(()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_drain_that_runs_out_of_time_fails_closed() {
+        let (client, server) = UnixStream::pair().unwrap();
+        let (release, released) = std::sync::mpsc::channel();
+        let server = flooding_eis_server(server, 10, released);
+        let context = super::ei::Context::new(client).unwrap();
+        let (_connection, mut pump) =
+            super::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        let budget = super::events::DrainBudget {
+            events: usize::MAX,
+            time: Duration::ZERO,
+        };
+        assert!(matches!(
+            pump.drain(budget, |_| Ok(())),
+            Err(super::LibeiError::EventBacklog)
+        ));
+        release.send(()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
     fn handshake_has_a_bounded_deadline() {
         let (client, _server) = UnixStream::pair().unwrap();
         let context = super::ei::Context::new(client).unwrap();
@@ -1160,6 +1322,7 @@ mod tests {
         ))
         .is_retryable());
         assert!(!super::LibeiError::MissingRequiredDevice.is_retryable());
+        assert!(!super::LibeiError::EventBacklog.is_retryable());
         assert!(!super::LibeiError::Portal("permission denied".into()).is_retryable());
         assert!(!super::LibeiError::TextTooLarge {
             length: 2,

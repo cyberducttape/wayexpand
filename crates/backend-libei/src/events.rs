@@ -67,20 +67,32 @@ impl EventPump {
         Ok(())
     }
 
-    /// Every event the server has already sent, without blocking.
-    pub(super) fn drain(&mut self) -> Result<Vec<EiEvent>, LibeiError> {
-        let mut events = Vec::new();
+    /// Hand `handle` every event the server has already sent, without
+    /// blocking, within `budget`. A server that keeps sending could otherwise
+    /// hold the caller here, and the typing waiting on it, indefinitely; past
+    /// the budget this fails closed (nothing is typed against state that is
+    /// still arriving) and the rest stays queued for the next call.
+    pub(super) fn drain(
+        &mut self,
+        budget: DrainBudget,
+        mut handle: impl FnMut(EiEvent) -> Result<(), LibeiError>,
+    ) -> Result<(), LibeiError> {
+        let deadline = Instant::now() + budget.time;
+        let mut handled = 0_usize;
         loop {
             self.handle_pending_requests()?;
             while let Some(event) = self.converter.next_event() {
-                events.push(event);
+                handle(event)?;
+                handled += 1;
+                budget.check(handled, deadline)?;
             }
+            budget.check(handled, deadline)?;
             if !poll_context(&self.context, Duration::ZERO)? {
-                return Ok(events);
+                return Ok(());
             }
             match self.context.read() {
                 Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(events),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Err(LibeiError::Disconnected("EIS socket closed".into()))
                 }
@@ -90,11 +102,33 @@ impl EventPump {
     }
 }
 
-pub(super) fn poll_context(context: &ei::Context, timeout: Duration) -> Result<bool, LibeiError> {
-    let timeout = rustix::event::Timespec {
-        tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
-        tv_nsec: timeout.subsec_nanos().into(),
+/// How much a single [`EventPump::drain`] may take on.
+#[derive(Clone, Copy)]
+pub(super) struct DrainBudget {
+    pub(super) events: usize,
+    pub(super) time: Duration,
+}
+
+impl DrainBudget {
+    /// Generous for a layout switch or device change (a handful of events),
+    /// small enough that a flooding server cannot stall typing.
+    pub(super) const SYNC: Self = Self {
+        events: 512,
+        time: Duration::from_millis(50),
     };
+
+    fn check(self, handled: usize, deadline: Instant) -> Result<(), LibeiError> {
+        if handled >= self.events || Instant::now() >= deadline {
+            return Err(LibeiError::EventBacklog);
+        }
+        Ok(())
+    }
+}
+
+/// Wait until the EIS socket is readable or `timeout` has passed; `false`
+/// means the time ran out.
+pub(super) fn poll_context(context: &ei::Context, timeout: Duration) -> Result<bool, LibeiError> {
+    let deadline = Instant::now() + timeout;
     let mut fds = [rustix::event::PollFd::new(
         context,
         rustix::event::PollFlags::IN
@@ -102,13 +136,20 @@ pub(super) fn poll_context(context: &ei::Context, timeout: Duration) -> Result<b
             | rustix::event::PollFlags::HUP
             | rustix::event::PollFlags::NVAL,
     )];
-    match rustix::event::poll(&mut fds, Some(&timeout)) {
-        Ok(0) => return Ok(false),
-        Ok(_) => {}
-        // A handled signal interrupted the wait. That is not a broken EIS
-        // connection, which a retryable error here would retire mid-typing.
-        Err(rustix::io::Errno::INTR) => return Ok(false),
-        Err(error) => return Err(LibeiError::Handshake(reis::Error::Io(error.into()))),
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let remaining = rustix::event::Timespec {
+            tv_sec: remaining.as_secs().try_into().unwrap_or(i64::MAX),
+            tv_nsec: remaining.subsec_nanos().into(),
+        };
+        match rustix::event::poll(&mut fds, Some(&remaining)) {
+            Ok(0) => return Ok(false),
+            Ok(_) => break,
+            // A handled signal interrupted the wait. That is neither a broken
+            // EIS connection nor the deadline, so wait out the time left.
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(error) => return Err(LibeiError::Handshake(reis::Error::Io(error.into()))),
+        }
     }
     let revents = fds[0].revents();
     if revents.intersects(
