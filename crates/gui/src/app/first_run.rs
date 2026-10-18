@@ -35,22 +35,34 @@ impl GuiApp {
             );
             ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
             ui.add_space(22.0);
-            theme::card(ui, palette, |ui| {
-                ui.set_width(ui.available_width().min(600.0));
-                ui.label(RichText::new(self.strings.onboarding_recommended_route_title()).strong());
-                ui.label(RichText::new(recommended_route).color(palette.accent));
-                ui.label(
-                    RichText::new(recommended_route_detail)
-                        .small()
-                        .color(palette.muted),
-                );
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(self.strings.onboarding_certification_note())
-                        .small()
-                        .color(palette.warning),
-                );
-            });
+            // Both cards share one column width, so their edges line up.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width().min(600.0), 0.0),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    theme::card(ui, palette, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new(self.strings.onboarding_recommended_route_title())
+                                    .strong(),
+                            );
+                            ui.label(RichText::new(recommended_route).color(palette.accent));
+                            ui.label(
+                                RichText::new(recommended_route_detail)
+                                    .small()
+                                    .color(palette.muted),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(self.strings.onboarding_certification_note())
+                                    .small()
+                                    .color(palette.warning),
+                            );
+                        });
+                    });
+                },
+            );
             ui.add_space(10.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width().min(600.0), ui.available_height()),

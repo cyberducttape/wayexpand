@@ -148,8 +148,8 @@ impl GuiApp {
                     }
                 });
                 ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(4.0);
+                self.render_search(ui);
+                ui.add_space(8.0);
                 let font_scale = self.settings_font_scale.multiplier();
                 let categories = self.categories();
                 let mut category_action = None;

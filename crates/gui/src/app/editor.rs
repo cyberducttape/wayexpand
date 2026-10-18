@@ -274,6 +274,8 @@ impl GuiApp {
         command_backed: bool,
     ) {
         let mut detect_app_clicked = false;
+        let mut variable_inserted = false;
+        let daemon_capabilities = self.daemon_capabilities;
         egui::Frame::new()
             .fill(palette.surface)
             .stroke(egui::Stroke::new(1.0, palette.border))
@@ -320,6 +322,7 @@ impl GuiApp {
                     strings.app_filter(),
                     strings.matching(),
                     strings.output_file(),
+                    strings.replacement(),
                 ]
                 .iter()
                 .map(|label| {
@@ -360,6 +363,80 @@ impl GuiApp {
                                 .color(palette.muted),
                         );
                     }
+                });
+
+                // What the snippet types comes right after its trigger;
+                // the rest of the form is metadata and matching rules.
+                form_row(ui, strings.replacement(), columns, |ui| {
+                    if command_backed {
+                        hint(
+                            ui,
+                            RichText::new(strings.command_backed_help())
+                                .small()
+                                .color(palette.warning),
+                        );
+                    }
+                    if let Some(limit) = daemon_capabilities
+                        .and_then(|capabilities| capabilities.injection_max_text_chars)
+                    {
+                        let count = draft.replacement.chars().count();
+                        if limit > 0 && count > limit {
+                            let mode = daemon_capabilities
+                                .and_then(|capabilities| capabilities.injection_mode)
+                                .unwrap_or("active injection");
+                            hint(
+                                ui,
+                                RichText::new(strings.insertion_limit_warning(count, limit, mode))
+                                    .small()
+                                    .color(palette.warning),
+                            );
+                        }
+                    }
+                    ui.add(
+                        TextEdit::multiline(&mut draft.replacement)
+                            .margin(theme::FIELD_MARGIN)
+                            .id(egui::Id::new(REPLACEMENT_EDITOR_SALT))
+                            .font(egui::TextStyle::Monospace)
+                            .desired_rows(7)
+                            .desired_width(field_width),
+                    );
+                    egui::CollapsingHeader::new(
+                        RichText::new(strings.template_variables()).small(),
+                    )
+                    .id_salt("template_variables")
+                    .show(ui, |ui| {
+                        hint(
+                            ui,
+                            RichText::new(strings.template_help())
+                                .small()
+                                .color(palette.muted),
+                        );
+                        for (group, variables) in TEMPLATE_VARIABLE_GROUPS {
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(strings.template_variable_group(*group))
+                                    .small()
+                                    .strong(),
+                            );
+                            ui.horizontal_wrapped(|ui| {
+                                for variable in *variables {
+                                    if theme::secondary_button(ui, palette, variable)
+                                        .on_hover_text(
+                                            strings.template_variable_description(variable),
+                                        )
+                                        .clicked()
+                                    {
+                                        insert_into_replacement_editor(
+                                            ui.ctx(),
+                                            &mut draft.replacement,
+                                            variable,
+                                        );
+                                        variable_inserted = true;
+                                    }
+                                }
+                            });
+                        }
+                    });
                 });
 
                 form_row(ui, strings.aliases(), columns, |ui| {
@@ -404,33 +481,35 @@ impl GuiApp {
                 });
 
                 form_row(ui, strings.category(), columns, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let picker_width = if categories.is_empty() { 0.0 } else { 130.0 };
-                        ui.add(
-                            TextEdit::singleline(&mut draft.category)
-                                .margin(theme::FIELD_MARGIN)
-                                .hint_text(strings.category_hint())
-                                .desired_width(
-                                    (field_width - picker_width - ui.spacing().item_spacing.x)
-                                        .max(120.0),
-                                ),
-                        );
-                        if !categories.is_empty() {
-                            egui::ComboBox::from_id_salt("category_picker")
-                                .selected_text(strings.existing())
-                                .width(picker_width - 20.0)
-                                .show_ui(ui, |ui| {
+                    // Right to left so the text field takes exactly the
+                    // width the picker leaves; the shared top and padding
+                    // give both the same height.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(field_width, 0.0),
+                        egui::Layout::right_to_left(egui::Align::Min),
+                        |ui| {
+                            ui.spacing_mut().button_padding.y = f32::from(theme::FIELD_MARGIN.top);
+                            if !categories.is_empty() {
+                                ui.menu_button(format!("{}  ⏷", strings.existing()), |ui| {
                                     for category in categories {
                                         if ui
                                             .selectable_label(draft.category == category, &category)
                                             .clicked()
                                         {
                                             draft.category = category.clone();
+                                            ui.close();
                                         }
                                     }
                                 });
-                        }
-                    });
+                            }
+                            ui.add(
+                                TextEdit::singleline(&mut draft.category)
+                                    .margin(theme::FIELD_MARGIN)
+                                    .hint_text(strings.category_hint())
+                                    .desired_width(ui.available_width().max(120.0)),
+                            );
+                        },
+                    );
                 });
 
                 form_row(ui, strings.output_file(), columns, |ui| {
@@ -527,82 +606,12 @@ impl GuiApp {
                         task.cancelled.store(true, Ordering::Release);
                     }
                 }
-                let Some(draft) = self.draft.as_mut() else {
-                    return;
-                };
-                ui.add_space(8.0);
-                ui.label(self.strings.replacement());
-                if command_backed {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(self.strings.command_backed_help())
-                                .small()
-                                .color(palette.warning),
-                        )
-                        .wrap(),
-                    );
-                }
-                if let Some(capabilities) = self.daemon_capabilities {
-                    if let Some(limit) = capabilities.injection_max_text_chars {
-                        let count = draft.replacement.chars().count();
-                        if limit > 0 && count > limit {
-                            let mode = capabilities.injection_mode.unwrap_or("active injection");
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(
-                                        self.strings.insertion_limit_warning(count, limit, mode),
-                                    )
-                                    .small()
-                                    .color(palette.warning),
-                                )
-                                .wrap(),
-                            );
-                        }
-                    }
-                }
-                ui.add(
-                    TextEdit::multiline(&mut draft.replacement)
-                        .margin(theme::FIELD_MARGIN)
-                        .id(egui::Id::new(REPLACEMENT_EDITOR_SALT))
-                        .font(egui::TextStyle::Monospace)
-                        .desired_rows(9)
-                        .desired_width(f32::INFINITY),
-                );
             });
         self.handle_app_detection(ui, detect_app_clicked);
+        if variable_inserted {
+            self.invalidate_preview();
+        }
         ui.add_space(10.0);
-        ui.collapsing(self.strings.template_variables(), |ui| {
-            ui.label(
-                RichText::new(self.strings.template_help())
-                    .small()
-                    .color(palette.muted),
-            );
-            for (group, variables) in TEMPLATE_VARIABLE_GROUPS {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(self.strings.template_variable_group(*group))
-                        .small()
-                        .strong(),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    for variable in *variables {
-                        if theme::secondary_button(ui, palette, variable)
-                            .on_hover_text(self.strings.template_variable_description(variable))
-                            .clicked()
-                        {
-                            if let Some(draft) = self.draft.as_mut() {
-                                insert_into_replacement_editor(
-                                    ui.ctx(),
-                                    &mut draft.replacement,
-                                    variable,
-                                );
-                            }
-                            self.invalidate_preview();
-                        }
-                    }
-                });
-            }
-        });
         ui.horizontal(|ui| {
             ui.label(self.strings.preview_app());
             ui.add(
@@ -800,12 +809,13 @@ impl GuiApp {
                         if self.try_live_open && self.playground.expansions == 0 {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(self.strings.try_live_help())
+                                    RichText::new(self.strings.try_live_short())
                                         .small()
                                         .color(palette.muted),
                                 )
                                 .truncate(),
-                            );
+                            )
+                            .on_hover_text(self.strings.try_live_help());
                         }
                     });
                 });
@@ -815,11 +825,9 @@ impl GuiApp {
                 ui.add_space(4.0);
                 if self.playground.form_detected {
                     ui.label(
-                        RichText::new(
-                            "Form snippet detected. Form expansion cannot be simulated in Try It Live yet.",
-                        )
-                        .small()
-                        .color(palette.warning),
+                        RichText::new(self.strings.try_live_form_detected())
+                            .small()
+                            .color(palette.warning),
                     );
                 }
                 let id = egui::Id::new("try_live_field");
@@ -964,7 +972,7 @@ pub(crate) fn form_row(
     });
 }
 
-/// Insert `text` at the replacement editor's caret/// Insert `text` at the replacement editor's caret (replacing any selection)
+/// Insert `text` at the replacement editor's caret (replacing any selection)
 /// and leave the caret after it, so inserting `{{cursor}}` lands where the
 /// user was typing rather than at the end of the snippet. Falls back to
 /// appending when the editor has no remembered caret yet.

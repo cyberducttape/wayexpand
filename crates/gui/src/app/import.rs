@@ -60,6 +60,7 @@ impl GuiApp {
         if self.import_open {
             let mut open = self.import_open;
             egui::Window::new(self.strings.import_dialog_title())
+                .order(egui::Order::Foreground)
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)

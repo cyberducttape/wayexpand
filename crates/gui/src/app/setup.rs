@@ -237,6 +237,7 @@ impl GuiApp {
             return;
         }
         egui::Window::new(self.strings.evdev_setup_title())
+            .order(egui::Order::Foreground)
             .collapsible(false)
             .resizable(true)
             .default_width(440.0)

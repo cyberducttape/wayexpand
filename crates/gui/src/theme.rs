@@ -15,6 +15,8 @@ pub const FIELD_MARGIN: Margin = Margin::symmetric(8, 6);
 
 #[derive(Clone, Copy)]
 pub struct Palette {
+    /// Main text: labels, typed text, button text.
+    pub text: Color32,
     pub accent: Color32,
     pub accent_weak: Color32,
     /// Text color with strong contrast against `accent` (fixed per palette
@@ -35,6 +37,7 @@ impl Palette {
     pub fn for_pack(pack: ColorPack, dark: bool) -> Self {
         let scheme = ColorScheme::for_pack(pack, dark);
         Self {
+            text: ColorScheme::text_color(pack, dark),
             accent: scheme.accent,
             accent_weak: scheme.accent_weak,
             accent_text: scheme.accent_text,
@@ -145,6 +148,17 @@ fn apply_for_pack(ctx: &egui::Context, theme: egui::Theme, pack: ColorPack, font
     // painting it with the border or accent color made every idle field
     // look disabled and every hovered one change its text color.
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, palette.border);
+    // Readable text in every state, from the pack rather than egui's dim
+    // baseline. Disabled widgets are still faded by egui itself.
+    for widgets in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widgets.fg_stroke.color = palette.text;
+    }
 
     // Hover should provide a clear change in state without making every
     // toolbar control look selected. The active state carries the heavier
@@ -509,7 +523,7 @@ pub fn snippet_row_scaled(
             egui::Align2::LEFT_TOP,
             row.trigger,
             FontId::new(14.5 * scale, FontFamily::Monospace),
-            ui.visuals().text_color(),
+            palette.text,
         );
         if row.command_backed {
             let galley = painter.layout_no_wrap(

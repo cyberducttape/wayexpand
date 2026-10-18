@@ -46,28 +46,14 @@ impl GuiApp {
                     }),
             )
             .show(root, |ui| {
-                // One row when there is room: identity on the left, the
-                // controls people reach for on the right. Narrow windows fall
-                // back to a second row for search instead of overlapping.
-                let single_row = ui.available_width() >= 980.0;
+                // Identity on the left, status and actions on the right.
+                // Search lives at the top of the snippet list it filters.
                 ui.horizontal(|ui| {
                     self.render_toolbar_brand(ui, palette);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         self.render_toolbar_controls(ui, palette);
-                        if single_row {
-                            ui.add_space(4.0);
-                            self.render_search(ui);
-                        }
                     });
                 });
-                if !single_row {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.render_search(ui);
-                        });
-                    });
-                }
             });
     }
 
@@ -299,9 +285,41 @@ impl GuiApp {
         route_contract_for(&source, &backend)
     }
 
-    /// The search field and its field-scope menu, laid out right to left.
+    /// The search field, a clear button, and its field-scope menu, filling
+    /// the width of the snippet list.
     pub(crate) fn render_search(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(self.strings.search_fields(), |ui| {
+        ui.horizontal(|ui| {
+            let fields_width = 30.0;
+            let clear_width = if self.filter.is_empty() { 0.0 } else { 26.0 };
+            ui.add(
+                TextEdit::singleline(&mut self.filter)
+                    .id(egui::Id::new(SEARCH_FIELD_SALT))
+                    .hint_text(self.strings.search_placeholder())
+                    .margin(egui::Margin::symmetric(10, 7))
+                    .desired_width(
+                        (ui.available_width()
+                            - fields_width
+                            - clear_width
+                            - 2.0 * ui.spacing().item_spacing.x)
+                            .max(80.0),
+                    ),
+            )
+            .on_hover_text(self.strings.search_tooltip());
+            if !self.filter.is_empty()
+                && ui
+                    .small_button("×")
+                    .on_hover_text(self.strings.clear_filters())
+                    .clicked()
+            {
+                self.filter.clear();
+            }
+            self.render_search_fields_menu(ui);
+        });
+    }
+
+    fn render_search_fields_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("⚙", |ui| {
+            ui.label(RichText::new(self.strings.search_fields()).small().strong());
             ui.checkbox(
                 &mut self.search_fields.triggers,
                 self.strings.search_triggers(),
@@ -315,22 +333,8 @@ impl GuiApp {
                 &mut self.search_fields.replacements,
                 self.strings.search_replacements(),
             );
-        });
-        if !self.filter.is_empty()
-            && ui
-                .small_button("×")
-                .on_hover_text(self.strings.clear_filters())
-                .clicked()
-        {
-            self.filter.clear();
-        }
-        ui.add(
-            TextEdit::singleline(&mut self.filter)
-                .id(egui::Id::new(SEARCH_FIELD_SALT))
-                .hint_text(self.strings.search_placeholder())
-                .margin(egui::Margin::symmetric(10, 7))
-                .desired_width(280.0),
-        )
-        .on_hover_text(self.strings.search_tooltip());
+        })
+        .response
+        .on_hover_text(self.strings.search_fields());
     }
 }

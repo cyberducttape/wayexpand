@@ -126,6 +126,7 @@ impl GuiApp {
         let mut open = self.settings_open;
         let max_size = theme::dialog_max_size(ctx, 560.0);
         egui::Window::new(self.strings.settings_title())
+            .order(egui::Order::Foreground)
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

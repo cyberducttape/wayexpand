@@ -4,6 +4,24 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI polish:
+  - Search moved from the crowded header, where it shrank to "Se…", to the
+    top of the snippet list it filters.
+  - The replacement editor now sits right below the trigger, with the
+    template variable buttons under it, instead of below every other field.
+  - Labels, triggers and typed text use each color pack's own main text
+    color; egui's dim baseline had made labels fainter than the hints
+    beneath them.
+  - Open dialogs dim the window behind them.
+  - The Category picker lines up with its text field.
+  - The two first-run cards share one width.
+  - The Matcher preview caption no longer runs off the edge (the full
+    explanation is on hover).
+  - "Production readiness" in diagnostics no longer draws its value over
+    its label.
+  - The form-snippet note in the preview is translated.
+- `scripts/gui-screenshot.sh` renders the GUI in a private headless
+  compositor for checking its look.
 - The editor's Template variables section groups its buttons (Date and
   time, Unique and random, Fill in when expanding, Text and system) and
   adds the new formatted date and time, UUID, random, field, choice and

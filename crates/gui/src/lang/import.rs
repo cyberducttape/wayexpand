@@ -423,6 +423,28 @@ impl Strings {
         }
     }
 
+    pub fn try_live_short(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Tests matching only, not desktop integration",
+            Language::Indonesian => "Hanya menguji pencocokan, bukan integrasi desktop",
+            Language::German => "Testet nur Matching, keine Desktop-Integration",
+        }
+    }
+
+    pub fn try_live_form_detected(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Form snippets can't be simulated here. Try them in an app, or write files with `wayexpand new`."
+            }
+            Language::Indonesian => {
+                "Cuplikan formulir tidak dapat disimulasikan di sini. Coba di aplikasi, atau tulis berkas dengan `wayexpand new`."
+            }
+            Language::German => {
+                "Formular-Snippets lassen sich hier nicht simulieren. In einer App testen oder Dateien mit `wayexpand new` schreiben."
+            }
+        }
+    }
+
     pub fn try_live_hint(&self) -> &'static str {
         match self.lang {
             Language::English => "Type a trigger and watch it expand…",

@@ -13,6 +13,7 @@ mod picker;
 mod playground;
 mod preview;
 mod runtime;
+mod screenshot;
 mod settings;
 mod status;
 mod theme;
@@ -243,6 +244,8 @@ struct GuiApp {
     /// worker reports completion, preventing retries from accumulating
     /// detached threads.
     app_detection: Option<AppDetectionTask>,
+    /// Debug builds only: capture the window and exit (see `screenshot`).
+    screenshot: Option<screenshot::ScreenshotCapture>,
     /// Set by `execute_action(PendingAction::Close)` once the user has
     /// confirmed closing with an unsaved draft (or there was nothing to
     /// confirm). The original OS close request was already cancelled by
@@ -445,6 +448,7 @@ impl GuiApp {
             preview_cache: None,
             preview_revision: 0,
             app_detection: None,
+            screenshot: screenshot::ScreenshotCapture::from_env(),
             close_after_confirm: false,
             window_title: String::new(),
             playground: playground::Playground::default(),
@@ -466,6 +470,21 @@ impl eframe::App for GuiApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
+        if let Some(capture) = self.screenshot.as_mut() {
+            let view = capture.take_view();
+            capture.tick(ctx);
+            match view.as_deref() {
+                Some("light") => self.set_dark_mode(ctx, false),
+                Some("settings") => self.open_settings(),
+                Some("diagnostics") => {
+                    self.diagnostics_open = true;
+                    self.refresh_diagnostics(true);
+                }
+                Some("new") => self.request_action(PendingAction::New),
+                Some("import") => self.import_open = true,
+                _ => {}
+            }
+        }
         self.poll_runtime(ctx);
         self.poll_command_preview(ctx);
         self.poll_setup(ctx);
@@ -543,6 +562,19 @@ impl eframe::App for GuiApp {
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
+        if self.any_dialog_open() {
+            // Dim the window behind an open dialog so it reads as one.
+            // Dialog windows are in the Foreground order, so a Middle layer
+            // covers every panel and stays below them.
+            let backdrop =
+                egui::LayerId::new(egui::Order::Middle, egui::Id::new("dialog_backdrop"));
+            ctx.memory_mut(|memory| memory.areas_mut().move_to_top(backdrop));
+            ctx.layer_painter(backdrop).rect_filled(
+                ctx.content_rect(),
+                0.0,
+                egui::Color32::from_black_alpha(if self.dark_mode { 110 } else { 70 }),
+            );
+        }
     }
 }
 

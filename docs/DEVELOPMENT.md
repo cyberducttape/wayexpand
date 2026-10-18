@@ -235,6 +235,16 @@ cargo clippy --locked --workspace --all-targets --release -- -D warnings
 shellcheck scripts/*.sh
 ```
 
+### Checking the GUI's look
+
+`scripts/gui-screenshot.sh CONFIG OUTPUT.png [WIDTHxHEIGHT]` renders a debug
+`wayexpand-gui` inside a private headless KWin (`kwin_wayland --virtual`) with
+its own D-Bus session, runtime and configuration directories, and saves a
+PNG. It never touches the running desktop, its daemon, or your settings.
+`WAYEXPAND_GUI_SCREENSHOT_VIEW` opens a screen first: `light`, `settings`,
+`diagnostics`, `new` or `import`. Use made-up snippets in CONFIG, not a real
+library. Release builds ignore the capture variables.
+
 ## Release Process
 
 **Pre-release checks:**

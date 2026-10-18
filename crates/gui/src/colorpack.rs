@@ -128,6 +128,25 @@ pub struct ColorScheme {
 }
 
 impl ColorScheme {
+    /// The main text color: labels, typed text and button text. egui's own
+    /// baseline (gray 140 in dark mode) is dimmer than these packs' `muted`
+    /// hint color, which made labels look fainter than the hints below them.
+    pub fn text_color(pack: ColorPack, dark_mode: bool) -> Color32 {
+        match (pack, dark_mode) {
+            (ColorPack::Default, true) => Color32::from_rgb(0xE6, 0xE9, 0xF0),
+            (ColorPack::Default, false) => Color32::from_rgb(0x1C, 0x20, 0x30),
+            (ColorPack::ClassicGreen, _) => Color32::from_rgb(0x33, 0xE6, 0x33),
+            (ColorPack::ClassicAmber, _) => Color32::from_rgb(0xFF, 0xC4, 0x1A),
+            (ColorPack::ClassicWhite, _) => Color32::from_rgb(0xEE, 0xEE, 0xEE),
+            (ColorPack::Retro80sNeon, true) => Color32::from_rgb(0xF2, 0xE8, 0xFF),
+            (ColorPack::Retro80sNeon, false) => Color32::from_rgb(0x2A, 0x00, 0x40),
+            (ColorPack::HighContrast, true) => Color32::WHITE,
+            (ColorPack::HighContrast, false) => Color32::BLACK,
+            (ColorPack::TerminalBlue, _) => Color32::WHITE,
+            (ColorPack::Commodore64, _) => Color32::WHITE,
+        }
+    }
+
     pub fn for_pack(pack: ColorPack, dark_mode: bool) -> Self {
         match pack {
             ColorPack::Default => Self::default_theme(dark_mode),
@@ -382,6 +401,7 @@ mod tests {
             for dark in [false, true] {
                 let scheme = ColorScheme::for_pack(pack, dark);
                 let foregrounds = [
+                    ("text", ColorScheme::text_color(pack, dark)),
                     ("accent", scheme.accent),
                     ("success", scheme.success),
                     ("warning", scheme.warning),

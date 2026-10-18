@@ -34,6 +34,7 @@ impl GuiApp {
             let mut open = self.diagnostics_open;
             let max_size = theme::dialog_max_size(ctx, 560.0);
             egui::Window::new(self.strings.diagnostics_title())
+                .order(egui::Order::Foreground)
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
@@ -69,13 +70,12 @@ impl GuiApp {
             }
             Some(_) => (self.strings.production_readiness_limited(), palette.warning),
         };
+        // Stacked rather than label-left/value-right: in a narrow dialog the
+        // right-aligned value was painted over the label.
         theme::card(ui, palette, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(self.strings.production_readiness());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.colored_label(readiness.1, readiness.0);
-                });
-            });
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(self.strings.production_readiness()).strong());
+            ui.add(egui::Label::new(RichText::new(readiness.0).color(readiness.1)).wrap());
         });
         ui.label(
             RichText::new(self.strings.live_test_boundary())
