@@ -530,4 +530,50 @@ impl Strings {
             Language::German => "Befehlsvorschau ist unerwartet fehlgeschlagen",
         }
     }
+
+    pub fn unsaved_change_kept(&self) -> &'static str {
+        match self.lang {
+            Language::English => "A change is not saved yet",
+            Language::Indonesian => "Ada perubahan yang belum disimpan",
+            Language::German => "Eine Änderung ist noch nicht gespeichert",
+        }
+    }
+
+    pub fn retry_save(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Retry save",
+            Language::Indonesian => "Coba simpan lagi",
+            Language::German => "Erneut speichern",
+        }
+    }
+
+    pub fn discard_unsaved_change(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Discard change",
+            Language::Indonesian => "Buang perubahan",
+            Language::German => "Änderung verwerfen",
+        }
+    }
+
+    pub fn status_unsaved_change_discarded(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unsaved change discarded",
+            Language::Indonesian => "Perubahan yang belum disimpan dibuang",
+            Language::German => "Nicht gespeicherte Änderung verworfen",
+        }
+    }
+
+    pub fn status_unsaved_change_blocks_close(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "A change is not saved yet. Retry or discard it, or close again to quit without it."
+            }
+            Language::Indonesian => {
+                "Ada perubahan yang belum disimpan. Coba simpan lagi atau buang, atau tutup sekali lagi untuk keluar tanpa perubahan itu."
+            }
+            Language::German => {
+                "Eine Änderung ist noch nicht gespeichert. Erneut speichern oder verwerfen, oder erneut schließen, um ohne sie zu beenden."
+            }
+        }
+    }
 }

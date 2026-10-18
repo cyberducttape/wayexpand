@@ -2027,3 +2027,147 @@ fn indonesian_strings_are_translated_not_english_fallbacks() {
     assert_eq!(indonesian.cancel(), "Batal");
     assert_ne!(indonesian.save_settings(), english.save_settings());
 }
+
+fn failed_save_test_app(name: &str) -> (std::path::PathBuf, GuiApp) {
+    let path =
+        std::env::temp_dir().join(format!("wayexpand-gui-{name}-{}.toml", std::process::id()));
+    let config = Config {
+        expansion: vec![
+            import_expansion(":mine", "original"),
+            import_expansion(":theirs", "original"),
+        ],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let app = GuiApp::load(path.clone()).unwrap();
+    (path, app)
+}
+
+fn settings_change(app: &GuiApp) -> Config {
+    let mut candidate = app.config.clone();
+    candidate.settings.max_buffer_chars += 7;
+    candidate
+}
+
+#[test]
+fn a_change_whose_conflict_reload_fails_is_kept_and_saves_on_retry() {
+    let (path, mut app) = failed_save_test_app("conflict-reload-fails");
+    let wanted = app.config.settings.max_buffer_chars + 7;
+    // The file changes on disk and cannot be read back, so the save hits a
+    // revision conflict and the reload that should resolve it fails.
+    fs::write(&path, "[[expansion]\nthis is not valid TOML").unwrap();
+    app.queue_save_config(settings_change(&app), SaveIntent::Settings);
+    assert!(app.failed_save.is_some(), "the change was dropped");
+    assert!(!app.save_in_flight());
+    assert_eq!(app.status.tone_for_test(), StatusTone::Error);
+
+    // Once the file is readable again (with an external edit of its own),
+    // retrying merges the kept change instead of losing either side.
+    let mut external = app.config.clone();
+    external.expansion[1].replacement = "edited elsewhere".into();
+    external.save_atomic(&path).unwrap();
+    app.retry_failed_save();
+
+    let saved = Config::load(&path).unwrap();
+    assert_eq!(saved.settings.max_buffer_chars, wanted);
+    assert_eq!(saved.expansion[1].replacement, "edited elsewhere");
+    assert!(app.failed_save.is_none());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn a_failed_write_is_kept_until_it_is_discarded() {
+    let (path, mut app) = failed_save_test_app("write-fails");
+    let original = Config::load(&path).unwrap();
+    app.pending_save = Some(PendingSave {
+        request_id: 5,
+        candidate: settings_change(&app),
+        base: app.config.clone(),
+        preview_revision: app.preview_revision,
+        intent: SaveIntent::Settings,
+        attempts: 0,
+    });
+    app.finish_save(5, Err(runtime::SaveFailure::Failed("disk full".into())));
+    assert!(app.failed_save.is_some(), "the change was dropped");
+    assert!(app.pending_save.is_none());
+
+    app.discard_failed_save();
+    assert!(app.failed_save.is_none());
+    assert_eq!(
+        Config::load(&path).unwrap().settings.max_buffer_chars,
+        original.settings.max_buffer_chars
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn a_change_that_outlasts_the_busy_retries_is_kept() {
+    let (path, mut app) = failed_save_test_app("busy-exhausted");
+    let wanted = app.config.settings.max_buffer_chars + 7;
+    app.pending_save = Some(PendingSave {
+        request_id: 6,
+        candidate: settings_change(&app),
+        base: app.config.clone(),
+        preview_revision: app.preview_revision,
+        intent: SaveIntent::Settings,
+        attempts: u8::MAX - 1,
+    });
+    app.finish_save(6, Err(runtime::SaveFailure::Busy));
+    assert!(app.queued_save.is_none());
+    assert!(app.failed_save.is_some(), "the change was dropped");
+
+    app.retry_failed_save();
+    assert_eq!(
+        Config::load(&path).unwrap().settings.max_buffer_chars,
+        wanted
+    );
+    assert!(app.failed_save.is_none());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn retrying_a_kept_change_reports_overlap_with_an_external_edit() {
+    let (path, mut app) = failed_save_test_app("retry-overlap");
+    let mut candidate = app.config.clone();
+    candidate.expansion[0].replacement = "edited in gui".into();
+    app.pending_save = Some(PendingSave {
+        request_id: 7,
+        candidate,
+        base: app.config.clone(),
+        preview_revision: app.preview_revision,
+        intent: SaveIntent::Snippet {
+            is_new: false,
+            index: 0,
+        },
+        attempts: 0,
+    });
+    app.finish_save(7, Err(runtime::SaveFailure::Failed("disk full".into())));
+
+    // The same snippet changes elsewhere and the GUI reloads it.
+    let mut external = app.config.clone();
+    external.expansion[0].replacement = "edited elsewhere".into();
+    external.save_atomic(&path).unwrap();
+    let loaded = Config::load_versioned(&path).unwrap();
+    app.apply_reload_snapshot(runtime::ReloadSnapshot {
+        document: persistence::read_config_document(loaded.source()).unwrap(),
+        search_index: library::SearchIndex::new(&loaded.config),
+        revision: loaded.revision,
+        config: loaded.config,
+    });
+
+    app.retry_failed_save();
+    assert_eq!(
+        Config::load(&path).unwrap().expansion[0].replacement,
+        "edited elsewhere",
+        "a retry must not overwrite the external edit"
+    );
+    assert!(
+        app.failed_save.is_some(),
+        "the change stays kept to discard"
+    );
+    assert_eq!(app.status.tone_for_test(), StatusTone::Error);
+    fs::remove_file(path).unwrap();
+}

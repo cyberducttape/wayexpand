@@ -231,6 +231,14 @@ struct GuiApp {
     /// A change whose save hit a revision conflict, kept until the disk
     /// version is reloaded and it is merged or reported as not saved.
     conflicted_save: Option<PendingSave>,
+    /// A change that could not be saved (the write failed, the lock stayed
+    /// busy, or the reload after a conflict failed). Kept until the user
+    /// retries it successfully or discards it, so a transient failure never
+    /// silently drops an edit.
+    failed_save: Option<PendingSave>,
+    /// Set once closing was held back for `failed_save`; a second close
+    /// goes through.
+    close_warned_failed_save: bool,
     /// When to retry a save that found the configuration lock busy.
     save_retry_at: Option<Instant>,
     next_save_id: u64,
@@ -411,6 +419,8 @@ impl GuiApp {
             pending_save: None,
             queued_save: None,
             conflicted_save: None,
+            failed_save: None,
+            close_warned_failed_save: false,
             save_retry_at: None,
             next_save_id: 1,
         })
@@ -454,6 +464,17 @@ impl eframe::App for GuiApp {
             // draft is no longer dirty so it goes through uncancelled.
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_action(PendingAction::Close);
+        }
+        if close_requested
+            && !self.draft_is_dirty()
+            && self.failed_save.is_some()
+            && !self.close_warned_failed_save
+        {
+            // A change that failed to save is not in the editor any more
+            // (settings, imports, deletions), so warn once before it goes.
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_warned_failed_save = true;
+            self.status = Status::warning(self.strings.status_unsaved_change_blocks_close());
         }
         if self.close_after_confirm {
             self.close_after_confirm = false;

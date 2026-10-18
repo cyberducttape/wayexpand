@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A change the GUI could not save is kept instead of dropped. A failed
+  write, a configuration lock that stayed busy, or a reload that failed
+  after a save conflict used to discard the pending change (settings,
+  imports, deletions and toggles are not kept in the editor). The status
+  bar now offers Retry save and Discard change; a retry is merged onto the
+  current configuration and reports, rather than overwrites, anything that
+  was also changed elsewhere, and closing the window warns once first.
 - A control-socket request must arrive in full within 2 seconds. The
   timeout applied to each read, so a client sending one byte at a time
   without a newline could hold one of the four control workers

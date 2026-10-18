@@ -31,6 +31,28 @@ impl GuiApp {
                     if self.diagnostics_running || self.pending_control > 0 {
                         ui.spinner();
                     }
+                    if self.failed_save.is_some() {
+                        ui.separator();
+                        ui.label(
+                            RichText::new(self.strings.unsaved_change_kept()).color(text_color),
+                        );
+                        let idle = !self.save_in_flight();
+                        if ui
+                            .add_enabled(idle, egui::Button::new(self.strings.retry_save()))
+                            .clicked()
+                        {
+                            self.retry_failed_save();
+                        }
+                        if ui
+                            .add_enabled(
+                                idle,
+                                egui::Button::new(self.strings.discard_unsaved_change()),
+                            )
+                            .clicked()
+                        {
+                            self.discard_failed_save();
+                        }
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let full_path = self.path.display().to_string();
                         ui.add(

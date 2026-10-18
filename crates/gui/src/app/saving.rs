@@ -51,6 +51,12 @@ impl GuiApp {
     }
 
     pub(crate) fn dispatch_save(&mut self, pending: PendingSave) -> bool {
+        self.try_dispatch_save(pending).is_none()
+    }
+
+    /// Start saving `pending`, or hand it back if the background queue is
+    /// full so the caller can keep it.
+    fn try_dispatch_save(&mut self, pending: PendingSave) -> Option<PendingSave> {
         let request_id = pending.request_id;
         let Some(sender) = self.runtime_sender.as_ref() else {
             // Headless unit tests construct GuiApp without the application
@@ -63,7 +69,7 @@ impl GuiApp {
             );
             self.pending_save = Some(pending);
             self.finish_save(request_id, result);
-            return true;
+            return None;
         };
         if sender
             .try_send(runtime::Request::SaveConfig {
@@ -76,11 +82,75 @@ impl GuiApp {
             .is_err()
         {
             self.status = Status::warning(self.strings.status_save_busy());
-            return false;
+            return Some(pending);
         }
         self.pending_save = Some(pending);
         self.status = Status::info(self.strings.status_saving());
-        true
+        None
+    }
+
+    /// Keep a change that could not be saved for an explicit retry or
+    /// discard, folded into any change already kept.
+    fn keep_failed_save(&mut self, change: PendingSave) {
+        self.failed_save = Some(match self.failed_save.take() {
+            Some(kept) => combine_changes(kept, change),
+            None => change,
+        });
+        self.close_warned_failed_save = false;
+    }
+
+    /// Keep the change that was waiting on a conflict reload that failed.
+    pub(crate) fn keep_conflicted_save(&mut self) {
+        if let Some(conflicted) = self.conflicted_save.take() {
+            self.keep_failed_save(conflicted);
+        }
+    }
+
+    /// Save the kept change again. It is replayed onto the current
+    /// configuration, which may have been reloaded from an external edit
+    /// since, so anything both sides changed is reported, not overwritten.
+    pub(crate) fn retry_failed_save(&mut self) {
+        if self.save_in_flight() {
+            self.status = Status::info(self.strings.status_saving());
+            return;
+        }
+        let Some(failed) = self.failed_save.take() else {
+            return;
+        };
+        let candidate = if failed.base == self.config {
+            Ok(failed.candidate.clone())
+        } else {
+            rebase_change(
+                &failed.base,
+                &failed.candidate,
+                &self.config,
+                Rebase::DetectConflicts,
+            )
+        };
+        match candidate {
+            Ok(candidate) => {
+                let retry = PendingSave {
+                    candidate,
+                    base: self.config.clone(),
+                    attempts: 0,
+                    ..failed
+                };
+                if let Some(retry) = self.try_dispatch_save(retry) {
+                    self.keep_failed_save(retry);
+                }
+            }
+            Err(conflicts) => {
+                self.failed_save = Some(failed);
+                self.status = Status::error(self.strings.status_not_saved_conflict(&conflicts));
+            }
+        }
+    }
+
+    pub(crate) fn discard_failed_save(&mut self) {
+        if self.failed_save.take().is_some() {
+            self.close_warned_failed_save = false;
+            self.status = Status::info(self.strings.status_unsaved_change_discarded());
+        }
     }
 
     pub(crate) fn dispatch_queued_save(&mut self) {
@@ -109,7 +179,9 @@ impl GuiApp {
                 }
             }
         }
-        let _ = self.dispatch_save(queued);
+        if let Some(queued) = self.try_dispatch_save(queued) {
+            self.keep_failed_save(queued);
+        }
     }
 
     /// Retry a save deferred by a busy configuration lock, once due.
@@ -152,7 +224,7 @@ impl GuiApp {
                     match runtime::load_config_snapshot(self.path.clone()) {
                         Ok(snapshot) => self.resolve_conflicted_save(snapshot),
                         Err(error) => {
-                            self.conflicted_save = None;
+                            self.keep_conflicted_save();
                             self.status = Status::error(self.strings.status_reload_failed(&error));
                         }
                     }
@@ -163,7 +235,7 @@ impl GuiApp {
                 if self.pending_reload_revision.is_none() {
                     // The reload could not even start: the change is not
                     // saved, and the queue must not wait on it forever.
-                    self.conflicted_save = None;
+                    self.keep_conflicted_save();
                     self.status = Status::error(self.strings.status_config_changed_externally());
                 }
                 return;
@@ -175,6 +247,7 @@ impl GuiApp {
                 };
                 retry.attempts = retry.attempts.saturating_add(1);
                 if retry.attempts > MAX_BUSY_SAVE_RETRIES {
+                    self.keep_failed_save(retry);
                     self.status = Status::error(self.strings.status_not_saved_busy());
                     return;
                 }
@@ -195,6 +268,7 @@ impl GuiApp {
                     SaveIntent::Deleted { .. } => strings.status_delete_failed(&error),
                     SaveIntent::Toggled { .. } => strings.status_toggle_failed(&error),
                 });
+                self.keep_failed_save(pending);
                 self.dispatch_queued_save();
                 return;
             }
@@ -402,11 +476,13 @@ impl GuiApp {
         match merged {
             Ok(candidate) => {
                 let base = self.config.clone();
-                let _ = self.dispatch_save(PendingSave {
+                if let Some(merged) = self.try_dispatch_save(PendingSave {
                     candidate,
                     base,
                     ..conflicted
-                });
+                }) {
+                    self.keep_failed_save(merged);
+                }
             }
             Err(conflicts) => {
                 self.queued_save = None;

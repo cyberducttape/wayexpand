@@ -136,9 +136,10 @@ impl GuiApp {
                             }
                         }
                         Err(error) => {
-                            // Nothing was written; say so rather than leave
-                            // the change waiting on a reload that failed.
-                            self.conflicted_save = None;
+                            // Nothing was written; say so, and keep the
+                            // change for an explicit retry rather than leave
+                            // it waiting on a reload that failed.
+                            self.keep_conflicted_save();
                             self.status = Status::error(self.strings.status_reload_failed(&error));
                         }
                     }
