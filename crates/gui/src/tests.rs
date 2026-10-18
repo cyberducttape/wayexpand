@@ -2271,3 +2271,54 @@ fn every_template_variable_button_is_described_and_valid() {
         }
     }
 }
+
+#[test]
+fn the_snippet_list_keeps_its_width_while_searching() {
+    let directory =
+        std::env::temp_dir().join(format!("wayexpand-gui-width-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir_all(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.join("expansions.toml");
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \";sig\"\nreplacement = \"Regards\"\n\n[[expansion]]\ntrigger = \";ty\"\nreplacement = \"Thanks\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut app = GuiApp::load(path).unwrap();
+    let palette = Palette::for_pack(app.colorpack, true);
+    let ctx = egui::Context::default();
+    // The app's theme: its button padding is what made the row too wide.
+    crate::theme::install_pack(&ctx, app.colorpack, app.settings_font_scale);
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1180.0, 780.0));
+    let mut remaining = Vec::new();
+    for frame in 0..40 {
+        // A search term shows the clear button, which used to overflow the
+        // row and make the resizable panel grow on every frame.
+        if frame == 2 {
+            app.filter = "s".into();
+        }
+        run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| {
+                app.render_snippet_list(ui, &palette);
+                remaining.push(ui.available_width());
+            },
+        );
+    }
+    let settled = remaining[5];
+    assert!(settled > 700.0, "the list took {} px", 1180.0 - settled);
+    assert!(
+        remaining[5..]
+            .iter()
+            .all(|width| (width - settled).abs() < 0.5),
+        "the list kept growing: {:?}",
+        &remaining[..]
+    );
+    let _ = fs::remove_dir_all(directory);
+}

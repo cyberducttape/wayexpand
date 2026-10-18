@@ -482,6 +482,7 @@ impl eframe::App for GuiApp {
                 }
                 Some("new") => self.request_action(PendingAction::New),
                 Some("import") => self.import_open = true,
+                Some("search") => self.filter = "s".into(),
                 _ => {}
             }
         }

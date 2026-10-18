@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: the snippet list kept widening until it filled the window. The
+  search row sized its field from a guessed button width; with the
+  editor's button padding the row was wider than the panel, so the
+  resizable panel grew to fit it on every frame (about 2 px a frame, and
+  17 px a frame while a search term showed the clear button). The field
+  now takes exactly the width left after the buttons.
 - GUI polish:
   - Search moved from the crowded header, where it shrank to "Se…", to the
     top of the snippet list it filters.

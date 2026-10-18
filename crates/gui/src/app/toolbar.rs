@@ -288,33 +288,36 @@ impl GuiApp {
     /// The search field, a clear button, and its field-scope menu, filling
     /// the width of the snippet list.
     pub(crate) fn render_search(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let fields_width = 30.0;
-            let clear_width = if self.filter.is_empty() { 0.0 } else { 26.0 };
-            ui.add(
-                TextEdit::singleline(&mut self.filter)
-                    .id(egui::Id::new(SEARCH_FIELD_SALT))
-                    .hint_text(self.strings.search_placeholder())
-                    .margin(egui::Margin::symmetric(10, 7))
-                    .desired_width(
-                        (ui.available_width()
-                            - fields_width
-                            - clear_width
-                            - 2.0 * ui.spacing().item_spacing.x)
-                            .max(80.0),
-                    ),
-            )
-            .on_hover_text(self.strings.search_tooltip());
-            if !self.filter.is_empty()
-                && ui
-                    .small_button("×")
-                    .on_hover_text(self.strings.clear_filters())
-                    .clicked()
-            {
-                self.filter.clear();
-            }
-            self.render_search_fields_menu(ui);
-        });
+        // Right to left: the buttons take their real width first and the
+        // field gets exactly what is left. Guessing the buttons' width made
+        // the row wider than the resizable panel whenever the clear button
+        // appeared, and the panel then grew every frame to fit it.
+        let margin = egui::Margin::symmetric(10, 7);
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 0.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                self.render_search_fields_menu(ui);
+                if !self.filter.is_empty()
+                    && ui
+                        .small_button("×")
+                        .on_hover_text(self.strings.clear_filters())
+                        .clicked()
+                {
+                    self.filter.clear();
+                }
+                let width =
+                    (ui.available_width() - f32::from(margin.left + margin.right)).max(40.0);
+                ui.add(
+                    TextEdit::singleline(&mut self.filter)
+                        .id(egui::Id::new(SEARCH_FIELD_SALT))
+                        .hint_text(self.strings.search_placeholder())
+                        .margin(margin)
+                        .desired_width(width),
+                )
+                .on_hover_text(self.strings.search_tooltip());
+            },
+        );
     }
 
     fn render_search_fields_menu(&mut self, ui: &mut egui::Ui) {

@@ -10,14 +10,14 @@ use std::path::PathBuf;
 use eframe::egui;
 
 /// Frames to let layout, fonts and the theme settle before capturing.
-const SETTLE_FRAMES: u32 = 20;
+const SETTLE_FRAMES: u32 = 60;
 
 pub(crate) struct ScreenshotCapture {
     path: PathBuf,
     frames: u32,
     requested: bool,
     /// `WAYEXPAND_GUI_SCREENSHOT_VIEW`: a screen to open before capturing
-    /// (`light`, `settings`, `diagnostics`, `new`, `import`).
+    /// (`light`, `settings`, `diagnostics`, `new`, `import`, `search`).
     view: Option<String>,
 }
 
