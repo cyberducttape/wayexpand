@@ -11,7 +11,7 @@ use std::{
     },
     thread,
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::warn;
 
@@ -455,13 +455,19 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
         control_rejected_total = total,
         "control request rejected: worker pool busy"
     );
-    // Closing a Unix stream with unread request bytes makes the kernel report
-    // ECONNRESET to the peer, which would hide the busy response behind a
-    // generic read error. Discard whatever the client already sent, without
-    // ever blocking the accept loop.
+    discard_unread_request(&mut stream);
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
+    let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+}
+
+/// Closing a Unix stream with unread request bytes makes the kernel report
+/// ECONNRESET to the peer, which would hide the response behind a generic
+/// read error. Discard whatever the client already sent, without blocking.
+fn discard_unread_request(stream: &mut UnixStream) {
     if stream.set_nonblocking(true).is_ok() {
-        // Bounded: this runs on the accept thread, and a client that keeps
-        // writing must not be able to hold it in this loop.
+        // Bounded: a client that keeps writing must not be able to hold the
+        // caller (the accept thread, or a worker) in this loop.
         let mut discard = [0_u8; 1024];
         for _ in 0..BUSY_DRAIN_READS {
             match stream.read(&mut discard) {
@@ -471,9 +477,6 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
         }
         let _ = stream.set_nonblocking(false);
     }
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
-    let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
-    let _ = stream.shutdown(std::net::Shutdown::Write);
 }
 
 /// Reply to an insert without a focus target under
@@ -551,6 +554,52 @@ fn explain_request(
     ))
 }
 
+/// Read one request line within `budget` for the whole request, not per
+/// read: a client that trickles bytes would otherwise hold one of the few
+/// control workers for as long as it likes. `None` means the request is
+/// larger than [`MAX_COMMAND_BYTES`]; it is refused as soon as that is known
+/// instead of reading on to the end of the line.
+fn read_command(stream: &mut UnixStream, budget: Duration) -> std::io::Result<Option<String>> {
+    let deadline = Instant::now() + budget;
+    let mut command_bytes = Vec::with_capacity(MAX_COMMAND_BYTES);
+    let mut chunk = [0_u8; 64];
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "control request was not completed in time",
+            ));
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        let count = match stream.read(&mut chunk) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            // The read timeout is the time left for the whole request.
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "control request was not completed in time",
+                ))
+            }
+            Err(error) => return Err(error),
+        };
+        if count == 0 {
+            break;
+        }
+        let line_end = chunk[..count].iter().position(|&byte| byte == b'\n');
+        let line = &chunk[..line_end.map_or(count, |end| end + 1)];
+        if command_bytes.len() + line.len() > MAX_COMMAND_BYTES {
+            return Ok(None);
+        }
+        command_bytes.extend_from_slice(line);
+        if line_end.is_some() {
+            break;
+        }
+    }
+    Ok(Some(String::from_utf8_lossy(&command_bytes).into_owned()))
+}
+
 fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     let Flags {
         reload,
@@ -564,28 +613,14 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         status,
         waker,
     } = flags;
-    stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT))?;
     stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
-    let mut command_bytes = Vec::with_capacity(MAX_COMMAND_BYTES);
-    let mut chunk = [0_u8; 64];
-    let mut oversized = false;
-    loop {
-        let count = stream.read(&mut chunk)?;
-        if count == 0 {
-            break;
+    // An oversized request is answered like any unknown command.
+    let command = match read_command(&mut stream, CONTROL_IO_TIMEOUT)? {
+        Some(command) => command,
+        None => {
+            discard_unread_request(&mut stream);
+            String::new()
         }
-        let remaining = MAX_COMMAND_BYTES.saturating_sub(command_bytes.len());
-        let retained = count.min(remaining);
-        command_bytes.extend_from_slice(&chunk[..retained]);
-        oversized |= retained != count;
-        if chunk[..count].contains(&b'\n') {
-            break;
-        }
-    }
-    let command = if oversized {
-        String::new()
-    } else {
-        String::from_utf8_lossy(&command_bytes).into_owned()
     };
     if let Some(request) = insert_request(&command) {
         let response = match request {
@@ -961,6 +996,61 @@ mod tests {
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_request_split_across_writes_is_read_whole() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let writer = std::thread::spawn(move || {
+            client.write_all(b"sta").unwrap();
+            std::thread::sleep(Duration::from_millis(30));
+            client.write_all(b"tus\n").unwrap();
+            client
+        });
+        let command = read_command(&mut server, Duration::from_secs(5)).unwrap();
+        assert_eq!(command.as_deref(), Some("status\n"));
+        drop(writer.join().unwrap());
+    }
+
+    #[test]
+    fn an_oversized_request_is_refused_without_waiting_for_its_end() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        // No newline, and the client stays connected.
+        client.write_all(&[b'x'; MAX_COMMAND_BYTES + 1]).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            read_command(&mut server, Duration::from_secs(5)).unwrap(),
+            None
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(client);
+    }
+
+    #[test]
+    fn a_trickling_client_cannot_outlast_the_request_deadline() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let trickle_stop = Arc::clone(&stop);
+        // One byte every 20 ms never trips a per-read timeout.
+        let trickler = std::thread::spawn(move || {
+            while !trickle_stop.load(Ordering::Acquire) {
+                if client.write_all(b"x").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let started = Instant::now();
+        let error = read_command(&mut server, Duration::from_millis(300)).unwrap_err();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Release);
+        drop(server);
+        trickler.join().unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "the request held its worker for {elapsed:?}"
+        );
     }
 
     #[test]

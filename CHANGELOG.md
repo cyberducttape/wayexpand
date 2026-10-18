@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A control-socket request must arrive in full within 2 seconds. The
+  timeout applied to each read, so a client sending one byte at a time
+  without a newline could hold one of the four control workers
+  indefinitely; an oversized request is also refused as soon as it passes
+  the 1 KiB limit instead of being read to its end.
 - The libei output no longer lets a stream of server events stall typing.
   Server updates are applied before anything is typed, without a limit on
   how many; a bounded batch (512 events, 50 ms) is now applied per attempt,
