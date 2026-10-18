@@ -24,6 +24,8 @@ use wayexpand_core::{
 const MAX_CONSISTENCY_ATTEMPTS: usize = 3;
 const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
+/// How often command workers that could not start are tried again.
+const WORKER_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct ReloadableConfig {
     path: PathBuf,
@@ -45,6 +47,14 @@ pub struct ReloadableConfig {
     rebuild_after_in_flight: bool,
     /// Wakes the reactor when a background build finishes.
     waker: Option<crate::waker::Waker>,
+    /// The daemon runs command snippets on worker threads. Kept here so a
+    /// reload, or a retry after a failed start, starts them again.
+    async_workers: bool,
+    /// Commands are off by enforced organization policy, apart from whether
+    /// workers are running.
+    commands_restricted: bool,
+    /// When to try again after command workers failed to start.
+    worker_retry_at: Option<Instant>,
 }
 
 /// A configuration read, validated, and turned into a matcher off the
@@ -250,6 +260,9 @@ impl ReloadableConfig {
             in_flight: None,
             rebuild_after_in_flight: false,
             waker: None,
+            async_workers: false,
+            commands_restricted: false,
+            worker_retry_at: None,
         })
     }
 
@@ -258,10 +271,45 @@ impl ReloadableConfig {
         self.waker = Some(waker);
     }
 
+    /// Run command snippets and hotkey actions on worker threads, now and
+    /// after every reload. `restricted` is the enforced organization policy's
+    /// decision to disable commands. Returns whether the
+    /// workers started; if not, commands stay off and starting is retried.
+    pub fn start_async_workers(&mut self, restricted: bool) -> bool {
+        self.async_workers = true;
+        self.commands_restricted = restricted;
+        self.ensure_async_workers()
+    }
+
+    /// Start command workers if they should run and are not running, and
+    /// set whether commands may run accordingly.
+    fn ensure_async_workers(&mut self) -> bool {
+        if !self.async_workers {
+            // Not a daemon host: commands keep whatever state was inherited.
+            return true;
+        }
+        let running = self.engine.enable_async_commands();
+        self.worker_retry_at = (!running).then(|| Instant::now() + WORKER_RETRY_INTERVAL);
+        self.engine
+            .set_commands_disabled(self.commands_restricted || !running);
+        running
+    }
+
+    fn retry_async_workers(&mut self) {
+        if self
+            .worker_retry_at
+            .is_some_and(|retry_at| Instant::now() >= retry_at)
+            && self.ensure_async_workers()
+        {
+            info!("command workers started; command-backed actions are enabled again");
+        }
+    }
+
     /// Parse first, then replace the live engine. Invalid edits leave the old
     /// configuration running and are reported to the operator.
     pub fn reload_if_changed(&mut self) {
         self.collect_reload();
+        self.retry_async_workers();
         let now = Instant::now();
         if self.watch_dirty.swap(false, Ordering::AcqRel) && self.watch_check_after.is_none() {
             self.watch_check_after = Some(now + WATCH_DEBOUNCE);
@@ -380,22 +428,23 @@ impl ReloadableConfig {
                 expansions,
                 stamp: stable_stamp,
             }) => {
-                let workers_restart_failed =
-                    self.engine.async_commands_enabled() && !engine.enable_async_commands();
-                if workers_restart_failed {
-                    warn!(
-                        "asynchronous workers could not restart after configuration reload; command-backed actions are disabled"
-                    );
-                }
                 // Pause, password-field, composition and window state,
                 // command restrictions and host hooks all carry over, as of
                 // now rather than when the build started; losing any of them
                 // would, for example, resume matching inside a password field.
                 engine.inherit_runtime_state(&self.engine);
-                engine.set_commands_disabled(
-                    self.engine.commands_disabled() || workers_restart_failed,
-                );
-                self.engine = engine;
+                // A host that enabled workers on the engine directly wants
+                // them after the reload too.
+                self.async_workers |= self.engine.async_commands_enabled();
+                // Stop the old command workers before starting new ones, so
+                // a reload never holds two sets of threads against the
+                // unit's task limit.
+                drop(std::mem::replace(&mut self.engine, engine));
+                if !self.ensure_async_workers() {
+                    warn!(
+                        "command workers could not restart after configuration reload; command-backed actions are disabled until they start (retried every 30 s)"
+                    );
+                }
                 self.stamp = stable_stamp;
                 self.observed = stable_stamp;
                 self.last_integrity_check = Instant::now();
@@ -796,6 +845,67 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "after restore");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn command_workers_restart_after_every_reload_without_overlapping() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        assert!(config.start_async_workers(false));
+        assert!(config.engine.async_commands_enabled());
+        assert!(!config.engine.commands_disabled());
+        for replacement in ["one", "two", "three"] {
+            write_config(&path, &config_text(replacement));
+            config.reload_now();
+            config.finish_pending_reload();
+            assert!(config.engine.async_commands_enabled(), "{replacement}");
+            assert!(!config.engine.commands_disabled(), "{replacement}");
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn commands_disabled_by_a_failed_worker_start_come_back_on_retry() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        // As after a failed start: commands off and a retry scheduled.
+        config.async_workers = true;
+        config.engine.set_commands_disabled(true);
+        config.worker_retry_at = Some(Instant::now());
+        config.retry_async_workers();
+        assert!(config.engine.async_commands_enabled());
+        assert!(!config.engine.commands_disabled());
+        assert_eq!(config.worker_retry_at, None);
+
+        // A reload after a failure also starts them, instead of carrying
+        // the disabled state forward as it used to.
+        config.engine.set_commands_disabled(true);
+        write_config(&path, &config_text("new"));
+        config.reload_now();
+        config.finish_pending_reload();
+        assert!(config.engine.async_commands_enabled());
+        assert!(!config.engine.commands_disabled());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_enforced_command_policy_survives_reloads() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        assert!(config.start_async_workers(true));
+        assert!(config.engine.commands_disabled());
+        write_config(&path, &config_text("new"));
+        config.reload_now();
+        config.finish_pending_reload();
+        assert!(config.engine.commands_disabled());
+        assert!(config.engine.async_commands_enabled());
         let _ = fs::remove_file(path);
     }
 

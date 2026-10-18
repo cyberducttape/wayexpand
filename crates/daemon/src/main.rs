@@ -263,17 +263,13 @@ fn main() -> Result<()> {
             path.display()
         )
     })?;
-    let worker_start_failed = !config.engine.enable_async_commands();
-    if worker_start_failed {
+    if !config.start_async_workers(commands_disabled_for_startup(&policy, false)) {
         warn!(
-            "asynchronous command/hotkey workers could not start; command-backed actions are disabled"
+            "asynchronous command/hotkey workers could not start; command-backed actions are disabled until they start (retried every 30 s)"
         );
     }
 
     let enforcement_policy = policy.effective_enforcement_policy();
-    config
-        .engine
-        .set_commands_disabled(commands_disabled_for_startup(&policy, worker_start_failed));
     config
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);

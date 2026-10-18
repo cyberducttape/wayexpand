@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Command snippets and hotkey actions no longer stay disabled after one
+  failed worker restart. A reload started the new engine's command threads
+  while the old ones still ran, which could exceed the unit's
+  `TasksMax=32`. When that happened, every later reload kept commands off
+  until the daemon restarted. The old workers now stop first, a failed
+  start is retried every 30 seconds and on the next reload, and the
+  enforced command policy is applied separately from that state.
 - `wayexpand explain` now checks whether the output route can type the
   replacement. It had said "would expand" for a snippet that libei's
   keysym fallback refuses, such as one containing a pasted no-break space,
