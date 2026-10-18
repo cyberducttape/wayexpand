@@ -28,6 +28,7 @@ mod paths;
 mod policy;
 mod store;
 mod template;
+mod template_dynamic;
 mod usage;
 
 pub use backend::{

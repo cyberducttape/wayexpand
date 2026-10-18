@@ -5308,3 +5308,20 @@ fn explain_reports_text_the_output_route_cannot_type() {
     engine.explain_output_route(&mut explanation, &unicode);
     assert!(explanation.would_expand());
 }
+
+#[test]
+fn each_expansion_renders_new_random_values() {
+    let mut engine = explain_engine(
+        "[[expansion]]\ntrigger = \":id\"\nreplacement = \"{{uuid}} {{random:hex:8}}\"\n",
+    );
+    let first = engine
+        .process(InputEvent::Text(":id".into()))
+        .pop()
+        .unwrap();
+    let second = engine
+        .process(InputEvent::Text(":id".into()))
+        .pop()
+        .unwrap();
+    assert_eq!(first.insert.len(), 36 + 1 + 8);
+    assert_ne!(first.insert, second.insert);
+}

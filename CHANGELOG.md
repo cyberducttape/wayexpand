@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- New template variables. `{{date:FORMAT}}` formats any clock variable, with
+  or without an offset, using strftime codes with English names (for example
+  `{{local_date+1w:%a %b %-d}}`). `{{uuid}}` gives a new version-4 UUID and
+  `{{uuid:NAME}}` repeats one value wherever that name appears in the same
+  expansion. `{{random:hex:16}}` and the `digits`, `lower`, `alpha`,
+  `alnum` and `password` kinds draw from the system's cryptographic random
+  source; `{{random:A|B|C}}` picks one option. A malformed format or kind is
+  a configuration error.
 - "Use current app" in the snippet editor no longer always adds WayExpand
   itself. It took the first window a new KWin tracker reported, which is
   the editor where the button was clicked. It now waits up to 15 seconds

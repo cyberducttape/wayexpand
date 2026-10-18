@@ -217,6 +217,16 @@ pub enum TemplateError {
     InvalidField,
     #[error("a form field has no value")]
     FieldValueMissing,
+    #[error("date format {format:?} is not supported (see docs/TEMPLATES.md)")]
+    InvalidDateFormat { format: String },
+    #[error(
+        "{{{{random:{spec}}}}} is malformed (random:hex:16, random:alnum:24, or random:A|B|C)"
+    )]
+    InvalidRandom { spec: String },
+    #[error("{{{{uuid:NAME}}}} needs a name of 1 to 64 characters")]
+    InvalidUuidName,
+    #[error("the system random number generator is unavailable")]
+    RandomUnavailable,
 }
 
 /// Render built-in variables without invoking a shell or external process.
@@ -233,7 +243,16 @@ pub fn render_template_preview(
     context: &TemplateContext,
     maximum_bytes: usize,
 ) -> Result<String, TemplateError> {
-    render_nested(template, context, true, 0, maximum_bytes, true).map(|(rendered, _, _)| rendered)
+    render_nested(
+        template,
+        context,
+        true,
+        0,
+        maximum_bytes,
+        true,
+        &mut HashMap::new(),
+    )
+    .map(|(rendered, _, _)| rendered)
 }
 
 /// Every `{{...}}` variable name in a template, in order. Unclosed markers
@@ -281,8 +300,16 @@ fn render(
     allow_cursor: bool,
     maximum_bytes: usize,
 ) -> Result<(String, Option<usize>), TemplateError> {
-    render_nested(template, context, allow_cursor, 0, maximum_bytes, false)
-        .map(|(rendered, cursor, _)| (rendered, cursor))
+    render_nested(
+        template,
+        context,
+        allow_cursor,
+        0,
+        maximum_bytes,
+        false,
+        &mut HashMap::new(),
+    )
+    .map(|(rendered, cursor, _)| (rendered, cursor))
 }
 
 fn render_nested(
@@ -292,6 +319,9 @@ fn render_nested(
     depth: usize,
     maximum_bytes: usize,
     preview: bool,
+    // `{{uuid:NAME}}` values, shared with included snippets so one name is
+    // one value throughout a render.
+    named: &mut HashMap<String, String>,
 ) -> Result<(String, Option<usize>, bool), TemplateError> {
     // Preview callers may pass an arbitrarily large valid template. Do not
     // reserve its full size before the output limit has a chance to reject it.
@@ -436,10 +466,55 @@ fn render_nested(
                 } else {
                     maximum_bytes
                 };
-                let (rendered, _, stopped) =
-                    render_nested(included, context, false, depth + 1, include_budget, preview)?;
+                let (rendered, _, stopped) = render_nested(
+                    included,
+                    context,
+                    false,
+                    depth + 1,
+                    include_budget,
+                    preview,
+                    named,
+                )?;
                 included_stopped = stopped;
                 rendered
+            }
+            "uuid" => crate::template_dynamic::uuid_v4()?,
+            other if other.starts_with("uuid:") => {
+                let label = other["uuid:".len()..].trim();
+                if label.is_empty() || label.chars().count() > 64 {
+                    return Err(TemplateError::InvalidUuidName);
+                }
+                match named.get(label) {
+                    Some(value) => value.clone(),
+                    None => {
+                        let value = crate::template_dynamic::uuid_v4()?;
+                        named.insert(label.to_owned(), value.clone());
+                        value
+                    }
+                }
+            }
+            other if other.starts_with("random:") => {
+                crate::template_dynamic::random_value(&other["random:".len()..])?
+            }
+            other if formatted_clock_spec(other).is_some() => {
+                let (base, offset, format) = formatted_clock_spec(other).expect("checked");
+                let overflow = || TemplateError::DateArithmeticOverflow {
+                    name: other.to_owned(),
+                };
+                let timestamp = context
+                    .unix_timestamp
+                    .checked_add_signed(offset)
+                    .ok_or_else(overflow)?;
+                let utc_offset = if base.starts_with("local_") {
+                    Some(local_utc_offset(timestamp).ok_or_else(overflow)?)
+                } else {
+                    None
+                };
+                crate::template_dynamic::format_date(
+                    format,
+                    i64::try_from(timestamp).map_err(|_| overflow())?,
+                    utc_offset,
+                )?
             }
             other => match parse_offset_variable(other) {
                 Some((base, offset)) => {
@@ -482,6 +557,20 @@ fn render_nested(
         cursor = end + 2;
     }
     Ok((rendered, cursor_position, false))
+}
+
+/// A formatted clock variable, `date:FORMAT` or `local_date+1d:FORMAT`:
+/// its base name, offset in seconds, and format. Every clock base accepts a
+/// format; the base only chooses UTC or local time.
+fn formatted_clock_spec(name: &str) -> Option<(&str, i64, &str)> {
+    let (spec, format) = name.split_once(':')?;
+    let spec = spec.trim();
+    let (base, offset) = parse_offset_variable(spec).unwrap_or((spec, 0));
+    matches!(
+        base,
+        "date" | "time" | "datetime" | "local_date" | "local_time" | "local_datetime"
+    )
+    .then_some((base, offset, format))
 }
 
 /// Parses a variable name of the form `<base><sign><magnitude><unit>` (e.g.
@@ -655,7 +744,7 @@ fn format_signed_date(timestamp: i64) -> String {
 
 // Gregorian UTC conversion, adapted from the public-domain civil_from_days
 // algorithm. Keeping this local avoids a runtime dependency or shell command.
-fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let z = days_since_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097;
@@ -1037,5 +1126,77 @@ mod tests {
                 "{invalid}"
             );
         }
+    }
+
+    #[test]
+    fn formatted_dates_apply_to_every_clock_variable_and_offset() {
+        let context = TemplateContext {
+            // 2026-10-09 14:05:07 UTC, a Friday.
+            unix_timestamp: 1_791_554_707,
+            ..TemplateContext::default()
+        };
+        let render = |template: &str| render_template(template, &context).unwrap();
+        assert_eq!(render("{{date:%A %-d %B}}"), "Friday 9 October");
+        assert_eq!(render("{{time:%H:%M}}"), "14:05");
+        assert_eq!(render("{{date+1d:%a %F}}"), "Sat 2026-10-10");
+        assert_eq!(render("{{datetime-90m:%H:%M %Z}}"), "12:35 UTC");
+        assert_eq!(render("{{ date : %Y }}"), " 2026");
+        // Local time: the format sees the system offset at that instant.
+        let local = render("{{local_date:%F %H:%M %:z}}");
+        assert_eq!(local.len(), "2026-10-09 08:05 -06:00".len(), "{local}");
+        assert!(matches!(
+            render_template("{{date:%Q}}", &context),
+            Err(TemplateError::InvalidDateFormat { .. })
+        ));
+        // Not a clock: still an unknown variable.
+        assert!(matches!(
+            render_template("{{when:%F}}", &context),
+            Err(TemplateError::UnknownVariable { .. })
+        ));
+    }
+
+    #[test]
+    fn uuid_and_random_render_fresh_values_and_named_uuids_repeat() {
+        let context = TemplateContext::default();
+        let rendered =
+            render_template("{{uuid}} {{uuid}} {{uuid:id}} {{uuid:id}}", &context).unwrap();
+        let parts: Vec<&str> = rendered.split(' ').collect();
+        assert_ne!(parts[0], parts[1]);
+        assert_eq!(parts[2], parts[3]);
+        assert_ne!(parts[2], parts[0]);
+        // A named UUID is shared with included snippets in the same render.
+        let mut snippets = HashMap::new();
+        snippets.insert(":inner".to_owned(), Arc::<str>::from("{{uuid:id}}"));
+        let context = TemplateContext {
+            snippets: Arc::new(snippets),
+            ..TemplateContext::default()
+        };
+        let rendered = render_template("{{uuid:id}}={{snippet::inner}}", &context).unwrap();
+        let (outer, inner) = rendered.split_once('=').unwrap();
+        assert_eq!(outer, inner);
+        // ...but each render gets new values.
+        assert_ne!(
+            rendered,
+            render_template("{{uuid:id}}={{snippet::inner}}", &context).unwrap()
+        );
+
+        let token = render_template("{{random:hex:16}}", &context).unwrap();
+        assert_eq!(token.len(), 16);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        let pick = render_template("{{random:a|b}}", &context).unwrap();
+        assert!(pick == "a" || pick == "b");
+        for invalid in ["{{random:hex}}", "{{random:x:1}}", "{{uuid:}}"] {
+            assert!(render_template(invalid, &context).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn malformed_dynamic_markers_fail_configuration_validation() {
+        for replacement in ["{{date:%Q}}", "{{random:hex:0}}", "{{uuid: }}"] {
+            let text = format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n");
+            assert!(crate::Config::parse(&text).is_err(), "{replacement}");
+        }
+        let text = "[[expansion]]\ntrigger = \":x\"\nreplacement = \"{{local_date+1w:%A}} {{uuid}} {{random:password:20}}\"\n";
+        assert!(crate::Config::parse(text).is_ok());
     }
 }

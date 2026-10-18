@@ -18,6 +18,70 @@ others must be enabled explicitly and can be disabled by organization policy.
 | `{{username}}`, `{{hostname}}` | The login name and the machine's host name |
 | `{{newline}}`, `{{tab}}` | A line break or a tab |
 | `{{cursor}}` | Where the cursor ends up after expansion (one per snippet) |
+| `{{date:FORMAT}}`, `{{local_date+1d:FORMAT}}` | Any clock variable, with or without an offset, in your own format (below) |
+| `{{uuid}}` | A new random UUID (version 4) each time |
+| `{{uuid:NAME}}` | One random UUID per name, repeated wherever the name appears in the same expansion |
+| `{{random:KIND:LENGTH}}` | LENGTH random characters (1–256) of a KIND: `hex`, `digits`, `lower` (a–z, 0–9), `alpha`, `alnum`, or `password` |
+| `{{random:A\|B\|C}}` | One of 2–32 options, picked at random |
+
+### Date formats
+
+A format follows the clock variable after a colon. With a format, `date`,
+`time` and `datetime` all mean "now, in UTC", and the `local_` names "now, in
+the system time zone". The format decides what is shown:
+
+```toml
+[[expansion]]
+trigger = ":today"
+replacement = "{{local_date:%A %-d %B %Y}}"         # Friday 9 October 2026
+
+[[expansion]]
+trigger = ":due"
+replacement = "Due {{local_date+1w:%a %b %-d}}"      # Due Fri Oct 16
+
+[[expansion]]
+trigger = ":ts"
+replacement = "{{local_datetime:%F %H:%M %:z}}"     # 2026-10-09 08:05 -06:00
+```
+
+| Code | Meaning | Code | Meaning |
+| --- | --- | --- | --- |
+| `%Y` | Year (2026) | `%y` | Year, two digits (26) |
+| `%m` | Month (10) | `%B` / `%b` | Month name (October / Oct) |
+| `%d` | Day (09) | `%e` | Day, space-padded ( 9) |
+| `%A` / `%a` | Weekday (Friday / Fri) | `%u` / `%w` | Weekday number, Monday=1 / Sunday=0 |
+| `%H` | Hour, 24-hour (14) | `%I` | Hour, 12-hour (02) |
+| `%M` | Minute | `%S` | Second |
+| `%p` | AM or PM | `%j` | Day of the year (282) |
+| `%F` | `%Y-%m-%d` | `%T` | `%H:%M:%S` |
+| `%R` | `%H:%M` | `%D` | `%m/%d/%y` |
+| `%z` / `%:z` | UTC offset (-0600 / -06:00) | `%Z` | `UTC`, or the offset for local time |
+| `%s` | Unix timestamp | `%%`, `%n`, `%t` | A literal %, newline, or tab |
+
+`%-d`, `%-m`, `%-H`, `%-I` (any number with `-`) drop the leading zero:
+`%-m/%-d` is `10/9`. Names are always English, so a snippet renders the same
+on every machine; on keystroke routes, which type only ASCII, they always
+type. An unknown code is a configuration error.
+
+### Random values
+
+Random values come from the system's cryptographic random number
+generator. If it is unavailable the snippet does not expand. They are not
+written to logs, but like any typed text they can end up in the
+application's own history, so treat `{{random:password:20}}` as a quick
+generator, not a password manager. `password` uses letters, digits and `-_.`,
+without look-alikes (`l`, `I`, `O`, `0`, `1`), so it needs no escaping in URLs,
+YAML values or shell commands.
+
+```toml
+[[expansion]]
+trigger = ";k8sname"
+replacement = "app-{{random:lower:6}}"
+
+[[expansion]]
+trigger = ";req"
+replacement = "X-Request-ID: {{uuid:id}}{{newline}}# trace {{uuid:id}}"
+```
 
 ## Snippet includes
 

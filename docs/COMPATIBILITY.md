@@ -732,6 +732,11 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::undo_chord` (string or absent, default absent) — a key chord
   (e.g. `"Ctrl+Z"`) that, pressed immediately after a successful expansion
   with no other keystroke in between, reverts it. Disabled unless set.
+- Template variables `{{date:FORMAT}}` (on every clock variable, with or
+  without an offset), `{{uuid}}`, `{{uuid:NAME}}`, `{{random:KIND:LENGTH}}`
+  and `{{random:A|B}}`. These names were unknown variables before, so no
+  valid configuration changes meaning. Older readers reject snippets that use
+  them.
 - Template variables `date`, `time`, and `datetime` accept a relative
   offset (e.g. `{{date+3d}}`, `{{time-2h}}`); see
   [FOR_SYSADMINS.md](FOR_SYSADMINS.md) for real-world examples.
