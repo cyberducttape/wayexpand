@@ -18,6 +18,12 @@ pub(super) struct EventPump {
 // is always empty; every other field is built from `Arc`/`Mutex`-backed reis
 // objects that the injector already moves between threads. The pump is used
 // by one thread at a time through `&mut LibeiInjector` (no `Sync` is claimed).
+//
+// This rests on reis internals, so reis is pinned to an exact version and
+// `send_invariant` (below) checks what can be checked: that this crate never
+// registers a callback, that the converter's other field types are `Send`,
+// and that the converter is still `!Send` (once reis makes it `Send`, delete
+// this impl). Re-read `EiEventConverter`'s fields on every reis upgrade.
 unsafe impl Send for EventPump {}
 
 impl EventPump {
@@ -208,5 +214,68 @@ pub(super) fn handshake_with_timeout(
         context
             .read()
             .map_err(|error| LibeiError::Handshake(reis::Error::Io(error)))?;
+    }
+}
+
+#[cfg(test)]
+mod send_invariant {
+    use std::marker::PhantomData;
+
+    /// `Probe::<T>::IS_SEND` is the inherent `true` when `T: Send`, and
+    /// falls back to the trait's `false` otherwise.
+    struct Probe<T>(PhantomData<T>);
+    trait NotSend {
+        const IS_SEND: bool = false;
+    }
+    impl<T> NotSend for Probe<T> {}
+    impl<T: Send> Probe<T> {
+        const IS_SEND: bool = true;
+    }
+
+    #[test]
+    fn this_crate_never_registers_a_converter_callback() {
+        // A call, not a mention; spelled in two halves so this test does not
+        // match itself.
+        let method = [".add_callback", "_handler("].concat();
+        let sources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&sources).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                let source = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    !source.contains(&method),
+                    "{} registers a callback",
+                    path.display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 3, "found only {checked} source files");
+    }
+
+    #[test]
+    fn the_converters_other_fields_are_send() {
+        // The field types of reis 0.7.1's `EiEventConverter`, apart from the
+        // callback map.
+        const { assert!(Probe::<reis::ei::Seat>::IS_SEND) };
+        const { assert!(Probe::<reis::ei::Device>::IS_SEND) };
+        const { assert!(Probe::<reis::ei::Callback>::IS_SEND) };
+        const { assert!(Probe::<reis::Object>::IS_SEND) };
+        const { assert!(Probe::<reis::event::Seat>::IS_SEND) };
+        const { assert!(Probe::<reis::event::Device>::IS_SEND) };
+        const { assert!(Probe::<reis::event::EiEvent>::IS_SEND) };
+        const { assert!(Probe::<reis::event::Connection>::IS_SEND) };
+        const { assert!(Probe::<reis::ei::Context>::IS_SEND) };
+    }
+
+    #[test]
+    fn the_converter_still_needs_the_manual_impl() {
+        const {
+            assert!(
+                !Probe::<reis::event::EiEventConverter>::IS_SEND,
+                "reis made EiEventConverter Send; remove `unsafe impl Send for EventPump`"
+            )
+        };
     }
 }
