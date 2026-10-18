@@ -15,7 +15,8 @@ grep -F -- 'for attempt in 1 2 3; do' "$workflow" >/dev/null
 grep -F -- 'push_status=$?' "$workflow" >/dev/null
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
-grep -F -- 'timeout-minutes: 30' "$workflow" >/dev/null
+# The job also vendors and publishes the launchpad-vendored build branch.
+grep -F -- 'timeout-minutes: 45' "$workflow" >/dev/null
 grep -F -- "$main_guard" "$workflow" >/dev/null
 grep -F -- "$tag_message" "$workflow" >/dev/null
 grep -F -- "$main_lease" "$workflow" >/dev/null
@@ -34,5 +35,14 @@ test "$guard_line" -lt "$first_push"
 test "$first_push" -lt "$second_push"
 test "$second_push" -lt "$tag_branch"
 test "$(grep -Fc -- 'HEAD:refs/heads/main' "$workflow")" -eq 2
+
+# The vendored build branch is published only for main, never from a tag's
+# detached HEAD, and each attempt is time-bounded.
+publish_step="- name: Publish the vendored Launchpad build branch"
+publish_line=$(grep -nF -- "$publish_step" "$workflow" | cut -d: -f1)
+test -n "$publish_line"
+sed -n "$((publish_line + 1))p" "$workflow" | grep -F -- "if: github.ref == 'refs/heads/main'" >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'timeout --signal=TERM --kill-after=30s 15m' >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'bash scripts/publish-launchpad-branch.sh' >/dev/null
 
 printf '%s\n' 'Launchpad workflow safety contract passed'
