@@ -451,6 +451,7 @@ struct Flags {
 
 fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
     let total = rejected_total.fetch_add(1, Ordering::Relaxed) + 1;
+    crate::counters::note_control_rejected();
     warn!(
         control_rejected_total = total,
         "control request rejected: worker pool busy"

@@ -496,7 +496,13 @@ operators can distinguish a running process from newly installed binaries.
   "compatibility_mode": "off",
   "focus_assurance": "protocol",
   "output_refused_total": 0,
-  "output_last_refusal": "none"
+  "output_last_refusal": "none",
+  "output_reconnect_total": 0,
+  "input_reconnect_total": 0,
+  "input_overflow_total": 0,
+  "control_rejected_total": 0,
+  "memory_rss_kib": 18432,
+  "memory_high_water_kib": 20480
 }
 ```
 
@@ -546,6 +552,11 @@ operators can distinguish a running process from newly installed binaries.
 - `focus_assurance` (string): How focus is bound for output. `protocol` on verified routes; on keystroke routes, `tracker` while a window tracker confirms the exact focused window and `unconfirmed` otherwise; `none` without a route. Added in status schema 8.
 - `output_refused_total` (integer): Outputs refused before their first keystroke since daemon start: no consent, a focus change after the match, or focus no tracker could confirm. Nothing was erased or inserted for them and they are never retried. Added in status schema 8.
 - `output_last_refusal` (string): Reason for the most recent refusal: `compatibility-mode-off`, `focus-changed`, `focus-unconfirmed`, or `none`. Added in status schema 8.
+- `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
+- `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
+- `input_overflow_total` (integer): Times evdev input arrived faster than it could be applied and the queue (4,096 events) was dropped, resetting the matcher; always 0 for other sources. Added in 1.2.x without a schema change.
+- `control_rejected_total` (integer): Control requests answered `error=busy` because all control workers were occupied. Added in 1.2.x without a schema change.
+- `memory_rss_kib`, `memory_high_water_kib` (integers): The daemon's current and peak resident memory (`VmRSS`, `VmHWM`), in KiB; 0 where `/proc` is unavailable. For soak tests: a peak that keeps rising under a steady workload is a leak. Added in 1.2.x without a schema change.
 
 These are injection-operation measurements, not end-to-end keypress-to-visible-text latency; they exclude time before a match is ready and compositor/client paint latency. The percentile window is process-local and resets on daemon restart.
 

@@ -50,6 +50,12 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "output_uncertain_total"
                         | "output_retiring_workers"
                         | "output_stalled_ms"
+                        | "output_reconnect_total"
+                        | "input_reconnect_total"
+                        | "input_overflow_total"
+                        | "control_rejected_total"
+                        | "memory_rss_kib"
+                        | "memory_high_water_kib"
                         | "output_refused_total"
                 ) =>
             {

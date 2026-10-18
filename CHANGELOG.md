@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The daemon status (and `wayexpand status --json`) reports reliability
+  counters and memory use: `output_reconnect_total`,
+  `input_reconnect_total`, `input_overflow_total` (evdev input dropped
+  because its queue filled), `control_rejected_total` (control requests
+  answered busy), and `memory_rss_kib` / `memory_high_water_kib`. The
+  fields are additive; the status schema stays 8.
+- New benchmarks cover worst-case Unicode buffers (a 4,096-scalar single
+  grapheme cluster, zalgo text, ZWJ emoji, regional indicators, Hangul
+  jamo) and a full reload (parse, validate, build) at the 10,000-snippet
+  limit.
 - `wayexpand sync` handles large libraries. Git listings (the tree check,
   the outgoing-history check, staged paths and `sync status`) were read as
   one block capped at 128 KiB, so a library of a few hundred long-named

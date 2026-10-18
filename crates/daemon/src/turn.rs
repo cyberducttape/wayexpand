@@ -440,6 +440,7 @@ impl Daemon {
                     &self.path,
                     self.config.healthy(),
                 );
+                crate::counters::note_output_reconnect();
                 info!(backend = self.backend_name, "output backend reconnected");
             }
             Err(error) if error.retryable => {

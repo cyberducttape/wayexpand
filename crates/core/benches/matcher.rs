@@ -13,6 +13,11 @@ fn config_with_expansions(count: usize) -> Config {
 }
 
 fn adversarial_config(count: usize) -> Config {
+    Config::parse(&adversarial_config_text(count))
+        .expect("adversarial benchmark configuration should validate")
+}
+
+fn adversarial_config_text(count: usize) -> String {
     let mut text = String::with_capacity(count * 768);
     for index in 0..count {
         // Exercise the expansion factors that the ordinary latency workload
@@ -32,7 +37,7 @@ fn adversarial_config(count: usize) -> Config {
         }
         text.push_str("]\npropagate_case = true\nreplacement = \"value\"\n\n");
     }
-    Config::parse(&text).expect("adversarial benchmark configuration should validate")
+    text
 }
 
 fn bench_matcher(c: &mut Criterion) {
@@ -108,10 +113,70 @@ fn bench_matcher_construction(c: &mut Criterion) {
     group.finish();
 }
 
+/// Buffers built to be expensive for grapheme-aware editing and
+/// normalization rather than typical prose: very long combining sequences
+/// (one grapheme cluster that spans the whole buffer), ZWJ emoji sequences,
+/// regional-indicator pairs, and Hangul jamo that compose under NFC.
+fn bench_unicode_worst_case(c: &mut Criterion) {
+    let mut group = c.benchmark_group("unicode_worst_case_keystroke");
+    let config = Config::parse(
+        "[settings]\nmax_buffer_chars = 4096\n[[expansion]]\ntrigger = \":café\"\npropagate_case = true\nreplacement = \"value\"",
+    )
+    .expect("benchmark configuration should validate");
+    let one_cluster = format!("e{}", "\u{301}".repeat(4095));
+    let zalgo = format!("a{} ", "\u{301}\u{316}\u{35c}\u{489}".repeat(8));
+    let cases: [(&str, String); 5] = [
+        ("single_cluster", one_cluster),
+        ("zalgo", zalgo.repeat(4096 / zalgo.chars().count() + 1)),
+        ("zwj_emoji", "👩\u{200d}👩\u{200d}👧\u{200d}👦 ".repeat(512)),
+        ("regional_indicators", "🇩🇪🇮🇩🇺🇸 ".repeat(600)),
+        ("hangul_jamo", "\u{1112}\u{1161}\u{11ab} ".repeat(1024)),
+    ];
+    for (name, filler) in cases {
+        let mut engine =
+            ExpansionEngine::new(config.clone()).expect("benchmark engine should initialize");
+        engine.process(InputEvent::Text(filler));
+        group.bench_function(BenchmarkId::new("type_and_backspace", name), |bench| {
+            bench.iter(|| {
+                black_box(engine.process(InputEvent::Text("\u{301}".into())));
+                black_box(engine.process(InputEvent::Backspace));
+            });
+        });
+        group.bench_function(BenchmarkId::new("near_miss_trigger", name), |bench| {
+            bench.iter(|| {
+                black_box(engine.process(InputEvent::Text(":cafe\u{301}x".into())));
+            });
+        });
+    }
+    group.finish();
+}
+
+/// What a reload costs at the documented maximum: parse and validate the
+/// TOML, then build the matcher, for a library at the snippet cap with the
+/// trigger amplification (aliases, case, NFC/NFD variants) near its limit.
+fn bench_reload_at_scale(c: &mut Criterion) {
+    let mut group = c.benchmark_group("reload_parse_validate_build");
+    group.sample_size(10);
+    for count in [1_000, 10_000] {
+        let text = adversarial_config_text(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), &text, |bench, text| {
+            bench.iter(|| {
+                let config = Config::parse(text).expect("benchmark configuration should validate");
+                black_box(
+                    ExpansionEngine::new(config).expect("benchmark engine should initialize"),
+                );
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_matcher,
     bench_long_buffer_keystroke,
-    bench_matcher_construction
+    bench_matcher_construction,
+    bench_unicode_worst_case,
+    bench_reload_at_scale
 );
 criterion_main!(benches);

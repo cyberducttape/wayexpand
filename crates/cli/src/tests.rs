@@ -327,7 +327,13 @@ fn status_json_matches_documented_stable_contract() {
          compatibility_mode=off\n\
          focus_assurance=protocol\n\
          output_refused_total=3\n\
-         output_last_refusal=focus-changed";
+         output_last_refusal=focus-changed\n\
+         output_reconnect_total=1\n\
+         input_reconnect_total=2\n\
+         input_overflow_total=3\n\
+         control_rejected_total=4\n\
+         memory_rss_kib=5\n\
+         memory_high_water_kib=6";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
@@ -376,6 +382,12 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["focus_assurance"], "protocol");
     assert_eq!(value["output_refused_total"], 3);
     assert_eq!(value["output_last_refusal"], "focus-changed");
+    assert_eq!(value["output_reconnect_total"], 1);
+    assert_eq!(value["input_reconnect_total"], 2);
+    assert_eq!(value["input_overflow_total"], 3);
+    assert_eq!(value["control_rejected_total"], 4);
+    assert_eq!(value["memory_rss_kib"], 5);
+    assert_eq!(value["memory_high_water_kib"], 6);
 }
 
 #[test]
@@ -476,6 +488,12 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "focus_assurance",
             "output_refused_total",
             "output_last_refusal",
+            "output_reconnect_total",
+            "input_reconnect_total",
+            "input_overflow_total",
+            "control_rejected_total",
+            "memory_rss_kib",
+            "memory_high_water_kib",
         ]
         .into_iter()
         .collect()

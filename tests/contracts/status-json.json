@@ -59,6 +59,12 @@
     "compatibility_mode": "string",
     "focus_assurance": "string",
     "output_refused_total": "integer",
-    "output_last_refusal": "string"
+    "output_last_refusal": "string",
+    "output_reconnect_total": "integer",
+    "input_reconnect_total": "integer",
+    "input_overflow_total": "integer",
+    "control_rejected_total": "integer",
+    "memory_rss_kib": "integer",
+    "memory_high_water_kib": "integer"
   }
 }

@@ -67,6 +67,14 @@ const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
 const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_PENDING_EVENTS: usize = 4096;
 
+static INPUT_QUEUE_OVERFLOWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How often, since process start, translated input outgrew its queue and
+/// was dropped (the matcher is reset each time). For the daemon status.
+pub fn input_queue_overflow_total() -> u64 {
+    INPUT_QUEUE_OVERFLOWS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[derive(Debug, Error)]
 pub enum EvdevError {
     #[error(
@@ -296,6 +304,7 @@ impl EvdevSource {
     /// pending transaction and emits one reset boundary instead.
     fn queue_event(&mut self, event: InputEvent) {
         if self.pending.len() >= MAX_PENDING_EVENTS {
+            INPUT_QUEUE_OVERFLOWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.pending.clear();
             self.pending.push_back(InputEvent::Reset);
             tracing::warn!(

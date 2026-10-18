@@ -233,6 +233,9 @@ mod tests {
                         "matcher_latency_",
                         "usage_",
                         "output_",
+                        "input_",
+                        "control_",
+                        "memory_",
                     ]
                     .iter()
                     .any(|prefix| line.starts_with(prefix))

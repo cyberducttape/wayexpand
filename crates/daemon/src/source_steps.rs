@@ -95,6 +95,7 @@ impl Daemon {
                         &self.path,
                         self.config.healthy(),
                     );
+                    crate::counters::note_input_reconnect();
                     info!("input-method source reconnected");
                 }
                 Err(error) if error.is_retryable() => {
@@ -228,6 +229,7 @@ impl Daemon {
                         &self.path,
                         self.config.healthy(),
                     );
+                    crate::counters::note_input_reconnect();
                     info!("evdev source reconnected");
                 }
                 Err(error) if error.is_retryable() => {

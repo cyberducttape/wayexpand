@@ -4,6 +4,7 @@ mod backend_lifecycle;
 mod build_info;
 mod clipboard;
 mod control;
+mod counters;
 mod events;
 mod focus;
 mod input_loop;
