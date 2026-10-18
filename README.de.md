@@ -30,6 +30,11 @@ produktiven Einsatz `wayexpand doctor` und die
   Fenster-Tracking (derzeit KDE Plasma); andernfalls oder ohne Dienst kopiert
   Enter es in die Zwischenablage. Skripte nutzen
   `wayexpand insert ';sig'`.
+- **Ganze Konfigurationsdateien ausfüllen.** `wayexpand new playbook` fragt
+  Host-Gruppe und Paket ab und schreibt ein fertiges Ansible-Playbook.
+  Dockerfiles, Compose, Kubernetes, systemd-Units, nginx und CI-Workflows
+  sind eingebaut; eigene Vorlagen funktionieren genauso
+  ([Templates](docs/TEMPLATES.md)).
 - **Mit einem Klick einschalten.** Der Startbildschirm aktiviert den sichersten
   erkannten Eingabeweg und gewährt nie selbstständig rohen Tastaturzugriff.
 
@@ -137,6 +142,18 @@ wayexpand status
 `test` und `preview` injizieren keinen Text in andere Anwendungen. Bei
 befehlsgestützten Snippets kann `test` das konfigurierte Programm ausführen;
 prüfen Sie `program` und `args` vor der Verwendung.
+
+## Konfigurationsdateien erzeugen
+
+Jedes Snippet mit `output_file` ist eine Dateivorlage. `wayexpand new` listet
+sie auf, fragt jedes `{{field:…}}` ab (im Terminal oder mit `--gui` als
+Formular) und schreibt die Datei, ohne eine vorhandene zu überschreiben:
+
+```bash
+wayexpand new                              # verfügbare Vorlagen
+wayexpand new compose --set service=web    # schreibt compose.yaml
+wayexpand new --show playbook              # als Snippet zum Anpassen
+```
 
 ## Entwicklung und weitere Dokumentation
 

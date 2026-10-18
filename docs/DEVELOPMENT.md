@@ -214,7 +214,7 @@ cargo vendor vendor/ > .cargo/config.toml
 cargo build --locked --offline --workspace
 ```
 
-See `CLAUDE.md` for dependency management.
+See `.claude/CLAUDE.md` for dependency management.
 
 ### Formatting and linting
 
@@ -242,8 +242,18 @@ shellcheck scripts/*.sh
 its own D-Bus session, runtime and configuration directories, and saves a
 PNG. It never touches the running desktop, its daemon, or your settings.
 `WAYEXPAND_GUI_SCREENSHOT_VIEW` opens a screen first: `light`, `settings`,
-`diagnostics`, `new` or `import`. Use made-up snippets in CONFIG, not a real
-library. Release builds ignore the capture variables.
+`diagnostics`, `new`, `import`, `search`, or `preview` (types a sample
+sentence into the Matcher preview). `WAYEXPAND_GUI_SCREENSHOT_PACK` picks a
+color pack (for example `retro_80s_neon`), and
+`WAYEXPAND_GUI_SCREENSHOT_DAEMON=1` also starts a sandboxed daemon that reads
+stdin and types nothing, so the header shows a running service. Use made-up
+snippets in CONFIG, not a real library. Release builds ignore the capture
+variables.
+
+The README images come from this script with the Retro 80s Neon pack.
+`scripts/make-social-preview.sh` builds `docs/images/social-preview.png`
+from the editor image; upload it under the repository's *Settings → Social
+preview*.
 
 ## Release Process
 
@@ -366,7 +376,7 @@ CI runs on every PR:
 
 ## Resources
 
-- **Architecture details:** See `CLAUDE.md` in the repository
+- **Architecture details:** See `.claude/CLAUDE.md` in the repository
 - **API contracts:** [docs/COMPATIBILITY.md](COMPATIBILITY.md)
 - **Security model:** [SECURITY.md](../SECURITY.md)
 - **Support matrix:** [docs/SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)

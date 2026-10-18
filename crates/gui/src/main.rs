@@ -483,6 +483,22 @@ impl eframe::App for GuiApp {
                 Some("new") => self.request_action(PendingAction::New),
                 Some("import") => self.import_open = true,
                 Some("search") => self.filter = "s".into(),
+                Some("preview") => {
+                    self.try_live_open = true;
+                    for character in
+                        "Hi Jordan, ;tyI've looked into this and the fix ships on Friday.".chars()
+                    {
+                        let mut text = self.playground.text.clone();
+                        text.push(character);
+                        self.playground.text = text.clone();
+                        if let Some(rewrite) =
+                            self.playground
+                                .edit(&self.config, &self.preview_app, &text, true)
+                        {
+                            self.playground.text = rewrite.text;
+                        }
+                    }
+                }
                 _ => {}
             }
         }

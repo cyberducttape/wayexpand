@@ -12,7 +12,7 @@ signature. Type `;ty` and get your support reply — with the cursor waiting
 where you need to keep typing. Dates, addresses, templates, team snippets:
 local, offline, no account, no telemetry.
 
-![WayExpand's editor in the Retro 80s Neon color pack, with the Matcher preview: typing "Hi Jordan, ;ty …" expanded into a full support reply, "1 expansion · 47 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
+![WayExpand's editor in the Retro 80s Neon color pack, with the Matcher preview: typing "Hi Jordan, ;ty …" expanded into a full support reply, "1 expansion · 22 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
 
 ### What makes it different
 
@@ -29,6 +29,10 @@ local, offline, no account, no telemetry.
 
   ![The quick-insert picker in the Retro 80s Neon color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
 
+- **Whole config files, filled in.** `wayexpand new playbook` asks for the
+  host group and package and writes a ready Ansible playbook. Dockerfiles,
+  Compose, Kubernetes, systemd units, nginx, and CI workflows are built in,
+  and your own templates work the same way.
 - **One click to turn on.** The first-run screen detects your desktop and
   enables the safest input path it finds. It never grants raw keyboard access
   on its own.
@@ -51,13 +55,7 @@ local, offline, no account, no telemetry.
 
 ## Install
 
-For local evaluation or development, install from source. Published binaries
-and packages are only supported when they are present on the [GitHub Releases
-page](https://github.com/cyberducttape/wayexpand/releases); do not infer
-availability from the release workflow alone. Review the [support
-matrix](docs/SUPPORT_MATRIX.md) before deploying desktop integration.
-
-### Experimental prebuilt packages
+### Prebuilt packages (experimental)
 
 Uncertified builds are published as GitHub prereleases named
 *Experimental build …* on the [releases page](https://github.com/cyberducttape/wayexpand/releases).
@@ -73,13 +71,9 @@ tar -xzf wayexpand-*-linux-x86_64.tar.gz
 # or: sudo dnf install ./wayexpand-*.x86_64.rpm
 ```
 
-On keystroke routes (evdev), typed expansions stay off until you allow them
-with `compatibility_mode`; `wayexpand doctor` explains what the active route
-guarantees. See [Insertion guarantees](SECURITY.md#insertion-guarantees).
-
 ### From source
 
-For a source installation (Rust 1.95+ required):
+Rust 1.95 or newer:
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
@@ -88,27 +82,9 @@ cd wayexpand
 wayexpand-gui
 ```
 
-Then create a first snippet from the terminal:
-
-```sh
-wayexpand setup
-wayexpand-ui
-```
-
-Verify the selected desktop route before typing into another application:
-
-```sh
-wayexpand doctor
-wayexpand status --json
-wayexpand test ';;hello'
-```
-
-Certified releases attach the same package set once their certification
-gates pass. See [Packaging](docs/PACKAGING.md) for experimental builds,
-source builds, and Launchpad status.
-
 The installers never run as root, enable services, grant raw-input access, or
-accept portal consent for you.
+accept portal consent for you. [Packaging](docs/PACKAGING.md) covers distro
+packages and the Ubuntu PPA's status.
 
 ## Your first minute
 
@@ -133,9 +109,32 @@ wayexpand status          # is the daemon running, and on which path
 wayexpand test ';sig'     # check matching without the desktop
 ```
 
-## Desktop compatibility
+## Generate config files
 
-Be precise about what works where:
+Any snippet with an `output_file` is a file template. `wayexpand new` lists
+them, asks for each `{{field:…}}` (in the terminal, or a form with `--gui`),
+and writes the file without overwriting one that exists:
+
+```console
+$ wayexpand new compose --set service=web
+Wrote compose.yaml
+$ cat compose.yaml
+services:
+  web:
+    image: nginx:stable
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    ...
+```
+
+Built in: `dockerfile` (plus `-python`, `-node`, `-rust`), `compose`,
+`playbook`, `ansible-role`, `inventory`, `systemd-service`,
+`github-actions`, `nginx-site`, and `k8s-deployment`. Start your own from
+`wayexpand new --show playbook`. Jinja and GitHub `{{ … }}` expressions are
+written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
+
+## Desktop compatibility
 
 - **Committed text only.** WayExpand does not see IME preedit/composition;
   finish CJK, dead-key, and Compose sequences before expecting a trigger to
@@ -144,37 +143,29 @@ Be precise about what works where:
   only on KDE Plasma (KWin). Elsewhere they fail closed and never expand.
 - **No compositor is certified yet** by automated end-to-end tests. Run
   `wayexpand doctor` on your own session before relying on a backend.
-- **evdev** is an explicit compatibility fallback, never the normal or
-  recommended setup. It observes every keyboard event, including password
-  fields; the fact that WayExpand does not transmit password text does not
-  change that observation risk. Setup never grants keyboard-device access.
-  Recommended mode configures the highest-ranked route that is available and
-  allowed by policy: certified routes first, then input-method-v2 (when libei
-  key pass-through is available), then IBus; it never automatically selects
-  evdev or another globally observing path. Use evdev only after reviewing the
-  security tradeoff and explicitly choosing maximum compatibility.
+- **evdev is a last resort.** It observes every keyboard event, including
+  password fields, so setup never grants keyboard-device access and
+  keystroke routes keep typed expansions off until you allow them with
+  `compatibility_mode`. Recommended mode configures the highest-ranked route
+  that is available and allowed by policy: certified routes first, then
+  input-method-v2 (when libei key pass-through is available), then IBus; it
+  never automatically selects evdev or another globally observing path. See
+  [Insertion guarantees](SECURITY.md#insertion-guarantees).
 
-See the [support matrix](docs/SUPPORT_MATRIX.md) and
-[certification matrix](docs/CERTIFICATION_MATRIX.md) for evidence and known
-limits. Deployment teams should also use the
-[production acceptance checklist](docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md);
-it separates implemented controls from gates that require real desktop
-evidence.
+The [support matrix](docs/SUPPORT_MATRIX.md) and
+[certification matrix](docs/CERTIFICATION_MATRIX.md) list evidence and known
+limits; deployment teams should also use the
+[production acceptance checklist](docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md).
 
-## Security and operational safety
+## Security
 
-WayExpand is designed to run as the unprivileged desktop user, work offline,
-avoid telemetry, keep configuration files owner-checked, execute command
-snippets without a shell, and suspend matching in sensitive fields when the
-selected input backend can report them. The evdev fallback is different: it
-requires explicit raw input-event access and an additional
-`--allow-evdev-sensitive-fields` acknowledgement because it cannot detect
-password fields.
-
-The daemon also uses bounded command queues, output limits, timeouts, process
-group cleanup, and organization policy that can either audit or enforce
-restrictions. These controls are intended to make everyday operation
-predictable, not to claim that WayExpand is a security sandbox.
+WayExpand runs as the unprivileged desktop user, works offline, has no
+telemetry, and owner-checks its configuration files. Command snippets run
+without a shell, with bounded queues, output limits, timeouts, and process
+group cleanup; organization policy can audit or enforce restrictions. These
+controls make everyday operation predictable — WayExpand does not claim to be
+a security sandbox. See [SECURITY.md](SECURITY.md) and the
+[threat model](THREAT_MODEL.md).
 
 ## Migrating from Espanso
 
@@ -182,24 +173,19 @@ predictable, not to claim that WayExpand is a security sandbox.
 wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
 ```
 
-Use `--strict` to reject entries whose Espanso semantics cannot be preserved.
-Use `--report-json` to emit a machine-readable migration report on stderr;
-review warnings before activating a permissive import.
+`--strict` rejects entries whose Espanso semantics cannot be preserved, and
+`--report-json` writes a machine-readable migration report to stderr. The
+GUI's import merges by default and previews duplicates and conflicts before
+anything changes. See [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
-The GUI defaults to a merge that preserves current snippets and reports
-duplicates/conflicts; replacement is a separate explicit action. Review the
-CLI's migration report or GUI preview for unmapped features before applying.
-See
-[Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
+## Documentation
 
-## More information
-
-- [Getting started and troubleshooting](docs/GETTING_STARTED.md)
-- [Security and threat model](SECURITY.md) · [Threat model](THREAT_MODEL.md)
-- [Backend details](docs/BACKENDS.md) · [Support matrix](docs/SUPPORT_MATRIX.md)
-- [Packaging status](docs/PACKAGING.md)
-- [Migration from Espanso](docs/MIGRATION_FROM_ESPANSO.md)
-- [Fleet deployment](docs/FLEET_CONFIG.md) · [Documentation index](docs/DOCUMENTATION_INDEX.md)
+- [Getting started](docs/GETTING_STARTED.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Templates](docs/TEMPLATES.md) · [GUI](docs/GUI.md)
+- [Backends](docs/BACKENDS.md) · [Support matrix](docs/SUPPORT_MATRIX.md)
+- [Fleet deployment](docs/FLEET_CONFIG.md) · [For sysadmins](docs/FOR_SYSADMINS.md)
+- [Packaging](docs/PACKAGING.md) · [Roadmap](docs/ROADMAP.md)
+- [Everything else](docs/DOCUMENTATION_INDEX.md)
 
 Non-English documentation: [Deutsch](README.de.md).
 

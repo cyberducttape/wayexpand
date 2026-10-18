@@ -1,13 +1,13 @@
-# WayExpand Professional Roadmap
+# WayExpand Roadmap
 
 > This is the forward-looking roadmap. Completed work and historical release
-> planning are archived in [docs/archive/2026-09/PROFESSIONAL_ROADMAP.md](docs/archive/2026-09/PROFESSIONAL_ROADMAP.md);
+> planning are archived in [docs/archive/2026-09/PROFESSIONAL_ROADMAP.md](archive/2026-09/PROFESSIONAL_ROADMAP.md);
 > current behavior is defined by the support and compatibility documents.
 
 As of v1.3.3, the core engine, configuration format, and CLI/JSON contracts
 are stable. Desktop backend support remains experimental until the
-certification evidence described in [docs/CERTIFICATION.md](docs/CERTIFICATION.md)
-and [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) is published.
+certification evidence described in [CERTIFICATION.md](CERTIFICATION.md)
+and [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) is published.
 
 ## Production blockers
 

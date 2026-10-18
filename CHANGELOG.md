@@ -4,6 +4,19 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Documentation and presentation:
+  - The README is shorter and leads with what WayExpand does. It states
+    each compatibility caveat once, and adds a section on file templates
+    (`wayexpand new`). The German README gains the same section.
+  - The README screenshots show the current GUI.
+  - The planning documents moved out of the repository root:
+    `PROFESSIONAL_ROADMAP.md` is now `docs/ROADMAP.md`,
+    `RELEASE_PROMOTION_GUIDE.md` is now `docs/RELEASE_PROMOTION.md`, and
+    the Claude Code notes are now `.claude/CLAUDE.md`.
+  - The bundled example `:sig` signs as "Your Name".
+  - `scripts/make-social-preview.sh` builds a GitHub social preview image.
+    `scripts/gui-screenshot.sh` gains a `preview` view and options for the
+    color pack and a sandboxed daemon.
 - Fixed: the Ubuntu package's test run failed on Launchpad builders. The
   sync tests need `git`, and the input-method Compose tests need an XKB
   Compose table, so both are now test-only build dependencies and the tests

@@ -264,7 +264,7 @@ can restore authorization on reconnect. Setting
 
 ## References
 
-- [PROFESSIONAL_ROADMAP.md](../../../PROFESSIONAL_ROADMAP.md) — Detailed feature roadmap
+- [PROFESSIONAL_ROADMAP.md](../../ROADMAP.md) — Detailed feature roadmap
 - [SECURITY.md](../../../SECURITY.md) — Threat model and vulnerability disclosure
 - [COMPATIBILITY.md](../../COMPATIBILITY.md) — Stability guarantees
 - [SUPPORT_MATRIX.md](../../SUPPORT_MATRIX.md) — Current backend/compositor status

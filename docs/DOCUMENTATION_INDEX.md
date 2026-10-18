@@ -152,7 +152,8 @@ Then see [SECURITY.md](../SECURITY.md)
 |----------|----------|---------|
 | [IBUS_ENGINE.md](IBUS_ENGINE.md) | IBus users and contributors | IBus engine behavior and protocol boundary |
 | [adr/0001-evdev-best-effort-semantics.md](adr/0001-evdev-best-effort-semantics.md) | Maintainers and administrators | Accepted evdev semantics decision |
-| [RELEASE_PROMOTION_GUIDE.md](../RELEASE_PROMOTION_GUIDE.md) | Release maintainers | Release and package promotion checks |
+| [RELEASE_PROMOTION.md](RELEASE_PROMOTION.md) | Release maintainers | Release and package promotion checks |
+| [ROADMAP.md](ROADMAP.md) | Contributors and maintainers | Open work and production blockers |
 
 ### Historical Design and Audit Records
 

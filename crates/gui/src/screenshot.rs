@@ -17,7 +17,8 @@ pub(crate) struct ScreenshotCapture {
     frames: u32,
     requested: bool,
     /// `WAYEXPAND_GUI_SCREENSHOT_VIEW`: a screen to open before capturing
-    /// (`light`, `settings`, `diagnostics`, `new`, `import`, `search`).
+    /// (`light`, `settings`, `diagnostics`, `new`, `import`, `search`,
+    /// `preview`).
     view: Option<String>,
 }
 

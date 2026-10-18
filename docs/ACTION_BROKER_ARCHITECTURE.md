@@ -319,7 +319,7 @@ missing broker service from an unknown or disabled action.
 
 - See [CAPTURE_BACKEND_TRADEOFFS.md](CAPTURE_BACKEND_TRADEOFFS.md) for input capture options
 - See [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) for tested configurations
-- See [docs/PROFESSIONAL_ROADMAP.md](../PROFESSIONAL_ROADMAP.md) for v1.3+ timeline
+- See [the roadmap](ROADMAP.md) for v1.3+ timeline
 
 ## References
 

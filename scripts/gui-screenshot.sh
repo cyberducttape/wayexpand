@@ -6,8 +6,13 @@
 # Runs a debug wayexpand-gui inside a private, headless KWin
 # (kwin_wayland --virtual) with its own D-Bus session, runtime directory and
 # configuration directory, so nothing touches the running desktop, its
-# daemon, or the user's settings. Extra environment (for example
-# WAYEXPAND_GUI_SCREENSHOT_VIEW) is passed through.
+# daemon, or the user's settings.
+#
+#   WAYEXPAND_GUI_SCREENSHOT_VIEW  screen to open first (see screenshot.rs)
+#   WAYEXPAND_GUI_SCREENSHOT_PACK  color pack code, for example retro_80s_neon
+#   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
+#                                  stdin and types nothing, so the header
+#                                  shows a running service
 set -euo pipefail
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
@@ -28,8 +33,10 @@ for tool in kwin_wayland dbus-run-session convert; do
     }
 done
 
-cargo build --quiet --locked -p wayexpand-gui --manifest-path "$project_dir/Cargo.toml"
+cargo build --quiet --locked -p wayexpand-gui -p wayexpand-daemon \
+    --manifest-path "$project_dir/Cargo.toml"
 gui="$project_dir/target/debug/wayexpand-gui"
+daemon="$project_dir/target/debug/wayexpand-daemon"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-gui-shot.XXXXXXXX")
 # The compositor's socket path must fit in 108 bytes, so its runtime
@@ -37,26 +44,46 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-gui-shot.XXXXXXXX")
 runtime=$(mktemp -d /tmp/wxshot.XXXXXX)
 trap 'rm -rf "$work" "$runtime"' EXIT
 chmod 700 "$runtime"
-mkdir -m 700 "$work/config" "$work/home"
-# The GUI opens its default configuration path, which must be private.
-mkdir -m 700 "$work/config/wayexpand"
-cp -- "$config" "$work/config/wayexpand/expansions.toml"
-chmod 600 "$work/config/wayexpand/expansions.toml"
+# The GUI opens its default configuration path, which must be private. It
+# sits under HOME so the status bar shows ~/.config/wayexpand/expansions.toml.
+config_home="$work/home/.config"
+mkdir -m 700 "$work/home" "$config_home" "$config_home/wayexpand"
+cp -- "$config" "$config_home/wayexpand/expansions.toml"
+chmod 600 "$config_home/wayexpand/expansions.toml"
+if [ -n "${WAYEXPAND_GUI_SCREENSHOT_PACK:-}" ]; then
+    printf 'language = "en"\ncolorpack = "%s"\n' "$WAYEXPAND_GUI_SCREENSHOT_PACK" \
+        >"$config_home/wayexpand/gui-prefs.toml"
+    chmod 600 "$config_home/wayexpand/gui-prefs.toml"
+fi
+
+# kwin_wayland --exit-with-session takes one program; this wrapper starts
+# the optional daemon and then the GUI.
+session="$work/session.sh"
+cat >"$session" <<EOF
+#!/bin/sh
+if [ "\${WAYEXPAND_GUI_SCREENSHOT_DAEMON:-}" = 1 ]; then
+    sleep 120 | '$daemon' --source=stdin --backend=none >'$work/daemon.log' 2>&1 &
+    sleep 2
+fi
+exec '$gui'
+EOF
+chmod 700 "$session"
 
 env -i \
     PATH="$PATH" \
     HOME="$work/home" \
     LANG="${LANG:-C.UTF-8}" \
     XDG_RUNTIME_DIR="$runtime" \
-    XDG_CONFIG_HOME="$work/config" \
-    WAYEXPAND_SOCKET="$runtime/no-daemon.sock" \
+    XDG_CONFIG_HOME="$config_home" \
+    WAYEXPAND_SOCKET="$runtime/wayexpand.sock" \
     WAYEXPAND_GUI_SCREENSHOT="$work/shot.ppm" \
     WAYEXPAND_GUI_SCREENSHOT_VIEW="${WAYEXPAND_GUI_SCREENSHOT_VIEW:-}" \
+    WAYEXPAND_GUI_SCREENSHOT_DAEMON="${WAYEXPAND_GUI_SCREENSHOT_DAEMON:-}" \
     QT_QPA_PLATFORM=offscreen \
     timeout 90 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
     --width "$width" --height "$height" --socket wayexpand-shot \
-    --exit-with-session "$gui" \
+    --exit-with-session "$session" \
     >"$work/kwin.log" 2>&1 || true
 
 if [ ! -s "$work/shot.ppm" ]; then

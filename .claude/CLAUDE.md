@@ -50,7 +50,7 @@ Script-level checks run in CI (`.github/workflows/ci.yml`): `scripts/test-releas
 - **State compatibility precisely.** Docs and `doctor` must not claim a backend works without evidence (see `docs/SUPPORT_MATRIX.md`, promotion policy).
 - **CLI exit codes come from typed error categories.** `CliErrorKind` carried by `CliError` in `crates/cli/src/main.rs` assigns stable exit codes independently of human-facing error wording. Exit codes and JSON output are a documented contract in `docs/COMPATIBILITY.md`, with contract tests in the CLI's test module.
 - **Errors must not leak snippet content.** Use `ConfigError::safe_summary()` in user-facing output; `scripts/test-doctor.sh` checks for leaks.
-- Open work and known bugs are tracked in `PROFESSIONAL_ROADMAP.md`.
+- Open work and known bugs are tracked in `docs/ROADMAP.md`.
 
 ## Packaging
 

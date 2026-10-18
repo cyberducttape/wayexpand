@@ -1,4 +1,7 @@
+hotkey = []
+
 [[expansion]]
+id = "63f28a0f-38d8-403a-9b9f-82b316421924"
 trigger = ";;hello"
 replacement = "Hello from Wayland!"
 description = "A friendly greeting"
@@ -6,18 +9,28 @@ tags = [
     "common",
     "greeting",
 ]
+category = ""
+app_filter = []
+match_mode = "immediate"
 enabled = true
+propagate_case = false
 
 [[expansion]]
+id = "ede31c06-d53f-49c0-9aa6-bb87b4014e99"
 trigger = ":sig"
 replacement = """
 Regards,
-Stephan"""
-description = "Professional sign-off"
+Your Name"""
+description = "Email sign-off (replace Your Name with yours)"
 tags = ["email"]
+category = ""
+app_filter = []
+match_mode = "immediate"
 enabled = true
+propagate_case = false
 
 [[expansion]]
+id = "52313bab-6736-4512-8808-1a445a1b7872"
 trigger = ":today"
 replacement = "Today is {{date}} ({{time}} UTC)."
 description = "Current UTC date and time"
@@ -25,7 +38,32 @@ tags = [
     "date",
     "time",
 ]
+category = ""
+app_filter = []
+match_mode = "immediate"
 enabled = true
+propagate_case = false
 
 [settings]
 max_buffer_chars = 128
+font_scale = "normal"
+libei_token_persistence = true
+fcitx5_direct_commit = false
+
+[organization]
+safe_mode = false
+disable_commands = false
+disable_hotkeys = false
+require_absolute_commands = false
+disable_title_matching = false
+allow_weak_app_filters = false
+require_atomic_replace = false
+require_sensitive_focus = false
+max_replacement_size = 0
+allowed_backends = []
+allowed_packs = []
+require_signed_packs = false
+pack_signers_file = "/etc/wayexpand/pack-signers"
+disable_clipboard = false
+disable_template_env = false
+audit_prefix = "wayexpand-policy"

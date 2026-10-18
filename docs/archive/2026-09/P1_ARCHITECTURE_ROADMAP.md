@@ -176,4 +176,4 @@ Each P1 fix should include:
 
 - [SECURITY.md](../../../SECURITY.md) - Security model and guarantees
 - [BACKENDS.md](../../BACKENDS.md) - Backend limitations and roadmap
-- [PROFESSIONAL_ROADMAP.md](../../../PROFESSIONAL_ROADMAP.md) - Full feature roadmap
+- [PROFESSIONAL_ROADMAP.md](../../ROADMAP.md) - Full feature roadmap
