@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
+    execute, queue,
+    style::{Attribute, Print, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, ClearType},
 };
 use std::{
@@ -19,19 +19,48 @@ use wayexpand_core::{
     default_config_path, Config, ConfigRevision, DaemonStatus, ExpansionEngine, InputEvent,
 };
 
+mod render;
+
+/// How the message line is colored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tone {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+/// What the last status poll learned about the daemon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DaemonState {
+    Checking,
+    Running,
+    Paused,
+    Stopped,
+}
+
 struct App {
     path: PathBuf,
     config: Config,
     config_revision: ConfigRevision,
     selected: usize,
+    /// First list row on screen; kept so the selection stays visible.
+    scroll: usize,
+    /// Snippet rows the list showed in the last frame, for paging.
+    list_rows: usize,
     query: String,
     searching: bool,
     message: String,
+    tone: Tone,
+    show_help: bool,
     paused: bool,
+    daemon: DaemonState,
     /// How the daemon's output route replaces triggers, from its status.
     insertion: Option<InsertionAssurance>,
     prompt: Option<Prompt>,
     input: String,
+    /// Caret position in `input`, in characters.
+    cursor: usize,
     confirm_delete: Option<usize>,
     undo: Option<Config>,
     external_edit: bool,
@@ -55,6 +84,18 @@ enum Prompt {
     PreviewApp,
 }
 
+impl Prompt {
+    fn label(&self) -> &'static str {
+        match self {
+            Prompt::NewTrigger => "New trigger",
+            Prompt::NewReplacement { .. } | Prompt::EditReplacement { .. } => "Replacement",
+            Prompt::EditDescription { .. } => "Description",
+            Prompt::EditTags { .. } => "Tags",
+            Prompt::PreviewApp => "Preview app id",
+        }
+    }
+}
+
 impl App {
     fn load(path: PathBuf) -> Result<Self> {
         let loaded = Config::ensure_user_config(&path)
@@ -64,13 +105,19 @@ impl App {
             config: loaded.config,
             config_revision: loaded.revision,
             selected: 0,
+            scroll: 0,
+            list_rows: 10,
             query: String::new(),
             searching: false,
             message: "Ready".into(),
+            tone: Tone::Info,
+            show_help: false,
             paused: false,
+            daemon: DaemonState::Checking,
             insertion: None,
             prompt: None,
             input: String::new(),
+            cursor: 0,
             confirm_delete: None,
             undo: None,
             external_edit: false,
@@ -82,6 +129,45 @@ impl App {
             preview_cache: None,
             preview_app: String::new(),
         })
+    }
+
+    fn say(&mut self, tone: Tone, message: String) {
+        self.tone = tone;
+        self.message = message;
+    }
+
+    /// Opens a prompt with `input` as its text and the caret at the end.
+    fn open_prompt(&mut self, prompt: Prompt, input: String) {
+        self.cursor = input.chars().count();
+        self.input = input;
+        self.prompt = Some(prompt);
+    }
+
+    fn move_selection(&mut self, target: usize) {
+        let count = self.visible_indices().len();
+        self.selected = target.min(count.saturating_sub(1));
+    }
+
+    fn insert_at_cursor(&mut self, character: char) {
+        let at = byte_offset(&self.input, self.cursor);
+        self.input.insert(at, character);
+        self.cursor += 1;
+    }
+
+    fn delete_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        self.cursor -= 1;
+        let at = byte_offset(&self.input, self.cursor);
+        self.input.remove(at);
+    }
+
+    fn delete_at_cursor(&mut self) {
+        if self.cursor < self.input.chars().count() {
+            let at = byte_offset(&self.input, self.cursor);
+            self.input.remove(at);
+        }
     }
 
     fn save_candidate(&mut self, candidate: &Config) -> Result<(), wayexpand_core::ConfigError> {
@@ -141,21 +227,24 @@ impl App {
 
     fn toggle_selected(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No matching snippet".into();
+            self.say(Tone::Warning, "No matching snippet".into());
             return;
         };
         let previous = self.config.clone();
         self.config.expansion[index].enabled = !self.config.expansion[index].enabled;
         match self.save_current() {
             Ok(()) => {
-                self.message = format!(
-                    "{} {}",
-                    if self.config.expansion[index].enabled {
-                        "Enabled"
-                    } else {
-                        "Disabled"
-                    },
-                    self.config.expansion[index].trigger
+                self.say(
+                    Tone::Success,
+                    format!(
+                        "{} {}",
+                        if self.config.expansion[index].enabled {
+                            "Enabled"
+                        } else {
+                            "Disabled"
+                        },
+                        self.config.expansion[index].trigger
+                    ),
                 );
                 self.undo = Some(previous);
                 self.visible_cache = None;
@@ -163,14 +252,17 @@ impl App {
             }
             Err(error) => {
                 self.config.expansion[index].enabled = !self.config.expansion[index].enabled;
-                self.message = format!("Save failed: {}", error.safe_summary());
+                self.say(
+                    Tone::Error,
+                    format!("Save failed: {}", error.safe_summary()),
+                );
             }
         }
     }
 
     fn toggle_match_mode(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No matching snippet".into();
+            self.say(Tone::Warning, "No matching snippet".into());
             return;
         };
         let previous = self.config.clone();
@@ -185,9 +277,12 @@ impl App {
         };
         match self.save_current() {
             Ok(()) => {
-                self.message = format!(
-                    "{label} matching enabled for {}",
-                    self.config.expansion[index].trigger
+                self.say(
+                    Tone::Success,
+                    format!(
+                        "{label} matching enabled for {}",
+                        self.config.expansion[index].trigger
+                    ),
                 );
                 self.undo = Some(previous);
                 self.visible_cache = None;
@@ -195,7 +290,10 @@ impl App {
             }
             Err(error) => {
                 self.config.expansion[index].match_mode = previous.expansion[index].match_mode;
-                self.message = format!("Save failed: {}", error.safe_summary());
+                self.say(
+                    Tone::Error,
+                    format!("Save failed: {}", error.safe_summary()),
+                );
             }
         }
     }
@@ -213,70 +311,87 @@ impl App {
                 self.selected = self
                     .selected
                     .min(self.visible_indices().len().saturating_sub(1));
-                self.message = "Configuration reloaded".into();
+                self.say(Tone::Success, "Configuration reloaded".into());
             }
-            Err(error) => self.message = format!("Reload failed: {}", error.safe_summary()),
+            Err(error) => self.say(
+                Tone::Error,
+                format!("Reload failed: {}", error.safe_summary()),
+            ),
         }
     }
 
     fn begin_new(&mut self) {
-        self.prompt = Some(Prompt::NewTrigger);
-        self.input.clear();
-        self.message = "Type a trigger and press Enter".into();
+        self.open_prompt(Prompt::NewTrigger, String::new());
+        self.say(
+            Tone::Info,
+            "New snippet: type its trigger, such as ;sig".into(),
+        );
     }
 
     fn begin_edit(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No snippet selected".into();
+            self.say(Tone::Warning, "No snippet selected".into());
             return;
         };
-        self.input = self.config.expansion[index].replacement.clone();
-        self.prompt = Some(Prompt::EditReplacement {
+        let prompt = Prompt::EditReplacement {
             index,
             trigger: self.config.expansion[index].trigger.clone(),
-        });
-        self.message = "Edit replacement and press Enter".into();
+        };
+        self.open_prompt(prompt, self.config.expansion[index].replacement.clone());
+        self.say(
+            Tone::Info,
+            "Edit the replacement (↵ marks a line break; for multi-line text, Esc then E)".into(),
+        );
     }
 
     fn begin_edit_description(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No snippet selected".into();
+            self.say(Tone::Warning, "No snippet selected".into());
             return;
         };
-        self.input = self.config.expansion[index].description.clone();
-        self.prompt = Some(Prompt::EditDescription {
+        let prompt = Prompt::EditDescription {
             index,
             trigger: self.config.expansion[index].trigger.clone(),
-        });
-        self.message = "Edit description and press Enter".into();
+        };
+        self.open_prompt(prompt, self.config.expansion[index].description.clone());
+        self.say(Tone::Info, "Edit the description".into());
     }
 
     fn begin_edit_tags(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No snippet selected".into();
+            self.say(Tone::Warning, "No snippet selected".into());
             return;
         };
-        self.input = encode_tags(&self.config.expansion[index].tags);
-        self.prompt = Some(Prompt::EditTags {
+        let prompt = Prompt::EditTags {
             index,
             trigger: self.config.expansion[index].trigger.clone(),
-        });
-        self.message = "Enter comma-separated tags and press Enter (use a JSON array such as [\"customer, west\"] for tags containing commas)".into();
+        };
+        self.open_prompt(prompt, encode_tags(&self.config.expansion[index].tags));
+        self.say(
+            Tone::Info,
+            "Comma-separated tags, such as ops, email (a JSON array for tags with commas)".into(),
+        );
     }
 
     fn request_delete(&mut self) {
         let Some(index) = self.selected_index() else {
-            self.message = "No snippet selected".into();
+            self.say(Tone::Warning, "No snippet selected".into());
             return;
         };
         self.confirm_delete = Some(index);
-        self.message = "Press d again to confirm deletion, or Esc to cancel".into();
+        let trigger = self.config.expansion[index].trigger.clone();
+        self.say(
+            Tone::Warning,
+            format!("Delete {trigger}? Press d again to delete it, or Esc to keep it."),
+        );
     }
 
     fn begin_preview_app(&mut self) {
-        self.input = self.preview_app.clone();
-        self.prompt = Some(Prompt::PreviewApp);
-        self.message = "Enter an app id for preview and press Enter (empty clears it)".into();
+        self.open_prompt(Prompt::PreviewApp, self.preview_app.clone());
+        self.say(
+            Tone::Info,
+            "Preview as if typed in this app id, such as firefox (empty clears it)".into(),
+        );
     }
 
     fn delete_confirmed(&mut self, index: usize) {
@@ -290,9 +405,12 @@ impl App {
             .min(self.visible_indices().len().saturating_sub(1));
         if let Err(error) = self.save_current() {
             self.config = previous;
-            self.message = format!("Delete failed: {}", error.safe_summary());
+            self.say(
+                Tone::Error,
+                format!("Delete failed: {}", error.safe_summary()),
+            );
         } else {
-            self.message = format!("Deleted {trigger}");
+            self.say(Tone::Success, format!("Deleted {trigger}"));
             self.undo = Some(previous);
         }
         self.confirm_delete = None;
@@ -300,7 +418,7 @@ impl App {
 
     fn undo_last(&mut self) {
         let Some(previous) = self.undo.take() else {
-            self.message = "Nothing to undo".into();
+            self.say(Tone::Warning, "Nothing to undo".into());
             return;
         };
         let current = std::mem::replace(&mut self.config, previous);
@@ -308,24 +426,28 @@ impl App {
         self.preview_cache = None;
         if let Err(error) = self.save_current() {
             self.config = current;
-            self.message = format!("Undo failed: {}", error.safe_summary());
+            self.say(
+                Tone::Error,
+                format!("Undo failed: {}", error.safe_summary()),
+            );
         } else {
             self.selected = self
                 .selected
                 .min(self.visible_indices().len().saturating_sub(1));
-            self.message = "Undid the last saved change".into();
+            self.say(Tone::Success, "Undid the last saved change".into());
         }
     }
 
     fn submit_prompt(&mut self) {
         let prompt = self.prompt.take();
         let input = std::mem::take(&mut self.input);
+        self.cursor = 0;
         match prompt {
             Some(Prompt::NewTrigger) if !input.trim().is_empty() => {
+                self.say(Tone::Info, format!("Now type the text {input} expands to"));
                 self.prompt = Some(Prompt::NewReplacement { trigger: input });
-                self.message = "Type replacement text and press Enter".into();
             }
-            Some(Prompt::NewTrigger) => self.message = "Trigger cannot be empty".into(),
+            Some(Prompt::NewTrigger) => self.say(Tone::Error, "Trigger cannot be empty".into()),
             Some(Prompt::NewReplacement { trigger }) => {
                 let previous = self.config.clone();
                 self.config.expansion.push(wayexpand_core::ExpansionConfig {
@@ -345,12 +467,15 @@ impl App {
                 });
                 if let Err(error) = self.save_current() {
                     self.config = previous;
-                    self.message = format!("Create failed: {}", error.safe_summary());
+                    self.say(
+                        Tone::Error,
+                        format!("Create failed: {}", error.safe_summary()),
+                    );
                 } else {
                     self.visible_cache = None;
                     self.preview_cache = None;
                     self.selected = self.visible_indices().len().saturating_sub(1);
-                    self.message = "Snippet created".into();
+                    self.say(Tone::Success, "Snippet created".into());
                     self.undo = Some(previous);
                 }
             }
@@ -359,9 +484,12 @@ impl App {
                 self.config.expansion[index].replacement = input;
                 if let Err(error) = self.save_current() {
                     self.config = previous;
-                    self.message = format!("Edit failed: {}", error.safe_summary());
+                    self.say(
+                        Tone::Error,
+                        format!("Edit failed: {}", error.safe_summary()),
+                    );
                 } else {
-                    self.message = format!("Updated {trigger}");
+                    self.say(Tone::Success, format!("Updated {trigger}"));
                     self.undo = Some(previous);
                     self.visible_cache = None;
                     self.preview_cache = None;
@@ -372,9 +500,12 @@ impl App {
                 self.config.expansion[index].description = input;
                 if let Err(error) = self.save_current() {
                     self.config = previous;
-                    self.message = format!("Description edit failed: {}", error.safe_summary());
+                    self.say(
+                        Tone::Error,
+                        format!("Description edit failed: {}", error.safe_summary()),
+                    );
                 } else {
-                    self.message = format!("Updated description for {trigger}");
+                    self.say(Tone::Success, format!("Updated description for {trigger}"));
                     self.undo = Some(previous);
                     self.visible_cache = None;
                     self.preview_cache = None;
@@ -384,9 +515,8 @@ impl App {
                 let tags = match decode_tags(&input) {
                     Ok(tags) => tags,
                     Err(error) => {
-                        self.message = format!("Tags JSON array is invalid: {error}");
-                        self.input = input;
-                        self.prompt = Some(Prompt::EditTags { index, trigger });
+                        self.say(Tone::Error, format!("Tags JSON array is invalid: {error}"));
+                        self.open_prompt(Prompt::EditTags { index, trigger }, input);
                         return;
                     }
                 };
@@ -394,9 +524,12 @@ impl App {
                 self.config.expansion[index].tags = tags;
                 if let Err(error) = self.save_current() {
                     self.config = previous;
-                    self.message = format!("Tag edit failed: {}", error.safe_summary());
+                    self.say(
+                        Tone::Error,
+                        format!("Tag edit failed: {}", error.safe_summary()),
+                    );
                 } else {
-                    self.message = format!("Updated tags for {trigger}");
+                    self.say(Tone::Success, format!("Updated tags for {trigger}"));
                     self.undo = Some(previous);
                     self.visible_cache = None;
                     self.preview_cache = None;
@@ -405,11 +538,14 @@ impl App {
             Some(Prompt::PreviewApp) => {
                 self.preview_app = input.trim().to_owned();
                 self.preview_cache = None;
-                self.message = if self.preview_app.is_empty() {
-                    "Preview app cleared".into()
-                } else {
-                    format!("Previewing as {}", self.preview_app)
-                };
+                self.say(
+                    Tone::Success,
+                    if self.preview_app.is_empty() {
+                        "Preview app cleared".into()
+                    } else {
+                        format!("Previewing as {}", self.preview_app)
+                    },
+                );
             }
             None => {}
         }
@@ -454,6 +590,11 @@ impl App {
                     if let Some(paused) = summary.paused {
                         self.paused = paused;
                     }
+                    self.daemon = match (summary.reachable, self.paused) {
+                        (false, _) => DaemonState::Stopped,
+                        (true, true) => DaemonState::Paused,
+                        (true, false) => DaemonState::Running,
+                    };
                     self.insertion = summary.insertion;
                     self.status_in_flight = false;
                 }
@@ -489,6 +630,7 @@ impl App {
                     let summary = control_command(wayexpand_core::DaemonOperation::Status)
                         .ok()
                         .map_or_else(StatusSummary::default, |status| StatusSummary {
+                            reachable: true,
                             paused: paused_from_status(&status),
                             insertion: insertion_from_status(&status),
                         });
@@ -534,7 +676,14 @@ impl Drop for TerminalGuard {
 fn main() -> Result<()> {
     let argument = env::args().nth(1);
     if matches!(argument.as_deref(), Some("--help" | "-h")) {
-        println!("Usage: wayexpand-ui [CONFIG]\n\nInteractive snippet browser and settings editor.\n\nKeys: / search, j/k navigate, e replacement, D description, t tags, m mode, space toggle, p pause/resume, r reload, q quit.");
+        println!(
+            "Usage: wayexpand-ui [CONFIG]\n\n\
+             Interactive snippet browser and settings editor.\n\n\
+             Keys: ↑/↓ or j/k move, / search, n new, e edit, E edit in $EDITOR,\n\
+             D description, t tags, m matching mode, Space enable/disable,\n\
+             d d delete, u undo, p pause/resume, r reload, ? all keys, q quit.\n\n\
+             Set NO_COLOR to turn colors off."
+        );
         return Ok(());
     }
     let path = argument
@@ -553,9 +702,9 @@ fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     // tick made the TUI flicker, noticeably so over SSH.
     let mut needs_draw = true;
     loop {
-        let (paused, insertion) = (app.paused, app.insertion);
+        let (daemon, insertion) = (app.daemon, app.insertion);
         app.refresh_daemon_state();
-        if needs_draw || app.paused != paused || app.insertion != insertion {
+        if needs_draw || app.daemon != daemon || app.insertion != insertion {
             draw(stdout, app)?;
             needs_draw = false;
         }
@@ -565,6 +714,8 @@ fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
         let key = match event::read()? {
             Event::Key(key) => key,
             Event::Resize(..) => {
+                // Rows past a shrunken frame would otherwise keep old text.
+                execute!(stdout, terminal::Clear(ClearType::All))?;
                 needs_draw = true;
                 continue;
             }
@@ -577,6 +728,7 @@ fn run(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
         if app.external_edit {
             app.external_edit = false;
             edit_with_external_editor(stdout, app)?;
+            execute!(stdout, terminal::Clear(ClearType::All))?;
         }
     }
 }
@@ -591,12 +743,22 @@ enum UiEffect {
 /// Apply one user event to the TUI state. Rendering and terminal I/O consume
 /// the returned effect, leaving state transitions directly testable.
 fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
+    let plain = !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Ok(UiEffect::Quit);
+    }
+    if app.show_help {
+        app.show_help = false;
+        return Ok(UiEffect::Continue);
+    }
     if let Some(index) = app.confirm_delete {
         match key.code {
             KeyCode::Char('d') | KeyCode::Enter => app.delete_confirmed(index),
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('n') => {
                 app.confirm_delete = None;
-                app.message = "Deletion cancelled".into();
+                app.say(Tone::Info, "Deletion cancelled".into());
             }
             _ => {}
         }
@@ -606,39 +768,45 @@ fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
         match key.code {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.input.clear();
+                app.cursor = 0;
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => app.cursor = 0,
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.cursor = app.input.chars().count();
             }
             KeyCode::Esc => {
                 app.prompt = None;
                 app.input.clear();
-                app.message = "Edit cancelled".into();
+                app.cursor = 0;
+                app.say(Tone::Info, "Edit cancelled".into());
             }
             KeyCode::Enter => app.submit_prompt(),
-            KeyCode::Backspace => {
-                app.input.pop();
-            }
-            KeyCode::Char(character)
-                if !key.modifiers.intersects(
-                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                ) =>
-            {
-                app.input.push(character)
-            }
+            KeyCode::Backspace => app.delete_before_cursor(),
+            KeyCode::Delete => app.delete_at_cursor(),
+            KeyCode::Left => app.cursor = app.cursor.saturating_sub(1),
+            KeyCode::Right => app.cursor = (app.cursor + 1).min(app.input.chars().count()),
+            KeyCode::Home => app.cursor = 0,
+            KeyCode::End => app.cursor = app.input.chars().count(),
+            KeyCode::Char(character) if plain => app.insert_at_cursor(character),
             _ => {}
         }
         return Ok(UiEffect::Continue);
     }
     if app.searching {
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => app.searching = false,
+            KeyCode::Enter => app.searching = false,
+            KeyCode::Esc => {
+                app.searching = false;
+                app.query.clear();
+                app.selected = 0;
+            }
             KeyCode::Backspace => {
                 app.query.pop();
                 app.selected = 0;
             }
-            KeyCode::Char(character)
-                if !key.modifiers.intersects(
-                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                ) =>
-            {
+            KeyCode::Up => app.selected = app.selected.saturating_sub(1),
+            KeyCode::Down => app.move_selection(app.selected + 1),
+            KeyCode::Char(character) if plain => {
                 app.query.push(character);
                 app.selected = 0;
             }
@@ -646,68 +814,30 @@ fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
         }
         return Ok(UiEffect::Continue);
     }
-    match key {
-        KeyEvent {
-            code: KeyCode::Char('q') | KeyCode::Esc,
-            ..
-        } => return Ok(UiEffect::Quit),
-        KeyEvent {
-            code: KeyCode::Char('c'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } => return Ok(UiEffect::Quit),
-        KeyEvent {
-            code: KeyCode::Char('/'),
-            ..
-        } => app.searching = true,
-        KeyEvent {
-            code: KeyCode::Char(' '),
-            ..
-        } => app.toggle_selected(),
-        KeyEvent {
-            code: KeyCode::Char('r'),
-            ..
-        } => app.reload(),
-        KeyEvent {
-            code: KeyCode::Char('n'),
-            ..
-        } => app.begin_new(),
-        KeyEvent {
-            code: KeyCode::Char('e'),
-            ..
-        } => app.begin_edit(),
-        KeyEvent {
-            code: KeyCode::Char('D'),
-            ..
-        } => app.begin_edit_description(),
-        KeyEvent {
-            code: KeyCode::Char('t'),
-            ..
-        } => app.begin_edit_tags(),
-        KeyEvent {
-            code: KeyCode::Char('a'),
-            ..
-        } => app.begin_preview_app(),
-        KeyEvent {
-            code: KeyCode::Char('m'),
-            ..
-        } => app.toggle_match_mode(),
-        KeyEvent {
-            code: KeyCode::Char('E'),
-            ..
-        } => return Ok(UiEffect::OpenExternalEditor),
-        KeyEvent {
-            code: KeyCode::Char('d'),
-            ..
-        } => app.request_delete(),
-        KeyEvent {
-            code: KeyCode::Char('u'),
-            ..
-        } => app.undo_last(),
-        KeyEvent {
-            code: KeyCode::Char('p'),
-            ..
-        } => {
+    let page = app.list_rows.max(1);
+    match key.code {
+        KeyCode::Char('q') => return Ok(UiEffect::Quit),
+        // Esc first clears an active search, then quits.
+        KeyCode::Esc if !app.query.is_empty() => {
+            app.query.clear();
+            app.selected = 0;
+            app.say(Tone::Info, "Search cleared".into());
+        }
+        KeyCode::Esc => return Ok(UiEffect::Quit),
+        KeyCode::Char('?') | KeyCode::F(1) => app.show_help = true,
+        KeyCode::Char('/') => app.searching = true,
+        KeyCode::Char(' ') => app.toggle_selected(),
+        KeyCode::Char('r') => app.reload(),
+        KeyCode::Char('n') => app.begin_new(),
+        KeyCode::Char('e') => app.begin_edit(),
+        KeyCode::Char('D') => app.begin_edit_description(),
+        KeyCode::Char('t') => app.begin_edit_tags(),
+        KeyCode::Char('a') => app.begin_preview_app(),
+        KeyCode::Char('m') => app.toggle_match_mode(),
+        KeyCode::Char('E') => return Ok(UiEffect::OpenExternalEditor),
+        KeyCode::Char('d') => app.request_delete(),
+        KeyCode::Char('u') => app.undo_last(),
+        KeyCode::Char('p') => {
             let operation = if app.paused {
                 wayexpand_core::DaemonOperation::Resume
             } else {
@@ -716,31 +846,39 @@ fn update(app: &mut App, key: KeyEvent) -> Result<UiEffect> {
             match control_command(operation) {
                 Ok(_) => {
                     app.paused = !app.paused;
-                    app.message = if app.paused {
-                        "Expansion paused".into()
+                    app.daemon = if app.paused {
+                        DaemonState::Paused
                     } else {
-                        "Expansion resumed".into()
+                        DaemonState::Running
                     };
+                    app.say(
+                        Tone::Success,
+                        if app.paused {
+                            "Expansion paused".into()
+                        } else {
+                            "Expansion resumed".into()
+                        },
+                    );
                 }
-                Err(error) => app.message = format!("Control unavailable: {error}"),
+                Err(error) => app.say(Tone::Error, format!("Control unavailable: {error}")),
             }
         }
-        KeyEvent {
-            code: KeyCode::Up | KeyCode::Char('k'),
-            ..
-        } => app.selected = app.selected.saturating_sub(1),
-        KeyEvent {
-            code: KeyCode::Down | KeyCode::Char('j'),
-            ..
-        } => {
-            let count = app.visible_indices().len();
-            if count > 0 {
-                app.selected = (app.selected + 1).min(count - 1);
-            }
-        }
+        KeyCode::Up | KeyCode::Char('k') => app.selected = app.selected.saturating_sub(1),
+        KeyCode::Down | KeyCode::Char('j') => app.move_selection(app.selected + 1),
+        KeyCode::PageUp => app.selected = app.selected.saturating_sub(page),
+        KeyCode::PageDown => app.move_selection(app.selected + page),
+        KeyCode::Home | KeyCode::Char('g') => app.selected = 0,
+        KeyCode::End | KeyCode::Char('G') => app.move_selection(usize::MAX),
         _ => {}
     }
     Ok(UiEffect::Continue)
+}
+
+/// Byte index of the `chars`-th character of `text` (its length past the end).
+fn byte_offset(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(offset, _)| offset)
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -756,7 +894,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
     let Some(index) = app.selected_index() else {
-        app.message = "No snippet selected".into();
+        app.say(Tone::Warning, "No snippet selected".into());
         return Ok(());
     };
     let temp = external_edit_directory(std::env::var_os("XDG_RUNTIME_DIR"))
@@ -822,7 +960,10 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
         })?;
         app.config = candidate;
         app.undo = Some(previous);
-        app.message = "Replacement edited in external editor".into();
+        app.say(
+            Tone::Success,
+            "Replacement edited in external editor".into(),
+        );
         Ok(())
     })();
     let _ = std::fs::remove_file(&temp);
@@ -830,7 +971,7 @@ fn edit_with_external_editor(stdout: &mut io::Stdout, app: &mut App) -> Result<(
         .and_then(|_| terminal::enable_raw_mode());
     restore_result?;
     if let Err(error) = edit_result {
-        app.message = format!("External edit failed: {error}");
+        app.say(Tone::Error, format!("External edit failed: {error}"));
     }
     Ok(())
 }
@@ -847,122 +988,95 @@ fn external_edit_directory(runtime_dir: Option<std::ffi::OsString>) -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
+/// Paints one frame in place. Every row is written at full width, so rows
+/// from the previous frame are overwritten without clearing the screen.
 fn draw(stdout: &mut io::Stdout, app: &mut App) -> Result<()> {
-    let selected_config_index = app.selected_index();
-    let preview = app.preview();
-    let visible_len = app.visible_indices().len();
-    execute!(
-        stdout,
-        cursor::MoveTo(0, 0),
-        terminal::Clear(ClearType::All),
-        SetForegroundColor(Color::Cyan),
-        Print("WayExpand Settings"),
-        ResetColor,
-        Print("  "),
-        Print(if app.paused { "[PAUSED]" } else { "[ACTIVE]" }),
-        Print("  "),
-        SetForegroundColor(match app.insertion {
-            Some(InsertionAssurance::Verified) => Color::Green,
-            Some(InsertionAssurance::Compatibility) => Color::Yellow,
-            Some(InsertionAssurance::Blocked) => Color::Red,
-            None => Color::DarkGrey,
-        }),
-        Print(match app.insertion {
-            Some(InsertionAssurance::Verified) => "[VERIFIED INSERTION]",
-            Some(InsertionAssurance::Compatibility) => "[COMPATIBILITY: ERASE UNVERIFIED]",
-            Some(InsertionAssurance::Blocked) => "[BLOCKED: TYPED EXPANSIONS REFUSED]",
-            None => "",
-        }),
-        ResetColor,
-        Print("\n"),
-        SetForegroundColor(Color::DarkGrey),
-        Print("/ search   j/k move   n new   e edit   D description   t tags   a preview app   m mode   d+d delete   u undo   space toggle   p pause   r reload   q quit"),
-        ResetColor,
-        Print("\n\n"),
-        Print("Filter: "),
-        Print(&app.query),
-        if app.searching {
-            Print("▌")
-        } else {
-            Print("")
-        },
-        Print("\n\n")
-    )?;
-    for row in 0..visible_len {
-        let index = app.visible_indices()[row];
-        let expansion = &app.config.expansion[index];
-        let marker = if row == app.selected { "❯" } else { " " };
-        let state = if expansion.enabled { "●" } else { "○" };
-        if Some(index) == selected_config_index {
-            execute!(stdout, SetForegroundColor(Color::Yellow))?;
-        }
-        execute!(
+    // A pseudo-terminal nobody sized (for example under `script`) reports 0×0.
+    let (width, height) = terminal::size()
+        .ok()
+        .filter(|&(width, height)| width > 0 && height > 0)
+        .unwrap_or((80, 24));
+    let lines = frame_for(app, width, height);
+    let color = color_enabled();
+    for (row, line) in lines.iter().enumerate() {
+        queue!(
             stdout,
-            Print(format!(
-                "{marker} {state} {:<18} {:<24} [{}] {} {}\n",
-                expansion.trigger,
-                expansion.description,
-                match expansion.match_mode {
-                    wayexpand_core::MatchMode::Immediate => "immediate",
-                    wayexpand_core::MatchMode::WordBoundary => "word-boundary",
-                },
-                expansion.tags.join(", "),
-                if expansion.command.is_some() {
-                    "[command]"
-                } else {
-                    ""
+            cursor::MoveTo(0, u16::try_from(row).unwrap_or(u16::MAX))
+        )?;
+        for piece in line {
+            queue!(stdout, SetAttribute(Attribute::Reset), ResetColor)?;
+            if let (true, Some(foreground)) = (color, piece.style.fg) {
+                queue!(stdout, SetForegroundColor(foreground))?;
+            }
+            for (enabled, attribute) in [
+                (piece.style.bold, Attribute::Bold),
+                (piece.style.dim, Attribute::Dim),
+                (piece.style.italic, Attribute::Italic),
+                (piece.style.reverse, Attribute::Reverse),
+            ] {
+                if enabled {
+                    queue!(stdout, SetAttribute(attribute))?;
                 }
-            )),
-            ResetColor
-        )?;
+            }
+            queue!(stdout, Print(&piece.text))?;
+        }
     }
-    execute!(
-        stdout,
-        Print("\nPreview\n"),
-        SetForegroundColor(Color::DarkGrey),
-        Print("Preview app: "),
-        Print(if app.preview_app.is_empty() {
-            "(none)"
-        } else {
-            &app.preview_app
-        }),
-        Print("\n"),
-        SetForegroundColor(Color::Green),
-        Print(preview),
-        ResetColor,
-        Print("\n\n"),
-        SetForegroundColor(Color::DarkGrey),
-        Print("Selected mode: "),
-        Print(
-            selected_config_index
-                .map(|index| match app.config.expansion[index].match_mode {
-                    wayexpand_core::MatchMode::Immediate => "immediate",
-                    wayexpand_core::MatchMode::WordBoundary => "word-boundary",
-                })
-                .unwrap_or("none"),
-        ),
-        Print("\n\n"),
-        SetForegroundColor(Color::DarkGrey),
-        Print(&app.message),
-        ResetColor
-    )?;
-    if let Some(prompt) = &app.prompt {
-        let label = match prompt {
-            Prompt::NewTrigger => "New trigger",
-            Prompt::NewReplacement { .. } => "Replacement",
-            Prompt::EditReplacement { .. } => "Replacement",
-            Prompt::EditDescription { .. } => "Description",
-            Prompt::EditTags { .. } => "Tags",
-            Prompt::PreviewApp => "Preview app id",
-        };
-        execute!(
-            stdout,
-            Print(format!("\n\n{label}: {}▌", app.input)),
-            ResetColor
-        )?;
-    }
+    queue!(stdout, SetAttribute(Attribute::Reset), ResetColor)?;
     stdout.flush()?;
     Ok(())
+}
+
+/// Lays out the current state for a `width` by `height` terminal, scrolling
+/// the list so the selection is on screen.
+fn frame_for(app: &mut App, width: u16, height: u16) -> Vec<render::Line> {
+    let visible = app.visible_indices().to_vec();
+    let layout = render::Layout::new(width, height, visible.len());
+    app.selected = app.selected.min(visible.len().saturating_sub(1));
+    app.list_rows = layout.list_rows.max(1);
+    app.scroll = render::keep_visible(app.scroll, app.selected, layout.list_rows, visible.len());
+    let preview = app.preview();
+    let path = display_path(&app.path, env::var_os("HOME").map(PathBuf::from).as_deref());
+    let prompt = app.prompt.as_ref().map(|prompt| render::PromptView {
+        label: prompt.label(),
+        input: &app.input,
+        cursor: app.cursor,
+    });
+    let view = render::View {
+        path: &path,
+        config: &app.config,
+        visible: &visible,
+        selected: app.selected,
+        scroll: app.scroll,
+        query: &app.query,
+        searching: app.searching,
+        daemon: app.daemon,
+        insertion: app.insertion,
+        message: &app.message,
+        tone: app.tone,
+        prompt,
+        confirm_delete: app.confirm_delete.is_some(),
+        preview: &preview,
+        preview_app: &app.preview_app,
+        show_help: app.show_help,
+    };
+    render::frame(&view, width, height)
+}
+
+/// Honors <https://no-color.org>: any non-empty `NO_COLOR` turns colors off;
+/// bold, dim and reverse video still mark state.
+fn color_enabled() -> bool {
+    env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
+}
+
+/// `path` with the home directory shown as `~`.
+fn display_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    if let Some(rest) = home
+        .filter(|home| !home.as_os_str().is_empty())
+        .and_then(|home| path.strip_prefix(home).ok())
+    {
+        return format!("~/{}", rest.display());
+    }
+    path.display().to_string()
 }
 
 fn control_command(operation: wayexpand_core::DaemonOperation) -> Result<String> {
@@ -978,6 +1092,7 @@ fn paused_from_status(response: &str) -> Option<bool> {
 /// What one daemon status poll reports to the TUI.
 #[derive(Default)]
 struct StatusSummary {
+    reachable: bool,
     paused: Option<bool>,
     insertion: Option<InsertionAssurance>,
 }

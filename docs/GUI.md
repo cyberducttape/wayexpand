@@ -28,25 +28,35 @@ an empty private configuration and opens the editor. Existing malformed,
 insecure, or unreadable files are never replaced automatically; they remain a
 visible startup error for safe recovery.
 
+The terminal UI shows the snippet list with the selected snippet's details
+and rendered preview: beside the list on terminals at least 100 columns
+wide, below it otherwise. The header shows the file and whether the daemon is
+running, and the bottom line lists the keys that fit; `?` shows all of them.
+Set `NO_COLOR` to turn colors off.
+
 Controls:
 
-- `/` starts snippet search
-- `j`/`k` or the arrow keys select a snippet
+- `/` starts snippet search; `Enter` keeps the search, `Esc` clears it
+- `j`/`k` or the arrow keys select a snippet; `PgUp`/`PgDn` move a page,
+  `Home`/`End` (or `g`/`G`) jump to the first or last
 - `n` creates a snippet, prompting for trigger and replacement
 - `e` edits the selected replacement
 - `D` edits the selected description
 - `t` edits tags as comma-separated text (for example, `ops, email`); use a
   JSON string array such as `["ops", "customer, west"]` for a tag that itself
   contains a comma
-- `Ctrl-U` clears the active prompt before entering replacement text
+- In a prompt, `←`/`→`, `Home`/`End` (or `Ctrl-A`/`Ctrl-E`), `Backspace` and
+  `Delete` edit at the caret, and `Ctrl-U` clears the text
 - `m` toggles immediate and Unicode-aware word-boundary matching
 - `E` opens the selected replacement in `$VISUAL` or `$EDITOR` for multiline editing
 - `d` then `d` again deletes the selected snippet (Esc cancels)
 - `u` undoes the last saved change
 - `Space` toggles the selected snippet and saves atomically
+- `a` previews the snippet as if typed in a given app id
 - `r` reloads the configuration from disk
 - `p` pauses or resumes the running daemon
-- `q`, `Esc`, or `Ctrl-C` exits
+- `?` shows every key
+- `q` or `Ctrl-C` exits; `Esc` exits too once no search is active
 
 The UI uses the core `Config` model and conditional atomic saves; it does not
 perform text-based edits or maintain a second configuration format. Preview

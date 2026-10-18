@@ -236,3 +236,192 @@ fn tui_refuses_to_overwrite_a_newer_external_revision() {
     fs::remove_file(path).unwrap();
     fs::remove_file(lock_path).unwrap();
 }
+
+fn demo_app(snippets: usize) -> (App, PathBuf) {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-tui-render-{snippets}-{}-{:?}.toml",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut text = String::from(
+        "[[expansion]]\ntrigger = \";sig\"\nreplacement = \"Best regards,\\nAlex Morgan\\nPlatform Engineering\"\ndescription = \"Email signature\"\ntags = [\"email\", \"signature\"]\ncategory = \"Email\"\n\n\
+         [[expansion]]\ntrigger = \";ty\"\nreplacement = \"Thanks for reaching out! \"\ndescription = \"Support reply opener with a description far too long to fit in any reasonable terminal column at all\"\nmatch_mode = \"word-boundary\"\n\n\
+         [[expansion]]\ntrigger = \";off\"\nreplacement = \"disabled\\tvalue\"\nenabled = false\n",
+    );
+    for index in 0..snippets.saturating_sub(3) {
+        text.push_str(&format!(
+            "\n[[expansion]]\ntrigger = \";s{index}\"\nreplacement = \"value {index}\"\ndescription = \"Snippet {index}\"\n"
+        ));
+    }
+    Config::parse(&text).unwrap().save_atomic(&path).unwrap();
+    (App::load(path.clone()).unwrap(), path)
+}
+
+fn screen(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    render::plain_text(&frame_for(app, width, height))
+}
+
+fn assert_exact_size(lines: &[String], width: u16, height: u16) {
+    use unicode_width::UnicodeWidthStr;
+    assert_eq!(lines.len(), usize::from(height));
+    for line in lines {
+        assert_eq!(line.width(), usize::from(width), "{line:?}");
+        assert!(!line.contains('\n') && !line.contains('\t'), "{line:?}");
+    }
+}
+
+#[test]
+fn every_frame_fills_the_terminal_exactly_at_any_size() {
+    let (mut app, _path) = demo_app(40);
+    for (width, height) in [(20, 5), (40, 8), (80, 24), (99, 30), (100, 30), (160, 50)] {
+        for state in 0..4 {
+            match state {
+                1 => app.begin_edit(),
+                2 => {
+                    app.prompt = None;
+                    app.show_help = true;
+                }
+                3 => {
+                    app.show_help = false;
+                    app.searching = true;
+                    app.query = "no such snippet".into();
+                }
+                _ => {}
+            }
+            assert_exact_size(&screen(&mut app, width, height), width, height);
+        }
+        app.searching = false;
+        app.query.clear();
+    }
+}
+
+#[test]
+fn list_scrolls_to_keep_the_selection_visible() {
+    let (mut app, _path) = demo_app(100);
+    update(&mut app, key(KeyCode::End)).unwrap();
+    let lines = screen(&mut app, 80, 24);
+    assert!(
+        lines.iter().any(|line| line.contains("❯ ● ;s96")),
+        "{lines:#?}"
+    );
+    update(&mut app, key(KeyCode::Home)).unwrap();
+    let lines = screen(&mut app, 80, 24);
+    assert!(
+        lines.iter().any(|line| line.contains("❯ ● ;sig")),
+        "{lines:#?}"
+    );
+    update(&mut app, key(KeyCode::PageDown)).unwrap();
+    assert_eq!(app.selected, app.list_rows);
+}
+
+#[test]
+fn details_show_multi_line_previews_on_their_own_rows() {
+    let (mut app, _path) = demo_app(3);
+    let lines = screen(&mut app, 80, 24);
+    for expected in ["│ Best regards,", "│ Alex Morgan", "│ Platform Engineering"] {
+        assert!(
+            lines.iter().any(|line| line.contains(expected)),
+            "{lines:#?}"
+        );
+    }
+    // Side by side on a wide terminal.
+    let lines = screen(&mut app, 120, 24);
+    assert!(
+        lines.iter().any(|line| line.contains("│ │ Best regards,")),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn long_text_is_cut_with_an_ellipsis_instead_of_wrapping() {
+    let (mut app, _path) = demo_app(3);
+    let lines = screen(&mut app, 80, 24);
+    let row = lines.iter().find(|line| line.contains(";ty")).unwrap();
+    assert!(row.contains('…') && row.contains("word"), "{row:?}");
+}
+
+#[test]
+fn prompt_caret_edits_in_the_middle_and_stays_visible() {
+    let (mut app, _path) = demo_app(3);
+    update(&mut app, key(KeyCode::Char('D'))).unwrap();
+    assert_eq!(app.input, "Email signature");
+    for _ in 0.."signature".len() {
+        update(&mut app, key(KeyCode::Left)).unwrap();
+    }
+    for character in "work ".chars() {
+        update(&mut app, key(KeyCode::Char(character))).unwrap();
+    }
+    update(&mut app, key(KeyCode::Delete)).unwrap();
+    assert_eq!(app.input, "Email work ignature");
+    app.input = "x".repeat(300);
+    app.cursor = 300;
+    let lines = screen(&mut app, 60, 20);
+    assert!(lines.last().unwrap().starts_with(" Description › …"));
+}
+
+#[test]
+fn escape_clears_a_search_before_it_quits() {
+    let (mut app, _path) = demo_app(3);
+    for code in [
+        KeyCode::Char('/'),
+        KeyCode::Char('t'),
+        KeyCode::Char('y'),
+        KeyCode::Enter,
+    ] {
+        update(&mut app, key(code)).unwrap();
+    }
+    assert_eq!(app.visible_indices(), &[1]);
+    assert_eq!(
+        update(&mut app, key(KeyCode::Esc)).unwrap(),
+        UiEffect::Continue
+    );
+    assert!(app.query.is_empty());
+    assert_eq!(update(&mut app, key(KeyCode::Esc)).unwrap(), UiEffect::Quit);
+}
+
+#[test]
+fn help_opens_with_question_mark_and_any_key_closes_it() {
+    let (mut app, _path) = demo_app(3);
+    update(&mut app, key(KeyCode::Char('?'))).unwrap();
+    let lines = screen(&mut app, 80, 30);
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("pause or resume the daemon")));
+    // The key that closes help does nothing else.
+    update(&mut app, key(KeyCode::Char('d'))).unwrap();
+    assert!(!app.show_help);
+    assert_eq!(app.confirm_delete, None);
+}
+
+#[test]
+fn home_directory_is_shown_as_a_tilde() {
+    assert_eq!(
+        display_path(
+            std::path::Path::new("/home/user/.config/wayexpand/expansions.toml"),
+            Some(std::path::Path::new("/home/user"))
+        ),
+        "~/.config/wayexpand/expansions.toml"
+    );
+    assert_eq!(
+        display_path(
+            std::path::Path::new("/etc/x.toml"),
+            Some(std::path::Path::new(""))
+        ),
+        "/etc/x.toml"
+    );
+}
+
+#[test]
+#[ignore = "prints sample screens for a manual look"]
+fn print_sample_screens() {
+    let (mut app, _path) = demo_app(14);
+    app.daemon = DaemonState::Running;
+    app.insertion = Some(InsertionAssurance::Verified);
+    for (width, height) in [(80, 24), (120, 30)] {
+        println!("{}", screen(&mut app, width, height).join("\n"));
+        println!("{}", "=".repeat(usize::from(width)));
+    }
+    app.show_help = true;
+    println!("{}", screen(&mut app, 80, 30).join("\n"));
+}

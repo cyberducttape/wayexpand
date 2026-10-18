@@ -4,6 +4,23 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Terminal UI (`wayexpand-ui`) polish:
+  - Fixed: rows no longer drift right ("staircase") and multi-line
+    previews no longer scramble the screen. The UI drew each line ending in
+    a bare newline, which in raw mode moves down without returning to the
+    first column. Each frame now paints every row in place at full width,
+    with no screen clear between frames.
+  - The list scrolls to keep the selection on screen, and long text is cut
+    with `…` instead of wrapping.
+  - The selected snippet's details (status, matching, tags, category,
+    apps, command, file) and its full rendered preview sit beside the list
+    on wide terminals and below it on narrow ones.
+  - A header shows the file and whether the daemon is running or paused.
+    Messages are colored by outcome. The bottom line lists the keys that
+    fit, and `?` lists every key.
+  - New keys: `PgUp`/`PgDn`, `Home`/`End` (`g`/`G`), and caret editing in
+    prompts. `Esc` clears an active search before it quits.
+  - `NO_COLOR` turns colors off.
 - Documentation and presentation:
   - The README is shorter and leads with what WayExpand does. It states
     each compatibility caveat once, and adds a section on file templates
