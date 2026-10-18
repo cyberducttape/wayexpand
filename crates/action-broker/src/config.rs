@@ -673,7 +673,7 @@ enabled = true
         use std::os::unix::fs::PermissionsExt;
         use std::path::Path;
 
-        let mut relative = BrokerConfig {
+        let relative = BrokerConfig {
             default_cwd: Some("relative/path".to_string()),
             ..BrokerConfig::default()
         };
