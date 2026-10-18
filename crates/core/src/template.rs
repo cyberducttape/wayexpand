@@ -102,6 +102,12 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         }));
     }
     let spec = name.strip_prefix("choice:")?;
+    // `choice:label=A|B` names the drop-down; the `=` must come before the
+    // first option separator.
+    let (label, spec) = match spec.split_once('=') {
+        Some((label, rest)) if !label.contains('|') => (Some(label.trim()), rest),
+        _ => (None, spec),
+    };
     let options: Vec<String> = spec
         .split('|')
         .map(|option| option.trim().to_owned())
@@ -109,9 +115,16 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
     if options.len() < 2 || options.len() > 32 || options.iter().any(String::is_empty) {
         return Some(Err(TemplateError::InvalidField));
     }
+    let (key, label) = match label {
+        Some(label) if label.is_empty() || label.chars().count() > 64 => {
+            return Some(Err(TemplateError::InvalidField));
+        }
+        Some(label) => (format!("choice:{label}"), label.to_owned()),
+        None => (format!("choice:{}", options.join("|")), "Choice".to_owned()),
+    };
     Some(Ok(FormField {
-        key: format!("choice:{}", options.join("|")),
-        label: "Choice".to_owned(),
+        key,
+        label,
         kind: FormFieldKind::Choice { options },
     }))
 }
@@ -123,8 +136,17 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     for name in template_variables(template) {
         if let Some(field) = parse_form_field(name) {
             let field = field?;
-            if !fields.iter().any(|existing| existing.key == field.key) {
-                fields.push(field);
+            match fields.iter().find(|existing| existing.key == field.key) {
+                None => fields.push(field),
+                // `{{choice:env=dev|prod}}` twice is one field; the same
+                // name with other options would leave the form ambiguous.
+                Some(existing)
+                    if matches!(existing.kind, FormFieldKind::Choice { .. })
+                        && existing.kind != field.kind =>
+                {
+                    return Err(TemplateError::InvalidField);
+                }
+                Some(_) => {}
             }
         }
     }
@@ -215,11 +237,16 @@ pub fn render_template_preview(
 }
 
 /// Every `{{...}}` variable name in a template, in order. Unclosed markers
-/// end the scan; rendering reports them as errors.
+/// end the scan; rendering reports them as errors. A doubled `{{{{` is a
+/// literal `{{`, not a marker.
 pub fn template_variables(template: &str) -> Vec<&str> {
     let mut names = Vec::new();
     let mut cursor = 0;
     while let Some(start) = template[cursor..].find("{{") {
+        if template[cursor + start..].starts_with(LITERAL_OPEN) {
+            cursor += start + LITERAL_OPEN.len();
+            continue;
+        }
         let variable_start = cursor + start + 2;
         let Some(end) = template[variable_start..].find("}}") else {
             break;
@@ -228,6 +255,21 @@ pub fn template_variables(template: &str) -> Vec<&str> {
         cursor = variable_start + end + 2;
     }
     names
+}
+
+/// A doubled `{{{{` renders as a literal `{{`, and a doubled `}}}}` outside a
+/// marker as a literal `}}`, so Jinja, Go and Helm templates (Ansible
+/// playbooks, Compose files, charts) can be written as snippets.
+const LITERAL_OPEN: &str = "{{{{";
+const LITERAL_CLOSE: &str = "}}}}";
+
+/// Literal template text with doubled closing braces collapsed.
+fn literal_text(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains(LITERAL_CLOSE) {
+        std::borrow::Cow::Owned(text.replace(LITERAL_CLOSE, "}}"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
 }
 
 /// Shared renderer. With `allow_cursor`, a `{{cursor}}` variable renders to
@@ -282,7 +324,7 @@ fn render_nested(
             if let Some(newline) = relative_newline
                 .filter(|newline| relative_start.is_none_or(|variable| *newline < variable))
             {
-                rendered.push_str(&remaining_template[..newline]);
+                rendered.push_str(&literal_text(&remaining_template[..newline]));
                 return Ok((rendered, cursor_position, true));
             }
         }
@@ -290,7 +332,12 @@ fn render_nested(
         let Some(relative_start) =
             relative_start.filter(|start| !preview || *start < remaining_output)
         else {
-            let stopped = push_bounded(&mut rendered, remaining_template, maximum_bytes, preview)?;
+            let stopped = push_bounded(
+                &mut rendered,
+                &literal_text(remaining_template),
+                maximum_bytes,
+                preview,
+            )?;
             if stopped {
                 return Ok((rendered, cursor_position, true));
             }
@@ -299,12 +346,19 @@ fn render_nested(
         let start = cursor + relative_start;
         let stopped = push_bounded(
             &mut rendered,
-            &template[cursor..start],
+            &literal_text(&template[cursor..start]),
             maximum_bytes,
             preview,
         )?;
         if stopped {
             return Ok((rendered, cursor_position, true));
+        }
+        if template[start..].starts_with(LITERAL_OPEN) {
+            if push_bounded(&mut rendered, "{{", maximum_bytes, preview)? {
+                return Ok((rendered, cursor_position, true));
+            }
+            cursor = start + LITERAL_OPEN.len();
+            continue;
         }
         let variable_start = start + 2;
         let Some(relative_end) = template[variable_start..].find("}}") else {
@@ -895,5 +949,93 @@ mod tests {
 
         assert_eq!(rendered, "prefix👍🏽");
         assert_eq!(offset, Some(1));
+    }
+
+    #[test]
+    fn doubled_braces_render_literal_template_syntax() {
+        let context = TemplateContext::default();
+        let playbook = r#"name: "{{{{ item }}}}" on {{tab}}{{{{ansible_host}}}}"#;
+        assert_eq!(
+            render_template(playbook, &context).unwrap(),
+            "name: \"{{ item }}\" on \t{{ansible_host}}"
+        );
+        // An escaped opener is not a marker, so nothing inside it is parsed.
+        assert!(template_variables(r"{{{{ cursor }}}} {{tab}}") == vec!["tab"]);
+        assert_eq!(
+            render_template_with_cursor(r"{{{{ x }}}}{{cursor}}!", &context).unwrap(),
+            ("{{ x }}!".to_owned(), Some(1))
+        );
+        // A lone `}}` in literal text is unchanged, as before.
+        assert_eq!(render_template("a }} b", &context).unwrap(), "a }} b");
+        assert_eq!(
+            render_template_preview(r"{{{{ item }}}}", &context, 3).unwrap(),
+            "{{ ",
+            "previews stay within their budget"
+        );
+    }
+
+    #[test]
+    fn escaped_braces_mix_with_form_fields() {
+        let template = r#"- hosts: {{field:hosts=all}}
+  tasks:
+    - ansible.builtin.package:
+        name: "{{{{ item }}}}"
+        state: {{choice:state=present|latest|absent}}
+      loop: [{{field:package}}]"#;
+        let fields = form_fields(template).unwrap();
+        let labels: Vec<&str> = fields.iter().map(|field| field.label.as_str()).collect();
+        assert_eq!(labels, ["hosts", "state", "package"]);
+        let mut values = HashMap::new();
+        values.insert("field:hosts".to_owned(), "web".to_owned());
+        values.insert("choice:state".to_owned(), "latest".to_owned());
+        values.insert("field:package".to_owned(), "nginx".to_owned());
+        let context = TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template(template, &context).unwrap(),
+            r#"- hosts: web
+  tasks:
+    - ansible.builtin.package:
+        name: "{{ item }}"
+        state: latest
+      loop: [nginx]"#
+        );
+    }
+
+    #[test]
+    fn named_choices_have_a_label_and_a_stable_key() {
+        let fields =
+            form_fields("{{choice:env=dev|prod}} {{choice:env=dev|prod}} {{choice:a|b}}").unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].label, "env");
+        assert_eq!(fields[0].key, "choice:env");
+        assert_eq!(
+            fields[0].kind,
+            FormFieldKind::Choice {
+                options: vec!["dev".to_owned(), "prod".to_owned()]
+            }
+        );
+        assert_eq!(fields[1].label, "Choice");
+        assert_eq!(fields[1].key, "choice:a|b");
+        // `=` after the first option is part of an option, as before.
+        assert_eq!(
+            form_fields("{{choice:a|b=c}}").unwrap()[0].kind,
+            FormFieldKind::Choice {
+                options: vec!["a".to_owned(), "b=c".to_owned()]
+            }
+        );
+        for invalid in [
+            "{{choice:=a|b}}",
+            "{{choice:env=a}}",
+            "{{choice:env=dev|prod}} {{choice:env=dev|test}}",
+        ] {
+            assert_eq!(
+                form_fields(invalid),
+                Err(TemplateError::InvalidField),
+                "{invalid}"
+            );
+        }
     }
 }

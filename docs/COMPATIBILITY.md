@@ -700,6 +700,22 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   route (the libei keysym fallback) accepts; longer ones are refused before
   anything is erased. It is reported as `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
+- `ExpansionConfig::output_file` (relative path string or absent, omitted
+  from saved TOML and JSON when absent) — the file `wayexpand new` writes the
+  snippet to. It may not be absolute or contain `..`, and command-backed
+  snippets cannot set it. Older readers that reject unknown fields will not
+  load a config that sets it.
+- Template markers `{{{{` and `}}}}` render a literal `{{` and `}}`, and
+  `{{choice:name=A|B}}` labels a choice. Before, `{{{{` was an unknown
+  variable and the snippet failed validation. A literal `}}}}` in plain text
+  now renders as `}}`, and an unlabelled choice whose first option contains
+  `=` (`{{choice:a=b|c}}`) is now labelled `a` with options `b` and `c`.
+- `wayexpand new` exits 0 after writing or printing a template, 2 (usage)
+  for an unknown or ambiguous name, a missing value, an invalid `--set`, or
+  an existing file without `--force`, and 3 (configuration) when the
+  configuration or template is invalid. `wayexpand new --json` prints
+  `{"templates": [{"trigger", "name", "output_file", "description",
+  "fields", "built_in"}]}`.
 - `ExpansionConfig::aliases` (list of strings, default empty, omitted from
   saved TOML and JSON when empty) — additional triggers for the same
   replacement. Older readers that reject unknown fields will not load a

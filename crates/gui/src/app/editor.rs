@@ -52,6 +52,7 @@ impl GuiApp {
             || draft.enabled != expansion.enabled
             || draft.match_mode != expansion.match_mode
             || draft.propagate_case != expansion.propagate_case
+            || draft.output_file.trim() != expansion.output_file.as_deref().unwrap_or_default()
             || !draft.matches_command(expansion.command.as_ref())
     }
 
@@ -318,6 +319,7 @@ impl GuiApp {
                     strings.category(),
                     strings.app_filter(),
                     strings.matching(),
+                    strings.output_file(),
                 ]
                 .iter()
                 .map(|label| {
@@ -429,6 +431,16 @@ impl GuiApp {
                                 });
                         }
                     });
+                });
+
+                form_row(ui, strings.output_file(), columns, |ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut draft.output_file)
+                            .margin(theme::FIELD_MARGIN)
+                            .hint_text(strings.output_file_hint())
+                            .desired_width(field_width),
+                    )
+                    .on_hover_text(strings.output_file_tooltip());
                 });
 
                 form_row(ui, strings.app_filter(), columns, |ui| {

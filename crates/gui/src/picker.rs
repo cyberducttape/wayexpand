@@ -807,6 +807,7 @@ mod tests {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         };
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(picker_expansion_is_eligible(&expansion, true));
@@ -827,6 +828,7 @@ mod tests {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         };
 
         assert!(!picker_expansion_is_eligible(&expansion, false));

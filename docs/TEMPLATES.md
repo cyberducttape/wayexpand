@@ -97,6 +97,7 @@ Current status: {{choice:Open|Waiting on customer|Resolved}}
 | `{{field:name}}` | A text box labelled *name*. Repeating the marker reuses the value. |
 | `{{field:name=default}}` | The same, prefilled. `{{prompt:name}}` is a synonym. |
 | `{{choice:A\|B\|C}}` | A drop-down with 2–32 options. |
+| `{{choice:name=A\|B\|C}}` | The same, labelled *name*; repeating it reuses the value. |
 
 Tab moves between fields, Enter inserts, and Escape cancels, leaving the typed
 trigger in place. While the form is open, expansion is paused so typing in the
@@ -120,6 +121,83 @@ it with `systemd-run --user` so it runs outside the daemon's sandbox. Form
 snippets cannot run commands and cannot be included in other snippets. The IBus
 route drops its surrounding-text knowledge when focus moves to the form, so
 form snippets do not expand through IBus.
+
+## Literal braces
+
+Write `{{{{` for a literal `{{` and `}}}}` for a literal `}}`. This lets a
+snippet contain Jinja (Ansible), Go templates (Helm, Compose) and GitHub
+Actions expressions alongside its own fields:
+
+```toml
+[[expansion]]
+trigger = ";;loop"
+replacement = """- name: Install {{field:what=packages}}
+  ansible.builtin.package:
+    name: "{{{{ item }}}}"
+  loop: "{{{{ {{field:what=packages}} }}}}"
+"""
+```
+
+renders `name: "{{ item }}"` and `loop: "{{ packages }}"`. A single `}}` in
+plain text is left as it is.
+
+## File templates (`wayexpand new`)
+
+Long, whitespace-sensitive files such as Dockerfiles, playbooks and
+Kubernetes manifests are better written than typed: editors re-indent typed
+YAML, and typing hundreds of characters is slow. `wayexpand new` fills in a
+snippet's fields and writes the result to a file. It needs no running daemon
+and works on every desktop and over SSH.
+
+```sh
+wayexpand new                       # list file templates
+wayexpand new playbook              # ask for each field, write site.yml
+wayexpand new playbook --set package=nginx --set state=latest
+wayexpand new dockerfile-python -o api/Dockerfile
+wayexpand new compose --stdout      # print instead of writing
+wayexpand new k8s-deployment --gui  # ask in the form window
+wayexpand new --show playbook       # print it as a snippet to copy
+```
+
+A snippet becomes a file template by naming the file it writes:
+
+```toml
+[[expansion]]
+trigger = ";;dockerfile-go"
+output_file = "Dockerfile"
+description = "Go service"
+replacement = """FROM golang:{{field:go=1.24}} AS build
+WORKDIR /src
+COPY . .
+RUN go build -o /out/{{field:binary}} .
+
+FROM gcr.io/distroless/static
+COPY --from=build /out/{{field:binary}} /{{field:binary}}
+ENTRYPOINT ["/{{field:binary}}"]
+"""
+```
+
+`wayexpand new dockerfile-go` finds it by its trigger without the
+punctuation (`;;dockerfile-go`), by an exact trigger or alias, or by the file
+name it writes. Typing the trigger still inserts the text as usual.
+
+- `output_file` is relative to the current directory and may not be absolute
+  or contain `..`. Missing directories are created. `-o FILE` writes
+  elsewhere; `-o -` and `--stdout` print instead.
+- An existing file is never replaced unless you pass `--force`. Then the new
+  file replaces it in one step, keeping its permissions.
+- `--set NAME=VALUE` fills a field by its label; a choice must be one of its
+  options. In a terminal you are asked for the rest (Enter keeps the default).
+  Without a terminal, defaults are used, and a field without one is an error.
+- Fields, environment variables and includes work as they do when typing.
+  `{{clipboard}}` is not available, and command snippets cannot be written to
+  a file.
+
+WayExpand ships starter templates: `dockerfile`, `dockerfile-python`,
+`dockerfile-node`, `dockerfile-rust`, `compose`, `playbook`, `ansible-role`,
+`inventory`, `systemd-service`, `github-actions`, `nginx-site` and
+`k8s-deployment`. A snippet of yours with the same name replaces the built-in
+one; `wayexpand new --show NAME` prints a built-in template to start from.
 
 ## Organization policy
 

@@ -2,6 +2,7 @@
 
 pub(crate) mod config;
 pub(crate) mod daemon;
+pub(crate) mod new;
 pub(crate) mod system;
 
 /// The remaining command-line arguments after the subcommand name.

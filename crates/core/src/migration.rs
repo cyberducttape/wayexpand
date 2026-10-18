@@ -229,6 +229,7 @@ pub fn import_espanso_with_mode(
             enabled: true,
             propagate_case: item.propagate_case,
             aliases,
+            output_file: None,
         });
     }
     let config = Config {

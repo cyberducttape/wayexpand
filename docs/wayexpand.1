@@ -87,6 +87,13 @@ Resolve a hotkey without executing its action.
 Preview a replacement. The optional application context is supplied with
 --preview-app APP or --preview-app=APP.
 .TP
+.B new [NAME [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]
+Fill in a file template, such as a Dockerfile or an Ansible playbook, and
+write it to the snippet's output_file in the current directory. Without NAME,
+list the available templates. Missing values are asked for in the terminal,
+or in the form window with --gui. An existing file is replaced only with
+--force. --show prints a template as a snippet to copy.
+.TP
 .B list [--json] [CONFIG]
 List configured expansions and hotkeys.
 .TP

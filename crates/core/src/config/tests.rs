@@ -891,3 +891,48 @@ fn first_run_setup_creates_every_missing_directory_privately() {
     }
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn output_file_must_stay_below_the_current_directory() {
+    let config_with = |output_file: &str| {
+        format!(
+            "[[expansion]]\ntrigger = \";;file\"\nreplacement = \"x\"\noutput_file = {}\n",
+            toml::Value::String(output_file.to_owned())
+        )
+    };
+    for valid in [
+        "Dockerfile",
+        ".github/workflows/ci.yml",
+        "./site.yml",
+        "roles/web/tasks/main.yml",
+    ] {
+        let config = Config::parse(&config_with(valid)).unwrap();
+        assert_eq!(config.expansion[0].output_file.as_deref(), Some(valid));
+    }
+    for invalid in [
+        "",
+        "/etc/passwd",
+        "../outside",
+        "a/../../b",
+        "dir/",
+        ".",
+        "a\nb",
+    ] {
+        assert!(
+            matches!(
+                Config::parse(&config_with(invalid)),
+                Err(ConfigError::InvalidOutputFile { .. })
+            ),
+            "{invalid:?} must be rejected"
+        );
+    }
+    let command_backed = "[[expansion]]\ntrigger = \";;file\"\nreplacement = \"\"\noutput_file = \"out\"\n[expansion.command]\nprogram = \"date\"\n";
+    assert!(matches!(
+        Config::parse(command_backed),
+        Err(ConfigError::InvalidOutputFile { .. })
+    ));
+    // Absent by default and not written back.
+    let plain = Config::parse("[[expansion]]\ntrigger = \";;x\"\nreplacement = \"x\"\n").unwrap();
+    assert_eq!(plain.expansion[0].output_file, None);
+    assert!(!toml::to_string(&plain).unwrap().contains("output_file"));
+}

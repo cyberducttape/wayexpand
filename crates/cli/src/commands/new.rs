@@ -1,0 +1,773 @@
+//! `wayexpand new`: fill in a snippet's fields and write it to a file.
+//!
+//! This is for file templates such as Dockerfiles, Ansible playbooks and
+//! Compose files. Typing a long, whitespace-sensitive file into an editor is
+//! slow and fragile (editors re-indent typed YAML), so `new` renders the
+//! snippet itself and writes the result. It needs no keyboard route or
+//! running daemon.
+
+use std::{
+    collections::HashMap,
+    io::{BufRead, IsTerminal},
+    process::Stdio,
+    sync::Arc,
+};
+
+use wayexpand_core::{
+    form_fields, render_template_with_cursor, ExpansionConfig, FormField, FormFieldKind,
+    TemplateContext,
+};
+
+use super::Args;
+use crate::*;
+
+const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]";
+
+/// Templates that ship with WayExpand. A snippet in the user's configuration
+/// with the same name takes precedence.
+const BUILTIN_TEMPLATES: &str = include_str!("../../templates/builtin.toml");
+
+/// Where a template came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    User,
+    BuiltIn,
+}
+
+fn builtin_templates() -> Config {
+    Config::parse(BUILTIN_TEMPLATES).expect("the built-in templates are valid (checked by a test)")
+}
+
+/// The user's configuration, or an empty one when the default file does not
+/// exist yet: the built-in templates need no configuration.
+fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
+    match Config::load(path) {
+        Ok(config) => Ok(config),
+        Err(wayexpand_core::ConfigError::Read { source, .. })
+            if !explicit && source.kind() == io::ErrorKind::NotFound =>
+        {
+            Ok(Config::parse("").expect("an empty configuration is valid"))
+        }
+        Err(error) => Err(config_load_error(path, error)),
+    }
+}
+
+/// Bytes in one value given with `--set` or typed at a prompt.
+const MAX_VALUE_BYTES: usize = 64 * 1024;
+
+pub(crate) fn new_command(args: Args) -> Result<()> {
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let force = take_flag(&mut rest, "--force");
+    let to_stdout = take_flag(&mut rest, "--stdout");
+    let gui = take_flag(&mut rest, "--gui");
+    let output =
+        match take_option(&mut rest, "--output").map_err(|error| usage_error(error.to_string()))? {
+            Some(output) => Some(output),
+            None => take_option(&mut rest, "-o").map_err(|error| usage_error(error.to_string()))?,
+        };
+    let show = take_option(&mut rest, "--show").map_err(|error| usage_error(error.to_string()))?;
+    let explicit_path = take_option(&mut rest, "--config")
+        .map_err(|error| usage_error(error.to_string()))?
+        .map(PathBuf::from);
+    let path = explicit_path.clone().unwrap_or_else(default_config_path);
+    let mut assignments = Vec::new();
+    while let Some(assignment) =
+        take_option(&mut rest, "--set").map_err(|error| usage_error(error.to_string()))?
+    {
+        let Some((name, value)) = assignment.split_once('=') else {
+            usage_bail!("--set needs NAME=VALUE, got {assignment:?}");
+        };
+        assignments.push((name.trim().to_owned(), value.to_owned()));
+    }
+    if rest.len() > 1
+        || rest
+            .first()
+            .is_some_and(|argument| argument.starts_with('-'))
+    {
+        usage_bail!("{USAGE}");
+    }
+    let config = load_user_config(&path, explicit_path.is_some())?;
+    let builtins = builtin_templates();
+    let layers = [(&config, Source::User), (&builtins, Source::BuiltIn)];
+    if let Some(name) = show {
+        if !rest.is_empty()
+            || output.is_some()
+            || to_stdout
+            || gui
+            || force
+            || !assignments.is_empty()
+        {
+            usage_bail!("{USAGE}");
+        }
+        let (snippet, _) = find_template(&layers, &name)?;
+        print!("{}", snippet_toml(snippet)?);
+        return Ok(());
+    }
+    let Some(name) = rest.into_iter().next() else {
+        if output.is_some() || to_stdout || gui || force || !assignments.is_empty() {
+            usage_bail!("{USAGE}");
+        }
+        print_templates(&layers, requested_json);
+        return Ok(());
+    };
+    if requested_json {
+        usage_bail!("--json lists templates; it does not apply to `wayexpand new <name>`");
+    }
+    if to_stdout && output.is_some() {
+        usage_bail!("use either --stdout or -o FILE, not both");
+    }
+    let (snippet, _) = find_template(&layers, &name)?;
+    if snippet.command.is_some() {
+        usage_bail!(
+            "{} runs a command; only text snippets can be written with `wayexpand new`",
+            snippet.trigger
+        );
+    }
+    let fields = form_fields(&snippet.replacement)
+        .map_err(|error| config_error(format!("{}: {error}", snippet.trigger)))?;
+    let mut values = values_from_assignments(&fields, assignments)?;
+    let missing: Vec<&FormField> = fields
+        .iter()
+        .filter(|field| !values.contains_key(&field.key))
+        .collect();
+    if !missing.is_empty() {
+        if gui {
+            values.extend(ask_with_form(&snippet.trigger, &missing)?);
+        } else if io::stdin().is_terminal() {
+            values.extend(ask_in_terminal(&missing)?);
+        } else {
+            // Not interactive: defaults apply as they would on Enter, and
+            // only a field without one is an error.
+            let mut unanswered = Vec::new();
+            for field in missing {
+                match default_value(field) {
+                    Some(value) => {
+                        values.insert(field.key.clone(), value);
+                    }
+                    None => unanswered.push(field.label.as_str()),
+                }
+            }
+            if !unanswered.is_empty() {
+                usage_bail!(
+                    "no value for {}; pass --set NAME=VALUE, --gui, or run in a terminal",
+                    unanswered.join(", ")
+                );
+            }
+        }
+    }
+    let context = TemplateContext {
+        fields: Arc::new(values),
+        ..config.template_context(None)
+    };
+    let (rendered, _) = render_template_with_cursor(&snippet.replacement, &context)
+        .map_err(|error| config_error(format!("{}: {error}", snippet.trigger)))?;
+
+    let destination = if to_stdout {
+        None
+    } else {
+        output
+            .or_else(|| snippet.output_file.clone())
+            .filter(|file| file != "-")
+    };
+    match destination {
+        None => {
+            io::stdout().write_all(rendered.as_bytes())?;
+            io::stdout().flush()?;
+        }
+        Some(file) => {
+            write_output(Path::new(&file), rendered.as_bytes(), force)?;
+            eprintln!("Wrote {file}");
+        }
+    }
+    Ok(())
+}
+
+/// A snippet as TOML to paste into a configuration, without its id (one is
+/// assigned when the configuration is first loaded).
+fn snippet_toml(snippet: &ExpansionConfig) -> Result<String> {
+    let mut table = toml::Table::try_from(snippet).context("could not serialize the snippet")?;
+    table.remove("id");
+    // Most telling keys first and the long replacement last; toml::Table
+    // itself is sorted.
+    let order = ["trigger", "output_file", "description", "category", "tags"];
+    let mut keys: Vec<String> = order
+        .iter()
+        .map(|key| (*key).to_owned())
+        .filter(|key| table.contains_key(key))
+        .collect();
+    keys.extend(
+        table
+            .keys()
+            .filter(|key| !order.contains(&key.as_str()) && *key != "replacement")
+            .cloned(),
+    );
+    keys.push("replacement".into());
+    let mut text = String::from("[[expansion]]\n");
+    for key in keys {
+        if let Some(value) = table.remove(&key) {
+            let mut single = toml::Table::new();
+            single.insert(key, value);
+            text.push_str(&toml::to_string(&single).context("could not serialize the snippet")?);
+        }
+    }
+    Ok(text)
+}
+
+fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
+    match args.iter().position(|argument| argument == flag) {
+        Some(position) => {
+            args.remove(position);
+            true
+        }
+        None => false,
+    }
+}
+
+/// A short name for a snippet: its trigger without leading and trailing
+/// punctuation, so `;;docker` is `docker`.
+fn short_name(trigger: &str) -> String {
+    trigger
+        .trim_matches(|character: char| !character.is_alphanumeric())
+        .to_lowercase()
+}
+
+/// Find the snippet `name` refers to, searching the user's configuration
+/// before the built-in templates.
+fn find_template<'a>(
+    layers: &[(&'a Config, Source)],
+    name: &str,
+) -> Result<(&'a ExpansionConfig, Source)> {
+    for (config, source) in layers {
+        // An ambiguous name in the user's layer is an error rather than a
+        // reason to fall through to a built-in template.
+        if let Some(snippet) = find_in(config, name)? {
+            return Ok((snippet, *source));
+        }
+    }
+    Err(usage_error(format!(
+        "no enabled snippet is called {name:?}; `wayexpand new` lists file templates"
+    )))
+}
+
+/// The snippet `name` refers to in one configuration: an exact trigger or
+/// alias first, then a trigger's short name, then the file name it writes.
+fn find_in<'a>(config: &'a Config, name: &str) -> Result<Option<&'a ExpansionConfig>> {
+    let enabled = || {
+        config
+            .expansion
+            .iter()
+            .filter(|expansion| expansion.enabled)
+    };
+    if let Some(exact) = enabled().find(|expansion| expansion.answers_to(name)) {
+        return Ok(Some(exact));
+    }
+    let wanted = name.to_lowercase();
+    let by_short_name = |expansion: &&ExpansionConfig| {
+        std::iter::once(&expansion.trigger)
+            .chain(&expansion.aliases)
+            .any(|trigger| short_name(trigger) == wanted)
+    };
+    let by_file_name = |expansion: &&ExpansionConfig| {
+        expansion.output_file.as_deref().is_some_and(|file| {
+            let file = Path::new(file);
+            [file.file_name(), file.file_stem()]
+                .into_iter()
+                .flatten()
+                .any(|part| part.to_string_lossy().to_lowercase() == wanted)
+        })
+    };
+    // A name match beats a file-name match: `dockerfile` is ;;dockerfile,
+    // not every template that writes a Dockerfile.
+    for candidates in [
+        enabled().filter(by_short_name).collect::<Vec<_>>(),
+        enabled().filter(by_file_name).collect::<Vec<_>>(),
+    ] {
+        match candidates.as_slice() {
+            [] => {}
+            [only] => return Ok(Some(only)),
+            several => {
+                let triggers: Vec<&str> = several
+                    .iter()
+                    .map(|snippet| snippet.trigger.as_str())
+                    .collect();
+                return Err(usage_error(format!(
+                    "{name:?} matches {}; use the full trigger",
+                    triggers.join(", ")
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
+    // A built-in template is hidden when its name now finds a user snippet.
+    let templates: Vec<(&ExpansionConfig, Source)> = layers
+        .iter()
+        .flat_map(|(config, source)| {
+            config
+                .expansion
+                .iter()
+                .filter(|expansion| {
+                    expansion.enabled
+                        && expansion.command.is_none()
+                        && expansion.output_file.is_some()
+                })
+                .map(move |expansion| (expansion, *source))
+        })
+        .filter(|(expansion, source)| {
+            *source == Source::User
+                || find_template(layers, &short_name(&expansion.trigger))
+                    .is_ok_and(|(found, _)| std::ptr::eq(found, *expansion))
+        })
+        .collect();
+    if requested_json {
+        let entries: Vec<serde_json::Value> = templates
+            .iter()
+            .map(|(snippet, source)| {
+                let fields: Vec<String> = form_fields(&snippet.replacement)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|field| field.label)
+                    .collect();
+                serde_json::json!({
+                    "trigger": snippet.trigger,
+                    "name": short_name(&snippet.trigger),
+                    "output_file": snippet.output_file,
+                    "description": snippet.description,
+                    "fields": fields,
+                    "built_in": *source == Source::BuiltIn,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::json!({ "templates": entries }));
+        return;
+    }
+    if templates.is_empty() {
+        println!("No file templates. Give a snippet an output_file to list it here, for example:");
+        println!();
+        println!("  [[expansion]]");
+        println!("  trigger = \";;dockerfile\"");
+        println!("  output_file = \"Dockerfile\"");
+        println!("  replacement = \"\"\"FROM {{{{field:image=debian:stable-slim}}}}\n  \"\"\"");
+        return;
+    }
+    let width = templates
+        .iter()
+        .map(|(snippet, _)| short_name(&snippet.trigger).chars().count())
+        .max()
+        .unwrap_or(0);
+    let file_width = templates
+        .iter()
+        .map(|(snippet, _)| {
+            snippet
+                .output_file
+                .as_deref()
+                .unwrap_or_default()
+                .chars()
+                .count()
+        })
+        .max()
+        .unwrap_or(0);
+    for (snippet, source) in templates {
+        let mut line = format!(
+            "{:<width$}  {:<file_width$}",
+            short_name(&snippet.trigger),
+            snippet.output_file.as_deref().unwrap_or_default()
+        );
+        if !snippet.description.is_empty() {
+            line.push_str(&format!("  {}", snippet.description));
+        }
+        if source == Source::User {
+            line.push_str("  (yours)");
+        }
+        println!("{}", line.trim_end());
+    }
+    println!();
+    println!("Run `wayexpand new <name>` to fill one in; --set NAME=VALUE skips a question.");
+    println!("`wayexpand new --show <name>` prints one as a snippet you can copy and change.");
+}
+
+/// Match `--set` names to fields by label (`--set port=8080` fills
+/// `{{field:port}}` and `{{choice:port=...}}`). Unknown names and choice
+/// values outside the options are errors rather than ignored.
+fn values_from_assignments(
+    fields: &[FormField],
+    assignments: Vec<(String, String)>,
+) -> Result<HashMap<String, String>> {
+    let mut values = HashMap::new();
+    for (name, value) in assignments {
+        let Some(field) = fields.iter().find(|field| field.label == name) else {
+            let names: Vec<&str> = fields.iter().map(|field| field.label.as_str()).collect();
+            usage_bail!(
+                "this template has no field {name:?}; its fields are: {}",
+                if names.is_empty() {
+                    "(none)".to_owned()
+                } else {
+                    names.join(", ")
+                }
+            );
+        };
+        check_value(field, &value)?;
+        values.insert(field.key.clone(), value);
+    }
+    Ok(values)
+}
+
+/// What Enter accepts: a text field's default, or a choice's first option.
+fn default_value(field: &FormField) -> Option<String> {
+    match &field.kind {
+        FormFieldKind::Text { default } if default.is_empty() => None,
+        FormFieldKind::Text { default } => Some(default.clone()),
+        FormFieldKind::Choice { options } => options.first().cloned(),
+    }
+}
+
+fn check_value(field: &FormField, value: &str) -> Result<()> {
+    if value.len() > MAX_VALUE_BYTES || value.contains('\0') {
+        usage_bail!("the value for {} is too long or contains NUL", field.label);
+    }
+    if let FormFieldKind::Choice { options } = &field.kind {
+        if !options.iter().any(|option| option == value) {
+            usage_bail!("{} must be one of: {}", field.label, options.join(", "));
+        }
+    }
+    Ok(())
+}
+
+fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
+    let mut values = HashMap::new();
+    for field in fields {
+        let value = loop {
+            match &field.kind {
+                FormFieldKind::Text { default } if default.is_empty() => {
+                    eprint!("{}: ", field.label)
+                }
+                FormFieldKind::Text { default } => eprint!("{} [{default}]: ", field.label),
+                FormFieldKind::Choice { options } => {
+                    eprintln!("{}:", field.label);
+                    for (number, option) in options.iter().enumerate() {
+                        eprintln!("  {}) {option}", number + 1);
+                    }
+                    eprint!("Choose 1-{} [1]: ", options.len());
+                }
+            }
+            io::stderr().flush()?;
+            let Some(line) = lines.next().transpose()? else {
+                usage_bail!("input ended before {} was answered", field.label);
+            };
+            let answer = line.trim_end_matches(['\r', '\n']);
+            let value = match &field.kind {
+                FormFieldKind::Text { .. } if answer.is_empty() => {
+                    default_value(field).unwrap_or_default()
+                }
+                FormFieldKind::Text { .. } => answer.to_owned(),
+                FormFieldKind::Choice { options } => {
+                    let answer = answer.trim();
+                    if answer.is_empty() {
+                        default_value(field).unwrap_or_default()
+                    } else if let Some(option) = answer
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|number| number.checked_sub(1))
+                        .and_then(|index| options.get(index))
+                    {
+                        option.clone()
+                    } else if options.iter().any(|option| option == answer) {
+                        answer.to_owned()
+                    } else {
+                        eprintln!("Please pick a number from the list.");
+                        continue;
+                    }
+                }
+            };
+            match check_value(field, &value) {
+                Ok(()) => break value,
+                Err(error) => eprintln!("{error}"),
+            }
+        };
+        values.insert(field.key.clone(), value);
+    }
+    Ok(values)
+}
+
+/// Ask with the same window the daemon uses for form snippets. It prints
+/// the values as a JSON object and exits 0, or exits non-zero on cancel.
+fn ask_with_form(title: &str, fields: &[&FormField]) -> Result<HashMap<String, String>> {
+    let spec = serde_json::json!({ "title": title, "fields": fields }).to_string();
+    let program = env::var_os("WAYEXPAND_FORM_HELPER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|dir| dir.join("wayexpand-gui")))
+                .filter(|candidate| candidate.is_file())
+        })
+        .unwrap_or_else(|| PathBuf::from("wayexpand-gui"));
+    let output = Command::new(&program)
+        .args(["--form", &spec])
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .with_context(|| format!("could not start {}", program.display()))?;
+    if !output.status.success() {
+        bail!("cancelled; nothing was written");
+    }
+    let values: HashMap<String, String> = serde_json::from_slice(&output.stdout)
+        .context("the form window returned an unreadable answer")?;
+    let mut checked = HashMap::new();
+    for field in fields {
+        let value = values
+            .get(&field.key)
+            .with_context(|| format!("the form window returned no value for {}", field.label))?;
+        check_value(field, value)?;
+        checked.insert(field.key.clone(), value.clone());
+    }
+    Ok(checked)
+}
+
+/// Write `contents` to `path`, creating missing parent directories. An
+/// existing file is never replaced without `force`; with it, the new file is
+/// written beside the old one and renamed over it, so a failure leaves the
+/// old file intact.
+fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("could not create {}", parent.display()))?;
+    }
+    if !force {
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                usage_bail!(
+                    "{} already exists; add --force to replace it",
+                    path.display()
+                );
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("could not create {}", path.display()))
+            }
+        };
+        if let Err(error) = file.write_all(contents).and_then(|()| file.sync_all()) {
+            drop(file);
+            let _ = fs::remove_file(path);
+            return Err(error).with_context(|| format!("could not write {}", path.display()));
+        }
+        return Ok(());
+    }
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("{} is not a file name", path.display()))?;
+    let temporary = path.with_file_name(format!(
+        ".{}.wayexpand-new-{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+    let result = (|| -> io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        if let Ok(existing) = fs::metadata(path) {
+            // Keep an executable script executable when it is replaced.
+            file.set_permissions(existing.permissions())?;
+        }
+        file.write_all(contents)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("could not write {}", path.display()));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(text: &str) -> Config {
+        Config::parse(text).unwrap()
+    }
+
+    const PLAYBOOK: &str = r#"
+[[expansion]]
+trigger = ";;playbook"
+output_file = "site.yml"
+replacement = """- hosts: {{field:hosts=all}}
+  tasks:
+    - ansible.builtin.package:
+        name: "{{{{ item }}}}"
+        state: {{choice:state=present|latest|absent}}
+      loop: [{{field:package}}]
+"""
+
+[[expansion]]
+trigger = ";;dockerfile"
+output_file = "docker/Dockerfile"
+replacement = "FROM {{field:image=debian:stable-slim}}\n"
+
+[[expansion]]
+trigger = ";;sig"
+replacement = "Regards"
+"#;
+
+    fn found(layers: &[(&Config, Source)], name: &str) -> (String, Source) {
+        let (snippet, source) = find_template(layers, name).unwrap();
+        (snippet.trigger.clone(), source)
+    }
+
+    #[test]
+    fn templates_are_found_by_trigger_short_name_or_file_name() {
+        let config = config(PLAYBOOK);
+        let layers = [(&config, Source::User)];
+        assert_eq!(found(&layers, ";;playbook").0, ";;playbook");
+        assert_eq!(found(&layers, "playbook").0, ";;playbook");
+        assert_eq!(found(&layers, "site").0, ";;playbook");
+        assert_eq!(found(&layers, "Dockerfile").0, ";;dockerfile");
+        assert!(find_template(&layers, "nothing").is_err());
+    }
+
+    #[test]
+    fn user_templates_take_precedence_over_built_in_ones() {
+        let user = config(PLAYBOOK);
+        let builtins = builtin_templates();
+        let layers = [(&user, Source::User), (&builtins, Source::BuiltIn)];
+        assert_eq!(
+            found(&layers, "playbook"),
+            (";;playbook".into(), Source::User)
+        );
+        assert_eq!(
+            found(&layers, "compose"),
+            (";;compose".into(), Source::BuiltIn)
+        );
+        // `dockerfile` is the user's ;;dockerfile, not the built-in one.
+        assert_eq!(
+            found(&layers, "dockerfile"),
+            (";;dockerfile".into(), Source::User)
+        );
+    }
+
+    #[test]
+    fn every_built_in_template_renders_with_its_defaults() {
+        let builtins = builtin_templates();
+        assert!(builtins.expansion.len() >= 10);
+        for snippet in &builtins.expansion {
+            assert!(snippet.output_file.is_some(), "{}", snippet.trigger);
+            let fields = form_fields(&snippet.replacement).unwrap();
+            let values: HashMap<String, String> = fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.key.clone(),
+                        default_value(field).unwrap_or_else(|| "value".into()),
+                    )
+                })
+                .collect();
+            let context = TemplateContext {
+                fields: Arc::new(values),
+                ..builtins.template_context(None)
+            };
+            let (rendered, _) = render_template_with_cursor(&snippet.replacement, &context)
+                .unwrap_or_else(|error| panic!("{}: {error}", snippet.trigger));
+            assert!(
+                rendered.ends_with('\n'),
+                "{} ends without a newline",
+                snippet.trigger
+            );
+            assert!(!rendered.contains("{{field:"), "{}", snippet.trigger);
+            // The built-in templates are each found by their short name.
+            let layers = [(&builtins, Source::BuiltIn)];
+            assert_eq!(
+                found(&layers, &short_name(&snippet.trigger)).0,
+                snippet.trigger
+            );
+        }
+        let playbook = builtins
+            .expansion
+            .iter()
+            .find(|snippet| snippet.trigger == ";;playbook");
+        let (rendered, _) = render_template_with_cursor(
+            &playbook.unwrap().replacement,
+            &TemplateContext {
+                fields: Arc::new(
+                    form_fields(&playbook.unwrap().replacement)
+                        .unwrap()
+                        .iter()
+                        .map(|field| (field.key.clone(), default_value(field).unwrap()))
+                        .collect(),
+                ),
+                ..TemplateContext::default()
+            },
+        )
+        .unwrap();
+        assert!(rendered.contains("name: \"{{ item }}\""));
+        assert!(rendered.contains("loop: \"{{ packages }}\""));
+    }
+
+    #[test]
+    fn a_shown_template_is_a_valid_snippet_without_an_id() {
+        let builtins = builtin_templates();
+        let layers = [(&builtins, Source::BuiltIn)];
+        let (snippet, _) = find_template(&layers, "playbook").unwrap();
+        let text = snippet_toml(snippet).unwrap();
+        assert!(!text.contains("id ="), "{text}");
+        let parsed = Config::parse(&text).unwrap();
+        assert_eq!(parsed.expansion[0].replacement, snippet.replacement);
+        assert_eq!(parsed.expansion[0].output_file, snippet.output_file);
+    }
+
+    #[test]
+    fn set_values_fill_fields_by_label_and_check_choices() {
+        let config = config(PLAYBOOK);
+        let (snippet, _) = find_template(&[(&config, Source::User)], "playbook").unwrap();
+        let fields = form_fields(&snippet.replacement).unwrap();
+        let values = values_from_assignments(
+            &fields,
+            vec![
+                ("state".into(), "latest".into()),
+                ("package".into(), "nginx".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            values.get("choice:state").map(String::as_str),
+            Some("latest")
+        );
+        assert_eq!(
+            values.get("field:package").map(String::as_str),
+            Some("nginx")
+        );
+        assert!(values_from_assignments(&fields, vec![("state".into(), "gone".into())]).is_err());
+        assert!(values_from_assignments(&fields, vec![("port".into(), "80".into())]).is_err());
+    }
+
+    #[test]
+    fn output_is_never_overwritten_without_force() {
+        let directory = std::env::temp_dir().join(format!("wayexpand-new-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        let target = directory.join("nested/Dockerfile");
+        write_output(&target, b"FROM one\n", false).unwrap();
+        assert!(write_output(&target, b"FROM two\n", false).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"FROM one\n");
+        write_output(&target, b"FROM two\n", true).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"FROM two\n");
+        let leftovers: Vec<_> = fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers, [std::ffi::OsString::from("Dockerfile")]);
+        fs::remove_dir_all(&directory).unwrap();
+    }
+}

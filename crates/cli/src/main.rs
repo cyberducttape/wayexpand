@@ -15,6 +15,7 @@ use commands::config::{
     stats_command, sync_command, test_command, test_hotkey_command, validate_command,
 };
 use commands::daemon::{control_command, insert_command};
+use commands::new::new_command;
 use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
     portal_command, setup_command,
@@ -100,6 +101,7 @@ fn run() -> Result<()> {
         Some("test") => test_command(args)?,
         Some("test-hotkey") => test_hotkey_command(args)?,
         Some("preview") => preview_command(args)?,
+        Some("new") => new_command(args)?,
         Some("list") => list_command(args)?,
         Some("search") => search_command(args)?,
         Some("schema") => schema_command(args)?,
@@ -180,6 +182,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "schema",
                 "Print the stable configuration schema for authoring tools",
+            ),
+            (
+                "new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force]]",
+                "Fill in a file template (Dockerfile, playbook...) and write it",
             ),
             (
                 "test <text> [--json] [config]",

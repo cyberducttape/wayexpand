@@ -18,6 +18,8 @@ pub(crate) struct Draft {
     pub(crate) enabled: bool,
     pub(crate) match_mode: MatchMode,
     pub(crate) propagate_case: bool,
+    /// `output_file` for `wayexpand new`; empty means none.
+    pub(crate) output_file: String,
     pub(crate) command_enabled: bool,
     pub(crate) command_action_mode: bool,
     pub(crate) command_action: String,
@@ -83,6 +85,7 @@ impl Draft {
             enabled: expansion.enabled,
             match_mode: expansion.match_mode,
             propagate_case: expansion.propagate_case,
+            output_file: expansion.output_file.clone().unwrap_or_default(),
             command_enabled,
             command_action_mode,
             command_action,
@@ -130,6 +133,7 @@ impl Draft {
             enabled: self.enabled,
             propagate_case: self.propagate_case,
             aliases: self.committed_aliases(),
+            output_file: Some(self.output_file.trim().to_owned()).filter(|file| !file.is_empty()),
         })
     }
 

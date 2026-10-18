@@ -919,6 +919,7 @@ fn engine_rejects_manually_constructed_invalid_config() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: crate::Settings::default(),

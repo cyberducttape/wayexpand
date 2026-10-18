@@ -68,6 +68,8 @@ pub enum ConfigError {
     InvalidAppFilter { index: usize },
     #[error("expansion {index} has an invalid category")]
     InvalidCategory { index: usize },
+    #[error("expansion {index} has an invalid output_file: {reason}")]
+    InvalidOutputFile { index: usize, reason: &'static str },
     #[error("expansion {index} has an invalid command: {reason}")]
     InvalidCommand { index: usize, reason: &'static str },
     #[error("duplicate trigger {trigger:?} in expansions {first} and {second}")]
@@ -199,6 +201,9 @@ impl ConfigError {
             }
             Self::InvalidCategory { index } => {
                 format!("expansion {index} has an invalid category")
+            }
+            Self::InvalidOutputFile { index, reason } => {
+                format!("expansion {index} has an invalid output_file: {reason}")
             }
             Self::InvalidCommand { index, reason } => {
                 format!("expansion {index} has an invalid command ({reason})")

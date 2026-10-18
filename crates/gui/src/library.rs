@@ -192,6 +192,7 @@ mod tests {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }
     }
 

@@ -1,0 +1,277 @@
+# Built-in file templates for `wayexpand new`.
+#
+# Each is an ordinary snippet with an output_file. A snippet in your own
+# configuration with the same name replaces the built-in one; copy one from
+# `wayexpand new --show NAME` to start your own.
+#
+# {{{{ and }}}} are a literal {{ and }} (Jinja, Go templates, GitHub
+# expressions); {{field:...}} and {{choice:...}} are what you fill in.
+
+[[expansion]]
+trigger = ";;dockerfile"
+output_file = "Dockerfile"
+description = "Generic Dockerfile"
+category = "DevOps"
+tags = ["docker"]
+replacement = """FROM {{field:image=debian:stable-slim}}
+
+WORKDIR {{field:workdir=/app}}
+COPY . .
+
+EXPOSE {{field:port=8080}}
+USER {{field:user=nobody}}
+CMD [{{field:command="./start.sh"}}]
+"""
+
+[[expansion]]
+trigger = ";;dockerfile-python"
+output_file = "Dockerfile"
+description = "Python application Dockerfile"
+category = "DevOps"
+tags = ["docker", "python"]
+replacement = """FROM python:{{field:python=3.13}}-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \\
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+
+RUN useradd --create-home --uid 10001 app
+USER app
+
+EXPOSE {{field:port=8000}}
+CMD ["python", "{{field:entrypoint=app.py}}"]
+"""
+
+[[expansion]]
+trigger = ";;dockerfile-node"
+output_file = "Dockerfile"
+description = "Node.js application Dockerfile"
+category = "DevOps"
+tags = ["docker", "node"]
+replacement = """FROM node:{{field:node=22}}-alpine
+
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+
+USER node
+EXPOSE {{field:port=3000}}
+CMD ["node", "{{field:entrypoint=server.js}}"]
+"""
+
+[[expansion]]
+trigger = ";;dockerfile-rust"
+output_file = "Dockerfile"
+description = "Multi-stage Rust Dockerfile with a small runtime image"
+category = "DevOps"
+tags = ["docker", "rust"]
+replacement = """FROM rust:{{field:rust=1}} AS build
+WORKDIR /src
+COPY . .
+RUN cargo build --release --locked
+
+FROM debian:stable-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \\
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/{{field:binary}} /usr/local/bin/{{field:binary}}
+USER nobody
+EXPOSE {{field:port=8080}}
+ENTRYPOINT ["/usr/local/bin/{{field:binary}}"]
+"""
+
+[[expansion]]
+trigger = ";;compose"
+output_file = "compose.yaml"
+description = "Docker Compose service"
+category = "DevOps"
+tags = ["docker", "compose"]
+replacement = """services:
+  {{field:service=app}}:
+    image: {{field:image=nginx:stable}}
+    restart: {{choice:restart=unless-stopped|always|on-failure|no}}
+    ports:
+      - "{{field:host port=8080}}:{{field:container port=80}}"
+    environment:
+      TZ: {{field:timezone=UTC}}
+    volumes:
+      - ./data:/data
+"""
+
+[[expansion]]
+trigger = ";;playbook"
+output_file = "site.yml"
+description = "Ansible playbook that installs and starts a package"
+category = "DevOps"
+tags = ["ansible"]
+replacement = """---
+- name: {{field:play name=Configure servers}}
+  hosts: {{field:hosts=all}}
+  become: true
+  vars:
+    packages:
+      - {{field:package=nginx}}
+
+  tasks:
+    - name: Install packages
+      ansible.builtin.package:
+        name: "{{{{ item }}}}"
+        state: {{choice:state=present|latest|absent}}
+      loop: "{{{{ packages }}}}"
+
+    - name: Enable and start {{field:service=nginx}}
+      ansible.builtin.service:
+        name: {{field:service=nginx}}
+        state: started
+        enabled: true
+"""
+
+[[expansion]]
+trigger = ";;ansible-role"
+output_file = "roles/main.yml"
+description = "Ansible role tasks file with a templated config and handler notify"
+category = "DevOps"
+tags = ["ansible"]
+replacement = """---
+- name: Install {{field:package}}
+  ansible.builtin.package:
+    name: {{field:package}}
+    state: present
+
+- name: Configure {{field:package}}
+  ansible.builtin.template:
+    src: {{field:template=config.j2}}
+    dest: {{field:destination}}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart {{field:package}}
+"""
+
+[[expansion]]
+trigger = ";;inventory"
+output_file = "inventory.ini"
+description = "Ansible INI inventory with one group"
+category = "DevOps"
+tags = ["ansible"]
+replacement = """[{{field:group=web}}]
+{{field:host=server1.example.com}} ansible_user={{field:ssh user=admin}}
+
+[{{field:group=web}}:vars]
+ansible_python_interpreter=/usr/bin/python3
+"""
+
+[[expansion]]
+trigger = ";;systemd-service"
+output_file = "app.service"
+description = "Hardened systemd service unit"
+category = "DevOps"
+tags = ["systemd"]
+replacement = """[Unit]
+Description={{field:description}}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type={{choice:type=simple|exec|notify|oneshot}}
+ExecStart={{field:command}}
+User={{field:user=nobody}}
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+[[expansion]]
+trigger = ";;github-actions"
+output_file = ".github/workflows/ci.yml"
+description = "GitHub Actions CI workflow"
+category = "DevOps"
+tags = ["ci", "github"]
+replacement = """name: CI
+
+on:
+  push:
+    branches: [{{field:branch=main}}]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: {{choice:runner=ubuntu-latest|ubuntu-24.04-arm|macos-latest|windows-latest}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: {{field:command=make test}}
+        env:
+          CI_RUN: "${{{{ github.run_id }}}}"
+"""
+
+[[expansion]]
+trigger = ";;nginx-site"
+output_file = "nginx.conf"
+description = "nginx reverse proxy site"
+category = "DevOps"
+tags = ["nginx"]
+replacement = """server {
+    listen 80;
+    server_name {{field:server name=example.com}};
+
+    location / {
+        proxy_pass http://{{field:upstream=127.0.0.1:8080}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+"""
+
+[[expansion]]
+trigger = ";;k8s-deployment"
+output_file = "deployment.yaml"
+description = "Kubernetes Deployment and Service"
+category = "DevOps"
+tags = ["kubernetes"]
+replacement = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{field:name=app}}
+  labels:
+    app: {{field:name=app}}
+spec:
+  replicas: {{field:replicas=2}}
+  selector:
+    matchLabels:
+      app: {{field:name=app}}
+  template:
+    metadata:
+      labels:
+        app: {{field:name=app}}
+    spec:
+      containers:
+        - name: {{field:name=app}}
+          image: {{field:image}}
+          ports:
+            - containerPort: {{field:port=8080}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{field:name=app}}
+spec:
+  type: {{choice:service type=ClusterIP|NodePort|LoadBalancer}}
+  selector:
+    app: {{field:name=app}}
+  ports:
+    - port: 80
+      targetPort: {{field:port=8080}}
+"""

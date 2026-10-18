@@ -86,6 +86,7 @@ impl GuiApp {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         };
         self.new_draft_origin = self.selected_id.clone();
         self.new_draft = true;
@@ -115,6 +116,7 @@ impl GuiApp {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         });
         self.queue_save_config(candidate, SaveIntent::Created);
     }

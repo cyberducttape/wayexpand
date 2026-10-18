@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- File templates: `wayexpand new` fills in a snippet's fields and writes the
+  result to a file, so Dockerfiles, Ansible playbooks, Compose files and
+  Kubernetes manifests no longer have to be typed into an editor (which
+  re-indents YAML). Values come from `--set NAME=VALUE`, terminal prompts or
+  the form window (`--gui`), and an existing file is replaced only with
+  `--force`. A snippet's new `output_file` setting (also in the editor as
+  "Write to file") names the file. Twelve starter templates ship built in;
+  `wayexpand new` lists them and `--show NAME` prints one to copy.
+- Snippets can contain literal `{{` and `}}`, written `{{{{` and `}}}}`, so
+  Jinja, Go template and GitHub Actions syntax no longer fails validation as
+  an unknown variable. `{{choice:name=A|B}}` gives a drop-down a label, which
+  `--set name=...` also uses.
 - The Ubuntu PPA builds again. Every Launchpad build since September had
   failed because the daily recipe built plain `main`, which has no vendored
   crates. The Sync Launchpad workflow now republishes the

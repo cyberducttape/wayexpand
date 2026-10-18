@@ -73,6 +73,36 @@ impl Strings {
         }
     }
 
+    pub fn output_file(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Write to file",
+            Language::Indonesian => "Tulis ke berkas",
+            Language::German => "In Datei schreiben",
+        }
+    }
+
+    pub fn output_file_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Dockerfile, site.yml (optional)",
+            Language::Indonesian => "Dockerfile, site.yml (opsional)",
+            Language::German => "Dockerfile, site.yml (optional)",
+        }
+    }
+
+    pub fn output_file_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "`wayexpand new` fills in this snippet's fields and writes it to this file in the current directory"
+            }
+            Language::Indonesian => {
+                "`wayexpand new` mengisi kolom cuplikan ini dan menulisnya ke berkas ini di direktori saat ini"
+            }
+            Language::German => {
+                "`wayexpand new` füllt die Felder dieses Snippets aus und schreibt es in diese Datei im aktuellen Verzeichnis"
+            }
+        }
+    }
+
     pub fn existing(&self) -> &'static str {
         match self.lang {
             Language::English => "Choose…",

@@ -123,6 +123,7 @@ mod tests {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -252,6 +253,7 @@ mod tests {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         };
         let mut draft = Draft::from_expansion(&expansion);
         draft.command_enabled = true;
@@ -283,6 +285,7 @@ mod tests {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         };
         let draft = Draft::from_expansion(&expansion);
         assert_eq!(

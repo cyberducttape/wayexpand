@@ -30,6 +30,7 @@ fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::Expansi
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     }
 }
 
@@ -112,6 +113,7 @@ fn draft() -> Draft {
         enabled: true,
         match_mode: MatchMode::Immediate,
         propagate_case: false,
+        output_file: String::new(),
         command_enabled: true,
         command_action_mode: false,
         command_action: String::new(),
@@ -212,6 +214,7 @@ fn command_editor_round_trips_managed_action_configuration() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let form = Draft::from_expansion(&source);
     assert!(form.command_action_mode);
@@ -234,6 +237,7 @@ fn command_editor_preserves_advanced_environment_settings() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     source.command = Some(wayexpand_core::CommandConfig {
         action: None,
@@ -395,6 +399,7 @@ fn invalid_command_draft_is_not_mistaken_for_clean_none() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let mut form = Draft::from_expansion(&source);
     form.command_enabled = true;
@@ -417,6 +422,7 @@ fn editor_draft_preserves_tag_and_app_filter_tokens_verbatim() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let form = Draft::from_expansion(&source);
     assert_eq!(form.tags, source.tags);
@@ -495,6 +501,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             },
             ExpansionConfig {
                 id: ExpansionConfig::new_id(),
@@ -509,6 +516,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             },
         ],
         hotkey: Vec::new(),
@@ -551,6 +559,7 @@ fn gui_refuses_to_overwrite_an_external_config_change() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -606,6 +615,7 @@ fn a_conflicting_save_merges_with_an_external_edit_of_another_snippet() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let config = Config {
         expansion: vec![snippet(":mine"), snippet(":theirs")],
@@ -648,6 +658,7 @@ fn changes_queued_behind_a_save_in_flight_are_all_kept() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let config = Config {
         expansion: vec![snippet(":a"), snippet(":b"), snippet(":c")],
@@ -729,6 +740,7 @@ fn failed_reload_leaves_the_loaded_editor_snapshot_untouched() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -802,6 +814,7 @@ fn reload_completion_cannot_overwrite_edits_made_while_loading() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -862,6 +875,7 @@ fn gui_core_revision_guard_catches_a_write_after_the_early_check() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -936,6 +950,7 @@ fn undo_history_is_bounded() {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -977,6 +992,7 @@ fn undo_history_respects_its_byte_budget() {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             }],
             hotkey: Vec::new(),
             settings: Settings::default(),
@@ -1009,6 +1025,7 @@ fn saved_snippet_edit_can_be_undone_back_to_disk() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1051,6 +1068,7 @@ fn undo_is_refused_while_a_save_is_in_flight() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1107,6 +1125,7 @@ fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1186,6 +1205,7 @@ fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let deleted = ExpansionConfig {
         id: "stable-b".into(),
@@ -1439,6 +1459,7 @@ fn the_window_title_names_the_open_file_and_marks_unsaved_edits() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1502,6 +1523,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
                 enabled: true,
                 propagate_case: false,
                 aliases: Vec::new(),
+                output_file: None,
             },
             ExpansionConfig {
                 id: ExpansionConfig::new_id(),
@@ -1524,6 +1546,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
                 enabled: false,
                 propagate_case: true,
                 aliases: Vec::new(),
+                output_file: None,
             },
         ],
         hotkey: Vec::new(),
@@ -1783,6 +1806,7 @@ fn format_preserving_saves_keep_manual_comments() {
             enabled: true,
             propagate_case: false,
             aliases: Vec::new(),
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1937,6 +1961,7 @@ fn duplicating_a_snippet_with_aliases_saves_a_copy_without_them() {
             enabled: true,
             propagate_case: false,
             aliases: vec![";signature".into()],
+            output_file: None,
         }],
         hotkey: Vec::new(),
         settings: Settings::default(),
@@ -1972,6 +1997,7 @@ fn save_rejects_an_alias_that_collides_with_another_snippet() {
         enabled: true,
         propagate_case: false,
         aliases: Vec::new(),
+        output_file: None,
     };
     let config = Config {
         expansion: vec![snippet(";one"), snippet(";two")],

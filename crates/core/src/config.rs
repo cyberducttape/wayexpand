@@ -403,6 +403,12 @@ pub struct ExpansionConfig {
     /// as before.
     #[serde(default)]
     pub propagate_case: bool,
+    /// File name `wayexpand new` writes this snippet to, relative to the
+    /// current directory (for example `Dockerfile` or
+    /// `.github/workflows/ci.yml`). Snippets with it are listed as file
+    /// templates; typing the trigger still inserts the text as usual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_file: Option<String>,
 }
 
 impl ExpansionConfig {

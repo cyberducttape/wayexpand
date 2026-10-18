@@ -243,6 +243,10 @@ impl Config {
             {
                 return Err(ConfigError::InvalidCategory { index });
             }
+            if let Some(output_file) = &expansion.output_file {
+                validate_output_file(output_file, expansion.command.is_some())
+                    .map_err(|reason| ConfigError::InvalidOutputFile { index, reason })?;
+            }
             if let Some(command) = &expansion.command {
                 if let Err(reason) = validate_command_config(command) {
                     return Err(ConfigError::InvalidCommand { index, reason });
@@ -376,3 +380,33 @@ impl Config {
         self.validate()
     }
 }
+
+/// `output_file` is where `wayexpand new` writes a snippet: a relative path
+/// that stays below the current directory. It is not a template.
+fn validate_output_file(output_file: &str, command_backed: bool) -> Result<(), &'static str> {
+    use std::path::{Component, Path};
+    if command_backed {
+        return Err("command-backed snippets cannot be written to a file");
+    }
+    if output_file.is_empty() || output_file.len() > MAX_OUTPUT_FILE_BYTES {
+        return Err("it must be 1 to 255 bytes");
+    }
+    if output_file.chars().any(char::is_control) {
+        return Err("it contains a control character");
+    }
+    if output_file.ends_with('/') {
+        return Err("it names a directory");
+    }
+    let path = Path::new(output_file);
+    if !path
+        .components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+        || path.file_name().is_none()
+    {
+        return Err("it must be a relative path without '..'");
+    }
+    Ok(())
+}
+
+/// Bytes in an `output_file` path.
+const MAX_OUTPUT_FILE_BYTES: usize = 255;
