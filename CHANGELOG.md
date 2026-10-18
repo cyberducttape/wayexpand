@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Ubuntu PPA builds again. Every Launchpad build since September had
+  failed because the daily recipe built plain `main`, which has no vendored
+  crates. The Sync Launchpad workflow now republishes the
+  `launchpad-vendored` branch on every push to `main`, and that branch now
+  includes `debian/`, which `git archive` had been leaving out. The package
+  tests also get a private `HOME`, because sbuild's `/sbuild-nonexistent`
+  failed the action broker's tests. The recipe must point at
+  `launchpad-vendored` (see docs/PACKAGING.md).
 - A configuration reload no longer pauses typing. The new configuration
   was read, validated and turned into a matcher on the daemon's event
   loop, which at the 10,000-snippet limit held keystrokes, stop and status

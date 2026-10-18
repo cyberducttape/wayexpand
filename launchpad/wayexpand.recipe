@@ -1,4 +1,8 @@
-# git-build-recipe format 0.4 deb-version {debversion}
+# git-build-recipe format 0.4 deb-version {debupstream}-0~{revtime}
+#
+# This is the text of the main-daily recipe. {revtime} gives every daily build
+# a new version; {debversion} would repeat 1.3.3-1 and Launchpad would refuse
+# the second upload.
 #
 # This recipe must use the generated launchpad-vendored branch.  A clean Git
 # checkout cannot build Debian packages because Cargo dependencies are not

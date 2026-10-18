@@ -22,8 +22,15 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	cargo build --release --locked -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
 
+# sbuild sets HOME=/sbuild-nonexistent, and the action broker's tests create
+# a private directory under HOME whose every ancestor must be owner-only.
+# Give the test run its own 0700 HOME in the build tree. TMPDIR stays the
+# system /tmp: the broker's test sockets need a short path (SUN_LEN).
 override_dh_auto_test:
-	cargo test --locked --workspace
+	rm -rf debian/test-home
+	install -d -m 700 debian/test-home
+	HOME=$(CURDIR)/debian/test-home cargo test --locked --workspace
+	rm -rf debian/test-home
 
 override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand usr/bin/

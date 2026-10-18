@@ -204,20 +204,23 @@ dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 Launchpad builds from source, so only submit to Ubuntu series whose build
 archive provides both `rustc` and `cargo` at or above the project MSRV (1.95).
 Ubuntu 26.04 Resolute currently provides Rust 1.93 and cannot satisfy this
-package's build dependencies. The configured `main-daily` recipe also tracks
-clean `main` rather than the vendored release source; it is not a supported
-automatic PPA publishing path. Check each Launchpad build result before
+package's build dependencies. Check each Launchpad build result before
 advertising a series as installable.
 
-**Recipe maintenance:** publish the self-contained branch used by the
-Launchpad Git recipe after each release:
+**Daily builds:** the `main-daily` recipe builds the `launchpad-vendored`
+branch once a day when it has changed. Its text is
+[`launchpad/wayexpand.recipe`](../launchpad/wayexpand.recipe). The Sync
+Launchpad workflow regenerates that branch on every push to `main`; it holds
+the `main` tree plus `debian/` (which release archives leave out) and Cargo's
+locked vendor sources. To publish it by hand, or to inspect it without pushing:
 
 ```bash
 GIT_SSH_COMMAND='ssh -F /dev/null' bash scripts/publish-launchpad-branch.sh
+bash scripts/publish-launchpad-branch.sh --output /tmp/wayexpand-lp
 ```
 
-The recipe must point at `launchpad-vendored`, not `main`. This branch is
-generated from the release tree and includes Cargo's locked vendor sources.
+The recipe must point at `launchpad-vendored`, not `main`: a clean `main`
+checkout has no `vendor/`, and `debian/rules` stops the build.
 
 **Note:** See [RELEASING.md](RELEASING.md) for the authoritative release version workflow
 (it is the single source of truth for version numbers across all distributions).
