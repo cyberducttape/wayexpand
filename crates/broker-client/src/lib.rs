@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use serde_json::from_str;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,30 +50,50 @@ fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, IpcError> {
 /// Read one newline-delimited frame without allowing an unterminated frame to
 /// grow past the protocol limit. `read_until` cannot be used here because it
 /// appends all input before the caller gets a chance to inspect its size.
+#[derive(Debug, PartialEq, Eq)]
+enum FrameProgress {
+    Eof,
+    Progress,
+    Complete,
+}
+
+fn read_bounded_chunk<R: BufRead>(
+    reader: &mut R,
+    frame: &mut Vec<u8>,
+) -> Result<FrameProgress, IpcError> {
+    let available = reader.fill_buf()?;
+    if available.is_empty() {
+        return Ok(FrameProgress::Eof);
+    }
+    let take = available
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(available.len(), |position| position + 1);
+    if frame.len().saturating_add(take) > MAX_MESSAGE_BYTES {
+        return Err(IpcError::MessageTooLarge(
+            frame.len().saturating_add(take),
+            MAX_MESSAGE_BYTES,
+        ));
+    }
+    let complete = available[..take].last() == Some(&b'\n');
+    frame.extend_from_slice(&available[..take]);
+    reader.consume(take);
+    Ok(if complete {
+        FrameProgress::Complete
+    } else {
+        FrameProgress::Progress
+    })
+}
+
 fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, IpcError> {
     let mut frame = Vec::new();
     loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            if frame.is_empty() {
+        match read_bounded_chunk(reader, &mut frame)? {
+            FrameProgress::Eof if frame.is_empty() => {
                 return Err(IpcError::ConnectionClosed);
             }
-            return Ok(frame);
-        }
-        let take = available
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(available.len(), |position| position + 1);
-        if frame.len().saturating_add(take) > MAX_MESSAGE_BYTES {
-            return Err(IpcError::MessageTooLarge(
-                frame.len().saturating_add(take),
-                MAX_MESSAGE_BYTES,
-            ));
-        }
-        frame.extend_from_slice(&available[..take]);
-        reader.consume(take);
-        if frame.last() == Some(&b'\n') {
-            return Ok(frame);
+            FrameProgress::Eof | FrameProgress::Complete => return Ok(frame),
+            FrameProgress::Progress => {}
         }
     }
 }
@@ -138,29 +158,22 @@ impl BrokerClient {
             }
             self.stream
                 .set_read_timeout(Some(remaining.min(DEADLINE_POLL_INTERVAL)))?;
-            let budget = (MAX_MESSAGE_BYTES + 1).saturating_sub(frame.len()) as u64;
-            match (&mut self.reader)
-                .take(budget)
-                .read_until(b'\n', &mut frame)
-            {
-                Ok(0) => return Err(IpcError::ConnectionClosed),
-                Ok(_) if frame.len() > MAX_MESSAGE_BYTES => {
-                    return Err(IpcError::MessageTooLarge(frame.len(), MAX_MESSAGE_BYTES))
-                }
-                Ok(_) if frame.last() == Some(&b'\n') => {
+            match read_bounded_chunk(&mut self.reader, &mut frame) {
+                Ok(FrameProgress::Eof) => return Err(IpcError::ConnectionClosed),
+                Ok(FrameProgress::Complete) => {
                     return Ok(from_str(
                         std::str::from_utf8(&frame)
                             .map_err(|_| IpcError::ConnectionClosed)?
                             .trim(),
                     )?)
                 }
-                Ok(_) => {}
-                Err(error)
+                Err(IpcError::Io(ref io_error))
                     if matches!(
-                        error.kind(),
+                        io_error.kind(),
                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
                     ) => {}
-                Err(error) => return Err(IpcError::Io(error)),
+                Err(error) => return Err(error),
+                Ok(FrameProgress::Progress) => {}
             }
         }
     }

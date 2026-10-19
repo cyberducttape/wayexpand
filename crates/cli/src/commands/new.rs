@@ -594,9 +594,11 @@ fn temporary_output_path(path: &Path, file_name: &std::ffi::OsStr) -> Result<Pat
 
 #[cfg(target_os = "linux")]
 fn rename_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
-    let from = std::ffi::CString::new(from.as_os_str().as_bytes())
+    let from_path = from;
+    let to_path = to;
+    let from = std::ffi::CString::new(from_path.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "temporary path contains NUL"))?;
-    let to = std::ffi::CString::new(to.as_os_str().as_bytes())
+    let to = std::ffi::CString::new(to_path.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "output path contains NUL"))?;
     // RENAME_NOREPLACE makes the create path atomic even when another writer
     // races the initial existence check.
@@ -610,21 +612,29 @@ fn rename_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
         )
     };
     if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
+        return Ok(());
     }
+    let error = io::Error::last_os_error();
+    if !matches!(
+        error.raw_os_error(),
+        Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)
+    ) {
+        return Err(error);
+    }
+    link_without_replacement(from_path, to_path)
 }
 
 #[cfg(not(target_os = "linux"))]
 fn rename_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
-    if to.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "output already exists",
-        ));
-    }
-    fs::rename(from, to)
+    link_without_replacement(from, to)
+}
+
+/// A hard link creates the destination with no-replacement semantics on Unix.
+/// Both paths are in the same parent, so this is also a portable fallback when
+/// Linux's renameat2 is unavailable.
+fn link_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
+    fs::hard_link(from, to)?;
+    fs::remove_file(from)
 }
 
 fn sync_parent_directory(path: &Path) -> io::Result<()> {

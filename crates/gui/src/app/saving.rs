@@ -664,17 +664,29 @@ pub(crate) fn rebase_change(
     let candidate_ids = ids(candidate);
     let onto_ids = ids(onto);
     let base_set: HashSet<_> = base_ids.iter().collect();
-    let base_order = |order: &[String]| {
+    let candidate_set: HashSet<_> = candidate_ids.iter().collect();
+    let onto_set: HashSet<_> = onto_ids.iter().collect();
+    let base_order = |order: &[String], present: &HashSet<&String>| {
         order
             .iter()
-            .filter(|id| base_set.contains(id))
+            .filter(|id| base_set.contains(id) && present.contains(id))
             .cloned()
             .collect::<Vec<_>>()
     };
-    let candidate_base_order = base_order(&candidate_ids);
-    let onto_base_order = base_order(&onto_ids);
-    let local_reordered = candidate_base_order != base_ids;
-    let external_reordered = onto_base_order != base_ids;
+    let candidate_base_order = base_order(&candidate_ids, &candidate_set);
+    let onto_base_order = base_order(&onto_ids, &onto_set);
+    let candidate_base_ids = base_ids
+        .iter()
+        .filter(|id| candidate_set.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let onto_base_ids = base_ids
+        .iter()
+        .filter(|id| onto_set.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let local_reordered = candidate_base_order != candidate_base_ids;
+    let external_reordered = onto_base_order != onto_base_ids;
     if detect && local_reordered && external_reordered && candidate_base_order != onto_base_order {
         conflicts.push("expansion order".to_owned());
     } else if candidate_ids != base_ids {
@@ -999,5 +1011,49 @@ replacement = "A"
                 "11111111-1111-4111-8111-111111111111",
             ]
         );
+    }
+
+    #[test]
+    fn deletion_does_not_look_like_a_local_reorder() {
+        let base = Config::parse(
+            r#"
+[[expansion]]
+id = "11111111-1111-4111-8111-111111111111"
+trigger = ":a"
+replacement = "A"
+
+[[expansion]]
+id = "22222222-2222-4222-8222-222222222222"
+trigger = ":b"
+replacement = "B"
+"#,
+        )
+        .unwrap();
+        let candidate = Config::parse(
+            r#"
+[[expansion]]
+id = "22222222-2222-4222-8222-222222222222"
+trigger = ":b"
+replacement = "B"
+"#,
+        )
+        .unwrap();
+        let onto = Config::parse(
+            r#"
+[[expansion]]
+id = "22222222-2222-4222-8222-222222222222"
+trigger = ":b"
+replacement = "B"
+
+[[expansion]]
+id = "11111111-1111-4111-8111-111111111111"
+trigger = ":a"
+replacement = "A"
+"#,
+        )
+        .unwrap();
+        let merged = rebase_change(&base, &candidate, &onto, Rebase::DetectConflicts).unwrap();
+        assert_eq!(merged.expansion.len(), 1);
+        assert_eq!(merged.expansion[0].trigger, ":b");
     }
 }
