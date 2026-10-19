@@ -594,81 +594,122 @@ pub(crate) fn rebase_change(
     onto: &Config,
     mode: Rebase,
 ) -> Result<Config, Vec<String>> {
-    use std::collections::HashMap;
-    let by_id = |config: &Config| -> HashMap<String, ExpansionConfig> {
+    use std::collections::{HashMap, HashSet};
+    let by_id = |config: &Config| {
         config
             .expansion
             .iter()
             .map(|expansion| (expansion.id.clone(), expansion.clone()))
-            .collect()
+            .collect::<HashMap<_, _>>()
     };
     let base_by_id = by_id(base);
     let candidate_by_id = by_id(candidate);
     let mut result = onto.clone();
+    let mut result_by_id = by_id(onto)
+        .into_iter()
+        .map(|(id, expansion)| (id.to_owned(), expansion.clone()))
+        .collect::<HashMap<_, _>>();
     let mut conflicts = Vec::new();
     let detect = mode == Rebase::DetectConflicts;
-    let changed_externally = |id: &str, result: &Config| -> bool {
-        let current = result.expansion.iter().find(|expansion| expansion.id == id);
-        current != base_by_id.get(id)
-    };
-
     // Removed locally.
     for (id, original) in &base_by_id {
         if candidate_by_id.contains_key(id) {
             continue;
         }
-        if detect && changed_externally(id, &result) && result.expansion.iter().any(|e| &e.id == id)
-        {
+        let changed_externally = result_by_id.get(id) != Some(original);
+        if detect && changed_externally && result_by_id.contains_key(id) {
             conflicts.push(original.trigger.clone());
             continue;
         }
-        result.expansion.retain(|expansion| &expansion.id != id);
+        result_by_id.remove(id);
     }
-    // Modified or added locally, in candidate order.
-    for (index, expansion) in candidate.expansion.iter().enumerate() {
+    // Merge content by ID. Ordering is deliberately handled separately below;
+    // mixing positional insertion with content replay loses pure reorders.
+    for expansion in &candidate.expansion {
         match base_by_id.get(&expansion.id) {
-            Some(original) if original == expansion => {}
+            Some(original) if *original == *expansion => {}
             Some(_) => {
                 // The other side made the same edit: nothing to replay.
-                if result
-                    .expansion
-                    .iter()
-                    .any(|existing| existing == expansion)
-                {
+                if result_by_id.get(&expansion.id) == Some(expansion) {
                     continue;
                 }
-                if detect && changed_externally(&expansion.id, &result) {
+                let changed_externally =
+                    result_by_id.get(&expansion.id) != base_by_id.get(&expansion.id);
+                if detect && changed_externally {
                     conflicts.push(expansion.trigger.clone());
                     continue;
                 }
-                match result
-                    .expansion
-                    .iter_mut()
-                    .find(|existing| existing.id == expansion.id)
-                {
-                    Some(existing) => *existing = expansion.clone(),
-                    None => result.expansion.push(expansion.clone()),
-                }
+                result_by_id.insert(expansion.id.clone(), expansion.clone());
             }
-            None => match result
-                .expansion
-                .iter()
-                .position(|existing| existing.id == expansion.id)
-            {
-                Some(position) if result.expansion[position] == *expansion => {}
-                Some(position) => {
-                    if detect {
-                        conflicts.push(expansion.trigger.clone());
-                    } else {
-                        result.expansion[position] = expansion.clone();
-                    }
+            None => match result_by_id.get(&expansion.id) {
+                Some(existing) if *existing == *expansion => {}
+                Some(_) if detect => {
+                    conflicts.push(expansion.trigger.clone());
                 }
-                None => {
-                    let position = index.min(result.expansion.len());
-                    result.expansion.insert(position, expansion.clone());
+                Some(_) | None => {
+                    result_by_id.insert(expansion.id.clone(), expansion.clone());
                 }
             },
         }
+    }
+
+    let ids = |config: &Config| {
+        config
+            .expansion
+            .iter()
+            .map(|expansion| expansion.id.clone())
+            .collect::<Vec<_>>()
+    };
+    let base_ids = ids(base);
+    let candidate_ids = ids(candidate);
+    let onto_ids = ids(onto);
+    let base_set: HashSet<_> = base_ids.iter().collect();
+    let base_order = |order: &[String]| {
+        order
+            .iter()
+            .filter(|id| base_set.contains(id))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let candidate_base_order = base_order(&candidate_ids);
+    let onto_base_order = base_order(&onto_ids);
+    let local_reordered = candidate_base_order != base_ids;
+    let external_reordered = onto_base_order != base_ids;
+    if detect && local_reordered && external_reordered && candidate_base_order != onto_base_order {
+        conflicts.push("expansion order".to_owned());
+    } else if candidate_ids != base_ids {
+        // Replay sequence changes independently from content. The preferred
+        // side owns a real reorder; otherwise preserve an external reorder
+        // while still retaining locally inserted IDs.
+        let prefer_candidate = !external_reordered || local_reordered;
+        let preferred = if prefer_candidate {
+            &candidate_ids
+        } else {
+            &onto_ids
+        };
+        let fallback = if prefer_candidate {
+            &onto_ids
+        } else {
+            &candidate_ids
+        };
+        let mut seen = HashSet::new();
+        result.expansion = preferred
+            .iter()
+            .chain(fallback.iter())
+            .filter_map(|id| {
+                if !seen.insert(id.clone()) {
+                    return None;
+                }
+                result_by_id.get(id).cloned()
+            })
+            .collect();
+    } else {
+        // No local sequence edit: retain the on-disk order after content
+        // additions/removals have been applied.
+        result.expansion = onto_ids
+            .iter()
+            .filter_map(|id| result_by_id.get(id).cloned())
+            .collect();
     }
     let mut section = |changed: bool, differs_on_disk: bool, name: &str| -> bool {
         if !changed {
@@ -913,5 +954,50 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, [":a"]);
+    }
+
+    #[test]
+    fn pure_reorder_is_replayed_during_rebase() {
+        let base = Config::parse(
+            r#"
+[[expansion]]
+id = "11111111-1111-4111-8111-111111111111"
+trigger = ":a"
+replacement = "A"
+
+[[expansion]]
+id = "22222222-2222-4222-8222-222222222222"
+trigger = ":b"
+replacement = "B"
+"#,
+        )
+        .unwrap();
+        let candidate = Config::parse(
+            r#"
+[[expansion]]
+id = "22222222-2222-4222-8222-222222222222"
+trigger = ":b"
+replacement = "B"
+
+[[expansion]]
+id = "11111111-1111-4111-8111-111111111111"
+trigger = ":a"
+replacement = "A"
+"#,
+        )
+        .unwrap();
+        let merged = rebase_change(&base, &candidate, &base, Rebase::DetectConflicts).unwrap();
+        let ids: Vec<_> = merged
+            .expansion
+            .iter()
+            .map(|expansion| expansion.id.to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "22222222-2222-4222-8222-222222222222",
+                "11111111-1111-4111-8111-111111111111",
+            ]
+        );
     }
 }

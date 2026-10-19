@@ -195,6 +195,15 @@ in-scope scenario × layout × client cell is an observed `pass`, the doctor and
 daemon probes identify the requested KDE session and backend, and a reviewer
 checks the per-cell logs. `UNVERIFIED` is never a pass.
 
+Focus changes and partial output are security-sensitive acceptance gates, not
+ordinary smoke-test cases. The evidence must show that a trigger detected in
+window A cannot erase or insert into window B after focus changes, and that a
+failed or interrupted non-atomic transaction retires the output route without
+replaying ambiguous keystrokes. Include the daemon status counters and journal
+events for output uncertainty, reconnect, and worker retirement with each
+compositor report. Desktop-independent unit tests cover recovery mechanics;
+they do not substitute for this real-session evidence.
+
 ## Adding Your Testing Results
 
 To report testing results for other compositors:

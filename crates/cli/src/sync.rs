@@ -433,6 +433,70 @@ fn validate_library(config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Synchronized libraries are static by default. Commands and hotkeys are
+/// executable policy, not ordinary snippet data, so a remote repository must
+/// not be able to introduce them without an explicit local approval.
+fn validate_library_executable_policy(config_path: &Path, allow_executable: bool) -> Result<()> {
+    if allow_executable {
+        return Ok(());
+    }
+    let primary = Config::load(config_path)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?;
+    reject_executable_content(config_path, &primary)?;
+    let directory = config_path
+        .parent()
+        .context("configuration path has no directory")?;
+    for file in Config::layer_files(directory)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced layers: {error}"))?
+    {
+        let layer = Config::load(&file)
+            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?;
+        reject_executable_content(&file, &layer)?;
+    }
+    Ok(())
+}
+
+fn reject_executable_content(path: &Path, config: &Config) -> Result<()> {
+    if let Some(expansion) = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.command.is_some())
+    {
+        bail!(
+            "synced library {} contains command-backed expansion {:?}; executable content is disabled by default. Review the revision and retry with --allow-executable --approved-revision <full-commit>",
+            path.display(),
+            expansion.trigger
+        );
+    }
+    if let Some(hotkey) = config.hotkey.first() {
+        bail!(
+            "synced library {} contains executable hotkey {:?}; executable content is disabled by default. Review the revision and retry with --allow-executable --approved-revision <full-commit>",
+            path.display(),
+            hotkey.chord
+        );
+    }
+    Ok(())
+}
+
+fn validate_approved_revision(revision: Option<&str>, fetched: &str) -> Result<()> {
+    let Some(revision) = revision else {
+        bail!(
+            "remote executable content requires --approved-revision with the full reviewed commit"
+        );
+    };
+    if !(revision.len() == 40 || revision.len() == 64)
+        || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!("--approved-revision must be a full 40- or 64-character Git object ID");
+    }
+    if !revision.eq_ignore_ascii_case(fetched) {
+        bail!(
+            "remote executable content is not the approved revision (fetched {fetched}, approved {revision})"
+        );
+    }
+    Ok(())
+}
+
 fn remote(directory: &Path) -> Result<Option<String>> {
     // `origin` is the explicitly configured synchronization remote.  Picking
     // the first entry from `git remote` makes a repository with a backup or
@@ -764,7 +828,17 @@ fn verify_outgoing_paths(directory: &Path, base: Option<&str>, primary: &str) ->
 }
 
 /// Commit local changes, rebase onto the remote, re-validate, and push.
+#[cfg(test)]
 pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
+    sync_with_policy(config_path, false, None)
+}
+
+/// Synchronize a library with an explicit executable-content approval policy.
+pub(crate) fn sync_with_policy(
+    config_path: &Path,
+    allow_executable: bool,
+    approved_revision: Option<&str>,
+) -> Result<SyncReport> {
     let directory = config_path
         .parent()
         .context("configuration path has no directory")?
@@ -774,6 +848,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     }
     let _lock = SyncLock::acquire(&directory)?;
     validate_library(config_path)?;
+    validate_library_executable_policy(config_path, allow_executable)?;
     let primary = library_primary_name(config_path)?;
     let committed = commit_library(&directory, primary, "Sync WayExpand library")?;
     let remote = remote(&directory)?;
@@ -800,6 +875,7 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         // symlinks, or submodules in the configuration directory.
         git_ok(&directory, &["fetch", "--quiet", "origin", &branch])?;
         verify_library_tree(&directory, "FETCH_HEAD", primary)?;
+        let fetched_revision = git_ok(&directory, &["rev-parse", "FETCH_HEAD"])?;
         let rebase = git(&directory, &["rebase", "--quiet", "FETCH_HEAD"])?;
         if !rebase.status.success() {
             let _ = git(&directory, &["rebase", "--abort"]);
@@ -812,12 +888,27 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
         }
         report.pulled = true;
         restrict_library_permissions(&directory, primary);
-        if let Err(error) = validate_library(config_path) {
+        if let Err(error) = validate_library(config_path)
+            .and_then(|()| validate_library_executable_policy(config_path, allow_executable))
+        {
             // Never leave the daemon a broken library: restore the local one.
             git_ok(&directory, &["reset", "--quiet", "--hard", &before])?;
             // The reset rewrites files with the umask; keep them loadable.
             restrict_library_permissions(&directory, primary);
             bail!("remote changes would make the {error:#}; kept the local library");
+        }
+        if allow_executable {
+            // Approval is tied to the exact fetched object, never merely to a
+            // branch name that can move between review and synchronization.
+            let executable_present = has_executable_content(config_path)?;
+            if executable_present {
+                if let Err(error) = validate_approved_revision(approved_revision, &fetched_revision)
+                {
+                    git_ok(&directory, &["reset", "--quiet", "--hard", &before])?;
+                    restrict_library_permissions(&directory, primary);
+                    bail!("remote executable approval failed: {error:#}; kept the local library");
+                }
+            }
         }
     }
     verify_outgoing_paths(
@@ -835,6 +926,37 @@ pub(crate) fn sync(config_path: &Path) -> Result<SyncReport> {
     )?;
     report.pushed = true;
     Ok(report)
+}
+
+fn has_executable_content(config_path: &Path) -> Result<bool> {
+    let primary = Config::load(config_path)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced library: {error}"))?;
+    if primary
+        .expansion
+        .iter()
+        .any(|expansion| expansion.command.is_some())
+        || !primary.hotkey.is_empty()
+    {
+        return Ok(true);
+    }
+    let directory = config_path
+        .parent()
+        .context("configuration path has no directory")?;
+    for file in Config::layer_files(directory)
+        .map_err(|error| anyhow::anyhow!("could not inspect synced layers: {error}"))?
+    {
+        let layer = Config::load(&file)
+            .map_err(|error| anyhow::anyhow!("could not inspect synced layer: {error}"))?;
+        if layer
+            .expansion
+            .iter()
+            .any(|expansion| expansion.command.is_some())
+            || !layer.hotkey.is_empty()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Git writes files with the local umask; the library must not be group- or
@@ -942,6 +1064,50 @@ mod tests {
         )
         .expect("configure test Git user email");
         (directory, config_path)
+    }
+
+    #[test]
+    fn synced_libraries_reject_commands_and_hotkeys_by_default() {
+        let directory = test_directory();
+        std::fs::create_dir_all(&directory).expect("create policy test directory");
+        std::fs::set_permissions(
+            &directory,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .expect("restrict policy test directory");
+        let config_path = directory.join("expansions.toml");
+        std::fs::write(
+            &config_path,
+            "[[expansion]]\ntrigger = \";run\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/true\"\n",
+        )
+        .expect("write command-backed configuration");
+        std::fs::set_permissions(
+            &config_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .expect("restrict command-backed configuration");
+        let error = validate_library_executable_policy(&config_path, false)
+            .expect_err("commands must require explicit approval");
+        assert!(error.to_string().contains("executable content is disabled"));
+
+        std::fs::write(
+            &config_path,
+            "[[hotkey]]\nchord = \"Ctrl+Alt+W\"\n[hotkey.command]\nprogram = \"/bin/true\"\n",
+        )
+        .expect("write hotkey configuration");
+        let error = validate_library_executable_policy(&config_path, false)
+            .expect_err("hotkeys must require explicit approval");
+        assert!(error.to_string().contains("executable hotkey"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn executable_approval_requires_the_exact_full_revision() {
+        let fetched = "0123456789abcdef0123456789abcdef01234567";
+        assert!(validate_approved_revision(Some(fetched), fetched).is_ok());
+        assert!(validate_approved_revision(Some(&fetched[..39]), fetched).is_err());
+        assert!(validate_approved_revision(Some(&"f".repeat(40)), fetched).is_err());
+        assert!(validate_approved_revision(None, fetched).is_err());
     }
 
     #[test]

@@ -47,17 +47,41 @@ fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, IpcError> {
     Ok(json)
 }
 
+/// Read one newline-delimited frame without allowing an unterminated frame to
+/// grow past the protocol limit. `read_until` cannot be used here because it
+/// appends all input before the caller gets a chance to inspect its size.
+fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, IpcError> {
+    let mut frame = Vec::new();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if frame.is_empty() {
+                return Err(IpcError::ConnectionClosed);
+            }
+            return Ok(frame);
+        }
+        let take = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |position| position + 1);
+        if frame.len().saturating_add(take) > MAX_MESSAGE_BYTES {
+            return Err(IpcError::MessageTooLarge(
+                frame.len().saturating_add(take),
+                MAX_MESSAGE_BYTES,
+            ));
+        }
+        frame.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if frame.last() == Some(&b'\n') {
+            return Ok(frame);
+        }
+    }
+}
+
 /// Decode one bounded request frame. Kept public for protocol fuzzing and
 /// compatibility with the broker's server-side validation.
 pub fn decode_request_frame<R: BufRead>(reader: &mut R) -> Result<ActionRequest, IpcError> {
-    let mut line = Vec::new();
-    let size = reader.read_until(b'\n', &mut line)?;
-    if size == 0 {
-        return Err(IpcError::ConnectionClosed);
-    }
-    if line.len() > MAX_MESSAGE_BYTES {
-        return Err(IpcError::MessageTooLarge(line.len(), MAX_MESSAGE_BYTES));
-    }
+    let line = read_bounded_line(reader)?;
     let request: ActionRequest = serde_json::from_slice(&line)?;
     if request.action_id.is_empty() || request.action_id.len() > MAX_ACTION_ID_BYTES {
         return Err(IpcError::ConnectionClosed);
@@ -94,14 +118,7 @@ impl BrokerClient {
     }
 
     pub fn recv_response(&mut self) -> Result<ActionResponse, IpcError> {
-        let mut frame = Vec::new();
-        let size = self.reader.read_until(b'\n', &mut frame)?;
-        if size == 0 {
-            return Err(IpcError::ConnectionClosed);
-        }
-        if frame.len() > MAX_MESSAGE_BYTES {
-            return Err(IpcError::MessageTooLarge(frame.len(), MAX_MESSAGE_BYTES));
-        }
+        let frame = read_bounded_line(&mut self.reader)?;
         Ok(serde_json::from_slice(&frame)?)
     }
 
@@ -146,5 +163,21 @@ impl BrokerClient {
                 Err(error) => return Err(IpcError::Io(error)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn oversized_unterminated_frames_are_rejected_before_allocation() {
+        let mut reader = Cursor::new(vec![b'x'; MAX_MESSAGE_BYTES + 1]);
+        let error = read_bounded_line(&mut reader).unwrap_err();
+        assert!(matches!(
+            error,
+            IpcError::MessageTooLarge(_, MAX_MESSAGE_BYTES)
+        ));
     }
 }

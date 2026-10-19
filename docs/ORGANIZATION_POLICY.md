@@ -136,6 +136,25 @@ mode as a rollout/testing phase; set `safe_mode = true`, explicitly allow only
 reviewed backends and signed packs, and disable commands unless they are
 required for the deployment.
 
+### Synchronized libraries are static by default
+
+`wayexpand sync` treats the Git repository as an untrusted configuration
+source. Command-backed expansions and hotkeys in the synchronized library are
+rejected by default, even when the ordinary configuration syntax is valid.
+This prevents repository write access from becoming executable authority.
+
+For a personally controlled repository, an operator may explicitly approve a
+reviewed remote commit:
+
+```bash
+wayexpand sync --allow-executable --approved-revision <full-40-or-64-character-commit>
+```
+
+The revision must be the exact object fetched from `origin`; a moving branch
+name is not sufficient. Managed deployments should leave executable content
+disabled and use administrator policy plus signed, reviewed packs for any
+approved actions.
+
 ## Examples
 
 ### Example 1: Locked-Down Environment

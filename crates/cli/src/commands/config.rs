@@ -855,10 +855,15 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
 
 /// `wayexpand sync`: optional Git synchronization of the library.
 pub(crate) fn sync_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand sync [init [--remote URL]|status] [--json] [config]";
+    const USAGE: &str = "usage: wayexpand sync [init [--remote URL]|status] [--json] [--allow-executable --approved-revision FULL_COMMIT] [config]";
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
     let remote = take_option(&mut rest, "--remote")?;
+    let allow_executable = crate::args::take_flag(&mut rest, "--allow-executable");
+    let approved_revision = take_option(&mut rest, "--approved-revision")?;
+    if approved_revision.is_some() && !allow_executable {
+        usage_bail!("--approved-revision requires --allow-executable; {USAGE}");
+    }
     let action = match rest.first().map(String::as_str) {
         Some("init") | Some("status") => rest.remove(0),
         _ => "now".to_owned(),
@@ -894,8 +899,12 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
             }
         }
         _ => {
-            let report =
-                crate::sync::sync(&path).map_err(|error| config_error(format!("{error:#}")))?;
+            let report = crate::sync::sync_with_policy(
+                &path,
+                allow_executable,
+                approved_revision.as_deref(),
+            )
+            .map_err(|error| config_error(format!("{error:#}")))?;
             // A running daemon picks up the merged library (it validates
             // before switching, so a bad library never replaces a good one).
             let _ = control_operation(wayexpand_core::DaemonOperation::Reload);

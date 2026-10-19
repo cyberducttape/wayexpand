@@ -123,14 +123,21 @@ systemctl --user enable --now wayexpand-input-method.service
 
 ### "I'm on KDE Plasma and need reliable keyboards"
 
-Use `--source=evdev --backend=libei --allow-evdev-sensitive-fields`. Accept no
-password protection; the explicit flag is required so this tradeoff is visible
-in service files and operator commands.
+Use evdev only as an explicitly approved exception. The packaged user unit is
+disabled until you create a consent marker; this prevents a default fleet
+deployment from silently enabling raw keyboard capture:
 
 ```bash
+install -d -m 0700 ~/.config/wayexpand
+install -m 0600 /dev/null ~/.config/wayexpand/evdev-sensitive-fields-ack
 sudo ./scripts/install-evdev-permissions.sh --access=active-seat
 systemctl --user enable --now wayexpand-evdev.service
 ```
+
+The unit still requires `--allow-evdev-sensitive-fields` and therefore records
+the limitation in the service definition and journal. Accept that password
+fields are not protected before creating the marker; remove the marker and
+disable the unit to revoke the exception.
 
 Before enabling, read [SECURITY.md](../SECURITY.md) carefully. The default
 active-seat mode limits access to the active local seat; use the explicit

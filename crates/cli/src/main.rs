@@ -168,8 +168,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "List configured expansions and hotkeys",
             ),
             (
-                "sync [init [--remote URL]|status] [--json] [config]",
-                "Synchronize the snippet library with Git (optional)",
+                "sync [init [--remote URL]|status] [--json] [--allow-executable --approved-revision FULL_COMMIT] [config]",
+                "Synchronize a static snippet library with Git (optional)",
             ),
             (
                 "stats [--json] [--days N] [--clear] [config]",

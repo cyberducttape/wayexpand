@@ -278,4 +278,18 @@ mod send_invariant {
             )
         };
     }
+
+    #[test]
+    fn the_unsafe_contract_requires_an_exact_reis_pin() {
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+        )
+        .unwrap();
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line.trim() == "reis = \"=0.7.1\""),
+            "review the EventPump Send invariant before changing the pinned reis version"
+        );
+    }
 }

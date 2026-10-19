@@ -5,6 +5,11 @@ PartOf=graphical-session.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 Conflicts=wayexpand.service wayexpand-input-method.service
+# Raw evdev cannot identify password fields. The unit is deliberately inert
+# until the local operator creates this consent marker after reviewing the
+# threat model. Package installation and service enablement do not create it,
+# so a fleet cannot silently opt into sensitive-field capture.
+ConditionPathExists=%h/.config/wayexpand/evdev-sensitive-fields-ack
 
 [Service]
 Type=simple

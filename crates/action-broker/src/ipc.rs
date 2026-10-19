@@ -177,10 +177,10 @@ impl BrokerServer {
             std::fs::remove_file(path)?;
         }
 
-        let previous_umask = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-        let listener_result = UnixListener::bind(path);
-        rustix::process::umask(previous_umask);
-        let listener = listener_result?;
+        // The systemd unit supplies UMask=0077. Do not mutate the process-wide
+        // umask here: this code runs after Tokio has started worker threads,
+        // so a concurrent file creation could inherit a transient umask.
+        let listener = UnixListener::bind(path)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         let metadata = std::fs::metadata(path)?;
         Ok(Self {

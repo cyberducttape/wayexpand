@@ -9,6 +9,7 @@
 use std::{
     collections::HashMap,
     io::{BufRead, IsTerminal},
+    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
     process::Stdio,
     sync::Arc,
 };
@@ -54,6 +55,7 @@ fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
 
 /// Bytes in one value given with `--set` or typed at a prompt.
 const MAX_VALUE_BYTES: usize = 64 * 1024;
+const GENERATED_FILE_MODE: u32 = 0o600;
 
 pub(crate) fn new_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
@@ -541,42 +543,21 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("could not create {}", parent.display()))?;
     }
-    if !force {
-        let mut file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                usage_bail!(
-                    "{} already exists; add --force to replace it",
-                    path.display()
-                );
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("could not create {}", path.display()))
-            }
-        };
-        if let Err(error) = file.write_all(contents).and_then(|()| file.sync_all()) {
-            drop(file);
-            let _ = fs::remove_file(path);
-            return Err(error).with_context(|| format!("could not write {}", path.display()));
-        }
-        return Ok(());
+    if !force && path.exists() {
+        usage_bail!(
+            "{} already exists; add --force to replace it",
+            path.display()
+        );
     }
     let file_name = path
         .file_name()
         .with_context(|| format!("{} is not a file name", path.display()))?;
-    let temporary = path.with_file_name(format!(
-        ".{}.wayexpand-new-{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
+    let temporary = temporary_output_path(path, file_name)?;
     let result = (|| -> io::Result<()> {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
+            .mode(GENERATED_FILE_MODE)
             .open(&temporary)?;
         if let Ok(existing) = fs::metadata(path) {
             // Keep an executable script executable when it is replaced.
@@ -584,7 +565,12 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
         }
         file.write_all(contents)?;
         file.sync_all()?;
-        fs::rename(&temporary, path)
+        if force {
+            fs::rename(&temporary, path)?;
+        } else {
+            rename_without_replacement(&temporary, path)?;
+        }
+        sync_parent_directory(path)
     })();
     if let Err(error) = result {
         let _ = fs::remove_file(&temporary);
@@ -593,12 +579,96 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
     Ok(())
 }
 
+fn temporary_output_path(path: &Path, file_name: &std::ffi::OsStr) -> Result<PathBuf> {
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random).context("could not obtain randomness for temporary output")?;
+    let suffix = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(path.with_file_name(format!(
+        ".{}.wayexpand-new-{suffix}",
+        file_name.to_string_lossy()
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn rename_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
+    let from = std::ffi::CString::new(from.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "temporary path contains NUL"))?;
+    let to = std::ffi::CString::new(to.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "output path contains NUL"))?;
+    // RENAME_NOREPLACE makes the create path atomic even when another writer
+    // races the initial existence check.
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn rename_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
+    if to.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "output already exists",
+        ));
+    }
+    fs::rename(from, to)
+}
+
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::File::open(parent)?.sync_all()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     fn config(text: &str) -> Config {
         Config::parse(text).unwrap()
+    }
+
+    #[test]
+    fn generated_files_are_published_atomically_with_private_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-new-test-{}-{}",
+            std::process::id(),
+            getrandom::u64().unwrap()
+        ));
+        let path = root.join("nested/output.txt");
+        write_output(&path, b"first", false).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"first");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(write_output(&path, b"refused", false).is_err());
+        write_output(&path, b"second", true).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        assert!(fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("wayexpand-new")));
+        fs::remove_dir_all(root).unwrap();
     }
 
     const PLAYBOOK: &str = r#"

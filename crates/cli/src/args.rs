@@ -34,3 +34,13 @@ pub fn take_option(args: &mut Vec<String>, name: &str) -> Result<Option<String>>
     }
     Ok(Some(value))
 }
+
+/// Removes a boolean flag wherever it appears.
+pub fn take_flag(args: &mut Vec<String>, name: &str) -> bool {
+    if let Some(index) = args.iter().position(|arg| arg == name) {
+        args.remove(index);
+        true
+    } else {
+        false
+    }
+}
