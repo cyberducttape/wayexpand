@@ -341,6 +341,22 @@ impl ReloadableConfig {
     }
 
     pub fn reload_now(&mut self) {
+        // Do not collect an already-finished build before recording this
+        // request. The worker may finish between the caller's edit and this
+        // method, which otherwise makes a second reload depend on scheduling:
+        // the first result can be applied and the follow-up request can be
+        // lost at the boundary. Queue the request explicitly and let
+        // `collect_reload` start the follow-up after the current result is
+        // applied.
+        if self.in_flight.is_some() {
+            self.rebuild_after_in_flight = true;
+            let current = file_stamp(&self.path);
+            self.last_integrity_check = Instant::now();
+            self.watch_check_after = None;
+            self.watch_dirty.store(false, Ordering::Release);
+            self.observed = current;
+            return;
+        }
         self.collect_reload();
         let current = file_stamp(&self.path);
         self.last_integrity_check = Instant::now();
