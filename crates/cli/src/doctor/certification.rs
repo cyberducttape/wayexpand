@@ -212,13 +212,22 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             let status_schema = snapshot
                 .get("status_schema")
                 .and_then(serde_json::Value::as_u64);
+            let daemon_commit = snapshot
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str);
+            let commit_matches = daemon_commit == Some(build_info::COMMIT);
             let compatible = status_schema_compatible(&snapshot);
             let runtime_capabilities = runtime_capabilities_from_status(&snapshot);
-            let detail = match (source, backend, compatible) {
-                (Some(source), Some(backend), true) => {
+            let detail = match (source, backend, compatible, commit_matches) {
+                (Some(source), Some(backend), true, true) => {
                     format!("state={state}; compatible active route is {source} + {backend}")
                 }
-                (Some(source), Some(backend), false) => format!(
+                (Some(source), Some(backend), _, false) => format!(
+                    "route {source} + {backend} is connected, but daemon commit is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
+                    daemon_commit,
+                    build_info::COMMIT
+                ),
+                (Some(source), Some(backend), false, true) => format!(
                     "route {source} + {backend} is connected, but daemon status schema is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
                     status_schema,
                     CONTROL_STATUS_SCHEMA
@@ -228,7 +237,7 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             add_check(
                 "runtime",
                 "active daemon route",
-                if connected && compatible {
+                if connected && compatible && commit_matches {
                     "verified"
                 } else {
                     "unavailable"
@@ -238,6 +247,8 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             serde_json::json!({
                 "connected": connected,
                 "compatible": compatible,
+                "commit_matches": commit_matches,
+                "daemon_commit": daemon_commit,
                 "status_schema": status_schema,
                 "state": state,
                 "source": source,
@@ -287,10 +298,15 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
         ]
     } else if selected_capture == "stdin" {
         if active_daemon["connected"] == true {
-            if active_daemon["compatible"] == true {
+            if active_daemon["compatible"] == true && active_daemon["commit_matches"] == true {
                 vec![
                     "a manually configured daemon route is connected; automatic selection remains stdin-only",
                     "desktop client behavior still requires certification scenarios",
+                ]
+            } else if active_daemon["compatible"] == true {
+                vec![
+                    "the running daemon was built from a different commit; restart/update it before relying on runtime diagnostics",
+                    "automatic selection remains stdin-only and desktop client behavior still requires certification scenarios",
                 ]
             } else {
                 vec![

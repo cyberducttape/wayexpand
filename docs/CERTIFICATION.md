@@ -16,9 +16,12 @@ wayexpand certify --json > wayexpand-certification.json
 The JSON record includes the detected desktop, automatic input selection, the
 currently connected daemon route (reported separately from that selection),
 every check with a stable status, and the limitations of the selected backend.
-The daemon route is a point-in-time status probe, not proof of correct typing
-or insertion. The report is safe to attach to a support report and contains no
-typed text or expansion contents. Certification scope is direct keyboard
+The active route is verified only when its status schema and `daemon_commit`
+match the CLI that produced the report; a stale daemon is reported as
+unavailable and must be restarted or updated first. The daemon route remains a
+point-in-time status probe, not proof of correct typing or insertion. The
+report is safe to attach to a support report and contains no typed text or
+expansion contents. Certification scope is direct keyboard
 input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
