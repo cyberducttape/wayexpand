@@ -225,7 +225,7 @@ impl GuiApp {
                     .fill(palette.background)
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
-            .show(root, |ui| {
+            .show_inside(root, |ui| {
                 if self.selected_index().is_none()
                     && !self.new_draft
                     && !self.config.expansion.is_empty()
@@ -757,7 +757,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 10))
                     .stroke(egui::Stroke::NONE),
             )
-            .show(root, |ui| self.render_try_live(ui, palette));
+            .show_inside(root, |ui| self.render_try_live(ui, palette));
     }
 
     /// "Matcher preview": exercise core matching and template rendering in
@@ -842,7 +842,7 @@ impl GuiApp {
                     let text = self.playground.text.clone();
                     let caret_at_end = output
                         .cursor_range
-                        .is_none_or(|range| range.primary.index.0 == text.chars().count());
+                        .is_none_or(|range| range.primary.index == text.chars().count());
                     if let Some(rewrite) =
                         self.playground
                             .edit(&self.config, &self.preview_app, &text, caret_at_end)
@@ -880,7 +880,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 10))
                     .stroke(egui::Stroke::NONE),
             )
-            .show(root, |ui| {
+            .show_inside(root, |ui| {
                 ui.horizontal(|ui| {
                     let dirty = self.draft_is_dirty();
                     if ui
@@ -988,7 +988,7 @@ pub(crate) fn insert_into_replacement_editor(
         .and_then(|state| state.cursor.char_range())
         .map(|range| {
             let range = range.as_sorted_char_range();
-            range.start.0..range.end.0
+            range.start..range.end
         });
     let caret = insert_at_char_range(replacement, selection, text);
     if let Some(state) = state.as_mut() {

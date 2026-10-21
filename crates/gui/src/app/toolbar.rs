@@ -45,7 +45,7 @@ impl GuiApp {
                         color: Color32::from_black_alpha(if self.dark_mode { 60 } else { 18 }),
                     }),
             )
-            .show(root, |ui| {
+            .show_inside(root, |ui| {
                 // Identity on the left, status and actions on the right.
                 // Search lives at the top of the snippet list it filters.
                 ui.horizontal(|ui| {

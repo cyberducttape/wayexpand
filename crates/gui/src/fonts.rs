@@ -160,7 +160,7 @@ mod tests {
         let context = egui::Context::default();
         install(&context);
         let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 ui.label("→ ✓ ● ◌ ⊘ 郵件 受信箱");
             });
         });

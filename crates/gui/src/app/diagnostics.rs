@@ -33,11 +33,18 @@ impl GuiApp {
         if self.diagnostics_open {
             let mut open = self.diagnostics_open;
             let max_size = theme::dialog_max_size(ctx, 560.0);
-            egui::Window::new(self.strings.diagnostics_title())
+            let title = self.strings.diagnostics_title();
+            egui::Window::new(title)
+                // Keep the area identity stable across egui releases; the
+                // default title-derived identity changed between 0.34 and
+                // 0.36, which made persisted/inspected dialog geometry
+                // disappear after a dependency downgrade.
+                .id(egui::Id::new(Some(title)))
                 .order(egui::Order::Foreground)
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
+                .constrain(true)
                 .min_width(340.0_f32.min(max_size.x))
                 .max_size(max_size)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)

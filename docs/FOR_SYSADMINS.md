@@ -16,7 +16,7 @@ WayExpand binaries. Do not deploy based on the example package workflows below;
 check the release page and PPA for actual published artifacts. Release assets
 remain gated on compositor certification.
 
-For local evaluation, users can build from source with Rust 1.95+:
+For local evaluation, users can build from source with Rust 1.92+:
 
 ```bash
 # Arch packaging preview (not yet submitted to AUR)
@@ -30,11 +30,11 @@ cd wayexpand
 ```
 
 **Packaging Status:**
-- ⏳ Ubuntu: PPA configured, but currently no published binaries; Resolute lacks the Rust 1.95 build dependency
+- ⏳ Ubuntu: PPA configured, but currently no published binaries; Resolute now satisfies the Rust 1.92 build dependency
 - ⏳ Debian: packaging maintained; no release asset or APT repository currently published
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
 - ⏳ Fedora: RPM spec/build maintained; no release asset or Copr repository currently published
-- 🔧 Others: local source builds are available with Rust 1.95+
+- 🔧 Others: local source builds are available with Rust 1.92+
 
 **Admin overhead:** Minimal. Users manage their own configs.
 
@@ -46,7 +46,7 @@ For teams with shared machines or controlled environments:
 
 **Approach 1: Package distribution** (once artifacts are published)
 - Verify actual release/PPA availability and successful certification before deployment.
-- **Ubuntu:** PPA publication is pending; current Resolute build dependencies cannot satisfy Rust MSRV.
+- **Ubuntu:** PPA publication is pending; current Resolute build dependencies satisfy the Rust MSRV.
 - **Debian/Fedora:** No release packages are currently published; build and validate an internal package if needed.
 - **Arch:** Packaging prepared but not yet submitted to AUR.
 - Users self-install from organizational repo

@@ -4,8 +4,8 @@ This guide covers building and maintaining WayExpand packages for different Linu
 
 ## Rust toolchain policy
 
-WayExpand supports Rust **1.95 or newer** for source builds. This is the
-project MSRV and is declared in the workspace `Cargo.toml`; CI checks Rust 1.95
+WayExpand supports Rust **1.92 or newer** for source builds. This is the
+project MSRV and is declared in the workspace `Cargo.toml`; CI checks Rust 1.92
 and the pinned project toolchain in `rust-toolchain.toml` (currently Rust
 1.96.0). End users installing a release `.deb`, `.rpm`, PPA package, or binary
 archive do not need Rust or Cargo on the target machine. Only distribution
@@ -143,7 +143,7 @@ rpmbuild -ba wayexpand.spec
 The release workflow builds on native x86_64 and aarch64 runners and is
 configured to attach both archives after certification gates pass. No release
 archive is currently published. For local evaluation on an aarch64 Fedora,
-Debian, Ubuntu, or Arch system, build from source after installing Rust 1.95+
+Debian, Ubuntu, or Arch system, build from source after installing Rust 1.92+
 and native Wayland dependencies:
 
 ```bash
@@ -202,10 +202,10 @@ dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 ```
 
 Launchpad builds from source, so only submit to Ubuntu series whose build
-archive provides both `rustc` and `cargo` at or above the project MSRV (1.95).
-Ubuntu 26.04 Resolute currently provides Rust 1.93 and cannot satisfy this
-package's build dependencies. Check each Launchpad build result before
-advertising a series as installable.
+archive provides both `rustc` and `cargo` at or above the project MSRV (1.92).
+Ubuntu 26.04 Resolute provides Rust 1.93 and satisfies this package's build
+dependencies. Check each Launchpad build result before advertising a series as
+installable.
 
 **Daily builds:** the `main-daily` recipe builds the `launchpad-vendored`
 branch once a day when it has changed. Its text is

@@ -743,7 +743,7 @@ mod tests {
         ctx.enable_accesskit();
         let palette = Palette::for_pack(ColorPack::Default, true);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 snippet_row_scaled(
                     ui,
                     &palette,

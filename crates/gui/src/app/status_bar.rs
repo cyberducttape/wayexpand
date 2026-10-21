@@ -17,7 +17,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(18, 8))
                     .stroke(egui::Stroke::NONE),
             )
-            .show(root, |ui| {
+            .show_inside(root, |ui| {
                 ui.horizontal(|ui| {
                     let (bar, _) = ui.allocate_exact_size(
                         egui::Vec2::new(3.0, ui.text_style_height(&egui::TextStyle::Body)),

@@ -376,7 +376,7 @@ impl eframe::App for PickerApp {
                     .fill(palette.background)
                     .inner_margin(egui::Margin::same(16)),
             )
-            .show(root, |ui| {
+            .show_inside(root, |ui| {
                 let search_id = egui::Id::new("picker_search");
                 let response = ui.add(
                     TextEdit::singleline(&mut self.query)
