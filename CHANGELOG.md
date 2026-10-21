@@ -23,6 +23,8 @@ All notable changes to WayExpand are documented here.
   while workers are running.
 - GUI undo restoration now uses stable-ID maps instead of repeated vector
   searches, keeping large-library undo operations linear.
+- GUI import merging now indexes existing IDs and effective triggers, avoiding
+  repeated full-library scans when importing large snippet sets.
 - Upgrade notes:
   - `wayexpand-evdev.service` now starts only when the consent marker
     `~/.config/wayexpand/evdev-sensitive-fields-ack` exists, so installing
