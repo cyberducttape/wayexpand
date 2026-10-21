@@ -112,4 +112,20 @@ if [ "$(id -u)" -eq 0 ] && id nobody >/dev/null 2>&1; then
     grep -F 'parent directory owner is not trusted' "$test_root/untrusted-sticky-parent.out" >/dev/null
 fi
 
+# The evdev unit is inert without its consent marker and systemd reports that
+# as a successful start, so setup must refuse instead of claiming success.
+setup_home="$test_root/setup-home"
+mkdir -m 0700 "$setup_home"
+if HOME="$setup_home" XDG_CONFIG_HOME="$setup_home/.config" \
+    "$project_dir/target/debug/wayexpand" setup --backend evdev \
+    >"$test_root/setup-evdev.out" 2>&1; then
+    printf '%s\n' 'setup enabled evdev without the consent marker' >&2
+    exit 1
+fi
+grep -F 'evdev-sensitive-fields-ack' "$test_root/setup-evdev.out" >/dev/null
+if grep -F 'Enabled and started' "$test_root/setup-evdev.out" >/dev/null; then
+    printf '%s\n' 'setup reported starting evdev without the consent marker' >&2
+    exit 1
+fi
+
 printf '%s\n' 'doctor exit-status test passed'

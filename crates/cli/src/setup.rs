@@ -191,11 +191,35 @@ pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
             println!("Its keystroke output cannot see the text it erases, so typed expansions stay refused until you allow it:");
             println!("  set compatibility_mode = \"tracked-focus\" (KDE window tracker confirms focus before typing)");
             println!("  or \"untracked-focus\" under [settings], or use Settings > Engine in wayexpand-gui.");
+            // The unit is inert without the consent marker, and systemd
+            // reports a failed condition as a successful start. Setup does
+            // not create the marker: that would let a scripted rollout opt a
+            // fleet into raw capture.
+            let marker = evdev_consent_marker()
+                .context("cannot locate the evdev consent marker: HOME is not set")?;
+            if !marker.exists() {
+                bail!(
+                    "wayexpand-evdev.service only starts after you accept that it captures password fields.\n\
+                     Review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the consent marker and rerun setup:\n  \
+                     install -d -m 0700 {}\n  install -m 0600 /dev/null {}",
+                    marker.parent().unwrap_or(&marker).display(),
+                    marker.display()
+                );
+            }
             enable_user_service("wayexpand-evdev.service")?;
         }
         _ => bail!("unknown setup backend {backend:?}; choose ibus, input-method, or evdev"),
     }
     Ok(())
+}
+
+/// The marker `wayexpand-evdev.service` requires through
+/// `ConditionPathExists=%h/.config/...`. systemd expands `%h` to the home
+/// directory regardless of `XDG_CONFIG_HOME`, so this path does too.
+pub(crate) fn evdev_consent_marker() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| PathBuf::from(home).join(".config/wayexpand/evdev-sensitive-fields-ack"))
 }
 
 pub(crate) fn enable_user_service(service: &str) -> Result<()> {

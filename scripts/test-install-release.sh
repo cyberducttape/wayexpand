@@ -104,6 +104,19 @@ esac
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/broker.toml" ]
 
+# Enabling evdev without its consent marker would leave an inert unit that
+# systemd reports as started.
+if PATH="$stub_bin:$PATH" SYSTEMCTL_LOG="$systemctl_log" HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/install-release.sh" --enable --service=wayexpand-evdev.service \
+    >"$test_root/evdev-no-consent.out" 2>&1; then
+    printf '%s\n' 'installer enabled evdev without the consent marker' >&2
+    exit 1
+fi
+grep -F 'evdev-sensitive-fields-ack' "$test_root/evdev-no-consent.out" >/dev/null
+install -d -m 0700 "$test_root/home/.config/wayexpand"
+install -m 0600 /dev/null "$test_root/home/.config/wayexpand/evdev-sensitive-fields-ack"
+
 PATH="$stub_bin:$PATH" \
 SYSTEMCTL_LOG="$systemctl_log" \
 HOME="$test_root/home" \

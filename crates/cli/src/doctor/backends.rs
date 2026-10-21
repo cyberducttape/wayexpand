@@ -14,6 +14,30 @@ pub(crate) fn session_description() -> &'static str {
     }
 }
 
+/// An enabled evdev unit without its consent marker never starts, and
+/// systemd records that as a skipped condition rather than a failure.
+pub(crate) fn print_evdev_consent_diagnostics() -> bool {
+    let enabled = crate::setup::run_setup_command(
+        "systemctl",
+        &["--user", "is-enabled", "--quiet", "wayexpand-evdev.service"],
+    )
+    .is_ok_and(|status| status.success());
+    if !enabled {
+        return true;
+    }
+    match crate::setup::evdev_consent_marker() {
+        Some(marker) if marker.exists() => true,
+        marker => {
+            println!("evdev service: enabled but inert; its consent marker is missing");
+            if let Some(marker) = marker {
+                println!("  After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, create it with: install -m 0600 /dev/null {}", marker.display());
+            }
+            println!("  Or disable it: systemctl --user disable wayexpand-evdev.service");
+            false
+        }
+    }
+}
+
 pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     let backends = discover_backends();
     for status in &backends {

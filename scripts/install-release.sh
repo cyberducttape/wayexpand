@@ -39,6 +39,18 @@ if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
     printf '%s\n' 'error: systemctl is required for --enable' >&2
     exit 127
 fi
+# The evdev unit is inert without its consent marker (ConditionPathExists),
+# and systemd reports a skipped condition as success. Refuse rather than
+# report an enabled service that never runs; never create the marker here.
+evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
+if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
+    && [ ! -e "$evdev_marker" ]; then
+    printf '%s\n' "error: wayexpand-evdev.service only starts after you accept that it captures password fields" >&2
+    printf '%s\n' "review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the marker and rerun:" >&2
+    printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+    printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
+    exit 2
+fi
 if [ "$(id -u)" -eq 0 ]; then
     if [ -n "${SUDO_USER:-}" ]; then
         printf '%s\n' "error: do not run the user installer with sudo; run it as $SUDO_USER" >&2
