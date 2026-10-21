@@ -21,6 +21,8 @@ All notable changes to WayExpand are documented here.
 - Daemon and Action Broker processes now establish a private umask before
   creating threads; socket creation no longer changes a process-wide umask
   while workers are running.
+- GUI undo restoration now uses stable-ID maps instead of repeated vector
+  searches, keeping large-library undo operations linear.
 - Upgrade notes:
   - `wayexpand-evdev.service` now starts only when the consent marker
     `~/.config/wayexpand/evdev-sensitive-fields-ack` exists, so installing

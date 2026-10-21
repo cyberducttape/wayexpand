@@ -840,23 +840,24 @@ impl UndoEntry {
 
     pub(crate) fn restore(&self, current: &Config) -> Result<Config, String> {
         let mut restored = current.clone();
+        // Restore by stable ID rather than searching the vector once per
+        // changed snippet. Large libraries can retain many modified or
+        // deleted entries in one undo record; the map keeps restoration
+        // linear in the number of entries.
+        let current_order: Vec<String> = restored
+            .expansion
+            .iter()
+            .map(|expansion| expansion.id.clone())
+            .collect();
+        let current_ids: std::collections::HashSet<_> = current_order.iter().collect();
+        let mut by_id: std::collections::HashMap<_, _> = std::mem::take(&mut restored.expansion)
+            .into_iter()
+            .map(|expansion| (expansion.id.clone(), expansion))
+            .collect();
         for previous in &self.prior_expansions {
-            if let Some(expansion) = restored
-                .expansion
-                .iter_mut()
-                .find(|expansion| expansion.id == previous.id)
-            {
-                *expansion = previous.clone();
-            } else {
-                restored.expansion.push(previous.clone());
-            }
+            by_id.insert(previous.id.clone(), previous.clone());
         }
         if let Some(order) = &self.prior_order {
-            let by_id: std::collections::HashMap<_, _> = restored
-                .expansion
-                .into_iter()
-                .map(|expansion| (expansion.id.clone(), expansion))
-                .collect();
             restored.expansion = order
                 .iter()
                 .map(|id| {
@@ -865,6 +866,23 @@ impl UndoEntry {
                     })
                 })
                 .collect::<Result<_, _>>()?;
+        } else {
+            restored.expansion = current_order
+                .iter()
+                .map(|id| {
+                    by_id.get(id).cloned().ok_or_else(|| {
+                        "undo history no longer matches the snippet library".to_owned()
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            // A deleted entry was not present in `current_order`; retain the
+            // historical behavior of appending it after the current entries.
+            restored.expansion.extend(
+                self.prior_expansions
+                    .iter()
+                    .filter(|expansion| !current_ids.contains(&expansion.id))
+                    .filter_map(|expansion| by_id.remove(&expansion.id)),
+            );
         }
         if let Some(hotkeys) = &self.prior_hotkeys {
             restored.hotkey.clone_from(hotkeys);
