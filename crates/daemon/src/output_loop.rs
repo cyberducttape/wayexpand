@@ -54,6 +54,19 @@ fn completion_deadline(capabilities: &InjectorCapabilities, chars: usize) -> Dur
     OUTPUT_COMPLETION_BASE.saturating_add(paced)
 }
 
+/// Keystrokes `ExpansionEngine::apply` sends for `result`: the erased text
+/// (with a reinserted delimiter), the inserted text (with the delimiter
+/// again), and the cursor moves back into the replacement.
+fn transaction_keystrokes(result: &ExpansionResult) -> usize {
+    let delimiter = usize::from(result.reinsert_after.is_some());
+    let erase = result.matched_text.chars().count() + delimiter;
+    let insert = result.insert.chars().count() + delimiter;
+    let cursor = result
+        .cursor_offset
+        .map_or(0, |offset| offset.saturating_add(delimiter));
+    erase.saturating_add(insert).saturating_add(cursor)
+}
+
 /// A failure reported by the serialized output actor after an operation was
 /// accepted into its queue. The daemon must reconnect rather than replay the
 /// operation because a non-atomic injector may have applied part of it.
@@ -188,10 +201,7 @@ pub struct SubmittedTransaction {
 impl TransactionSubmitter {
     pub fn submit(&self, result: &ExpansionResult) -> Result<SubmittedTransaction, InjectorError> {
         let (completion, outcome) = sync_channel(1);
-        let chars = result.matched_text.chars().count()
-            + result.insert.chars().count()
-            + usize::from(result.reinsert_after.is_some()) * 2
-            + result.cursor_offset.unwrap_or(0);
+        let chars = transaction_keystrokes(result);
         enqueue_command(
             &self.sender,
             OutputCommand::Transaction(Box::new(result.clone()), completion),
@@ -929,6 +939,30 @@ mod tests {
             *calls.lock().unwrap(),
             vec![":a->replacement", ":b->second"]
         );
+    }
+
+    #[test]
+    fn deadline_counts_every_keystroke_the_transaction_sends() {
+        let mut result = ExpansionResult {
+            snippet_id: String::new(),
+            trigger: ";sig".into(),
+            matched_text: ";sig".into(),
+            insert: "héllo".into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: true,
+            folded_suffix_chars: 0,
+        };
+        // Four Backspaces and five characters (counted as scalars, not bytes).
+        assert_eq!(transaction_keystrokes(&result), 9);
+        // A reinserted delimiter is erased, retyped, and stepped back over.
+        result.reinsert_after = Some(' ');
+        result.cursor_offset = Some(3);
+        assert_eq!(transaction_keystrokes(&result), 5 + 6 + 4);
+        // A zero offset with a delimiter still moves back over the delimiter.
+        result.cursor_offset = Some(0);
+        assert_eq!(transaction_keystrokes(&result), 5 + 6 + 1);
     }
 
     #[test]

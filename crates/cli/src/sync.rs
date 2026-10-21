@@ -110,6 +110,44 @@ pub(crate) struct SyncReport {
     pub(crate) remote: Option<String>,
 }
 
+/// Variables that point git at a repository, index, object store, or
+/// configuration other than the one `-C` names (`git rev-parse
+/// --local-env-vars`). Git exports several of them while it runs hooks, so
+/// a sync started from a hook, or from a shell with `GIT_DIR` set, would
+/// otherwise commit and push in that other repository.
+const GIT_LOCAL_ENVIRONMENT: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// `git -C directory args...` that can only act on `directory`'s
+/// repository and never prompts on the terminal.
+fn git_command(directory: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    for variable in GIT_LOCAL_ENVIRONMENT {
+        command.env_remove(variable);
+    }
+    command
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
 fn git(directory: &Path, args: &[&str]) -> Result<Output> {
     let mut stdout = Vec::new();
     let (status, stderr) = run_git(directory, args, None, &mut |chunk| {
@@ -135,13 +173,9 @@ fn run_git(
     stdin: Option<Vec<u8>>,
     on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>)> {
-    let mut command = Command::new("git");
+    let mut command = git_command(directory, args);
     configure_process_group(&mut command);
     let mut child = command
-        .arg("-C")
-        .arg(directory)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -1795,5 +1829,43 @@ mod tests {
             "ssh://example.invalid/backup.git"
         );
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn git_never_inherits_a_redirected_repository() {
+        let command = git_command(Path::new("/library"), &["status"]);
+        let envs: std::collections::HashMap<_, _> = command.get_envs().collect();
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+        ] {
+            assert_eq!(
+                envs.get(std::ffi::OsStr::new(variable)),
+                Some(&None),
+                "{variable} must be removed"
+            );
+        }
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("GIT_TERMINAL_PROMPT")),
+            Some(&Some(std::ffi::OsStr::new("0")))
+        );
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["-C", "/library", "status"]);
+        // The list is git's own; keep it in step when git is available.
+        if let Ok(output) = Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+        {
+            if output.status.success() {
+                for variable in String::from_utf8_lossy(&output.stdout).lines() {
+                    assert!(
+                        GIT_LOCAL_ENVIRONMENT.contains(&variable),
+                        "git reports {variable} as repository-local"
+                    );
+                }
+            }
+        }
     }
 }

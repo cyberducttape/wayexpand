@@ -17,6 +17,12 @@ repository that tracks only the library: `expansions.toml` and any
 and Action Broker configuration are excluded by the generated `.gitignore` and
 never leave the machine. Git uses your normal credentials and SSH keys.
 
+Sync always acts on that directory's repository. It removes the variables
+that would point git elsewhere (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
+and the rest of `git rev-parse --local-env-vars`), which git sets while it
+runs hooks. Your Git configuration still applies, including credential
+helpers, `core.sshCommand`, and hooks.
+
 When `wayexpand sync` is given a custom configuration path, that file's
 filename is tracked as the library's primary configuration instead of
 `expansions.toml`. Other machines must use the same filename and point WayExpand

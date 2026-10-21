@@ -323,10 +323,13 @@ mod tests {
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
         fail: bool,
+        /// Set once an operation (already admitted) is waiting at the gate.
+        waiting: Arc<std::sync::atomic::AtomicBool>,
     }
 
     impl GatedInjector {
         fn wait_for_gate(&self) {
+            self.waiting.store(true, Ordering::Release);
             let (open, changed) = &*self.gate;
             let mut open = open.lock().unwrap();
             while !*open {
@@ -363,6 +366,7 @@ mod tests {
         daemon: Daemon,
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        waiting: Arc<std::sync::atomic::AtomicBool>,
         directory: PathBuf,
     }
 
@@ -399,11 +403,13 @@ mod tests {
                 .unwrap();
             let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let waker = waker::Waker::new().unwrap();
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
                 gate: Arc::clone(&gate),
                 calls: Arc::clone(&calls),
                 fail,
+                waiting: Arc::clone(&waiting),
             });
             let backend = match guard {
                 Some(guard) => crate::assurance::AssuredInjector::wrap(backend, guard),
@@ -456,6 +462,7 @@ mod tests {
                 daemon,
                 gate,
                 calls,
+                waiting,
                 directory,
             }
         }
@@ -590,6 +597,74 @@ mod tests {
             ["erase::a", "insert:first", "erase::b", "insert:second"]
         );
         assert!(harness.daemon.serialized_output(), "route stays connected");
+    }
+
+    #[test]
+    fn focus_moving_while_a_transaction_types_refuses_the_queued_rest_of_the_batch() {
+        use wayexpand_core::{window_update_channel, CompatibilityMode, WindowContext};
+        let window = |instance: &str| {
+            Some(WindowContext {
+                app_id: Some("editor".into()),
+                title: None,
+                instance_id: Some(instance.into()),
+            })
+        };
+        let guard = Arc::new(crate::assurance::GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        // The reactor last applied window w1: the trigger was typed there.
+        sender.send(window("w1")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        let mut harness = Harness::guarded(Arc::clone(&guard));
+        harness.daemon.window_tracker =
+            Some(backend_lifecycle::WindowTrackerHandle::for_test(receiver));
+
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![
+                    OutputJob::Expansion(result(":a", "first")),
+                    OutputJob::Expansion(result(":b", "second")),
+                ],
+                Vec::new(),
+            )
+            .unwrap();
+        // The first transaction was admitted in w1 and is now typing.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "first transaction never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // Focus moves to w2 while it types. Pending-output turns must not
+        // apply the change: that would restamp the guard to w2, and the
+        // queued transaction would then pass its focus check in w2.
+        sender.send(window("w2")).unwrap();
+        for _ in 0..3 {
+            harness.daemon.service_pending_output().unwrap();
+        }
+        harness.open_gate();
+        harness.run_until_resolved();
+
+        // Only the transaction admitted in w1 was typed; the queued one was
+        // refused before typing anything into w2.
+        assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
+        assert_eq!(
+            guard.last_refusal(),
+            Some(crate::assurance::Refusal::FocusChanged)
+        );
+        // The focus update is still waiting for the reactor's next turn.
+        let (pending_window, _) = harness
+            .daemon
+            .window_tracker
+            .as_ref()
+            .unwrap()
+            .receiver
+            .try_recv_stamped()
+            .expect("the focus change was left for the next reactor turn");
+        assert_eq!(pending_window, window("w2"));
     }
 
     #[test]

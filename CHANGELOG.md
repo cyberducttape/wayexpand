@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: `wayexpand sync` could commit and push in the wrong repository.
+  `git -C` does not override repository variables such as `GIT_DIR`,
+  `GIT_WORK_TREE` and `GIT_INDEX_FILE`, and git exports them while it runs
+  hooks. A sync started from a hook, or from a shell with `GIT_DIR` set,
+  therefore acted on that other repository. Sync now removes git's
+  repository-local variables before running git.
+- The serialized output worker's acknowledgement deadline now counts every
+  keystroke a transaction sends, including the cursor step back over a
+  reinserted delimiter.
+- A new test pins a focus-safety invariant: while a transaction types, the
+  daemon applies no focus change, so a queued transaction cannot pass its
+  focus check in a window that gained focus meanwhile.
 - Upgrade notes:
   - `wayexpand-evdev.service` now starts only when the consent marker
     `~/.config/wayexpand/evdev-sensitive-fields-ack` exists, so installing

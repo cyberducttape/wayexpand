@@ -39,6 +39,17 @@ impl WindowTrackerHandle {
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }
+
+    /// A tracker fed by a test through the sender side of `receiver`.
+    #[cfg(test)]
+    pub(crate) fn for_test(receiver: WindowUpdateReceiver) -> Self {
+        Self {
+            receiver,
+            connected: Arc::new(AtomicBool::new(true)),
+            stop: Arc::new(AtomicBool::new(false)),
+            supervisor: None,
+        }
+    }
 }
 
 impl Drop for WindowTrackerHandle {
