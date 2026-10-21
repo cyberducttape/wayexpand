@@ -473,6 +473,10 @@ fn accept_error_is_exhaustion(error: &action_broker::ipc::IpcError) -> bool {
 }
 
 fn main() -> Result<()> {
+    // Establish the private-file default before Tokio creates worker threads.
+    // The systemd unit also enforces this, but standalone launches need the
+    // same guarantee without a runtime process-wide umask race.
+    rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(RUNTIME_WORKER_THREADS)
         .max_blocking_threads(MAX_BLOCKING_THREADS)

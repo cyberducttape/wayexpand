@@ -191,6 +191,10 @@ struct Daemon {
 const DBUS_RUNTIME_WORKERS: &str = "2";
 
 fn main() -> Result<()> {
+    // Set the process umask before any library can create a thread. The
+    // control socket is then private from bind onward without temporarily
+    // changing a process-wide setting while worker threads are active.
+    rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
     // Must run before any thread exists: the environment is process-global.
     // An operator-provided value still wins.
     if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {

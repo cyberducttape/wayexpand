@@ -16,6 +16,11 @@ All notable changes to WayExpand are documented here.
 - A new test pins a focus-safety invariant: while a transaction types, the
   daemon applies no focus change, so a queued transaction cannot pass its
   focus check in a window that gained focus meanwhile.
+- Replaced the deprecated `unsafe-libyaml` Espanso importer dependency with
+  the safe Rust `serde-saphyr` parser, preserving the bounded import path.
+- Daemon and Action Broker processes now establish a private umask before
+  creating threads; socket creation no longer changes a process-wide umask
+  while workers are running.
 - Upgrade notes:
   - `wayexpand-evdev.service` now starts only when the consent marker
     `~/.config/wayexpand/evdev-sensitive-fields-ack` exists, so installing

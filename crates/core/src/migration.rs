@@ -11,7 +11,7 @@ struct EspansoDocument {
     #[serde(default)]
     matches: Vec<EspansoMatch>,
     #[serde(flatten)]
-    extra: BTreeMap<String, serde_yaml::Value>,
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,7 +27,7 @@ struct EspansoMatch {
     #[serde(default)]
     propagate_case: bool,
     #[serde(flatten)]
-    extra: BTreeMap<String, serde_yaml::Value>,
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -82,7 +82,7 @@ pub enum MigrationError {
     #[error("Espanso path is not a regular file: {path}")]
     NotRegular { path: String },
     #[error("could not parse Espanso YAML: {0}")]
-    Parse(#[from] serde_yaml::Error),
+    Parse(#[from] serde_saphyr::Error),
     #[error("imported configuration is invalid: {0}")]
     Invalid(#[from] ConfigError),
     #[error("strict Espanso import rejected {trigger}: {details}")]
@@ -146,9 +146,9 @@ pub fn import_espanso_with_mode(
             error.utf8_error(),
         ))
     })?;
-    // The byte limit bounds the source document size; serde_yaml additionally
-    // applies a recursion limit while deserializing nested structures.
-    let document: EspansoDocument = serde_yaml::from_str(&text)?;
+    // The byte limit bounds the source document size; the YAML deserializer
+    // also applies a recursion limit while deserializing nested structures.
+    let document: EspansoDocument = serde_saphyr::from_str(&text)?;
     let mut expansion = Vec::with_capacity(document.matches.len());
     let mut report = EspansoImportReport::default();
     for key in document.extra.keys() {

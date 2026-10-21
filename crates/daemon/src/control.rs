@@ -174,13 +174,10 @@ impl ControlServer {
                 }
             }
         }
-        // A restrictive umask closes the permission window between bind and
-        // chmod. Restore the caller's mask immediately after bind so this
-        // process does not change unrelated file-creation behavior.
-        let previous_umask = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-        let listener_result = UnixListener::bind(&operation_path);
-        rustix::process::umask(previous_umask);
-        let listener = listener_result
+        // `main` sets the process umask before any threads exist, so the
+        // socket is private from bind onward without a process-wide umask
+        // mutation while worker threads are active.
+        let listener = UnixListener::bind(&operation_path)
             .with_context(|| format!("binding control socket {}", path.display()))?;
         let listener_socket = listener
             .try_clone()
