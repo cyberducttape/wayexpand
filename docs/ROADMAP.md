@@ -155,7 +155,10 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 - [ ] Publish installable release assets. Every tag-triggered Release run
       since v1.2.0 has failed (v1.3.3 failed in "Package aarch64 release"),
       so GitHub releases have no `.deb`, `.rpm`, or tarball assets even
-      though the packaging and workflows exist.
+      though the packaging and workflows exist. The aarch64 job now builds
+      and checks every release binary, and the ancestry check is no longer
+      vacuous; the x86_64 publish job has never run on CI, so the next tag
+      is the first end-to-end test of it.
 
 - [ ] Keep GitHub, Debian/Launchpad, RPM, Arch, and AppStream metadata
       synchronized for each release.
