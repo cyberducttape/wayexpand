@@ -717,10 +717,18 @@ pub(crate) fn rebase_change(
             .collect();
     } else {
         // No local sequence edit: retain the on-disk order after content
-        // additions/removals have been applied.
+        // additions/removals have been applied, then keep any local edit
+        // that LocalWins restored after it disappeared from disk.
+        let mut seen = HashSet::new();
         result.expansion = onto_ids
             .iter()
-            .filter_map(|id| result_by_id.get(id).cloned())
+            .chain(candidate_ids.iter())
+            .filter_map(|id| {
+                if !seen.insert(id.clone()) {
+                    return None;
+                }
+                result_by_id.get(id).cloned()
+            })
             .collect();
     }
     let mut section = |changed: bool, differs_on_disk: bool, name: &str| -> bool {
@@ -1055,5 +1063,14 @@ replacement = "A"
         let merged = rebase_change(&base, &candidate, &onto, Rebase::DetectConflicts).unwrap();
         assert_eq!(merged.expansion.len(), 1);
         assert_eq!(merged.expansion[0].trigger, ":b");
+    }
+
+    #[test]
+    fn local_edit_to_a_snippet_missing_from_onto_survives_local_wins() {
+        let base = library("old");
+        let onto = Config::parse("").unwrap();
+        let merged = rebase_change(&base, &library("new"), &onto, Rebase::LocalWins).unwrap();
+        assert_eq!(merged.expansion.len(), 1);
+        assert_eq!(merged.expansion[0].replacement, "new");
     }
 }
