@@ -42,6 +42,18 @@ Each sync:
    merge would make it invalid (for example a duplicate trigger);
 5. pushes, and asks a running daemon to reload.
 
+A synced library is static text by default: sync refuses a library that
+contains command snippets or hotkeys, so write access to the repository cannot
+become the power to run programs on your machine. If you keep commands in a
+repository you control, review the fetched commit and approve it explicitly:
+
+```sh
+wayexpand sync --allow-executable --approved-revision <full-commit-id>
+```
+
+The revision must be the exact commit fetched from `origin`. See
+[ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) for managed deployments.
+
 A genuine conflict (both machines changed the same snippet) stops before
 anything changes and asks you to resolve it with Git in the configuration
 directory. Snippets carry stable IDs, so most edits on different machines merge

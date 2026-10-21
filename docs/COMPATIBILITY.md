@@ -572,11 +572,13 @@ daemon engine and reset after a successful configuration reload.
 
 ### `wayexpand sync`
 
-`wayexpand sync [init [--remote URL]|status] [--json] [config]` synchronizes
-the library with Git; see [LIBRARY_SYNC.md](LIBRARY_SYNC.md). `--json` for a
-sync prints `directory`, `committed`, `pulled`, `pushed`, and `remote`.
-Failures (invalid library, conflict, rejected merge) use the configuration
-exit code. **Stability:** 🧪 **Experimental**.
+`wayexpand sync [init [--remote URL]|status] [--json] [--allow-executable
+--approved-revision FULL_COMMIT] [config]` synchronizes the library with Git;
+see [LIBRARY_SYNC.md](LIBRARY_SYNC.md). `--json` for a sync prints
+`directory`, `committed`, `pulled`, `pushed`, and `remote`. Failures (invalid
+library, conflict, rejected merge, executable content without approval) use
+the configuration exit code; `--approved-revision` without
+`--allow-executable` is a usage error. **Stability:** 🧪 **Experimental**.
 
 ---
 

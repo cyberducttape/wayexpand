@@ -4,6 +4,29 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Upgrade notes:
+  - `wayexpand-evdev.service` now starts only when the consent marker
+    `~/.config/wayexpand/evdev-sensitive-fields-ack` exists, so installing
+    or enabling the package cannot silently turn on raw keyboard capture.
+    Existing evdev users must create it after reading
+    `docs/BACKENDS_SENSITIVE_FIELDS.md`; until then the unit is skipped.
+    `wayexpand doctor` reports an enabled but inert evdev unit, and
+    `wayexpand setup --backend evdev` and `install-release.sh --enable
+    --service=wayexpand-evdev.service` refuse with instructions instead of
+    reporting a service that never runs.
+  - `wayexpand sync` refuses a library that contains command snippets or
+    hotkeys. Pass `--allow-executable`; content pulled from the remote
+    additionally needs `--approved-revision` with the full reviewed commit.
+- Fixed: a GUI save queued while another was in flight lost an edit to a
+  snippet that was no longer in the saved configuration, even though the
+  newer local edit is meant to win.
+- Fixed: the release ancestry check compared each release tag with itself,
+  so it could never fail. It now requires descent from the previous
+  release tag, and the release job fetches full history for it.
+- Writing a file with `wayexpand new` no longer replaces a file created
+  concurrently, and the file is private (0600). The broker client rejects
+  oversized frames before buffering them.
+
 - Terminal UI (`wayexpand-ui`) polish:
   - Fixed: rows no longer drift right ("staircase") and multi-line
     previews no longer scramble the screen. The UI drew each line ending in
