@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed (review of the latest changes):
+  - `wayexpand upgrade-status`, certification, and `doctor --json` treated
+    two builds without Git metadata as the same build, since both report
+    their commit as `unknown`. After a distribution-package upgrade, a stale
+    daemon therefore showed as current. An unknown commit now never counts
+    as a match, and `upgrade-status` reports the new `unverified` status.
+    Its text output no longer prints the status with JSON quotes.
+  - The Espanso importer failed the whole import when an option it ignores
+    contained integer map keys or `.nan`/`.inf`, both of which the previous
+    YAML parser accepted. Ignored option values are now skipped unparsed.
+    Alias-expansion bombs are still rejected, and a test now covers them.
+  - `fuzz/Cargo.lock` still pinned `serde_yaml` and `unsafe-libyaml`.
 - Fixed: `wayexpand sync` could commit and push in the wrong repository.
   `git -C` does not override repository variables such as `GIT_DIR`,
   `GIT_WORK_TREE` and `GIT_INDEX_FILE`, and git exports them while it runs

@@ -35,6 +35,10 @@ The command reports one of these statuses:
 
 - `current`: the daemon status schema and build commit match the CLI.
 - `restart-required`: the daemon is compatible but came from another build.
+- `unverified`: the daemon is compatible, but this CLI or the daemon was
+  built without a commit ID (`unknown`, as source-archive builds such as
+  distribution packages report unless `WAYEXPAND_BUILD_SHA` is set), so a
+  match cannot be shown. Restart the user service after every upgrade.
 - `incompatible`: the daemon status schema is missing or unsupported.
 - `unavailable`: no daemon responded.
 
@@ -44,7 +48,7 @@ Use the JSON form in deployment checks:
 wayexpand upgrade-status --json | jq -e '.status == "current"'
 ```
 
-For `restart-required` or `incompatible`, restart the appropriate user
+For `restart-required`, `incompatible` or `unverified`, restart the appropriate user
 service, then rerun the command before relying on desktop-wide capture or
 insertion diagnostics. This command never restarts or mutates the service.
 
@@ -455,6 +459,8 @@ below are exactly what that response currently carries -- nothing more.
 
 `daemon_commit` identifies the daemon binary that produced the response, so
 operators can distinguish a running process from newly installed binaries.
+Builds without Git metadata report `unknown`; an `unknown` commit on either
+side never counts as a match (`commit_matches` is then `false`).
 
 **Output shape:**
 ```json

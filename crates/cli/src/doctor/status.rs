@@ -237,6 +237,28 @@ pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {
         == Some(u64::from(CONTROL_STATUS_SCHEMA))
 }
 
+/// Whether the daemon was built from the same commit as this CLI. A build
+/// from a source archive without Git metadata (distribution packages, unless
+/// `WAYEXPAND_BUILD_SHA` is set) reports `unknown`, and two such builds of
+/// different releases would otherwise "match"; an unknown commit therefore
+/// never counts as a match.
+pub(crate) fn daemon_commit_matches(daemon_commit: Option<&str>) -> bool {
+    commits_match(daemon_commit, crate::build_info::COMMIT)
+}
+
+/// Whether either side has no commit to compare, so a match cannot be shown.
+pub(crate) fn daemon_commit_unknown(daemon_commit: Option<&str>) -> bool {
+    commit_unknown(daemon_commit, crate::build_info::COMMIT)
+}
+
+fn commit_unknown(daemon: Option<&str>, cli: &str) -> bool {
+    cli == "unknown" || daemon.is_none_or(|commit| commit == "unknown")
+}
+
+fn commits_match(daemon: Option<&str>, cli: &str) -> bool {
+    !commit_unknown(daemon, cli) && daemon == Some(cli)
+}
+
 /// Compare the running daemon with the CLI that is reporting its status.
 /// A responsive socket is not sufficient: the daemon may still be an older
 /// installation with different safety or output semantics.
@@ -245,9 +267,11 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
         .get("daemon_commit")
         .and_then(serde_json::Value::as_str);
     let compatible = status_schema_compatible(snapshot);
-    let commit_matches = daemon_commit == Some(crate::build_info::COMMIT);
+    let commit_matches = daemon_commit_matches(daemon_commit);
     let status = if !compatible {
         "incompatible"
+    } else if daemon_commit_unknown(daemon_commit) {
+        "unverified"
     } else if !commit_matches {
         "restart-required"
     } else {
@@ -259,6 +283,9 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
         }
         "restart-required" => {
             "The running daemon is from a different build; restart the user service before relying on this CLI."
+        }
+        "unverified" => {
+            "This CLI or the daemon was built without a commit ID (for example from a source archive), so it cannot tell whether the daemon is current; restart the user service after every upgrade."
         }
         _ => "The running daemon matches this CLI build.",
     };
@@ -301,4 +328,22 @@ pub(crate) fn upgrade_status_unavailable() -> serde_json::Value {
         "compatible": false,
         "commit_matches": false,
     })
+}
+
+#[cfg(test)]
+mod commit_tests {
+    use super::{commit_unknown, commits_match};
+
+    #[test]
+    fn unknown_commits_never_match() {
+        assert!(commits_match(Some("abc123"), "abc123"));
+        assert!(!commits_match(Some("abc123"), "def456"));
+        assert!(!commits_match(None, "abc123"));
+        // Two source-archive builds of different releases both say unknown.
+        assert!(!commits_match(Some("unknown"), "unknown"));
+        assert!(!commits_match(Some("abc123"), "unknown"));
+        assert!(commit_unknown(Some("unknown"), "abc123"));
+        assert!(commit_unknown(None, "abc123"));
+        assert!(!commit_unknown(Some("def456"), "abc123"));
+    }
 }

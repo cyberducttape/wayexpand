@@ -156,7 +156,7 @@ pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
             report["cli"]["version"].as_str().unwrap_or("unknown"),
             report["cli"]["commit"].as_str().unwrap_or("unknown")
         );
-        println!("Daemon: {}", report["status"]);
+        println!("Daemon: {}", report["status"].as_str().unwrap_or("unknown"));
         if let Some(commit) = report["daemon"]["commit"].as_str() {
             println!("Daemon commit: {commit}");
         }

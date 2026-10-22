@@ -10,8 +10,10 @@ use thiserror::Error;
 struct EspansoDocument {
     #[serde(default)]
     matches: Vec<EspansoMatch>,
+    /// Unmapped options. Only their names are reported, so the values are
+    /// skipped unparsed: any YAML value (integer keys, `.nan`) is accepted.
     #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
+    extra: BTreeMap<String, serde::de::IgnoredAny>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,8 +28,10 @@ struct EspansoMatch {
     label: Option<String>,
     #[serde(default)]
     propagate_case: bool,
+    /// Unmapped options. Only their names are reported, so the values are
+    /// skipped unparsed: any YAML value (integer keys, `.nan`) is accepted.
     #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
+    extra: BTreeMap<String, serde::de::IgnoredAny>,
 }
 
 #[derive(Debug)]
@@ -147,8 +151,13 @@ pub fn import_espanso_with_mode(
         ))
     })?;
     // The byte limit bounds the source document size; the YAML deserializer
-    // also applies a recursion limit while deserializing nested structures.
-    let document: EspansoDocument = serde_saphyr::from_str(&text)?;
+    // also applies a recursion limit and a node budget (which stops alias
+    // "billion laughs" expansion). Non-finite floats (`.nan`, `.inf`) are
+    // valid YAML and may appear in options this importer skips, so they are
+    // passed through instead of failing the whole import.
+    let mut options = serde_saphyr::Options::default();
+    options.non_finite_float_policy = serde_saphyr::NonFiniteFloatPolicy::PassThrough;
+    let document: EspansoDocument = serde_saphyr::from_str_with_options(&text, options)?;
     let mut expansion = Vec::with_capacity(document.matches.len());
     let mut report = EspansoImportReport::default();
     for key in document.extra.keys() {
@@ -341,6 +350,56 @@ mod tests {
             Err(MigrationError::NotRegular { .. })
         ));
         fs::remove_file(path).unwrap();
+    }
+
+    fn import_text(name: &str, text: &str) -> Result<EspansoImport, MigrationError> {
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-espanso-{name}-{}.yml",
+            std::process::id()
+        ));
+        fs::write(&path, text).unwrap();
+        let imported = import_espanso(&path);
+        fs::remove_file(path).unwrap();
+        imported
+    }
+
+    #[test]
+    fn any_value_in_an_unmapped_option_is_accepted() {
+        // Only option names are reported, so values the old YAML parser
+        // accepted (integer keys, non-finite floats) must not fail the import.
+        let imported = import_text(
+            "unmapped-values",
+            "threshold: .nan
+limit: -.inf
+matches:
+  - trigger: ':pick'
+    replace: chosen
+    vars:
+      - name: x
+        type: choice
+        params: {values: {1: one, 2: two}}
+",
+        )
+        .unwrap();
+        assert_eq!(imported.config.expansion.len(), 1);
+        assert_eq!(imported.report.migrated_with_warnings, 1);
+        assert_eq!(imported.report.warnings.len(), 3);
+    }
+
+    #[test]
+    fn alias_expansion_bombs_are_rejected() {
+        let mut text = String::from("a: &a [lol, lol, lol, lol, lol, lol, lol, lol, lol]\n");
+        let mut previous = 'a';
+        for name in "bcdefghi".chars() {
+            let items = vec![format!("*{previous}"); 9].join(", ");
+            text.push_str(&format!("{name}: &{name} [{items}]\n"));
+            previous = name;
+        }
+        text.push_str("matches: []\n");
+        assert!(matches!(
+            import_text("alias-bomb", &text),
+            Err(MigrationError::Parse(_))
+        ));
     }
 
     #[test]

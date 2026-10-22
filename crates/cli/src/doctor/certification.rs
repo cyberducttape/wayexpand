@@ -215,13 +215,19 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             let daemon_commit = snapshot
                 .get("daemon_commit")
                 .and_then(serde_json::Value::as_str);
-            let commit_matches = daemon_commit == Some(build_info::COMMIT);
+            let commit_matches = crate::doctor::status::daemon_commit_matches(daemon_commit);
+            let commit_unknown = crate::doctor::status::daemon_commit_unknown(daemon_commit);
             let compatible = status_schema_compatible(&snapshot);
             let runtime_capabilities = runtime_capabilities_from_status(&snapshot);
             let detail = match (source, backend, compatible, commit_matches) {
                 (Some(source), Some(backend), true, true) => {
                     format!("state={state}; compatible active route is {source} + {backend}")
                 }
+                (Some(source), Some(backend), _, false) if commit_unknown => format!(
+                    "route {source} + {backend} is connected, but this CLI or the daemon has no build commit (daemon {:?}, CLI {}), so the daemon cannot be shown to match. Restart the daemon after upgrading, or build with WAYEXPAND_BUILD_SHA set",
+                    daemon_commit,
+                    build_info::COMMIT
+                ),
                 (Some(source), Some(backend), _, false) => format!(
                     "route {source} + {backend} is connected, but daemon commit is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
                     daemon_commit,

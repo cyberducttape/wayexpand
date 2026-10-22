@@ -867,10 +867,12 @@ impl UndoEntry {
                 })
                 .collect::<Result<_, _>>()?;
         } else {
+            // IDs are unique (validated), so each entry moves out of the map
+            // instead of being cloned a second time.
             restored.expansion = current_order
                 .iter()
                 .map(|id| {
-                    by_id.get(id).cloned().ok_or_else(|| {
+                    by_id.remove(id).ok_or_else(|| {
                         "undo history no longer matches the snippet library".to_owned()
                     })
                 })

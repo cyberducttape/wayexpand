@@ -112,7 +112,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 serde_json::json!({
                     "available": true,
                     "compatible": status_schema_compatible(&snapshot),
-                    "commit_matches": daemon_commit == Some(build_info::COMMIT),
+                    "commit_matches": crate::doctor::status::daemon_commit_matches(daemon_commit),
                     "daemon_commit": daemon_commit,
                     "status_schema": snapshot.get("status_schema"),
                     "state": snapshot.get("state"),
