@@ -236,3 +236,69 @@ pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {
         .and_then(serde_json::Value::as_u64)
         == Some(u64::from(CONTROL_STATUS_SCHEMA))
 }
+
+/// Compare the running daemon with the CLI that is reporting its status.
+/// A responsive socket is not sufficient: the daemon may still be an older
+/// installation with different safety or output semantics.
+pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serde_json::Value {
+    let daemon_commit = snapshot
+        .get("daemon_commit")
+        .and_then(serde_json::Value::as_str);
+    let compatible = status_schema_compatible(snapshot);
+    let commit_matches = daemon_commit == Some(crate::build_info::COMMIT);
+    let status = if !compatible {
+        "incompatible"
+    } else if !commit_matches {
+        "restart-required"
+    } else {
+        "current"
+    };
+    let action = match status {
+        "incompatible" => {
+            "The running daemon does not speak this CLI's status protocol; stop it and start the installed daemon."
+        }
+        "restart-required" => {
+            "The running daemon is from a different build; restart the user service before relying on this CLI."
+        }
+        _ => "The running daemon matches this CLI build.",
+    };
+    serde_json::json!({
+        "status": status,
+        "action": action,
+        "cli": {
+            "version": crate::build_info::VERSION,
+            "commit": crate::build_info::COMMIT,
+        },
+        "daemon": {
+            "available": true,
+            "commit": daemon_commit,
+            "status_schema": snapshot.get("status_schema"),
+            "state": snapshot.get("state"),
+            "source": snapshot.get("source"),
+            "backend": snapshot.get("backend"),
+        },
+        "compatible": compatible,
+        "commit_matches": commit_matches,
+    })
+}
+
+pub(crate) fn upgrade_status_unavailable() -> serde_json::Value {
+    serde_json::json!({
+        "status": "unavailable",
+        "action": "No daemon responded; start the appropriate user service, then rerun this command.",
+        "cli": {
+            "version": crate::build_info::VERSION,
+            "commit": crate::build_info::COMMIT,
+        },
+        "daemon": {
+            "available": false,
+            "commit": serde_json::Value::Null,
+            "status_schema": serde_json::Value::Null,
+            "state": serde_json::Value::Null,
+            "source": serde_json::Value::Null,
+            "backend": serde_json::Value::Null,
+        },
+        "compatible": false,
+        "commit_matches": false,
+    })
+}

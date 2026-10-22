@@ -18,7 +18,7 @@ use commands::daemon::{control_command, insert_command};
 use commands::new::new_command;
 use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
-    portal_command, setup_command,
+    portal_command, setup_command, upgrade_status_command,
 };
 use doctor::backends::{
     print_backend_diagnostics, print_backend_selection_explain, session_description,
@@ -114,6 +114,7 @@ fn run() -> Result<()> {
         Some("edit") => edit_command(args)?,
         Some("setup") => setup_command(args)?,
         Some("doctor") => doctor_command(args)?,
+        Some("upgrade-status") => upgrade_status_command(args)?,
         Some("explain") => explain_command(args)?,
         Some("stats") => stats_command(args)?,
         Some("sync") => sync_command(args)?,
@@ -145,6 +146,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "doctor [--json] [config]",
                 "Diagnose configuration and backends",
+            ),
+            (
+                "upgrade-status [--json]",
+                "Check whether the running daemon matches this CLI",
             ),
             (
                 "explain <text> [--json] [--offline] [--app ID] [config]",

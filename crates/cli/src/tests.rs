@@ -245,6 +245,38 @@ fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
 }
 
 #[test]
+fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
+    let current = crate::doctor::status::upgrade_status_from_snapshot(&serde_json::json!({
+        "daemon_commit": crate::build_info::COMMIT,
+        "status_schema": CONTROL_STATUS_SCHEMA,
+        "state": "connected",
+        "source": "input-method",
+        "backend": "input-method-v2",
+    }));
+    assert_eq!(current["status"], "current");
+    assert_eq!(current["commit_matches"], true);
+    assert_eq!(current["compatible"], true);
+
+    let stale = crate::doctor::status::upgrade_status_from_snapshot(&serde_json::json!({
+        "daemon_commit": "older-build",
+        "status_schema": CONTROL_STATUS_SCHEMA,
+    }));
+    assert_eq!(stale["status"], "restart-required");
+    assert_eq!(stale["commit_matches"], false);
+    assert!(stale["action"].as_str().unwrap().contains("restart"));
+
+    let incompatible = crate::doctor::status::upgrade_status_from_snapshot(
+        &serde_json::json!({ "daemon_commit": crate::build_info::COMMIT }),
+    );
+    assert_eq!(incompatible["status"], "incompatible");
+    assert_eq!(incompatible["compatible"], false);
+
+    let unavailable = crate::doctor::status::upgrade_status_unavailable();
+    assert_eq!(unavailable["status"], "unavailable");
+    assert_eq!(unavailable["daemon"]["available"], false);
+}
+
+#[test]
 fn certification_separates_capture_and_injection_capabilities() {
     let status = status_as_json(
         "running\nsource=evdev\nbackend=libei\ncapture_sensitive_focus=false\ncapture_exclusive=false\ninject_full_unicode=true\ninject_atomic_replace=false\n",

@@ -136,6 +136,35 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    if !rest.is_empty() {
+        usage_bail!("usage: wayexpand upgrade-status [--json]");
+    }
+    let report = match crate::doctor::status::read_daemon_status()
+        .and_then(|response| crate::doctor::status::status_as_json(&response))
+    {
+        Ok(snapshot) => crate::doctor::status::upgrade_status_from_snapshot(&snapshot),
+        Err(_) => crate::doctor::status::upgrade_status_unavailable(),
+    };
+    if requested_json {
+        println!("{report}");
+    } else {
+        println!(
+            "CLI: {} (commit {})",
+            report["cli"]["version"].as_str().unwrap_or("unknown"),
+            report["cli"]["commit"].as_str().unwrap_or("unknown")
+        );
+        println!("Daemon: {}", report["status"]);
+        if let Some(commit) = report["daemon"]["commit"].as_str() {
+            println!("Daemon commit: {commit}");
+        }
+        println!("Action: {}", report["action"].as_str().unwrap_or("unknown"));
+    }
+    Ok(())
+}
+
 pub(crate) fn certify_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);

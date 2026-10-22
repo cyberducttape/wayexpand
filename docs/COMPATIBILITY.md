@@ -24,6 +24,33 @@ the exact source tree. `wayexpand doctor --json` exposes the same values as
 as well. Builds made from source archives without Git metadata use the package
 version and report the commit as `unknown`.
 
+### `wayexpand upgrade-status [--json]`
+
+This read-only diagnostic compares the running daemon with the CLI binary
+invoking it. A healthy control socket does not prove that both processes came
+from the same installation: after an upgrade, the old daemon can continue
+running until its user service is restarted.
+
+The command reports one of these statuses:
+
+- `current`: the daemon status schema and build commit match the CLI.
+- `restart-required`: the daemon is compatible but came from another build.
+- `incompatible`: the daemon status schema is missing or unsupported.
+- `unavailable`: no daemon responded.
+
+Use the JSON form in deployment checks:
+
+```bash
+wayexpand upgrade-status --json | jq -e '.status == "current"'
+```
+
+For `restart-required` or `incompatible`, restart the appropriate user
+service, then rerun the command before relying on desktop-wide capture or
+insertion diagnostics. This command never restarts or mutates the service.
+
+**Stability:** 🔒 **Stable** — the top-level fields `status`, `action`, `cli`,
+`daemon`, `compatible`, and `commit_matches` are guaranteed within 1.x.
+
 ---
 
 ## CLI Exit Codes
