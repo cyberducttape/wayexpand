@@ -69,6 +69,17 @@ chmod 0755 "$stub_bin/systemctl"
 systemctl_log="$test_root/systemctl.log"
 : >"$systemctl_log"
 
+# Keep the normal uninstall assertion hermetic too.  The uninstaller checks
+# the host process table when the user systemd bus is unavailable; without a
+# stub here, an unrelated WayExpand daemon running for the developer would
+# make this temporary-install test fail before it reaches its explicit
+# active-process safety case below.
+cat >"$stub_bin/ps" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "$stub_bin/ps"
+
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
