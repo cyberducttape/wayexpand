@@ -25,6 +25,8 @@ pub struct KeyChord {
 pub enum KeyChordError {
     #[error("key chord is empty")]
     Empty,
+    #[error("key chord has only modifiers; add a key, for example Ctrl+Alt+T")]
+    OnlyModifiers,
     #[error("key chord contains an empty component")]
     EmptyComponent,
     #[error("unknown modifier {0:?}")]
@@ -65,7 +67,7 @@ impl KeyChord {
             }
         }
         let Some(key) = key else {
-            return Err(KeyChordError::Empty);
+            return Err(KeyChordError::OnlyModifiers);
         };
         Ok(Self { modifiers, key })
     }
@@ -130,7 +132,10 @@ mod tests {
             KeyChord::parse("Ctrl+A+B").unwrap_err(),
             KeyChordError::MultipleKeys
         );
-        assert_eq!(KeyChord::parse("Shift").unwrap_err(), KeyChordError::Empty);
+        assert_eq!(
+            KeyChord::parse("Shift").unwrap_err(),
+            KeyChordError::OnlyModifiers
+        );
     }
 
     #[test]

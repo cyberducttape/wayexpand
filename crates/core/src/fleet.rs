@@ -4,7 +4,9 @@
 /// personal configurations. Layers are merged in deterministic order:
 ///
 /// 1. `/etc/wayexpand/snippets.d/` (organization snippets, root-owned)
-/// 2. `~/.config/wayexpand/snippets.d/` (user personal snippets)
+/// 2. `snippets.d/` next to the default configuration (user personal
+///    snippets; `~/.config/wayexpand/snippets.d/` unless `XDG_CONFIG_HOME`
+///    or `WAYEXPAND_CONFIG` moves the configuration)
 /// 3. `~/.local/share/wayexpand/packs/` (optional curated packs)
 ///
 /// Each layer is a directory of .toml files. Within a layer, files are merged
@@ -124,6 +126,17 @@ pub enum Layer {
     Pack = 3,
 }
 
+/// The user layer is the `snippets.d` next to the configuration file, the
+/// directory `wayexpand sync` tracks and `Config::layer_files` validates.
+/// Hard-coding `~/.config` left a configuration under `XDG_CONFIG_HOME`
+/// with synchronized layers the daemon never loaded.
+fn user_layer_dir(config: &Path) -> Option<PathBuf> {
+    config
+        .parent()
+        .filter(|directory| directory.is_absolute())
+        .map(|directory| directory.join("snippets.d"))
+}
+
 impl Layer {
     pub fn name(self) -> &'static str {
         match self {
@@ -137,13 +150,7 @@ impl Layer {
     pub fn default_dir(self) -> Option<PathBuf> {
         match self {
             Layer::Organization => Some(PathBuf::from("/etc/wayexpand/snippets.d")),
-            Layer::User => {
-                if let Ok(home) = std::env::var("HOME") {
-                    Some(PathBuf::from(home).join(".config/wayexpand/snippets.d"))
-                } else {
-                    None
-                }
-            }
+            Layer::User => user_layer_dir(&crate::default_config_path()),
             Layer::Pack => {
                 if let Ok(home) = std::env::var("HOME") {
                     Some(PathBuf::from(home).join(".local/share/wayexpand/packs"))
@@ -189,7 +196,7 @@ impl FleetConfig {
     /// Load and merge configuration from standard fleet layers.
     ///
     /// Loads from /etc/wayexpand/snippets.d (organization),
-    /// ~/.config/wayexpand/snippets.d (user), and
+    /// the `snippets.d` next to the default configuration (user), and
     /// ~/.local/share/wayexpand/packs (curated packs).
     /// Falls back gracefully if layers don't exist.
     pub fn load_standard() -> Result<Self, FleetError> {
@@ -729,6 +736,12 @@ mod tests {
     fn layer_defaults() {
         assert_eq!(Layer::Organization.name(), "organization");
         assert_eq!(Layer::User.name(), "user");
+        assert_eq!(
+            user_layer_dir(Path::new("/xdg/config/wayexpand/expansions.toml")),
+            Some(PathBuf::from("/xdg/config/wayexpand/snippets.d"))
+        );
+        // Without a usable home the default path is relative: no user layer.
+        assert_eq!(user_layer_dir(Path::new("expansions.toml")), None);
         assert_eq!(Layer::Pack.name(), "pack");
     }
 

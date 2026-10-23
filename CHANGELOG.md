@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: with `XDG_CONFIG_HOME` set, the daemon (in its default fleet mode)
+  and `validate --fleet` loaded user snippet layers from
+  `~/.config/wayexpand/snippets.d`, while the configuration file and
+  `wayexpand sync` used `$XDG_CONFIG_HOME/wayexpand/`. Layers kept in sync
+  were never loaded, and layers under `~/.config` were loaded but not
+  synchronized. The user layer is now the `snippets.d` next to the default
+  configuration.
+- Fixed: `wayexpand-daemon CONFIG` failed with "multiple configuration paths
+  supplied" when `WAYEXPAND_CONFIG` was set. A path argument now overrides the
+  variable, as it does for the CLI.
+- A hotkey of only modifiers (for example `Ctrl+Shift`) now reports that it
+  needs a key, instead of "key chord is empty".
 - Fixed: `{{local_date}}`, `{{local_time}}`, `{{local_datetime}}` and
   local date formats kept the time zone the daemon started with. glibc's
   `localtime_r` reads the zone only once per process, so after the system

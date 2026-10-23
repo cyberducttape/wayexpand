@@ -11,6 +11,9 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
     let mut backend = env::var("WAYEXPAND_BACKEND").ok();
     let mut source = env::var("WAYEXPAND_SOURCE").ok();
     let mut allow_evdev_sensitive_fields = false;
+    // A path argument overrides WAYEXPAND_CONFIG, as it does for the CLI;
+    // only a second path argument is an error.
+    let mut path_argument = false;
     for argument in env::args().skip(1) {
         if let Some(value) = argument.strip_prefix("--backend=") {
             backend = Some(value.to_string());
@@ -30,10 +33,11 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
             std::process::exit(0);
         } else if argument.starts_with('-') {
             anyhow::bail!("unknown option {argument:?}; try --help");
-        } else if path.is_some() {
+        } else if path_argument {
             anyhow::bail!("multiple configuration paths supplied");
         } else {
             path = Some(PathBuf::from(argument));
+            path_argument = true;
             explicit_path = true;
         }
     }

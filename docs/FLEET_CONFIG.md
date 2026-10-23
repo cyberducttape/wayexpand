@@ -12,7 +12,9 @@ See:
 - **Policy enforcement:** [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md)
 - **Configuration layers:**
   1. `/etc/wayexpand/snippets.d/` - Organization layer (root-owned)
-  2. `~/.config/wayexpand/snippets.d/` - User layer (personal snippets)
+  2. `snippets.d/` next to the configuration file - User layer (personal
+     snippets; `~/.config/wayexpand/snippets.d/` by default, or under
+     `$XDG_CONFIG_HOME/wayexpand/` when that is set)
   3. `~/.local/share/wayexpand/packs/` - Curated packs
 
 ## Quick Start
