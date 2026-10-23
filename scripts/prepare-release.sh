@@ -66,6 +66,9 @@ fi
 
 release_date=$(LANG=en_US.UTF-8 date '+%Y-%m-%d')
 debian_date=$(LANG=en_US.UTF-8 date '+%a, %d %b %Y %H:%M:%S %z')
+# RPM's changelog parser requires the traditional weekday/month form rather
+# than the ISO date used by the Markdown and AppStream metadata.
+rpm_date=$(LANG=en_US.UTF-8 date '+%a %b %d %Y')
 
 # 1. Update Cargo.toml
 printf '%s\n' "Updating Cargo.toml..."
@@ -156,7 +159,7 @@ sed -i.bak "s/\\\"WayExpand [0-9][0-9.]*\\\"/\\\"WayExpand $new_version\\\"/" \
     docs/wayexpand.1
 rm -f docs/wayexpand.1.bak
 spec_tmp=$(mktemp)
-awk -v version="$new_version" -v date="$release_date" '
+awk -v version="$new_version" -v date="$rpm_date" '
     !inserted && /^%changelog$/ {
         print
         print "* " date " Stephan Loesevitz <stephan.loesevitz@gmail.com> - " version "-1"

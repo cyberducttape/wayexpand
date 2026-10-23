@@ -35,6 +35,11 @@ Show the active daemon status. The JSON form is stable for automation.
 .B doctor [--json] [CONFIG]
 Report available input and output backends and their compatibility.
 .TP
+.B upgrade-status [--json]
+Compare the running daemon's build and status protocol with this CLI. The
+read-only report identifies a current, stale, incompatible, unverified, or
+unavailable daemon; it never restarts or mutates a service.
+.TP
 .B sync [init [--remote URL]|status] [--json] [CONFIG]
 Synchronize the snippet library with Git. \fBinit\fR tracks only the library
 files in the configuration directory; a sync validates, commits, rebases,

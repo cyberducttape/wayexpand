@@ -106,6 +106,7 @@ Useful commands:
 ```sh
 wayexpand doctor          # what this desktop supports, and what is missing
 wayexpand status          # is the daemon running, and on which path
+wayexpand upgrade-status  # is the running daemon from this CLI build?
 wayexpand test ';sig'     # check matching without the desktop
 ```
 
