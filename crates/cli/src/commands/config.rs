@@ -822,7 +822,16 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
     if !config.settings.usage_stats {
         println!("Usage recording is off (settings.usage_stats = false).");
     }
-    println!("Last {days} days: {} expansions", report.expansions);
+    println!(
+        "Last {days} {}: {} {}",
+        if days == 1 { "day" } else { "days" },
+        report.expansions,
+        if report.expansions == 1 {
+            "expansion"
+        } else {
+            "expansions"
+        }
+    );
     println!(
         "Keystrokes avoided (all time): {}",
         report.keystrokes_avoided

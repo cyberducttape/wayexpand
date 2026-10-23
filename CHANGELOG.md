@@ -4,6 +4,22 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed: `{{local_date}}`, `{{local_time}}`, `{{local_datetime}}` and
+  local date formats kept the time zone the daemon started with. glibc's
+  `localtime_r` reads the zone only once per process, so after the system
+  zone changed (travel, `timedatectl set-timezone`) expansions used the old
+  offset until a restart. The zone is now re-read when it changes.
+- Fixed: `{{hostname}}` was read once from `/etc/hostname`. It stayed stale
+  after a rename until the daemon restarted, and was empty when the name was
+  set by DHCP or transiently. It now uses the kernel's current host name.
+- Sync status and diagnostics now also redact signature query parameters
+  (`sig=`, `X-Amz-Signature=`) in remote URLs.
+- Fixed: editing a large replacement in `wayexpand-ui` froze it. Keeping
+  the caret visible re-measured the text for every character it skipped,
+  which is quadratic in the length: 50,000 characters took 5.7 seconds per
+  keystroke in a debug build. It now measures only what fits on the line.
+- `wayexpand stats` says "1 day" and "1 expansion" instead of "1 days" and
+  "1 expansions".
 - Fixed (review of the latest changes):
   - `wayexpand upgrade-status`, certification, and `doctor --json` treated
     two builds without Git metadata as the same build, since both report

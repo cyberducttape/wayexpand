@@ -715,18 +715,20 @@ fn prompt_line(prompt: &PromptView<'_>, width: usize) -> Line {
         })
         .collect();
     let cursor = prompt.cursor.min(characters.len());
-    let char_width = |character: &char| character.width().unwrap_or(0);
-    // Start late enough that everything up to and including the caret fits.
-    let mut start = 0;
-    let caret_cell = |start: usize| {
-        characters[start..cursor]
-            .iter()
-            .map(char_width)
-            .sum::<usize>()
-            + usize::from(start > 0)
-    };
-    while start < cursor && caret_cell(start) + 1 > room {
-        start += 1;
+    // Start late enough that everything up to and including the caret fits:
+    // walk back from the caret, keeping a cell for it and one for the `…`
+    // shown when the start is cut. This visits only what fits on the line,
+    // so a replacement of any size stays cheap to redraw on every key.
+    let mut start = cursor;
+    let mut used = 0;
+    while start > 0 {
+        let width = characters[start - 1].width().unwrap_or(0);
+        let ellipsis = usize::from(start > 1);
+        if used + width + 1 + ellipsis > room {
+            break;
+        }
+        used += width;
+        start -= 1;
     }
     let mut line = vec![span(label, Style::fg(ACCENT).bold())];
     if start > 0 {

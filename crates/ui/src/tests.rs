@@ -425,3 +425,19 @@ fn print_sample_screens() {
     app.show_help = true;
     println!("{}", screen(&mut app, 80, 30).join("\n"));
 }
+
+#[test]
+fn a_large_replacement_in_the_prompt_renders_quickly() {
+    let (mut app, _path) = demo_app(3);
+    update(&mut app, key(KeyCode::Char('e'))).unwrap();
+    app.input = "x".repeat(50_000);
+    app.cursor = 25_000;
+    let started = std::time::Instant::now();
+    let lines = screen(&mut app, 80, 24);
+    let elapsed = started.elapsed();
+    assert!(lines.last().unwrap().starts_with(" Replacement › …"));
+    assert!(
+        elapsed < std::time::Duration::from_millis(250),
+        "{elapsed:?}"
+    );
+}

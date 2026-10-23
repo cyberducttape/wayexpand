@@ -586,6 +586,8 @@ fn redact_query(tail: &str) -> String {
                 "api_key",
                 "access_key",
                 "key",
+                // Shared-access signatures (`sig=`, `X-Amz-Signature=`).
+                "sig",
             ]
             .iter()
             .any(|sensitive| key_lower.contains(sensitive))
@@ -1762,6 +1764,18 @@ mod tests {
         assert_eq!(
             redact_remote_url("ssh://git@example.invalid/team/lib.git"),
             "ssh://example.invalid/team/lib.git"
+        );
+        // An unescaped `@` in a password must not leave part of it behind.
+        assert_eq!(
+            redact_remote_url("https://alice:p@ss@example.invalid/lib.git"),
+            "https://example.invalid/lib.git"
+        );
+        // Shared-access signatures carry the secret in a query parameter.
+        assert_eq!(
+            redact_remote_url(
+                "https://store.example.invalid/lib.git?sv=2024&sig=abc%3D&X-Amz-Signature=def"
+            ),
+            "https://store.example.invalid/lib.git?sv=2024&sig=[REDACTED]&X-Amz-Signature=[REDACTED]"
         );
         let diagnostic = redact_git_diagnostic(
             "fatal: https://alice:topsecret@example.invalid/lib.git?password=hidden failed\n",

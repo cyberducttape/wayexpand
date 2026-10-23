@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    env, fs,
+    env,
     sync::{Arc, OnceLock},
 };
 use thiserror::Error;
@@ -11,7 +11,6 @@ use crate::limits::MAX_RENDERED_BYTES;
 
 const MAX_INCLUDE_DEPTH: usize = 8;
 static SYSTEM_USERNAME: OnceLock<String> = OnceLock::new();
-static SYSTEM_HOSTNAME: OnceLock<String> = OnceLock::new();
 
 /// Reads the clipboard for `{{clipboard}}`. Called only while rendering a
 /// snippet that uses the variable; `None` means it could not be read.
@@ -163,14 +162,7 @@ impl TemplateContext {
         let username = SYSTEM_USERNAME
             .get_or_init(|| env::var("USER").unwrap_or_default())
             .clone();
-        let hostname = SYSTEM_HOSTNAME
-            .get_or_init(|| {
-                fs::read_to_string("/etc/hostname")
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned()
-            })
-            .clone();
+        let hostname = current_hostname();
         let unix_timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs());
@@ -706,10 +698,33 @@ fn format_clock_with_offset(name: &str, timestamp: u64, offset: Option<i64>) -> 
     })
 }
 
+/// The kernel's current host name. Read on every render rather than cached:
+/// a long-running daemon must follow `hostnamectl set-hostname`, and
+/// `/etc/hostname` (read before) is only the static name, empty or missing
+/// when the name comes from DHCP or a transient setting.
+fn current_hostname() -> String {
+    rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .trim()
+        .to_owned()
+}
+
+// POSIX; the `libc` crate does not bind it.
+unsafe extern "C" {
+    fn tzset();
+}
+
 /// Seconds east of UTC for the system time zone at `timestamp`.
 fn local_utc_offset(timestamp: u64) -> Option<i64> {
     let time = libc::time_t::try_from(timestamp).ok()?;
     let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // glibc's localtime_r reads the time zone only once per process, so a
+    // long-running daemon kept the zone it started with after the system
+    // zone changed (travel, `timedatectl set-timezone`). tzset re-reads TZ
+    // and /etc/localtime when they change; glibc serializes it internally.
+    // SAFETY: tzset takes no arguments and only updates libc's zone state.
+    unsafe { tzset() };
     // SAFETY: both pointers are valid for the call; localtime_r is the
     // reentrant variant and fully initializes `local` when it succeeds.
     let result = unsafe { libc::localtime_r(&time, local.as_mut_ptr()) };
@@ -1198,5 +1213,42 @@ mod tests {
         }
         let text = "[[expansion]]\ntrigger = \":x\"\nreplacement = \"{{local_date+1w:%A}} {{uuid}} {{random:password:20}}\"\n";
         assert!(crate::Config::parse(text).is_ok());
+    }
+
+    /// A long-running daemon must follow a change of the system time zone.
+    /// Changing `TZ` is only safe without other threads, so the check runs
+    /// in a child copy of this test binary limited to this one test.
+    #[test]
+    fn local_offset_follows_a_changed_time_zone() {
+        const CHILD: &str = "WAYEXPAND_TZ_CHANGE_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            // SAFETY: the parent runs this child with --test-threads=1 and
+            // only this test, so no other thread reads the environment.
+            unsafe { std::env::set_var("TZ", "AAA+03") };
+            let before = super::local_utc_offset(1_800_000_000);
+            unsafe { std::env::set_var("TZ", "BBB-05") };
+            let after = super::local_utc_offset(1_800_000_000);
+            assert_eq!(before, Some(-3 * 3_600));
+            assert_eq!(after, Some(5 * 3_600));
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "template::tests::local_offset_follows_a_changed_time_zone",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // The filter must have matched: a renamed test would pass vacuously.
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
     }
 }
