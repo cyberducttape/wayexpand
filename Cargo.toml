@@ -18,6 +18,7 @@ members = [
     "crates/broker-client",
     "crates/process-supervisor",
     "crates/build-info",
+    "crates/e2e",
 ]
 
 [workspace.package]

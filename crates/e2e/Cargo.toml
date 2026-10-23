@@ -1,0 +1,32 @@
+[package]
+name = "wayexpand-e2e"
+description = "Helpers for WayExpand's headless KWin end-to-end tests (never packaged)"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "wx-e2e-sink"
+path = "src/bin/sink.rs"
+
+[[bin]]
+name = "wx-e2e-eis-relay"
+path = "src/bin/eis_relay.rs"
+
+[[bin]]
+name = "wx-e2e-type"
+path = "src/bin/type.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+rustix = { workspace = true, features = ["fs", "net"] }
+wayland-client.workspace = true
+wayland-protocols = { workspace = true, features = ["client"] }
+xkbcommon.workspace = true
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+wayexpand-backend-libei = { path = "../backend-libei" }
+wayexpand-core = { path = "../core" }

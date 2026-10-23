@@ -35,6 +35,8 @@ Clippy results can be stale from the build cache; `touch` a changed crate's `src
 
 Package names differ from directory names: `crates/cli` is package `wayexpand` (binary `wayexpand`); the others are `wayexpand-core`, `wayexpand-daemon`, `wayexpand-ui`, `wayexpand-gui`, and `wayexpand-backend-*`.
 
+`crates/e2e` (`wayexpand-e2e`, never packaged) holds the headless KWin harness helpers; run the harness with `scripts/test-kwin-e2e.sh` (local only: CI runners lack KWin 6). It starts its own private KWin and D-Bus and never touches the desktop session.
+
 Script-level checks run in CI (`.github/workflows/ci.yml`): `scripts/test-release.sh`, `smoke-daemon.sh`, `test-doctor.sh`, `test-ui.sh`, the `test-install-*.sh` scripts, `shellcheck scripts/*.sh`, and `systemd-analyze verify` on the units in `systemd/`.
 
 ## Architecture

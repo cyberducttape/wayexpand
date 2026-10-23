@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Headless KWin end-to-end harness: `scripts/test-kwin-e2e.sh` runs eleven
+  scenarios against the production daemon, libei output, and KWin window
+  tracker in a private `kwin_wayland --virtual` session, with text checked
+  in real Wayland windows. They cover expansion, word boundaries, cursor
+  placement, multi-line text, an untypeable character being refused,
+  `app_filter` by focus, focus changes and window closes during an
+  expansion, config reload, and daemon restart. The helpers live in the new,
+  never-packaged `wayexpand-e2e` crate. Capture is simulated, so results are
+  not compositor certification; see `docs/INTEGRATION_TESTING.md`.
 - Fixed: with `XDG_CONFIG_HOME` set, the daemon (in its default fleet mode)
   and `validate --fleet` loaded user snippet layers from
   `~/.config/wayexpand/snippets.d`, while the configuration file and

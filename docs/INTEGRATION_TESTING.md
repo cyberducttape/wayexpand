@@ -25,6 +25,67 @@ contexts, and command-backed expansion execution. It uses `stdin` plus the
 smoke test and the real compositor procedures below remain necessary for
 backend behavior.
 
+## Headless KWin end-to-end harness
+
+`scripts/test-kwin-e2e.sh [--keep] [SCENARIO...]` runs WayExpand against a
+real KWin without touching the desktop: it starts a private
+`kwin_wayland --virtual` with its own D-Bus session, runtime directory, home,
+and configuration, and stops every process it started (including the portal
+services KWin activates) when it finishes. It needs `kwin_wayland`,
+`dbus-run-session`, `gdbus`, and `jq`.
+
+Inside that session (`scripts/kwin-e2e-session.sh`):
+
+- **Target windows** are `wx-e2e-sink` instances, minimal Wayland clients
+  that record exactly the text KWin delivers to them, with a caret.
+- **The user** is `wx-e2e-type`, which types into the focused window through
+  libei.
+- **The daemon** is the production `wayexpand-daemon` with the production
+  libei output backend and KWin window tracker, and
+  `compatibility_mode = "tracked-focus"`. Its libei connection reaches KWin's
+  emulated-input server through `wx-e2e-eis-relay`, which asks KWin for it
+  over D-Bus (`org.kde.KWin.EIS.RemoteDesktop.connectToEIS`) instead of the
+  RemoteDesktop portal, so no consent dialog is involved.
+- **Capture is simulated**: the daemon reads what the user typed from stdin.
+  Real keyboard capture needs `/dev/input` or an input method and is not
+  exercised.
+
+| Scenario | Shows |
+|---|---|
+| `expansion-replaces-trigger` | The trigger is erased and the replacement typed into a real window |
+| `word-boundary-reinserts-delimiter` | Word-boundary triggers keep the typed delimiter |
+| `cursor-placement` | `{{cursor}}` leaves the caret inside the replacement |
+| `multiline-replacement` | Line breaks arrive as Return |
+| `unreachable-character-is-refused` | A character the layout cannot type (`é` on the default US layout, without `ei_text`) is refused before anything is erased |
+| `app-filter-follows-focus` | `app_filter` uses KWin's focused window: no expansion in B, expansion in A |
+| `command-expansion-completes` | Control: a slow command snippet does replace its trigger when focus stays put |
+| `focus-change-during-expansion` | Focus moving to B while the command runs: nothing is typed into B and A is not erased |
+| `target-closes-during-expansion` | The target window closing mid-expansion: nothing is typed into the window that gains focus, and the daemon survives |
+| `config-reload` | An edited configuration takes effect without a restart |
+| `daemon-restart` | A killed daemon reconnects to libei and the tracker and expands again |
+
+Each line of the summary is `pass`, `fail`, or `unverified` (the scenario
+could not set itself up). The script exits non-zero unless every selected
+scenario passes; `--keep` leaves logs and sink states under `target/`.
+
+The focus scenarios are known to detect the failure they guard against: with
+the engine's focus-change invalidation removed, both fail, because the
+command's output is typed into window B.
+
+**Evidence boundary.** Results are evidence for libei output and KWin focus
+tracking on the tested KWin version, in a headless session, with capture
+simulated. They are not compositor certification and do not replace the
+real-desktop procedures below.
+
+Findings from KWin 6.6.6 that this harness surfaced:
+
+- KWin implements `zwp_input_method_v1` and `org_kde_kwin_fake_input`, but not
+  `zwp_input_method_v2` or `zwp_virtual_keyboard_v1`, so WayExpand's
+  input-method-v2 and wlroots routes cannot run on KWin; on KDE the output
+  route is libei.
+- KWin's EIS offers no `ei_text`, so libei output is limited to characters
+  the current keyboard layout can type.
+
 ## Matcher performance baseline
 
 The matcher benchmark exercises 100, 1,000, and 10,000 configured snippets
@@ -370,6 +431,9 @@ behavior after portal revocation or compositor restart.
 
 ## Evidence boundary
 
-Passing the repository smoke test proves daemon lifecycle behavior only. It does
+Passing the headless KWin harness proves libei output and KWin focus
+tracking in a headless session with simulated capture; see its own evidence
+boundary above. Passing the repository smoke test proves daemon lifecycle
+behavior only. It does
 not prove compositor protocol availability, input-method activation, keyboard
 pass-through, preedit support, or desktop-wide compatibility.
