@@ -253,8 +253,13 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
         "source": "input-method",
         "backend": "input-method-v2",
     }));
-    assert_eq!(current["status"], "current");
-    assert_eq!(current["commit_matches"], true);
+    if crate::build_info::COMMIT == "unknown" {
+        assert_eq!(current["status"], "unverified");
+        assert_eq!(current["commit_matches"], false);
+    } else {
+        assert_eq!(current["status"], "current");
+        assert_eq!(current["commit_matches"], true);
+    }
     assert_eq!(current["compatible"], true);
 
     let stale = crate::doctor::status::upgrade_status_from_snapshot(&serde_json::json!({

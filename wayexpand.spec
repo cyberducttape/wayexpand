@@ -81,16 +81,16 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 
 %changelog
-* 2026-10-03 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.3-1
+* Sat Oct 03 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.3-1
 - Release v1.3.3
 
-* 2026-10-03 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.2-1
+* Sat Oct 03 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.2-1
 - Release v1.3.2
 
-* 2026-10-03 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.1-1
+* Sat Oct 03 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.1-1
 - Release v1.3.1
 
-* 2026-10-03 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.0-1
+* Sat Oct 03 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.0-1
 - Release v1.3.0
 
 * Thu Sep 24 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.2.0-1
