@@ -4,6 +4,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     fs,
     hash::{Hash, Hasher},
+    io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{
@@ -127,6 +128,49 @@ fn file_stamp(path: &Path) -> Option<FileStamp> {
         mode,
         change_time,
         change_time_nsec,
+    })
+}
+
+/// Bounded content read used only by reload workers, never by the input
+/// reactor. It mirrors the config loader's regular-file and size limits and
+/// rechecks the opened descriptor in case the path changes between metadata
+/// lookup and open.
+fn read_regular_config_file(path: &Path) -> Option<(fs::Metadata, Vec<u8>)> {
+    let preliminary = fs::metadata(path).ok()?;
+    if !preliminary.file_type().is_file() || preliminary.len() > MAX_CONFIG_BYTES as u64 {
+        return None;
+    }
+    let descriptor = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .ok()?;
+    let file = fs::File::from(descriptor);
+    let metadata = file.metadata().ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES as u64 {
+        return None;
+    }
+    let mut contents = Vec::new();
+    file.take(MAX_CONFIG_BYTES as u64 + 1)
+        .read_to_end(&mut contents)
+        .ok()?;
+    (contents.len() <= MAX_CONFIG_BYTES).then_some((metadata, contents))
+}
+
+fn file_content_fingerprint(path: &Path) -> Option<u64> {
+    let (_, contents) = read_regular_config_file(path)?;
+    Some(stable_content_fingerprint(&contents))
+}
+
+fn stable_content_fingerprint(contents: &[u8]) -> u64 {
+    // FNV-1a is deterministic across compiler versions and sensitive to byte
+    // order, unlike a commutative chunk sum.
+    contents.iter().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
 }
 
@@ -483,9 +527,11 @@ fn safe_reload_error(error: &anyhow::Error) -> String {
 fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>)> {
     for _attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
         let before = file_stamp(path);
+        let content_before = file_content_fingerprint(path);
         let config = Config::load(path)?;
         let after = file_stamp(path);
-        if before == after {
+        let content_after = file_content_fingerprint(path);
+        if before == after && content_before == content_after {
             return Ok((config, after));
         }
     }
@@ -507,11 +553,11 @@ fn load_for_mode(
     for attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
         let (mut base, stamp) = load_consistent(path)?;
         if fleet {
-            let before = standard_fleet_signature();
+            let before = standard_fleet_content_signature();
             // Kept typed so `safe_reload_error` can report what went wrong.
             let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
                 .map_err(anyhow::Error::new)?;
-            let after = standard_fleet_signature();
+            let after = standard_fleet_content_signature();
             if before != after {
                 if attempt + 1 == MAX_CONSISTENCY_ATTEMPTS {
                     anyhow::bail!(
@@ -577,6 +623,43 @@ fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
     hasher.finish()
 }
 
+/// Exact content signature for the background fleet load consistency check.
+/// Keep content I/O off the reactor; `fleet_signature_for` above is the fast
+/// metadata-only change probe used there.
+fn standard_fleet_content_signature() -> u64 {
+    match FleetConfig::standard_source_files() {
+        Ok(paths) => {
+            let mut hasher = DefaultHasher::new();
+            let mut paths: Vec<_> = paths.into_iter().collect();
+            paths.sort();
+            for path in paths {
+                path.hash(&mut hasher);
+                match read_regular_config_file(&path) {
+                    Some((_, contents)) => {
+                        b"contents".hash(&mut hasher);
+                        stable_content_fingerprint(&contents).hash(&mut hasher);
+                    }
+                    None => {
+                        b"unavailable".hash(&mut hasher);
+                        if let Ok(metadata) = fs::metadata(&path) {
+                            metadata.len().hash(&mut hasher);
+                            metadata.ino().hash(&mut hasher);
+                            metadata.ctime().hash(&mut hasher);
+                            metadata.ctime_nsec().hash(&mut hasher);
+                        }
+                    }
+                }
+            }
+            hasher.finish()
+        }
+        Err(error) => {
+            let mut hasher = DefaultHasher::new();
+            error.to_string().hash(&mut hasher);
+            hasher.finish()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,6 +720,28 @@ mod tests {
         fs::write(&nested, "after!").unwrap();
         assert_eq!(fs::metadata(&nested).unwrap().len(), 6);
         let after = fleet_signature_for([nested.clone()]);
+
+        assert_ne!(before, after);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn background_content_fingerprint_tracks_same_size_rewrites() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-config-fingerprint-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let config = root.join("expansions.toml");
+        fs::write(&config, "before").unwrap();
+        let before = file_content_fingerprint(&config);
+        fs::write(&config, "after!").unwrap();
+        assert_eq!(fs::metadata(&config).unwrap().len(), 6);
+        let after = file_content_fingerprint(&config);
 
         assert_ne!(before, after);
         fs::remove_dir_all(root).unwrap();
