@@ -189,10 +189,55 @@ pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json:
     })
 }
 
-/// Print the running daemon's output health. Returns false when the daemon
-/// reports a stalled output route or refuses all typed expansions; an
-/// unreachable daemon is not a failure here (doctor also runs before the
-/// service is started).
+pub(crate) fn runtime_route_summary(snapshot: &serde_json::Value) -> serde_json::Value {
+    let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
+    let number = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_u64);
+    let insertion_mode = text("inject_insertion_mode").or_else(|| text("backend_mode"));
+    let latency = |prefix: &str| {
+        serde_json::json!({
+            "p50_us": number(&format!("{prefix}_latency_p50_us")),
+            "p95_us": number(&format!("{prefix}_latency_p95_us")),
+            "p99_us": number(&format!("{prefix}_latency_p99_us")),
+            "sample_count": number(&format!("{prefix}_latency_sample_count")),
+        })
+    };
+    serde_json::json!({
+        "capture_source": text("source"),
+        "injection_backend": text("backend"),
+        "backend_mode": text("backend_mode"),
+        "insertion_mode": insertion_mode,
+        "keysym_fallback": insertion_mode.is_some_and(|mode| mode.contains("keysym fallback")),
+        "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
+        "injection_latency": latency("injection"),
+        "matcher_latency": latency("matcher"),
+        "daemon_compatibility": upgrade_status_from_snapshot(snapshot),
+    })
+}
+
+fn print_percentiles(label: &str, metrics: &serde_json::Value) {
+    if metrics["sample_count"].as_u64().unwrap_or(0) == 0 {
+        return;
+    }
+    let percentile = |name: &str| match metrics[name].as_u64() {
+        Some(value) => format!("{value} µs"),
+        None => "n/a".to_owned(),
+    };
+    println!(
+        "{label}: p50 {}, p95 {}, p99 {}, {} samples",
+        percentile("p50_us"),
+        percentile("p95_us"),
+        metrics["p99_us"]
+            .as_u64()
+            .map(|value| format!("{value} µs"))
+            .unwrap_or_else(|| "n/a".to_owned()),
+        metrics["sample_count"].as_u64().unwrap_or(0)
+    );
+}
+
+/// Print the running daemon's route and output health. Returns false when the
+/// daemon reports a stalled output route, refuses typed expansions, or is
+/// stale/incompatible with this CLI. An unreachable daemon is not a failure
+/// here (doctor also runs before the service is started).
 pub(crate) fn print_output_health_diagnostics() -> bool {
     let Some(snapshot) = read_daemon_status()
         .ok()
@@ -200,6 +245,46 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     else {
         return true;
     };
+    let route = runtime_route_summary(&snapshot);
+    if let (Some(source), Some(backend)) = (
+        route["capture_source"].as_str(),
+        route["injection_backend"].as_str(),
+    ) {
+        println!("Active route: {source} capture → {backend} injection");
+    }
+    if let Some(mode) = route["insertion_mode"].as_str() {
+        println!("Injection mode: {mode}");
+    }
+    if let Some(detail) = route["backend_mode"].as_str() {
+        if Some(detail) != route["insertion_mode"].as_str() {
+            println!("Injection detail: {detail}");
+        }
+    }
+    if route["keysym_fallback"] == true {
+        println!(
+            "Injection warning: keysym fallback types text key by key; Unicode coverage is limited and longer expansions take longer."
+        );
+    }
+    match route["sensitive_field_detection"].as_bool() {
+        Some(true) => println!("Sensitive-field detection: available on the active capture route"),
+        Some(false) => println!(
+            "Sensitive-field warning: the active capture route cannot identify password fields"
+        ),
+        None => println!("Sensitive-field detection: not reported by the active daemon"),
+    }
+    print_percentiles("Backend injection latency", &route["injection_latency"]);
+    print_percentiles("Matcher latency", &route["matcher_latency"]);
+    let daemon_status = route["daemon_compatibility"]["status"]
+        .as_str()
+        .unwrap_or("unverified");
+    if daemon_status != "current" {
+        println!(
+            "Daemon compatibility: {daemon_status} — {}",
+            route["daemon_compatibility"]["action"]
+                .as_str()
+                .unwrap_or("verify the daemon before relying on these diagnostics")
+        );
+    }
     let insertion = insertion_from_status(&snapshot);
     if let Some(explanation) = insertion["explanation"].as_str() {
         println!("Insertion: {explanation}");
@@ -236,7 +321,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         );
         return false;
     }
-    insertion_ok
+    insertion_ok && matches!(daemon_status, "current" | "unverified")
 }
 
 pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {
@@ -337,6 +422,59 @@ pub(crate) fn upgrade_status_unavailable() -> serde_json::Value {
         "compatible": false,
         "commit_matches": false,
     })
+}
+
+#[cfg(test)]
+mod runtime_route_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_route_summary_separates_fallback_and_latency_metrics() {
+        let snapshot = serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "backend_mode": "ei_keyboard keysym fallback (12ms key pacing)",
+            "inject_insertion_mode": "libei keysym fallback",
+            "capture_sensitive_focus": false,
+            "injection_latency_p50_us": 300_000,
+            "injection_latency_p95_us": 1_200_000,
+            "injection_latency_p99_us": 1_300_000,
+            "injection_latency_sample_count": 12,
+            "matcher_latency_p50_us": 4,
+            "matcher_latency_p95_us": 12,
+            "matcher_latency_p99_us": 20,
+            "matcher_latency_sample_count": 500,
+            "status_schema": CONTROL_STATUS_SCHEMA,
+            "daemon_commit": crate::build_info::COMMIT,
+        });
+
+        let summary = runtime_route_summary(&snapshot);
+
+        assert_eq!(summary["capture_source"], "evdev");
+        assert_eq!(summary["injection_backend"], "libei");
+        assert_eq!(summary["keysym_fallback"], true);
+        assert_eq!(summary["sensitive_field_detection"], false);
+        assert_eq!(summary["injection_latency"]["p95_us"], 1_200_000);
+        assert_eq!(summary["injection_latency"]["sample_count"], 12);
+        assert_eq!(summary["matcher_latency"]["p95_us"], 12);
+        assert_eq!(summary["matcher_latency"]["sample_count"], 500);
+        assert_eq!(summary["daemon_compatibility"]["status"], "current");
+    }
+
+    #[test]
+    fn runtime_route_summary_identifies_a_stale_daemon_build() {
+        let snapshot = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA,
+            "daemon_commit": "old-build",
+        });
+
+        let summary = runtime_route_summary(&snapshot);
+
+        assert_eq!(
+            summary["daemon_compatibility"]["status"],
+            "restart-required"
+        );
+    }
 }
 
 #[cfg(test)]
