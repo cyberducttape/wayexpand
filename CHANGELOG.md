@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Git synchronization now writes large index updates through the supervised
   nonblocking stdin pipe, so a stalled Git process or inherited pipe cannot
   strand a writer-thread join beyond the command deadline.
+- Added regression coverage for bounded input/output queues: overflow resets
+  stale keyboard input, fresh input resumes afterward, and the output actor
+  accepts new transactions once queued work drains. The production acceptance
+  checklist now links to these exact scenarios.
 - GUI latency diagnostics now label matcher and backend injection latency
   explicitly, and accessibility tests cover the keysym-fallback warning and
   the separate percentile rows.

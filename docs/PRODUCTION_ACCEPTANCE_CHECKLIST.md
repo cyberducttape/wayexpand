@@ -47,7 +47,13 @@ session evidence; unit tests alone do not satisfy them.
 - [ ] Complete a 24-hour continuous desktop soak test.
 - [ ] Demonstrate stable memory, thread count, and file descriptors during
       that soak.
-- [ ] Demonstrate bounded behavior and recovery under event-queue saturation.
+- [x] Demonstrate bounded behavior and recovery under event-queue saturation.
+      Evdev and input-method event queues reset stale input and accept fresh
+      input after overflow; the serialized output queue rejects excess work
+      and accepts new transactions after draining. Regression tests are
+      `pending_event_overflow_resets_the_queue_and_accepts_fresh_input`,
+      `protocol_event_queue_is_bounded_and_fails_closed`, and
+      `full_transaction_queue_rejects_excess_work_and_recovers`.
 
 The currently open items are intentional production gates. In particular,
 evdev must not be treated as approved merely because its unit starts, and
