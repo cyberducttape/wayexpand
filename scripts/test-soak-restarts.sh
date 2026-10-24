@@ -33,6 +33,17 @@ restart_count=$(sed -n 's/^daemon_restarts=//p' "$report_dir/summary.txt")
 test "$(wc -l <"$report_dir/daemon-restart-latency-ms.txt")" -eq "$restart_count"
 grep -Eq '^restart_latency_p50_ms=[0-9]+\.[0-9]{3}$' "$report_dir/summary.txt"
 grep -Eq '^restart_latency_p95_ms=[0-9]+\.[0-9]{3}$' "$report_dir/summary.txt"
+for environment in /proc/[0-9]*/environ; do
+    [ -r "$environment" ] || continue
+    runtime_value=$(cat "$environment" 2>/dev/null | tr '\0' '\n' \
+        | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1) || continue
+    case "$runtime_value" in
+        "$runtime_tmp"/wayexpand-soak.*)
+            printf '%s\n' 'completed soak left a process running in its private runtime' >&2
+            exit 1
+            ;;
+    esac
+done
 if find "$runtime_tmp" -mindepth 1 -maxdepth 1 -type d -name 'wayexpand-soak.*' -print -quit | grep -q .; then
     printf '%s\n' 'restart soak left its private runtime directory behind' >&2
     exit 1
