@@ -32,6 +32,9 @@ grep -F -- 'runner-preflight:' "$workflow" >/dev/null
 grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
+grep -F -- 'Missing CERTIFICATION_RUNNER_TOKEN.' "$workflow" >/dev/null
+grep -F -- 'Could not list repository Actions runners.' "$workflow" >/dev/null
+grep -F -- 'GITHUB_STEP_SUMMARY' "$workflow" >/dev/null
 grep -F -- 'actions: read' "$workflow" >/dev/null
 grep -F -- 'fromJSON(needs.runner-preflight.outputs.matrix)' "$workflow" >/dev/null
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null

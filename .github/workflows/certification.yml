@@ -38,11 +38,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$CERTIFICATION_RUNNER_TOKEN" ]; then
-            echo 'Missing CERTIFICATION_RUNNER_TOKEN; configure a fine-grained token with repository Administration: read permission.' >&2
+            message='Missing CERTIFICATION_RUNNER_TOKEN. Configure a fine-grained token with repository Administration: read permission, then store it as this repository secret.'
+            echo "$message" >&2
+            echo "## Compositor certification unavailable" >>"$GITHUB_STEP_SUMMARY"
+            echo "$message" >>"$GITHUB_STEP_SUMMARY"
+            echo 'No compositor runner was queried and no certification result was produced.' >>"$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           export GH_TOKEN="$CERTIFICATION_RUNNER_TOKEN"
-          runners_json="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100")"
+          if ! runners_json="$(gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100")"; then
+            message='Could not list repository Actions runners. Verify that CERTIFICATION_RUNNER_TOKEN is valid and has repository Administration: read permission.'
+            echo "$message" >&2
+            echo "## Compositor certification unavailable" >>"$GITHUB_STEP_SUMMARY"
+            echo "$message" >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           # compositor, certification backend, production required.
           # Raw evdev is a compatibility fallback, not a production-safe
           # certification route: it cannot observe sensitive fields or make
@@ -73,8 +83,14 @@ jobs:
             fi
           done <<<"$targets"
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Missing online self-hosted certification runners for required compositors: ${missing[*]}" >&2
+            message="Missing online self-hosted certification runners for required compositors: ${missing[*]}"
+            echo "$message" >&2
             echo 'Register runners with labels: wayexpand-certification plus the compositor label.' >&2
+            {
+              echo '## Compositor certification unavailable'
+              echo "$message"
+              echo 'Register online self-hosted runners with labels `wayexpand-certification` and the compositor name.'
+            } >>"$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           printf 'matrix=%s\n' "$(jq -c '{include: .}' <<<"$include")" >>"$GITHUB_OUTPUT"
