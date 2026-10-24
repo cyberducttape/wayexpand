@@ -212,8 +212,31 @@ impl Draft {
 /// Return action IDs from the operator's broker policy for the editor's
 /// picker. The text field remains editable so a policy can be prepared before
 /// the broker is installed or while a fleet-managed policy is being rolled out.
-pub(crate) fn broker_action_ids() -> Vec<String> {
-    let path = std::env::var_os("WAYEXPAND_ACTION_BROKER_CONFIG")
+///
+/// The picker asks on every frame it is shown, so the answer is cached for
+/// [`BROKER_ACTIONS_REFRESH`]; edits to the policy appear within that time.
+pub(crate) fn broker_action_ids() -> std::sync::Arc<[String]> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<[String]>)>> =
+        std::sync::Mutex::new(None);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((read_at, ids)) = cache.as_ref() {
+        if read_at.elapsed() < BROKER_ACTIONS_REFRESH {
+            return std::sync::Arc::clone(ids);
+        }
+    }
+    let ids: std::sync::Arc<[String]> = read_broker_action_ids(&broker_config_path()).into();
+    *cache = Some((std::time::Instant::now(), std::sync::Arc::clone(&ids)));
+    ids
+}
+
+const BROKER_ACTIONS_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
+/// Far above any real broker policy; anything larger is not read.
+const MAX_BROKER_CONFIG_BYTES: u64 = 1024 * 1024;
+
+fn broker_config_path() -> std::path::PathBuf {
+    std::env::var_os("WAYEXPAND_ACTION_BROKER_CONFIG")
         .map(std::path::PathBuf::from)
         .or_else(|| {
             std::env::var_os("XDG_CONFIG_HOME").map(|dir| {
@@ -225,10 +248,35 @@ pub(crate) fn broker_action_ids() -> Vec<String> {
         .unwrap_or_else(|| {
             std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
                 .join(".config/wayexpand/broker.toml")
-        });
-    let Ok(source) = std::fs::read_to_string(path) else {
+        })
+}
+
+fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    // Non-blocking, so a FIFO at the path cannot stall the UI thread; only
+    // a bounded regular file is read.
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)
+    else {
         return Vec::new();
     };
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_BROKER_CONFIG_BYTES)
+    {
+        return Vec::new();
+    }
+    let mut source = String::new();
+    if file
+        .take(MAX_BROKER_CONFIG_BYTES)
+        .read_to_string(&mut source)
+        .is_err()
+    {
+        return Vec::new();
+    }
     let Ok(document) = source.parse::<toml_edit::DocumentMut>() else {
         return Vec::new();
     };
@@ -252,4 +300,37 @@ pub(crate) fn with_pending_token(tokens: &[String], pending: &str) -> Vec<String
         committed.push(pending.to_owned());
     }
     committed
+}
+
+#[cfg(test)]
+mod broker_policy_tests {
+    use super::read_broker_action_ids;
+
+    #[test]
+    fn broker_action_ids_read_a_policy_and_never_block_on_a_fifo() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-gui-broker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let policy = directory.join("broker.toml");
+        std::fs::write(
+            &policy,
+            "[actions.restart-web]\nprogram = \"/bin/true\"\n[actions.backup]\nprogram = \"/bin/true\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_broker_action_ids(&policy), ["backup", "restart-web"]);
+
+        let fifo = directory.join("fifo.toml");
+        let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        let started = std::time::Instant::now();
+        assert!(read_broker_action_ids(&fifo).is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

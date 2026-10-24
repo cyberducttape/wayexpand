@@ -418,7 +418,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let reload_store = Arc::clone(&store);
     let reload_config = Arc::clone(&factory_config);
     let reload_instances = Arc::clone(&instances);
-    let config_watch_path = path.clone();
+    let config_watch_path = path;
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
         .spawn(move || {
@@ -517,7 +517,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .name(BUS_NAME)?
         .serve_at(FACTORY_PATH, factory)?
         .build()?;
-    *connection_slot.lock().expect("connection slot") = Some(connection.clone());
+    *connection_slot.lock().expect("connection slot") = Some(connection);
     loop {
         std::thread::park();
     }

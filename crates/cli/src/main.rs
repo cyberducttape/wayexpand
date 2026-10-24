@@ -144,8 +144,12 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Configure a safe compatibility mode",
             ),
             (
-                "doctor [--json] [--certify] [config]",
-                "Diagnose the desktop or run isolated live insertion checks",
+                "doctor [--json] [config]",
+                "Diagnose configuration, backends and the running daemon",
+            ),
+            (
+                "doctor --certify [--json]",
+                "Run isolated live insertion checks in a private KWin",
             ),
             (
                 "upgrade-status [--json]",

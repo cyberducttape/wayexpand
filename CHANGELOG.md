@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- In managed safe mode, snippet-pack imports can no longer replace the
+  organization’s required signer list with a caller-supplied `--signers` file.
+- The GUI’s managed-action picker now bounds broker-policy reads, avoids
+  blocking on special files, refreshes at most every two seconds, and shares
+  cached action IDs without cloning the whole list on each frame.
+- CLI help and the manual now list isolated `doctor --certify` separately and
+  document pack operations and the reviewed-revision requirement for executable
+  snippets during Git sync.
+- The Debian/RPM packaging job frees Debian build outputs and its duplicate
+  extracted source before running the RPM workspace tests, reducing peak
+  temporary storage use.
 - Fixed the wlroots virtual-keyboard output route typing the wrong keys. It
   sent XKB keycodes where the protocol expects evdev codes, so every client
   decoded each key 8 positions off: BackSpace never erased and replacements

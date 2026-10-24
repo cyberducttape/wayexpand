@@ -126,7 +126,8 @@ support@example.com namespaces="wayexpand-pack" ssh-ed25519 AAAA...
 
 In safe mode, `require_signed_packs = true` accepts only packs signed by a
 signer in `pack_signers_file` (default `/etc/wayexpand/pack-signers`), which
-must be root-owned and not writable by others. This applies to `pack import`
+must be root-owned and not writable by others; `pack import --signers FILE`
+is refused rather than trusting a signers file the user chose. This applies to `pack import`
 and to the fleet pack layer: a pack directory under
 `~/.local/share/wayexpand/packs/` that contains a manifest is loaded from its
 `snippets/` directory as managed, read-only snippets, separate from the user's

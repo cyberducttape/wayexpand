@@ -100,7 +100,7 @@ fn run_sync_command(cli: std::path::PathBuf, config: std::path::PathBuf) -> Resu
     if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
         supervisor.kill_group();
         let _ = supervisor.reap();
-        return Err(error.to_string());
+        return Err(error);
     }
     let mut stdout_bytes = Vec::new();
     let mut stderr_bytes = Vec::new();

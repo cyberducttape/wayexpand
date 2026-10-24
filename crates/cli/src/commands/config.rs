@@ -427,6 +427,21 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
     Ok(())
 }
 
+/// When policy requires signed packs, its signers file is the
+/// organization's trust root: a signers file the user chooses would let any
+/// self-signed pack through.
+fn pack_signers_override_refusal(
+    policy: &wayexpand_core::OrganizationPolicy,
+    signers_overridden: bool,
+) -> Option<String> {
+    (signers_overridden && policy.safe_mode && policy.require_signed_packs).then(|| {
+        format!(
+            "organization policy requires packs signed by a signer in {}; --signers cannot replace it",
+            policy.pack_signers_file
+        )
+    })
+}
+
 pub(crate) fn pack_command(args: Args) -> Result<()> {
     const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory> [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
@@ -447,6 +462,9 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     // Verify a signature when present; require one when policy says so.
     let check_signature = || -> Result<Option<String>> {
         let required = policy.safe_mode && policy.require_signed_packs;
+        if let Some(refusal) = pack_signers_override_refusal(&policy, !policy_signers) {
+            return Err(config_error(refusal));
+        }
         let verified = if policy_signers {
             wayexpand_core::trusted_signers_file(&signers)
                 .and_then(|()| wayexpand_core::verify_pack_signature(&path, &signers))
@@ -956,4 +974,27 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod pack_policy_tests {
+    use super::pack_signers_override_refusal;
+
+    #[test]
+    fn required_pack_signatures_refuse_a_user_chosen_signers_file() {
+        let mut policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_signed_packs: true,
+            ..Default::default()
+        };
+        assert!(pack_signers_override_refusal(&policy, true).is_some());
+        assert!(pack_signers_override_refusal(&policy, false).is_none());
+        // Without the requirement, an explicit signers file is the user's
+        // own verification choice.
+        policy.require_signed_packs = false;
+        assert!(pack_signers_override_refusal(&policy, true).is_none());
+        policy.require_signed_packs = true;
+        policy.safe_mode = false;
+        assert!(pack_signers_override_refusal(&policy, true).is_none());
+    }
 }

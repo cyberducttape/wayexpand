@@ -73,9 +73,9 @@ pub fn emit() {
             .is_ok_and(|status| status.success());
 
     let version = match sha.as_deref() {
-        Some(_sha) if exact_release => package_version.clone(),
+        Some(_sha) if exact_release => package_version,
         Some(sha) => format!("{package_version}-dev+{sha}"),
-        None => package_version.clone(),
+        None => package_version,
     };
     let commit = sha.unwrap_or_else(|| "unknown".to_owned());
 

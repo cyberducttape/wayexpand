@@ -513,6 +513,10 @@ jobs:
             '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
             dpkg-deb -c "$deb" | grep -F "$path"
           done
+          # The RPM build below compiles and tests the workspace again; the
+          # Debian build's outputs would otherwise exhaust the runner's disk.
+          rm -rf target debian/wayexpand debian/.debhelper
+          df -h . /tmp
       - name: Build RPM package and inspect manifest
         run: |
           deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
@@ -526,6 +530,7 @@ jobs:
           cp -a .cargo vendor "$source_dir/"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
+          rm -rf "$top/sources"
           timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nodeps \
             --define "_topdir $top/rpmbuild" \
             --define "_sourcedir $top/rpmbuild/SOURCES" \

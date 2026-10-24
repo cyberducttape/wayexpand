@@ -69,11 +69,11 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     } else if let Some(mode) = requested_mode {
         setup_backend_for_mode(&mode, &capabilities, &policy)?
     } else if assume_yes {
-        automatic.backend.to_owned()
+        automatic.backend
     } else {
         let prompt = format!("Configure Recommended mode ({})? [Y/n] ", automatic.label);
         if prompt_yes_no(&prompt, true)? {
-            automatic.backend.to_owned()
+            automatic.backend
         } else {
             prompt_mode_choice(&capabilities, &policy)?
         }

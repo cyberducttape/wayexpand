@@ -605,10 +605,7 @@ pub(crate) fn rebase_change(
     let base_by_id = by_id(base);
     let candidate_by_id = by_id(candidate);
     let mut result = onto.clone();
-    let mut result_by_id = by_id(onto)
-        .into_iter()
-        .map(|(id, expansion)| (id.to_owned(), expansion.clone()))
-        .collect::<HashMap<_, _>>();
+    let mut result_by_id = by_id(onto).into_iter().collect::<HashMap<_, _>>();
     let mut conflicts = Vec::new();
     let detect = mode == Rebase::DetectConflicts;
     // Removed locally.

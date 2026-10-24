@@ -32,9 +32,9 @@ application-filter rules as typed triggers; command snippets are not run.
 .B status [--json]
 Show the active daemon status. The JSON form is stable for automation.
 .TP
-.B doctor [--json] [--certify] [CONFIG]
+.B doctor [--json] [CONFIG] | doctor --certify [--json]
 Report available input and output backends and their compatibility. With
-B--certifyR, run safe insertion and focus checks in a private headless KWin
+\fB--certify\fR, run safe insertion and focus checks in a private headless KWin
 session, then report the test client's observed results. This does not change
 the active desktop or daemon. Keyboard capture and several desktop behaviors
 remain explicitly untested. Unicode insertion is verified only when the
@@ -49,10 +49,12 @@ Compare the running daemon's build and status protocol with this CLI. The
 read-only report identifies a current, stale, incompatible, unverified, or
 unavailable daemon; it never restarts or mutates a service.
 .TP
-.B sync [init [--remote URL]|status] [--json] [CONFIG]
+.B sync [init [--remote URL]|status] [--json] [--allow-executable --approved-revision FULL_COMMIT] [CONFIG]
 Synchronize the snippet library with Git. \fBinit\fR tracks only the library
 files in the configuration directory; a sync validates, commits, rebases,
-re-validates (rolling back an invalid merge), and pushes.
+re-validates (rolling back an invalid merge), and pushes. A synced library that
+contains command-backed snippets is refused unless \fB--allow-executable\fR
+names the reviewed commit with \fB--approved-revision\fR.
 .TP
 .B stats [--json] [--days N] [--clear] [CONFIG]
 Show local usage statistics: recent expansions, keystrokes avoided, most-used
@@ -123,6 +125,12 @@ Parse and validate a configuration file without starting the daemon. With
 .TP
 .B backup [CONFIG] [DESTINATION]
 Create a private, non-overwriting configuration backup.
+.TP
+.B pack inspect|import|verify DIRECTORY [--signers FILE] | pack sign DIRECTORY --key FILE
+Inspect, verify, or import a local snippet pack, or sign one with an SSH key.
+Import prints the converted TOML with command actions disabled. When
+organization policy requires signed packs, only signers in its
+\fBpack_signers_file\fR are accepted and \fB--signers\fR is refused.
 .TP
 .B backend
 Show implementation and environment status for backend paths.

@@ -53,15 +53,15 @@ impl GuiApp {
                                 &draft.command_action
                             })
                             .show_ui(ui, |ui| {
-                                for action_id in action_ids {
+                                for action_id in action_ids.iter() {
                                     if ui
                                         .selectable_label(
-                                            draft.command_action == action_id,
-                                            &action_id,
+                                            draft.command_action == *action_id,
+                                            action_id,
                                         )
                                         .clicked()
                                     {
-                                        draft.command_action = action_id;
+                                        draft.command_action = action_id.clone();
                                     }
                                 }
                             });

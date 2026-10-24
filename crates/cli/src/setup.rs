@@ -77,9 +77,7 @@ pub(crate) fn setup_backend_for_mode(
     policy: &OrganizationPolicy,
 ) -> Result<String> {
     match mode {
-        "recommended" => Ok(recommended_setup_backend(capabilities, policy)
-            .backend
-            .to_owned()),
+        "recommended" => Ok(recommended_setup_backend(capabilities, policy).backend),
         "maximum" => {
             if !capabilities.has_dev_input {
                 bail!("Maximum compatibility requires a readable /dev/input keyboard")

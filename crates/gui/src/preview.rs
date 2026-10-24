@@ -39,9 +39,7 @@ pub(crate) fn command_preview_policy_violation(
     if command.action.is_some() {
         return None;
     }
-    effective
-        .command_path_violation(&command.program)
-        .map(|reason| reason.to_string())
+    effective.command_path_violation(&command.program)
 }
 
 #[cfg(test)]

@@ -969,7 +969,7 @@ impl ExpansionEngine {
             }),
             undoable: true,
             command: plan.command.as_ref().map(|c| (**c).clone()),
-            form: plan.form.clone(),
+            form: plan.form,
         })
     }
 
