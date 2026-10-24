@@ -7,14 +7,46 @@ use action_broker::{
     ActionConfig, ActionOutput, ActionRequest, ActionResponse, BrokerClient, BrokerConfig,
     BrokerServer,
 };
-use std::os::unix::fs::PermissionsExt;
-use std::time::Duration;
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+struct BrokerChild(Child);
+
+impl Drop for BrokerChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
 
 fn test_socket(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("wayexpand-broker-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     dir.join(name)
+}
+
+fn private_test_directory(name: &str) -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").expect("HOME is required for secure broker tests");
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::path::PathBuf::from(home)
+        .join(format!(".wayexpand-{name}-{}-{suffix}", std::process::id()));
+    fs::create_dir(&directory).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    directory
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[test]
@@ -87,6 +119,106 @@ async fn broker_client_server_echo_request_response() {
 
     // Wait for server thread
     server_handle.join().expect("broker server thread panicked");
+}
+
+#[test]
+fn sigterm_cancels_running_action_and_flushes_required_audit() {
+    let directory = private_test_directory("sigterm-shutdown");
+    let socket_path = directory.join("broker.sock");
+    let audit_path = directory.join("sigterm-shutdown-audit.jsonl");
+    let config_path = directory.join("sigterm-shutdown.toml");
+    let marker_path = directory.join("sigterm-action-started");
+    let action_command = format!(
+        ": > {}; while :; do printf x; done",
+        shell_quote(&marker_path.to_string_lossy())
+    );
+    let config = format!(
+        r#"[broker]
+audit_path = {:?}
+audit_required = true
+
+[actions.stream]
+program = "/bin/sh"
+args = ["-c", {:?}]
+timeout_ms = 60000
+"#,
+        audit_path.to_string_lossy(),
+        action_command
+    );
+    fs::write(&config_path, config).unwrap();
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let mut broker = BrokerChild(
+        Command::new(env!("CARGO_BIN_EXE_wayexpand-action-broker"))
+            .args(["--config", config_path.to_str().unwrap(), "--socket"])
+            .arg(&socket_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("start broker process"),
+    );
+
+    let startup_deadline = Instant::now() + Duration::from_secs(5);
+    while !socket_path.exists() && Instant::now() < startup_deadline {
+        if let Some(status) = broker.0.try_wait().expect("check broker startup") {
+            panic!("broker exited before binding its socket: {status}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket_path.exists(), "broker did not create its socket");
+
+    let mut client = BrokerClient::connect(&socket_path).expect("connect to broker");
+    client
+        .send_request(&ActionRequest {
+            action_id: "stream".to_string(),
+            timeout_ms: 60_000,
+            inherit_env: false,
+            env_vars: vec![],
+            stdout_capture: true,
+        })
+        .expect("submit continuous-output action");
+    let action_deadline = Instant::now() + Duration::from_secs(5);
+    while !marker_path.exists() && Instant::now() < action_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(marker_path.exists(), "action did not start before SIGTERM");
+
+    let shutdown_started = Instant::now();
+    let signal_result = unsafe { libc::kill(broker.0.id() as i32, libc::SIGTERM) };
+    assert_eq!(signal_result, 0, "send SIGTERM to broker");
+
+    let response_deadline = Instant::now() + Duration::from_secs(4);
+    let response = client
+        .recv_response_until(response_deadline, None)
+        .expect("broker should return the cancelled action response");
+    assert!(matches!(response, ActionResponse::Error(_)));
+
+    let shutdown_deadline = Instant::now() + Duration::from_secs(4);
+    let status = loop {
+        if let Some(status) = broker.0.try_wait().expect("check broker shutdown") {
+            break status;
+        }
+        assert!(
+            Instant::now() < shutdown_deadline,
+            "broker exceeded its bounded SIGTERM shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(status.success(), "broker exited unsuccessfully: {status}");
+    assert!(
+        shutdown_started.elapsed() < Duration::from_secs(2),
+        "SIGTERM shutdown was not promptly bounded: {:?}",
+        shutdown_started.elapsed()
+    );
+
+    let audit_contents = fs::read_to_string(&audit_path).expect("required audit was flushed");
+    let audit: serde_json::Value = serde_json::from_str(audit_contents.trim()).unwrap();
+    assert_eq!(audit["action_id"], "stream");
+    assert_eq!(audit["exit_status"], serde_json::Value::Null);
+    assert_eq!(audit["timed_out"], false);
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
