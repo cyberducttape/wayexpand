@@ -581,21 +581,27 @@ fn fleet_signature_for(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
     paths.sort();
     for path in paths {
         path.hash(&mut hasher);
-        // This probe runs periodically on the keyboard loop: a FIFO, device,
-        // or oversized file must neither block it nor force a large read.
-        // Such a file still changes the signature (by type, size and time),
-        // so the reload that follows reports it through the loader.
-        match read_regular_config_file(&path) {
-            Some((_, contents)) => contents.hash(&mut hasher),
-            None => match fs::metadata(&path) {
-                Ok(metadata) => {
-                    b"rejected".hash(&mut hasher);
-                    metadata.file_type().is_file().hash(&mut hasher);
-                    metadata.len().hash(&mut hasher);
-                    metadata.modified().ok().hash(&mut hasher);
-                }
-                Err(_) => b"unreadable".hash(&mut hasher),
-            },
+        // This probe runs on the keyboard reactor when a filesystem event
+        // arrives and during periodic integrity checks. Hash metadata only:
+        // reading every layer here can synchronously pull gigabytes through
+        // the input path for a large library or slow home filesystem. The
+        // background loader still reads and validates the complete contents
+        // before it can promote a new engine.
+        match fs::metadata(&path) {
+            Ok(metadata) => {
+                b"present".hash(&mut hasher);
+                metadata.file_type().is_file().hash(&mut hasher);
+                metadata.len().hash(&mut hasher);
+                metadata.modified().ok().hash(&mut hasher);
+                metadata.ino().hash(&mut hasher);
+                metadata.dev().hash(&mut hasher);
+                metadata.ctime().hash(&mut hasher);
+                metadata.ctime_nsec().hash(&mut hasher);
+            }
+            Err(error) => {
+                b"unreadable".hash(&mut hasher);
+                error.kind().hash(&mut hasher);
+            }
         }
     }
     hasher.finish()
@@ -643,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn fleet_signature_tracks_nested_pack_file_content() {
+    fn fleet_signature_tracks_same_size_nested_pack_rewrites() {
         let root = std::env::temp_dir().join(format!(
             "wayexpand-fleet-signature-{}-{}",
             std::process::id(),
@@ -655,9 +661,11 @@ mod tests {
         let nested = root.join("my-pack").join("foo.toml");
         fs::create_dir_all(nested.parent().unwrap()).unwrap();
         fs::write(&nested, "before").unwrap();
+        assert_eq!(fs::metadata(&nested).unwrap().len(), 6);
 
         let before = fleet_signature_for([nested.clone()]);
         fs::write(&nested, "after!").unwrap();
+        assert_eq!(fs::metadata(&nested).unwrap().len(), 6);
         let after = fleet_signature_for([nested.clone()]);
 
         assert_ne!(before, after);
