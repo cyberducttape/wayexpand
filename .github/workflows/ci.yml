@@ -433,7 +433,7 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install headless compositor dependencies
-        run: sudo apt-get update && sudo apt-get install -y dbus-daemon jq kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
       - name: Test isolated doctor certification report

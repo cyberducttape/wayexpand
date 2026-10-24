@@ -61,8 +61,13 @@ time.sleep(0.05)
 os.kill(int(os.environ["BROKER_PID"]), signal.SIGTERM)
 response = json.loads(client.makefile("rb").readline())
 client.close()
-assert response["Success"]["stdout"] == "broker-e2e-pass", response
-assert response["Success"]["exit_code"] == 0, response
+assert response == {
+    "Error": {
+        "CommunicationError": {
+            "reason": "action was cancelled because the broker is shutting down"
+        }
+    }
+}, response
 PY
 
 wait "$broker_pid"
@@ -74,7 +79,11 @@ import os
 
 with open(os.environ["AUDIT_FILE"], encoding="utf-8") as audit:
     events = [json.loads(line) for line in audit if line.strip()]
-assert any(event["action_id"] == "integration-echo" for event in events), events
+cancelled = [event for event in events if event["action_id"] == "integration-echo"]
+assert len(cancelled) == 1, events
+assert cancelled[0]["exit_status"] is None, cancelled[0]
+assert cancelled[0]["timed_out"] is False, cancelled[0]
+assert cancelled[0]["output_size"] == 0, cancelled[0]
 PY
 
 HEALTH_FILE="$test_root/wayexpand-broker-health.json" python3 - <<'PY'

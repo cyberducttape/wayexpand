@@ -9,7 +9,7 @@ matrix="$project_dir/tests/certification/compositor-matrix.json"
 status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
     "$project_dir/tests/contracts/status-json.json")
 set_status_schema() {
-    sed 's/\$status_schema/'"$status_schema"'/g' "$1" >"$1.tmp"
+    sed "s/\\\$status_schema/$status_schema/g" "$1" >"$1.tmp"
     mv "$1.tmp" "$1"
     chmod 0755 "$1"
 }
