@@ -8,6 +8,8 @@ All notable changes to WayExpand are documented here.
   5.4.1 to 5.4.3. The workspace suite passes with the new lockfile and
   `cargo audit` no longer reports a yanked package; it reports only the
   already-documented informational zbus 5 unmaintained notices.
+- CI now treats yanked locked dependencies as a failing security-audit result,
+  preventing a later lockfile update from silently reintroducing one.
 
 - Preserved the 11/11 production-daemon KWin 6.6.6 headless end-to-end run as
   a redacted machine-readable artifact. It records the source commit and

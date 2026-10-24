@@ -113,7 +113,9 @@ jobs:
         with:
           toolchain: 1.96.0
       - name: Run cargo audit
-        run: cargo install cargo-audit --version 0.22.2 --locked && cargo audit
+        # Vulnerabilities fail by default; also fail on yanked lockfile entries.
+        # Informational unmaintained advisories are handled by deny.toml.
+        run: cargo install cargo-audit --version 0.22.2 --locked && cargo audit --deny yanked
       - name: Run cargo deny
         run: cargo install cargo-deny --version 0.20.2 --locked && cargo deny check
 
