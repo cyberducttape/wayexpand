@@ -472,7 +472,9 @@ trap 'exit 1' INT TERM
 "$bin/wx-e2e-eis-relay" "$LIBEI_SOCKET" >>"$work/relay.log" 2>&1 &
 relay_pid=$!
 if ! wait_until 50 test -S "$LIBEI_SOCKET"; then
-    printf 'unverified session the EIS relay did not start\n' >>"$results"
+    relay_diagnostic=$(tail -5 "$work/relay.log" 2>/dev/null | tr '\n' ' ' | cut -c 1-512)
+    printf 'unverified session the EIS relay did not start: %s\n' \
+        "${relay_diagnostic:-no relay output}" >>"$results"
     exit 0
 fi
 

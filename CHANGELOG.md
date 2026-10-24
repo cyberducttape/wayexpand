@@ -10,6 +10,14 @@ All notable changes to WayExpand are documented here.
   accented and Japanese output; keysym-only routes show it as not tested.
   Human reports now identify the desktop and use concise scenario labels. CI
   exercises the report contract separately from its mandatory E2E scenarios.
+- A successful action whose required audit sync fails now returns an explicit
+  “completed; verify before retrying” error instead of a generic broker error.
+  Existing action failures remain visible, with the separate audit failure in
+  broker health and the service journal. A required-audit acknowledgment
+  timeout now marks audit health unhealthy as well.
+- Headless KWin CI now preserves failure diagnostics and reports the EIS relay
+  startup error, so compositor-specific integration failures can be diagnosed
+  from the workflow artifact.
 - Updated the locked Windows clipboard dependency from yanked `clipboard-win`
   5.4.1 to 5.4.3. The workspace suite passes with the new lockfile and
   `cargo audit` no longer reports a yanked package; it reports only the

@@ -20,6 +20,7 @@ const MAX_AUDIT_BYTES: u64 = 16 * 1024 * 1024;
 const AUDIT_QUEUE_CAPACITY: usize = 256;
 const AUDIT_BATCH_SIZE: usize = 64;
 const AUDIT_BATCH_WAIT: Duration = Duration::from_millis(100);
+const REQUIRED_AUDIT_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct CallerIdentity {
@@ -122,9 +123,11 @@ impl AuditLogger {
                     "audit writer is unavailable; event dropped",
                 ));
             }
-            return ack_receiver
-                .recv_timeout(Duration::from_secs(2))
-                .map_err(|_| io::Error::other("audit writer did not confirm the event"))?;
+            return receive_required_ack(
+                &ack_receiver,
+                REQUIRED_AUDIT_ACK_TIMEOUT,
+                &self.write_failures,
+            );
         }
         match sender.try_send(AuditMessage::Event(line)) {
             Ok(()) => Ok(()),
@@ -171,6 +174,28 @@ impl AuditLogger {
             if worker.join().is_err() {
                 self.write_failures.fetch_add(1, Ordering::Relaxed);
                 tracing::error!("audit writer thread panicked during shutdown");
+            }
+        }
+    }
+}
+
+fn receive_required_ack(
+    receiver: &mpsc::Receiver<io::Result<()>>,
+    timeout: Duration,
+    write_failures: &AtomicU64,
+) -> io::Result<()> {
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(error) => {
+            write_failures.fetch_add(1, Ordering::Relaxed);
+            match error {
+                mpsc::RecvTimeoutError::Timeout => Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "audit writer did not confirm the event before the deadline",
+                )),
+                mpsc::RecvTimeoutError::Disconnected => Err(io::Error::other(
+                    "audit writer stopped before confirming the event",
+                )),
             }
         }
     }
@@ -443,6 +468,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
         drop(logger);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn required_audit_ack_timeout_marks_audit_health_unhealthy() {
+        let (ack_sender, ack_receiver) = mpsc::sync_channel(1);
+        let failures = AtomicU64::new(0);
+
+        let error = receive_required_ack(&ack_receiver, Duration::from_millis(1), &failures)
+            .expect_err("missing durable acknowledgment must fail closed");
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(failures.load(Ordering::Relaxed), 1);
+        drop(ack_sender);
     }
 
     #[test]

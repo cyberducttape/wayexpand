@@ -334,6 +334,26 @@ fn audit_output_size(response: &action_broker::ActionResponse) -> usize {
     }
 }
 
+fn mandatory_audit_failure_response(
+    response: action_broker::ActionResponse,
+    action_id: &str,
+    error: &std::io::Error,
+) -> action_broker::ActionResponse {
+    match response {
+        action_broker::ActionResponse::Success(_) => {
+            action_broker::ActionResponse::Error(ActionError::Internal {
+                reason: format!(
+                    "action '{action_id}' completed successfully, but its mandatory audit record could not be confirmed as persisted: {error}. Do not retry automatically; verify the action's effects first"
+                ),
+            })
+        }
+        // The action already has a meaningful failure response. Preserve it;
+        // audit health and the broker journal report the separate persistence
+        // failure without obscuring the execution result.
+        error_response @ action_broker::ActionResponse::Error(_) => error_response,
+    }
+}
+
 fn broker_health_path(socket_path: &Path) -> PathBuf {
     socket_path
         .parent()
@@ -727,10 +747,10 @@ async fn run() -> Result<()> {
                 if let Err(error) = audit_result {
                     error!(request_id = %request_id, error = %error, "failed to write action audit event");
                     if audit_required {
-                        action_response = action_broker::ActionResponse::Error(
-                            ActionError::Internal {
-                                reason: format!("mandatory action audit failed: {error}"),
-                            },
+                        action_response = mandatory_audit_failure_response(
+                            action_response,
+                            &action_id,
+                            &error,
                         );
                     }
                 }
@@ -781,6 +801,48 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn required_audit_failure_warns_not_to_retry_a_successful_action() {
+        let response = action_broker::ActionResponse::Success(action_broker::ActionOutput {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            duration_ms: 12,
+        });
+        let error = std::io::Error::other("disk full");
+
+        let response = mandatory_audit_failure_response(response, "restart-service", &error);
+
+        let action_broker::ActionResponse::Error(ActionError::Internal { reason }) = response
+        else {
+            panic!("successful action with failed mandatory audit must be explicit");
+        };
+        assert!(reason.contains("completed successfully"));
+        assert!(reason.contains("disk full"));
+        assert!(reason.contains("Do not retry automatically"));
+    }
+
+    #[test]
+    fn required_audit_failure_preserves_an_existing_action_error() {
+        let response = action_broker::ActionResponse::Error(ActionError::Timeout {
+            action_id: "restart-service".into(),
+            timeout_ms: 500,
+        });
+        let error = std::io::Error::other("disk full");
+
+        let response = mandatory_audit_failure_response(response, "restart-service", &error);
+
+        assert!(matches!(
+            response,
+            action_broker::ActionResponse::Error(ActionError::Timeout {
+                timeout_ms: 500,
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn runtime_threads_fit_the_service_task_limit() {

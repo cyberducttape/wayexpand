@@ -9,6 +9,10 @@ strict_env = true
 # must be private; audit events never include arguments, environment values,
 # or command output.
 # audit_path = "$XDG_STATE_HOME/wayexpand/action-audit.jsonl"
+# Set true to require a synced audit event before reporting action success.
+# If that final write fails or cannot be confirmed after the command succeeds,
+# the broker reports that the action completed and must be verified before retrying.
+# audit_required = false
 
 # Add only commands you explicitly approve. The broker validates executable
 # ownership, permissions, paths, timeouts, and environment allowlists.

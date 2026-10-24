@@ -434,9 +434,17 @@ jobs:
       - name: Install headless compositor dependencies
         run: sudo apt-get update && sudo apt-get install -y dbus-daemon jq kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config
       - name: Test production output and KWin focus tracking
-        run: bash scripts/test-kwin-e2e.sh
+        run: bash scripts/test-kwin-e2e.sh --keep
       - name: Test isolated doctor certification report
         run: bash scripts/test-doctor-certify.sh target/debug/wayexpand
+      - name: Upload headless KWin diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: headless-kwin-diagnostics
+          path: target/kwin-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 3
 
   packaging:
     name: Debian and RPM Package Artifacts
