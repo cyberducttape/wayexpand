@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Headless KWin end-to-end tests.
 #
-#   scripts/test-kwin-e2e.sh [--keep] [SCENARIO...]
+#   scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [SCENARIO...]
 #
 # Starts a private KWin (kwin_wayland --virtual) with its own D-Bus session,
 # runtime directory, home and configuration, then runs the scenarios in
@@ -19,10 +19,14 @@
 set -euo pipefail
 
 keep=false
-if [ "${1:-}" = --keep ]; then
-    keep=true
-    shift
-fi
+allow_unicode_unverified=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --keep) keep=true; shift ;;
+        --allow-unverified-unicode) allow_unicode_unverified=true; shift ;;
+        *) break ;;
+    esac
+done
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 session_driver=$(dirname -- "$0")/kwin-e2e-session.sh
 if [ ! -f "$session_driver" ]; then
@@ -134,15 +138,22 @@ if [ ! -s "$results" ]; then
     tail -20 "$work/kwin.log" >&2
     exit 2
 fi
-pass=0 fail=0 unverified=0
+pass=0 fail=0 unverified=0 required_unverified=0
 while read -r outcome name detail; do
     printf '%-10s %-38s %s\n' "$outcome" "$name" "$detail"
     case "$outcome" in
         pass) pass=$((pass + 1)) ;;
         fail) fail=$((fail + 1)) ;;
-        *) unverified=$((unverified + 1)) ;;
+        *)
+            unverified=$((unverified + 1))
+            [ "$name" = unicode-insertion ] || required_unverified=$((required_unverified + 1))
+            ;;
     esac
 done <"$results"
 printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture simulated)\n' \
     "$pass" "$fail" "$unverified" "$(kwin_wayland --version 2>/dev/null | awk '{print $2}')"
-[ "$fail" -eq 0 ] && [ "$unverified" -eq 0 ]
+[ "$fail" -eq 0 ] && {
+    [ "$unverified" -eq 0 ] || {
+        [ "$allow_unicode_unverified" = true ] && [ "$required_unverified" -eq 0 ]
+    }
+}

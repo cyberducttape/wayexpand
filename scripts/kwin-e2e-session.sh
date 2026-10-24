@@ -447,7 +447,7 @@ EOF
     return "$result"
 }
 
-all_scenarios="expansion-replaces-trigger unicode-insertion word-boundary-reinserts-delimiter cursor-placement
+all_scenarios="expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart"
 

@@ -60,6 +60,7 @@ fn run_harness() -> HarnessResult {
     command
         .args(["--signal=TERM", "--kill-after=10s", "960s"])
         .arg(&script)
+        .arg("--allow-unverified-unicode")
         .args(SCENARIOS)
         .stdin(Stdio::null());
     if let Some((helper_bin, app_bin)) = prebuilt_bin {

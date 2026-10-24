@@ -37,9 +37,12 @@ Report available input and output backends and their compatibility. With
 B--certifyR, run safe insertion and focus checks in a private headless KWin
 session, then report the test client's observed results. This does not change
 the active desktop or daemon. Keyboard capture and several desktop behaviors
-remain explicitly untested; the result is partial evidence, not production
-certification. Binary packages include the test helpers. Source checkouts need
-Rust build tools; either path needs the documented KWin test dependencies.
+remain explicitly untested. Unicode insertion is verified only when the
+negotiated route supports it and the test client receives the exact text; an
+unsupported route is reported as not tested. The result is partial evidence,
+not production certification. Binary packages include the test helpers.
+Source checkouts need Rust build tools; either path needs the documented KWin
+test dependencies.
 .TP
 .B upgrade-status [--json]
 Compare the running daemon's build and status protocol with this CLI. The

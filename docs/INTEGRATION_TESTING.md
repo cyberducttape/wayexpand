@@ -27,8 +27,8 @@ backend behavior.
 
 ## Headless KWin end-to-end harness
 
-`scripts/test-kwin-e2e.sh [--keep] [SCENARIO...]` runs WayExpand against a
-real KWin without touching the desktop: it starts a private
+`scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [SCENARIO...]`
+runs WayExpand against a real KWin without touching the desktop: it starts a private
 `kwin_wayland --virtual` with its own D-Bus session, runtime directory, home,
 and configuration, and stops every process it started (including the portal
 services KWin activates) when it finishes. It needs `kwin_wayland`,
@@ -48,11 +48,13 @@ Inside that session (`scripts/kwin-e2e-session.sh`):
   RemoteDesktop portal, so no consent dialog is involved.
 - **Capture is simulated**: the daemon reads what the user typed from stdin.
   Real keyboard capture needs `/dev/input` or an input method and is not
-  exercised.
+  exercised. The standard E2E suite omits the capability-gated Unicode probe;
+  `doctor --certify` explicitly runs it.
 
 | Scenario | Shows |
 |---|---|
 | `expansion-replaces-trigger` | The trigger is erased and the replacement typed into a real window |
+| `unicode-insertion` | The isolated doctor probe checks exact accented and Japanese text when KWin offers `ei_text`; otherwise it reports `unverified` |
 | `word-boundary-reinserts-delimiter` | Word-boundary triggers keep the typed delimiter |
 | `cursor-placement` | `{{cursor}}` leaves the caret inside the replacement |
 | `multiline-replacement` | Line breaks arrive as Return |
@@ -66,7 +68,10 @@ Inside that session (`scripts/kwin-e2e-session.sh`):
 
 Each line of the summary is `pass`, `fail`, or `unverified` (the scenario
 could not set itself up). The script exits non-zero unless every selected
-scenario passes; `--keep` leaves logs and sink states under `target/`.
+scenario passes. The doctor uses `--allow-unverified-unicode` because KWin may
+offer only the keysym route; this permits that single capability-gated scenario
+to remain unverified while all other scenarios must pass. `--keep` leaves logs
+and sink states under `target/`.
 
 The focus scenarios are known to detect the failure they guard against: with
 the engine's focus-change invalidation removed, both fail, because the

@@ -8,7 +8,8 @@ All notable changes to WayExpand are documented here.
   KWin test client when the negotiated libei route offers direct text input.
   The report marks Unicode as passed only after the client receives the exact
   accented and Japanese output; keysym-only routes show it as not tested.
-  Human reports now identify the desktop and use concise scenario labels.
+  Human reports now identify the desktop and use concise scenario labels. CI
+  exercises the report contract separately from its mandatory E2E scenarios.
 - Updated the locked Windows clipboard dependency from yanked `clipboard-win`
   5.4.1 to 5.4.3. The workspace suite passes with the new lockfile and
   `cargo audit` no longer reports a yanked package; it reports only the
