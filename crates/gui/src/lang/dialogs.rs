@@ -199,17 +199,17 @@ impl Strings {
 
     pub fn matcher_latency(&self) -> &'static str {
         match self.lang {
-            Language::English => "Matcher / preparation",
-            Language::Indonesian => "Pencocok / persiapan",
-            Language::German => "Matcher / Vorbereitung",
+            Language::English => "Matcher latency",
+            Language::Indonesian => "Latensi pencocokan",
+            Language::German => "Matcher-Latenz",
         }
     }
 
     pub fn output_latency(&self) -> &'static str {
         match self.lang {
-            Language::English => "Output backend / injection",
-            Language::Indonesian => "Backend keluaran / injeksi",
-            Language::German => "Ausgabebackend / Einfügen",
+            Language::English => "Backend injection latency",
+            Language::Indonesian => "Latensi injeksi backend",
+            Language::German => "Latenz der Backend-Injektion",
         }
     }
 

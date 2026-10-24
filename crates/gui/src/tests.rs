@@ -1442,6 +1442,62 @@ fn diagnostics_dialog_stays_inside_a_small_window() {
 }
 
 #[test]
+fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-diagnostics-route-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.diagnostics_open = true;
+    app.daemon_reachable = Some(true);
+    app.daemon_status = "source=evdev · backend=libei".into();
+    app.daemon_capabilities = Some(runtime::DaemonCapabilities {
+        injection_mode: Some("libei keysym fallback"),
+        injection_latency_mean_us: Some(420_000),
+        injection_latency_p50_us: Some(400),
+        injection_latency_p95_us: Some(700),
+        injection_latency_p99_us: Some(900),
+        matcher_latency_p50_us: Some(4),
+        matcher_latency_p95_us: Some(10),
+        matcher_latency_p99_us: Some(16),
+        ..Default::default()
+    });
+
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let output = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_diagnostics_body(ui, &palette);
+        },
+    );
+    let semantics = format!(
+        "{:?}",
+        output
+            .platform_output
+            .accesskit_update
+            .expect("diagnostics should expose accessible content")
+            .nodes
+    );
+    assert!(semantics.contains("libei keysym fallback"));
+    assert!(semantics.contains("Keysym fallback is active"));
+    assert!(semantics.contains("Matcher latency"));
+    assert!(semantics.contains("Backend injection latency"));
+    assert!(semantics.contains("700 µs"));
+    assert!(semantics.contains("10 µs"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn the_window_title_names_the_open_file_and_marks_unsaved_edits() {
     let path =
         std::env::temp_dir().join(format!("wayexpand-gui-title-{}.toml", std::process::id()));
@@ -2051,9 +2107,14 @@ fn indonesian_strings_are_translated_not_english_fallbacks() {
     }
     let english = crate::lang::Strings::new(Language::English);
     let indonesian = crate::lang::Strings::new(Language::Indonesian);
+    let german = crate::lang::Strings::new(Language::German);
     assert_eq!(indonesian.settings(), "Pengaturan");
     assert_eq!(indonesian.cancel(), "Batal");
     assert_ne!(indonesian.save_settings(), english.save_settings());
+    assert_ne!(indonesian.matcher_latency(), english.matcher_latency());
+    assert_ne!(indonesian.output_latency(), english.output_latency());
+    assert_ne!(german.matcher_latency(), english.matcher_latency());
+    assert_ne!(german.output_latency(), english.output_latency());
 }
 
 fn failed_save_test_app(name: &str) -> (std::path::PathBuf, GuiApp) {

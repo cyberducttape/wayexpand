@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI latency diagnostics now label matcher and backend injection latency
+  explicitly, and accessibility tests cover the keysym-fallback warning and
+  the separate percentile rows.
 - GUI command-preview warnings now distinguish direct programs run in a
   transient systemd unit with WayExpand's service sandbox from programs run
   locally when no user manager is available.
