@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Action Broker shutdown integration test now keeps its Unix socket in a
+  short private runtime path, so Debian package builds with deeply nested
+  staging homes do not exceed the platform's socket-path limit.
 - The headless KWin E2E runner now rejects a timed-out compositor session even
   when it already wrote passing scenario results, and includes the compositor
   log tail in the failure report. CI covers this timeout-after-results case.

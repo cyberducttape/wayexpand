@@ -124,7 +124,10 @@ async fn broker_client_server_echo_request_response() {
 #[test]
 fn sigterm_cancels_running_action_and_flushes_required_audit() {
     let directory = private_test_directory("sigterm-shutdown");
-    let socket_path = directory.join("broker.sock");
+    // Keep the AF_UNIX socket in the short runtime-style fixture path. Debian
+    // package builds can set HOME to a deeply nested staging directory; config
+    // and audit files belong there, but the socket must fit SUN_LEN.
+    let socket_path = test_socket("sigterm-shutdown");
     let audit_path = directory.join("sigterm-shutdown-audit.jsonl");
     let config_path = directory.join("sigterm-shutdown.toml");
     let marker_path = directory.join("sigterm-action-started");
