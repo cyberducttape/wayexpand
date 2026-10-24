@@ -4,6 +4,25 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed the wlroots virtual-keyboard output route typing the wrong keys. It
+  sent XKB keycodes where the protocol expects evdev codes, so every client
+  decoded each key 8 positions off: BackSpace never erased and replacements
+  came out as wrong characters or nothing. The generated keymap now starts at
+  XKB keycode 9 and keys go out as evdev codes.
+- On desktops without KWin, the KWin window tracker's reprobes republished
+  "no window" on every retry, and each republish cleared the partly typed
+  trigger and discarded pending command results. A focus snapshot that names
+  the same target (still no window, or the same exactly identified window
+  with a new title) no longer resets the engine; a title-only change still
+  updates `title_contains:` filters. Updates without an exact window instance
+  still count as focus changes.
+- Added a headless Sway end-to-end harness (`scripts/test-sway-e2e.sh`) and a
+  CI job for it. It drives the production daemon and wlroots output into real
+  Wayland windows in a private Sway, with capture simulated through stdin and
+  focus untracked. The KWin and Sway harnesses now share their scenarios in
+  `scripts/e2e-lib.sh`, which the certification packages install beside the
+  KWin scripts.
+
 - An installed `wayexpand doctor --certify` now tests the certification
   helpers installed beside it. Before, a binary built from a source checkout
   (such as a user install) preferred that checkout's script if it still

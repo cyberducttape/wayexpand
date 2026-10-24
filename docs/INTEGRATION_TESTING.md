@@ -34,7 +34,8 @@ home, and configuration, and stops every process it started (including the
 portal services KWin activates) when it finishes. It needs `kwin_wayland`,
 `dbus-run-session`, `gdbus`, and `jq`.
 
-Inside that session (`scripts/kwin-e2e-session.sh`):
+Inside that session (`scripts/kwin-e2e-session.sh`, with the scenarios shared
+with the Sway harness in `scripts/e2e-lib.sh`):
 
 - **Target windows** are `wx-e2e-sink` instances, minimal Wayland clients
   that record exactly the text KWin delivers to them, with a caret.
@@ -90,6 +91,53 @@ Findings from KWin 6.6.6 that this harness surfaced:
   route is libei.
 - KWin's EIS offers no `ei_text`, so libei output is limited to characters
   the current keyboard layout can type.
+
+## Headless Sway end-to-end harness
+
+`scripts/test-sway-e2e.sh [--keep] [SCENARIO...]` runs the same scenario
+library against a private headless Sway (`WLR_BACKENDS=headless`, software
+rendering, no input devices) with its own runtime directory, home and
+configuration, and no D-Bus session. It needs `sway`, `swaymsg` and `jq`. A
+Sway unpacked outside the system library path (for example from
+`apt-get download sway libwlroots-0.19 ...` and `dpkg-deb -x`) works when
+`PATH` and `LD_LIBRARY_PATH` point at it.
+
+Inside that session (`scripts/sway-e2e-session.sh`):
+
+- **The daemon** uses the production wlroots virtual-keyboard output backend
+  with `compatibility_mode = "untracked-focus"`: WayExpand has no Sway window
+  tracker.
+- **The user** is `wx-e2e-type` with `WX_E2E_TYPIST=wlroots`, typing through
+  its own virtual keyboard, separate from the daemon's.
+- **Capture is simulated** through stdin, as on KWin.
+
+It runs `expansion-replaces-trigger`, `word-boundary-reinserts-delimiter`,
+`cursor-placement`, `multiline-replacement`, `unreachable-character-is-refused`
+(the wlroots route refuses text outside its guarantee, such as `é`, before
+erasing), `command-expansion-completes`, `config-reload`, `daemon-restart`, and
+`app-filter-fails-closed`: without a tracker, an `app_filter` snippet does not
+expand even in its own app. The KWin focus scenarios do not apply: with
+untracked focus, WayExpand makes no promise when focus moves mid-expansion.
+
+**Evidence boundary.** Results are evidence for wlroots virtual-keyboard
+output on the tested Sway version, in a headless session, with capture
+simulated and focus untracked. They are not compositor certification.
+
+Findings from Sway 1.11 that this harness surfaced:
+
+- The wlroots backend sent XKB keycodes where the protocol expects evdev
+  codes, so every client decoded each key 8 positions off: BackSpace never
+  erased and text came out wrong. Fixed; a unit test now decodes the wire
+  codes against the uploaded keymap the way clients do.
+- The KWin window tracker's reprobes on a desktop without KWin republished
+  "no window", and each republish reset the matcher buffer and discarded
+  pending command results. Unchanged focus no longer resets anything.
+- Sway delivers none of a virtual keyboard's keys if its client disconnects
+  immediately after sending them; the one-shot test typist lingers briefly.
+  The daemon's keyboard lives as long as the daemon.
+- Input-method-v2 capture cannot run on Sway: the daemon starts it only with
+  libei key pass-through (see [Input-method source](#input-method-source)),
+  and Sway offers no libei/EIS server.
 
 ## Matcher performance baseline
 
@@ -404,6 +452,11 @@ Capture `systemctl --user status wayexpand-input-method.service` and relevant
 user-journal output after each failure. Do not include typed secrets or
 replacement contents in reports.
 
+The daemon starts input-method capture only after it has connected libei key
+pass-through, because an exclusive keyboard grab without pass-through would
+swallow non-text keys. A compositor with input-method-v2 but no libei/EIS
+server (Sway, for example) therefore cannot run this route.
+
 Do not substitute a GNOME or KDE session for this prerequisite. The protocol
 is experimental and current compositor support is not uniform; a failed probe
 is a capability result, not a configuration error. For desktops that do not
@@ -418,8 +471,9 @@ output path:
 cargo run -p wayexpand-backend-wlroots --bin wlroots-type -- 'Hello 🙂'
 ```
 
-Then exercise the stdin harness with `--backend=wlroots`. This validates output
-only; it is not evidence of global input capture.
+Then exercise the stdin harness with `--backend=wlroots`, or run the headless
+Sway harness above. This validates output only; it is not evidence of global
+input capture.
 
 ## libei output
 

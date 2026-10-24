@@ -25,6 +25,7 @@ done
 install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
     "$project_dir/scripts/kwin-e2e-session.sh" \
     "$release_dir/libexec/wayexpand-certification/"
+install -m 0644 "$project_dir/scripts/e2e-lib.sh" "$release_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"

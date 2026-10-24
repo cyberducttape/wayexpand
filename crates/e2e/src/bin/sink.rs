@@ -69,10 +69,18 @@ impl Sink {
 
     fn press(&mut self, keycode: xkb::Keycode) {
         let Some(state) = self.xkb.as_ref() else {
+            eprintln!("wx-e2e-sink: key {} without a keymap", keycode.raw());
             return;
         };
         let symbol = state.key_get_one_sym(keycode);
         let text = state.key_get_utf8(keycode);
+        // The log is the first thing to read when a scenario's text is
+        // wrong: it shows what the compositor delivered and how it decoded.
+        eprintln!(
+            "wx-e2e-sink: key {} sym {:#x} text {text:?}",
+            keycode.raw(),
+            symbol.raw()
+        );
         match symbol.raw() {
             xkb::keysyms::KEY_BackSpace => {
                 if self.cursor > 0 {
@@ -126,7 +134,7 @@ impl Sink {
     }
 }
 
-fn read_keymap(fd: OwnedFd, size: u32) -> Result<xkb::Keymap> {
+fn read_keymap(fd: OwnedFd, size: u32) -> Result<String> {
     let mut file = File::from(fd);
     file.seek(SeekFrom::Start(0))?;
     let mut bytes = vec![0; size as usize];
@@ -134,11 +142,14 @@ fn read_keymap(fd: OwnedFd, size: u32) -> Result<xkb::Keymap> {
     if bytes.last() == Some(&0) {
         bytes.pop();
     }
-    let text = String::from_utf8(bytes).context("keymap is not UTF-8")?;
+    String::from_utf8(bytes).context("keymap is not UTF-8")
+}
+
+fn compile_keymap(text: &str) -> Result<xkb::Keymap> {
     let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
     xkb::Keymap::new_from_string(
         &context,
-        text,
+        text.to_owned(),
         xkb::KEYMAP_FORMAT_TEXT_V1,
         xkb::KEYMAP_COMPILE_NO_FLAGS,
     )
@@ -189,8 +200,20 @@ impl Dispatch<wl_seat::WlSeat, ()> for Sink {
             capabilities: WEnum::Value(capabilities),
         } = event
         {
-            if capabilities.contains(wl_seat::Capability::Keyboard) && state.keyboard.is_none() {
+            let has_keyboard = capabilities.contains(wl_seat::Capability::Keyboard);
+            if has_keyboard && state.keyboard.is_none() {
                 state.keyboard = Some(seat.get_keyboard(qh, ()));
+            } else if !has_keyboard {
+                // Like a real client, rebind when a keyboard returns: on
+                // headless Sway the seat loses its keyboard whenever the
+                // last virtual keyboard goes (e.g. the daemon restarts),
+                // and the old wl_keyboard stays inert.
+                if let Some(keyboard) = state.keyboard.take() {
+                    keyboard.release();
+                }
+                state.xkb = None;
+                state.focused = false;
+                state.write_state();
             }
         }
     }
@@ -206,10 +229,35 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Sink {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_keyboard::Event::Keymap { fd, size, .. } => match read_keymap(fd, size) {
-                Ok(keymap) => state.xkb = Some(xkb::State::new(&keymap)),
-                Err(error) => eprintln!("wx-e2e-sink: {error:#}"),
-            },
+            wl_keyboard::Event::Keymap { format, .. }
+                if format != WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) =>
+            {
+                // wlroots sends no_keymap for a virtual keyboard that has
+                // not uploaded one yet.
+                eprintln!("wx-e2e-sink: keyboard without a keymap");
+                state.xkb = None;
+            }
+            wl_keyboard::Event::Keymap { fd, size, .. } => {
+                let compiled = read_keymap(fd, size).and_then(|text| {
+                    compile_keymap(&text).inspect_err(|_| {
+                        // Keep what failed: real clients compile keymaps
+                        // with the same libxkbcommon.
+                        let _ =
+                            std::fs::write(state.state_path.with_extension("bad-keymap"), &text);
+                    })
+                });
+                match compiled {
+                    Ok(keymap) => {
+                        eprintln!("wx-e2e-sink: new keymap ({size} bytes)");
+                        state.xkb = Some(xkb::State::new(&keymap));
+                    }
+                    Err(error) => {
+                        // Never decode later keys with the previous keymap.
+                        state.xkb = None;
+                        eprintln!("wx-e2e-sink: {error:#}");
+                    }
+                }
+            }
             wl_keyboard::Event::Enter { .. } => {
                 state.focused = true;
                 state.write_state();

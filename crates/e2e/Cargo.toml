@@ -1,6 +1,6 @@
 [package]
 name = "wayexpand-e2e"
-description = "Helpers for WayExpand's headless KWin end-to-end tests and doctor --certify"
+description = "Helpers for WayExpand's headless KWin and Sway end-to-end tests and doctor --certify"
 version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
@@ -29,4 +29,5 @@ wayland-protocols = { workspace = true, features = ["client"] }
 xkbcommon.workspace = true
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 wayexpand-backend-libei = { path = "../backend-libei" }
+wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-core = { path = "../core" }

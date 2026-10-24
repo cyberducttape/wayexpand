@@ -46,6 +46,7 @@ override_dh_install:
 	install -Dm755 target/release/wx-e2e-eis-relay debian/wayexpand/usr/libexec/wayexpand-certification/bin/wx-e2e-eis-relay
 	install -Dm755 scripts/test-kwin-e2e.sh debian/wayexpand/usr/libexec/wayexpand-certification/test-kwin-e2e.sh
 	install -Dm755 scripts/kwin-e2e-session.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-session.sh
+	install -Dm644 scripts/e2e-lib.sh debian/wayexpand/usr/libexec/wayexpand-certification/e2e-lib.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
 	dh_install --package=wayexpand io.github.cyberducttape.WayExpand.metainfo.xml usr/share/metainfo/

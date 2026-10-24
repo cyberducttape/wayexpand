@@ -4489,6 +4489,7 @@ dependencies = [
  "rustix 1.1.5",
  "serde_json",
  "wayexpand-backend-libei",
+ "wayexpand-backend-wlroots",
  "wayexpand-core",
  "wayland-client",
  "wayland-protocols",
