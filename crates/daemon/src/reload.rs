@@ -4,7 +4,6 @@ use std::{
     collections::hash_map::DefaultHasher,
     fs,
     hash::{Hash, Hasher},
-    io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{
@@ -97,66 +96,37 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
 struct FileStamp {
     modified: SystemTime,
     length: u64,
+    device: u64,
     inode: u64,
+    mode: u32,
     change_time: i64,
     change_time_nsec: i64,
-    fingerprint: u64,
 }
 
-/// Read a configuration file for an integrity probe with the loader's
-/// contract: symlinks are followed like the loader does, but only a regular
-/// file of at most `MAX_CONFIG_BYTES` is ever read. A FIFO, socket, or device
-/// node (directly or through a symlink) is never opened by path, and the
-/// nonblocking descriptor is re-checked in case the path was swapped.
-fn read_regular_config_file(path: &Path) -> Option<(fs::Metadata, Vec<u8>)> {
-    let preliminary = fs::metadata(path).ok()?;
-    if !preliminary.file_type().is_file() || preliminary.len() > MAX_CONFIG_BYTES as u64 {
-        return None;
-    }
-    let descriptor = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NONBLOCK
-            | rustix::fs::OFlags::NOCTTY,
-        rustix::fs::Mode::empty(),
-    )
-    .ok()?;
-    let file = fs::File::from(descriptor);
-    let metadata = file.metadata().ok()?;
+/// A metadata-only stamp for the primary config. This is sampled on the
+/// keyboard reactor, so it must never read the file's contents. The actual
+/// load and parse happen on the reload worker, which compares the stamp before
+/// and after reading to reject concurrent edits.
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let metadata = fs::metadata(path).ok()?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES as u64 {
         return None;
     }
-    let mut contents = Vec::new();
-    file.take(MAX_CONFIG_BYTES as u64 + 1)
-        .read_to_end(&mut contents)
-        .ok()?;
-    (contents.len() <= MAX_CONFIG_BYTES).then_some((metadata, contents))
-}
-
-fn file_stamp(path: &Path) -> Option<FileStamp> {
-    let (metadata, contents) = read_regular_config_file(path)?;
     let modified = metadata.modified().ok()?;
     let length = metadata.len();
+    let device = metadata.dev();
     let inode = metadata.ino();
+    let mode = metadata.mode();
     let change_time = metadata.ctime();
     let change_time_nsec = metadata.ctime_nsec();
-    let fingerprint = stable_content_fingerprint(&contents);
     Some(FileStamp {
         modified,
         length,
+        device,
         inode,
+        mode,
         change_time,
         change_time_nsec,
-        fingerprint,
-    })
-}
-
-fn stable_content_fingerprint(contents: &[u8]) -> u64 {
-    // FNV-1a is deterministic across compiler versions and sensitive to byte
-    // order, unlike the previous commutative chunk sum.
-    contents.iter().fold(0xcbf29ce484222325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
     })
 }
 

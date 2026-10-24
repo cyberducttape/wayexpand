@@ -4,10 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-- Fleet configuration integrity polling now fingerprints file metadata rather
-  than reading every layer on the keyboard reactor. Full file contents are
-  still read and validated by the background loader before a reload is
-  promoted, avoiding large synchronous reads during live input.
+- Configuration integrity polling now fingerprints file metadata rather than
+  reading the primary file and every fleet layer on the keyboard reactor.
+  Full contents are still read and validated by the background loader before
+  a reload is promoted, avoiding synchronous disk reads during live input.
 - The Action Broker shutdown integration test now keeps its Unix socket in a
   short private runtime path, so Debian package builds with deeply nested
   staging homes do not exceed the platform's socket-path limit.
