@@ -609,6 +609,27 @@ fn run_bounded_systemctl(args: &[&str]) {
 }
 
 #[cfg(unix)]
+fn transient_unit_shutdown_commands(unit: &str) -> [Vec<String>; 2] {
+    [
+        [
+            "--user",
+            "kill",
+            "--kill-whom=all",
+            "--signal=SIGKILL",
+            "--no-block",
+            unit,
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        ["--user", "stop", "--no-block", unit]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    ]
+}
+
+#[cfg(unix)]
 pub(super) fn stop_transient_unit(unit: Option<&str>) {
     let Some(unit) = unit else {
         return;
@@ -618,15 +639,10 @@ pub(super) fn stop_transient_unit(unit: Option<&str>) {
     // process in that unit explicitly. The unit name is unique to this form
     // helper (PID plus sequence number), so a force-kill cannot affect another
     // WayExpand operation.
-    run_bounded_systemctl(&[
-        "--user",
-        "kill",
-        "--kill-whom=all",
-        "--signal=SIGKILL",
-        "--no-block",
-        unit,
-    ]);
-    run_bounded_systemctl(&["--user", "stop", "--no-block", unit]);
+    for command in transient_unit_shutdown_commands(unit) {
+        let args = command.iter().map(String::as_str).collect::<Vec<_>>();
+        run_bounded_systemctl(&args);
+    }
 }
 
 #[cfg(unix)]
@@ -805,6 +821,30 @@ mod tests {
             stderr_truncated,
             duration_ms: 1,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transient_form_cleanup_kills_the_unit_cgroup_then_stops_the_unit() {
+        assert_eq!(
+            transient_unit_shutdown_commands("wayexpand-form-42-7.service"),
+            [
+                vec![
+                    "--user",
+                    "kill",
+                    "--kill-whom=all",
+                    "--signal=SIGKILL",
+                    "--no-block",
+                    "wayexpand-form-42-7.service",
+                ],
+                vec![
+                    "--user",
+                    "stop",
+                    "--no-block",
+                    "wayexpand-form-42-7.service",
+                ],
+            ]
+        );
     }
 
     #[test]
