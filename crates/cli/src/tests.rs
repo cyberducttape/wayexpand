@@ -268,9 +268,21 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
         "daemon_commit": "older-build",
         "status_schema": CONTROL_STATUS_SCHEMA,
     }));
-    assert_eq!(stale["status"], "restart-required");
+    let stale_status = if crate::build_info::COMMIT == "unknown" {
+        "unverified"
+    } else {
+        "restart-required"
+    };
+    assert_eq!(stale["status"], stale_status);
     assert_eq!(stale["commit_matches"], false);
-    assert!(stale["action"].as_str().unwrap().contains("restart"));
+    if crate::build_info::COMMIT == "unknown" {
+        assert!(stale["action"]
+            .as_str()
+            .unwrap()
+            .contains("cannot tell whether"));
+    } else {
+        assert!(stale["action"].as_str().unwrap().contains("restart"));
+    }
 
     let incompatible = crate::doctor::status::upgrade_status_from_snapshot(
         &serde_json::json!({ "daemon_commit": crate::build_info::COMMIT }),

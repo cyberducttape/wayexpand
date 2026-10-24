@@ -458,7 +458,12 @@ mod runtime_route_tests {
         assert_eq!(summary["injection_latency"]["sample_count"], 12);
         assert_eq!(summary["matcher_latency"]["p95_us"], 12);
         assert_eq!(summary["matcher_latency"]["sample_count"], 500);
-        assert_eq!(summary["daemon_compatibility"]["status"], "current");
+        let expected_status = if crate::build_info::COMMIT == "unknown" {
+            "unverified"
+        } else {
+            "current"
+        };
+        assert_eq!(summary["daemon_compatibility"]["status"], expected_status);
     }
 
     #[test]
@@ -470,10 +475,12 @@ mod runtime_route_tests {
 
         let summary = runtime_route_summary(&snapshot);
 
-        assert_eq!(
-            summary["daemon_compatibility"]["status"],
+        let expected_status = if crate::build_info::COMMIT == "unknown" {
+            "unverified"
+        } else {
             "restart-required"
-        );
+        };
+        assert_eq!(summary["daemon_compatibility"]["status"], expected_status);
     }
 }
 
