@@ -74,11 +74,23 @@ grep -Fx 'exit_status=1' "$report_dir/summary.txt" >/dev/null
 grep -Fx 'daemon_restarts=0' "$report_dir/summary.txt" >/dev/null
 grep -Eq '^source_revision=[0-9a-f]{40}$' "$report_dir/summary.txt"
 grep -Eq '^source_worktree=(clean|dirty)$' "$report_dir/summary.txt"
+if grep -q '^host=' "$report_dir/summary.txt"; then
+    printf '%s\n' 'soak evidence exposed the host name' >&2
+    exit 1
+fi
 test -s "$report_dir/daemon.log"
 test -s "$report_dir/resource-samples.csv"
 test -s "$report_dir/status-latency-ms.txt"
 test -s "$report_dir/explain-latency-ms.txt"
 test -f "$report_dir/daemon-restart-latency-ms.txt"
+for environment in /proc/[0-9]*/environ; do
+    [ -r "$environment" ] || continue
+    if cat "$environment" 2>/dev/null | tr '\0' '\n' \
+        | grep -Fx "XDG_RUNTIME_DIR=$private_runtime" >/dev/null 2>&1; then
+        printf '%s\n' 'interrupted soak left a process running in its private runtime' >&2
+        exit 1
+    fi
+done
 if find "$runtime_tmp" -mindepth 1 -maxdepth 1 -type d -name 'wayexpand-soak.*' -print -quit | grep -q .; then
     printf '%s\n' 'interrupted soak left its private runtime directory behind' >&2
     exit 1

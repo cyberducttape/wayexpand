@@ -121,6 +121,16 @@ fn run_harness() -> HarnessResult {
     for scenario in SCENARIOS {
         outcomes.entry((*scenario).to_owned()).or_insert("not-run");
     }
+    if matches!(timeout.status.code(), Some(124 | 137)) {
+        return HarnessResult {
+            status: "incomplete",
+            version,
+            outcomes,
+            reason: Some(
+                "the isolated harness exceeded its deadline after producing scenario results",
+            ),
+        };
+    }
     // A driver can emit passing scenario lines and still fail during session
     // teardown or evidence collection. Never present that run as a successful
     // partial report: the process result is part of the evidence contract.
@@ -234,7 +244,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "unavailable"
     } else if result.status == "failed" || any_failed {
         "failed"
-    } else if required_checks_passed {
+    } else if result.status == "completed" && required_checks_passed {
         "partial"
     } else {
         "incomplete"
@@ -291,5 +301,43 @@ fn print_human_report(report: &serde_json::Value) {
     println!("This report is partial evidence, not a compositor certification.");
     if let Some(reason) = report["harness"]["reason"].as_str() {
         println!("Reason: {reason}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn all_completed_scenarios() -> BTreeMap<String, &'static str> {
+        SCENARIOS
+            .iter()
+            .map(|scenario| ((*scenario).to_owned(), "passed"))
+            .collect()
+    }
+
+    #[test]
+    fn timeout_after_passing_scenarios_is_incomplete_not_failed_or_partial() {
+        let report = make_report(HarnessResult {
+            status: "incomplete",
+            version: Some("test".into()),
+            outcomes: all_completed_scenarios(),
+            reason: Some("deadline"),
+        });
+
+        assert_eq!(report["overall"], "incomplete");
+        assert_eq!(report["certified"], false);
+    }
+
+    #[test]
+    fn unexpected_harness_exit_cannot_be_reported_as_partial() {
+        let report = make_report(HarnessResult {
+            status: "failed",
+            version: Some("test".into()),
+            outcomes: all_completed_scenarios(),
+            reason: Some("exit failure"),
+        });
+
+        assert_eq!(report["overall"], "failed");
+        assert_eq!(report["certified"], false);
     }
 }

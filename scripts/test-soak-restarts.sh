@@ -17,6 +17,10 @@ if ! TMPDIR="$runtime_tmp" SOAK_SECONDS=36 SOAK_SAMPLE_INTERVAL_SECONDS=10 \
 fi
 
 grep -Fx 'result=passed' "$report_dir/summary.txt" >/dev/null
+if grep -q '^host=' "$report_dir/summary.txt"; then
+    printf '%s\n' 'soak evidence exposed the host name' >&2
+    exit 1
+fi
 if ! grep -Eq '^daemon_restarts=[2-9][0-9]*$' "$report_dir/summary.txt"; then
     cat "$report_dir/summary.txt" >&2
     cat "$test_root/soak.log" >&2

@@ -33,9 +33,12 @@ All notable changes to WayExpand are documented here.
   the checkout with a relative `CARGO_TARGET_DIR`, and restricts permissions
   only on its temporary work directory. It uses a private session and does
   not alter the active desktop. See `docs/CERTIFICATION.md`.
-- Certification reports now fail if the harness process exits unsuccessfully,
-  even when it emitted passing scenario results before failing during teardown
-  or evidence collection.
+- Certification reports now distinguish a timed-out/incomplete harness from a
+  scenario failure, and reject a successful partial result if the harness
+  exits unsuccessfully during teardown or evidence collection.
+- Daemon soak cleanup now terminates every process carrying its private runtime
+  environment, including an orphaned daemon after a control-check failure. Soak
+  evidence no longer records the host's potentially sensitive hostname.
 
 - Diagnostics now show the active capture and injection routes, detected
   compositor/version, route permission health, and rolling average injection

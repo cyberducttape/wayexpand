@@ -86,7 +86,6 @@ preserve_partial_report() {
         echo "exit_status=$failure_status"
         echo "started_utc=${started_utc:-unknown}"
         echo "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        echo "host=$(hostname)"
         echo "kernel=$(uname -sr)"
         echo "source_revision=$source_revision"
         echo "source_worktree=$source_worktree"
@@ -97,12 +96,50 @@ preserve_partial_report() {
     } >"$report_dir/summary.txt" || true
 }
 
+private_process_pids() {
+    for environment in /proc/[0-9]*/environ; do
+        [ -r "$environment" ] || continue
+        pid=${environment#/proc/}
+        pid=${pid%/environ}
+        if cat "$environment" 2>/dev/null | tr '\0' '\n' \
+            | grep -Fx "XDG_RUNTIME_DIR=$runtime_dir" >/dev/null 2>&1; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
+
+reap_private_processes() {
+    # A background shell function can leave its env-launched daemon orphaned
+    # when the wrapper PID is killed. Match the randomized private runtime
+    # inherited by the daemon and any of its descendants, then reap the whole
+    # isolated process set before removing that runtime directory.
+    private_pids=$(private_process_pids)
+    for pid in $private_pids; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    attempt=0
+    while [ "$attempt" -lt 20 ]; do
+        private_pids=$(private_process_pids)
+        [ -n "$private_pids" ] || break
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    for pid in $(private_process_pids); do
+        kill -KILL "$pid" 2>/dev/null || true
+    done
+}
+
 cleanup() {
     cleanup_status=$?
     trap - EXIT INT TERM
     for pid in "$feeder_pid" "$daemon_pid"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
+        fi
+    done
+    reap_private_processes
+    for pid in "$feeder_pid" "$daemon_pid"; do
+        if [ -n "$pid" ]; then
             wait "$pid" 2>/dev/null || true
         fi
     done
@@ -285,8 +322,14 @@ while [ $(( $(date +%s) - start )) -lt "$soak_seconds" ]; do
     write_config "$round"
     # Plain status isolates the daemon control round-trip; --json also probes
     # the user's action-broker/systemd state, which is unrelated to this soak.
-    status_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" status)
-    explain_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" explain ';;sig')
+    if ! status_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" status); then
+        printf '%s\n' 'error: daemon status probe failed during the soak' >&2
+        exit 1
+    fi
+    if ! explain_ms=$(measure_latency_ms run_isolated "$runtime_dir" "$config_path" "$cli" explain ';;sig'); then
+        printf '%s\n' 'error: daemon explain probe failed during the soak' >&2
+        exit 1
+    fi
     printf '%s\n' "$status_ms" >>"$status_latency_path"
     printf '%s\n' "$explain_ms" >>"$explain_latency_path"
     if [ $((round % 5)) -eq 0 ]; then
@@ -343,7 +386,6 @@ if [ -n "$report_dir" ]; then
         echo "result=passed"
         echo "started_utc=$started_utc"
         echo "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        echo "host=$(hostname)"
         echo "kernel=$(uname -sr)"
         echo "source_revision=$source_revision"
         echo "source_worktree=$source_worktree"
