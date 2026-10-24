@@ -210,19 +210,29 @@ pub(crate) fn runtime_route_summary(snapshot: &serde_json::Value) -> serde_json:
         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
         "injection_latency": latency("injection"),
         "matcher_latency": latency("matcher"),
+        "injection_latency_profiles": snapshot
+            .get("injection_latency_profiles")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
         "daemon_compatibility": upgrade_status_from_snapshot(snapshot),
     })
 }
 
 fn print_percentiles(label: &str, metrics: &serde_json::Value) {
+    if let Some(line) = percentile_line(label, metrics) {
+        println!("{line}");
+    }
+}
+
+fn percentile_line(label: &str, metrics: &serde_json::Value) -> Option<String> {
     if metrics["sample_count"].as_u64().unwrap_or(0) == 0 {
-        return;
+        return None;
     }
     let percentile = |name: &str| match metrics[name].as_u64() {
         Some(value) => format!("{value} µs"),
         None => "n/a".to_owned(),
     };
-    println!(
+    Some(format!(
         "{label}: p50 {}, p95 {}, p99 {}, {} samples",
         percentile("p50_us"),
         percentile("p95_us"),
@@ -231,7 +241,28 @@ fn print_percentiles(label: &str, metrics: &serde_json::Value) {
             .map(|value| format!("{value} µs"))
             .unwrap_or_else(|| "n/a".to_owned()),
         metrics["sample_count"].as_u64().unwrap_or(0)
-    );
+    ))
+}
+
+fn latency_profile_lines(profiles: &serde_json::Value) -> Vec<String> {
+    let Some(modes) = profiles.as_object() else {
+        return Vec::new();
+    };
+    modes
+        .iter()
+        .flat_map(|(mode, buckets)| {
+            buckets
+                .as_object()
+                .into_iter()
+                .flat_map(move |buckets| buckets.iter())
+                .filter_map(move |(bucket, metrics)| {
+                    percentile_line(
+                        &format!("Backend latency ({mode}, {bucket} expansions)"),
+                        metrics,
+                    )
+                })
+        })
+        .collect()
 }
 
 /// Print the running daemon's route and output health. Returns false when the
@@ -274,6 +305,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     }
     print_percentiles("Backend injection latency", &route["injection_latency"]);
     print_percentiles("Matcher latency", &route["matcher_latency"]);
+    print_latency_profiles(&route["injection_latency_profiles"]);
     let daemon_status = route["daemon_compatibility"]["status"]
         .as_str()
         .unwrap_or("unverified");
@@ -322,6 +354,12 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         return false;
     }
     insertion_ok && matches!(daemon_status, "current" | "unverified")
+}
+
+fn print_latency_profiles(profiles: &serde_json::Value) {
+    for line in latency_profile_lines(profiles) {
+        println!("{line}");
+    }
 }
 
 pub(crate) fn status_schema_compatible(snapshot: &serde_json::Value) -> bool {
@@ -440,6 +478,24 @@ mod runtime_route_tests {
             "injection_latency_p95_us": 1_200_000,
             "injection_latency_p99_us": 1_300_000,
             "injection_latency_sample_count": 12,
+            "injection_latency_profiles": {
+                "libei_keysym_fallback": {
+                    "small": {
+                        "sample_count": 8,
+                        "window_count": 8,
+                        "p50_us": 250_000,
+                        "p95_us": 500_000,
+                        "p99_us": 500_000
+                    },
+                    "medium": {
+                        "sample_count": 4,
+                        "window_count": 4,
+                        "p50_us": 900_000,
+                        "p95_us": 1_200_000,
+                        "p99_us": 1_200_000
+                    }
+                }
+            },
             "matcher_latency_p50_us": 4,
             "matcher_latency_p95_us": 12,
             "matcher_latency_p99_us": 20,
@@ -456,6 +512,17 @@ mod runtime_route_tests {
         assert_eq!(summary["sensitive_field_detection"], false);
         assert_eq!(summary["injection_latency"]["p95_us"], 1_200_000);
         assert_eq!(summary["injection_latency"]["sample_count"], 12);
+        assert_eq!(
+            summary["injection_latency_profiles"]["libei_keysym_fallback"]["medium"]["p95_us"],
+            1_200_000
+        );
+        assert_eq!(
+            latency_profile_lines(&summary["injection_latency_profiles"]),
+            [
+                "Backend latency (libei_keysym_fallback, medium expansions): p50 900000 µs, p95 1200000 µs, p99 1200000 µs, 4 samples",
+                "Backend latency (libei_keysym_fallback, small expansions): p50 250000 µs, p95 500000 µs, p99 500000 µs, 8 samples",
+            ]
+        );
         assert_eq!(summary["matcher_latency"]["p95_us"], 12);
         assert_eq!(summary["matcher_latency"]["sample_count"], 500);
         let expected_status = if crate::build_info::COMMIT == "unknown" {

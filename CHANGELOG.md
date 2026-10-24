@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Human `wayexpand doctor` output now includes latency percentiles by negotiated
+  output mode and replacement-size bucket, making keysym-fallback costs for
+  longer expansions visible without changing the configured pacing.
 - Cancelling a form helper launched through `systemd-run` now force-stops all
   processes in its unique transient unit after stopping the wrapper, preventing
   late unit starts and GUI descendants in the separate systemd cgroup from
