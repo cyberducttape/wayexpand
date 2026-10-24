@@ -10,6 +10,10 @@ All notable changes to WayExpand are documented here.
   already-documented informational zbus 5 unmaintained notices.
 - CI now treats yanked locked dependencies as a failing security-audit result,
   preventing a later lockfile update from silently reintroducing one.
+- CI now runs the production-daemon KWin/libei output and focused-window E2E
+  scenarios in a private headless compositor session on every change. Capture
+  remains simulated, so this catches output/focus regressions without claiming
+  real-session certification.
 
 - Preserved the 11/11 production-daemon KWin 6.6.6 headless end-to-end run as
   a redacted machine-readable artifact. It records the source commit and
