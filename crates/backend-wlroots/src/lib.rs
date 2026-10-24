@@ -25,12 +25,19 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
 };
 
 const BACKEND_NAME: &str = "wlroots-virtual-keyboard";
-// Reserved alongside the BackSpace keycode (8) in every generated keymap,
-// for `{{cursor}}` placement after a replacement has already been typed.
-const LEFT_KEYCODE: u32 = 9;
-const FIRST_DYNAMIC_KEYCODE: u32 = 10;
+// Keycodes below are XKB keycodes, as written in the generated keymap. The
+// protocol's `key` request carries Linux evdev codes, which every client
+// turns back into XKB keycodes by adding 8; `wire_keycode` does the reverse.
+const XKB_EVDEV_OFFSET: u32 = 8;
+// XKB keycode 8 would go out as evdev 0 (KEY_RESERVED), so the fixed keys
+// start at 9.
+const BACKSPACE_KEYCODE: u32 = 9;
+// Reserved alongside BackSpace in every generated keymap, for `{{cursor}}`
+// placement after a replacement has already been typed.
+const LEFT_KEYCODE: u32 = 10;
+const FIRST_DYNAMIC_KEYCODE: u32 = 11;
 const KEYCODE_LIMIT: u32 = 255;
-/// XKB reserves K8/K9 for erase/cursor control, leaving 10..254 for output.
+/// K9/K10 are reserved for erase/cursor control, leaving 11..254 for output.
 const MAX_UNIQUE_OUTPUT_CHARS: usize = (KEYCODE_LIMIT - FIRST_DYNAMIC_KEYCODE) as usize;
 const MAX_OUTPUT_CHARS: usize = 8192;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -278,10 +285,11 @@ impl WlrootsInjector {
     }
 
     fn send_key_unflushed(&mut self, keycode: u32) {
+        let key = wire_keycode(keycode);
         self.keyboard
-            .key(0, keycode, wl_keyboard::KeyState::Pressed.into());
+            .key(0, key, wl_keyboard::KeyState::Pressed.into());
         self.keyboard
-            .key(0, keycode, wl_keyboard::KeyState::Released.into());
+            .key(0, key, wl_keyboard::KeyState::Released.into());
     }
 
     fn send_keys<I>(&mut self, keycodes: I) -> Result<(), WlrootsError>
@@ -425,12 +433,15 @@ impl TextInjector for WlrootsInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        self.send_keys(std::iter::repeat_n(8, erase_grapheme_count(trigger)))
-            .map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: error.to_string(),
-                retryable: error.is_retryable(),
-            })
+        self.send_keys(std::iter::repeat_n(
+            BACKSPACE_KEYCODE,
+            erase_grapheme_count(trigger),
+        ))
+        .map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })
     }
 
     fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
@@ -461,7 +472,7 @@ impl TextInjector for WlrootsInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        let mut keycodes = vec![8; erase_grapheme_count(trigger)];
+        let mut keycodes = vec![BACKSPACE_KEYCODE; erase_grapheme_count(trigger)];
         keycodes.extend(text.chars().map(|character| self.mappings[&character]));
         self.send_keys(keycodes).map_err(|error| InjectorError {
             backend: BACKEND_NAME,
@@ -485,6 +496,11 @@ impl TextInjector for WlrootsInjector {
     }
 }
 
+/// The evdev code to send for an XKB keycode of the generated keymap.
+fn wire_keycode(keycode: u32) -> u32 {
+    keycode - XKB_EVDEV_OFFSET
+}
+
 fn build_keymap(
     chars: impl Iterator<Item = char>,
 ) -> Result<(String, HashMap<char, u32>), WlrootsError> {
@@ -492,10 +508,10 @@ fn build_keymap(
     let mut next_keycode = FIRST_DYNAMIC_KEYCODE;
     let mut character_count = 0;
     let mut keycodes = String::from(
-        "xkb_keymap {\n xkb_keycodes \"(unnamed)\" { minimum = 8; maximum = 255;\n <K8> = 8;\n <K9> = 9;\n",
+        "xkb_keymap {\n xkb_keycodes \"(unnamed)\" { minimum = 8; maximum = 255;\n <K9> = 9;\n <K10> = 10;\n",
     );
     let mut symbols = String::from(
-        "xkb_symbols \"(unnamed)\" {\n key <K8> { [ BackSpace ] };\n key <K9> { [ Left ] };\n",
+        "xkb_symbols \"(unnamed)\" {\n key <K9> { [ BackSpace ] };\n key <K10> { [ Left ] };\n",
     );
     for character in chars {
         character_count += 1;
@@ -560,6 +576,34 @@ mod tests {
         assert!(keymap.contains("[ Return ]"));
         assert!(keymap.contains("[ BackSpace ]"));
         assert!(keymap.contains("[ Left ]"));
+    }
+
+    /// A client adds 8 to each wire keycode before looking it up in the
+    /// keymap. Before this was enforced, every key landed 8 entries too
+    /// high: BackSpace never erased and text came out wrong.
+    #[test]
+    fn wire_keycodes_select_the_intended_keymap_entries() {
+        let (keymap, mappings) = build_keymap("a🙂\n".chars()).unwrap();
+        let symbol_at = |wire: u32| {
+            let name = format!("<K{}>", wire + 8);
+            assert!(
+                keymap.contains(&format!(" {name} = {};", wire + 8)),
+                "{name} is not defined"
+            );
+            let entry = format!(" key {name} {{ [ ");
+            let start = keymap.find(&entry).expect("symbols entry") + entry.len();
+            keymap[start..].split(' ').next().unwrap().to_owned()
+        };
+        assert_eq!(symbol_at(wire_keycode(BACKSPACE_KEYCODE)), "BackSpace");
+        assert_eq!(symbol_at(wire_keycode(LEFT_KEYCODE)), "Left");
+        assert_eq!(symbol_at(wire_keycode(mappings[&'a'])), "U61");
+        assert_eq!(symbol_at(wire_keycode(mappings[&'🙂'])), "U1F642");
+        assert_eq!(symbol_at(wire_keycode(mappings[&'\n'])), "Return");
+        // Evdev 0 is KEY_RESERVED; nothing may be sent as it.
+        assert!(mappings
+            .values()
+            .chain([&BACKSPACE_KEYCODE, &LEFT_KEYCODE])
+            .all(|&keycode| wire_keycode(keycode) >= 1));
     }
 
     #[test]

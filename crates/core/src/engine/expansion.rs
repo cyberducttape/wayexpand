@@ -351,6 +351,16 @@ impl ExpansionEngine {
     }
 
     fn on_window_changed(&mut self, window: Option<super::WindowContext>) {
+        if same_focus_target(self.current_window.as_ref(), window.as_ref()) {
+            // Trackers republish unchanged focus: a tracker that keeps
+            // failing to connect reports "no window" on every retry, and an
+            // application retitles its window while the user types. Neither
+            // moves focus (the focus witness does not count them either), so
+            // keep the typed context and pending work and only refresh the
+            // title for `title_contains:` filters.
+            self.set_window_context(window);
+            return;
+        }
         self.bump_generation();
         // The text in the buffer belongs to the previously-focused
         // application. Text expansion state must be scoped to the focused
@@ -361,6 +371,27 @@ impl ExpansionEngine {
         // cross-window trigger matches that can cause unrelated text deletion.
         self.set_window_context(window);
         self.clear_buffer();
+    }
+}
+
+/// Whether two focus snapshots certainly name the same target: both "no
+/// window", or the same application and the same exact window instance.
+/// Anything less certain (no instance ID to compare) counts as a change.
+fn same_focus_target(
+    current: Option<&super::WindowContext>,
+    update: Option<&super::WindowContext>,
+) -> bool {
+    match (current, update) {
+        (None, None) => true,
+        (Some(current), Some(update)) => {
+            current.app_id == update.app_id
+                && current
+                    .instance_id
+                    .as_deref()
+                    .is_some_and(|instance| !instance.is_empty())
+                && current.instance_id == update.instance_id
+        }
+        _ => false,
     }
 }
 

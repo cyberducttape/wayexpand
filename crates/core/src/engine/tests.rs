@@ -5325,3 +5325,126 @@ fn each_expansion_renders_new_random_values() {
     assert_eq!(first.insert.len(), 36 + 1 + 8);
     assert_ne!(first.insert, second.insert);
 }
+
+fn exact_window(app: &str, instance: Option<&str>, title: &str) -> WindowContext {
+    WindowContext {
+        app_id: Some(app.into()),
+        title: Some(title.into()),
+        instance_id: instance.map(Into::into),
+    }
+}
+
+#[test]
+fn republished_focus_keeps_a_partly_typed_trigger() {
+    // A tracker that cannot connect republishes "no window" on every retry,
+    // and an exactly identified window is retitled while the user types.
+    // Neither is a focus change, so the trigger typed across it must match.
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":sig"
+        replacement = "Regards"
+    "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.process(InputEvent::Text(":si".into())).is_empty());
+    engine.process(InputEvent::WindowChanged(None));
+    assert_eq!(
+        engine.process(InputEvent::Text("g".into())).len(),
+        1,
+        "a repeated \"no window\" update reset the trigger"
+    );
+
+    let mut engine = ExpansionEngine::new(
+        Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":sig"
+            replacement = "Regards"
+            app_filter = ["title_contains:draft"]
+        "#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    engine.process(InputEvent::WindowChanged(Some(exact_window(
+        "org.example.Mail",
+        Some("toplevel-1"),
+        "Inbox",
+    ))));
+    assert!(engine.process(InputEvent::Text(":si".into())).is_empty());
+    engine.process(InputEvent::WindowChanged(Some(exact_window(
+        "org.example.Mail",
+        Some("toplevel-1"),
+        "Draft - Mail",
+    ))));
+    assert_eq!(
+        engine
+            .current_window()
+            .and_then(|window| window.title.as_deref()),
+        Some("Draft - Mail"),
+        "a title-only update must still refresh the title"
+    );
+    assert_eq!(engine.process(InputEvent::Text("g".into())).len(), 1);
+}
+
+#[test]
+fn a_same_app_update_without_an_instance_id_still_resets_the_trigger() {
+    // Without an instance ID, two windows of one app are indistinguishable,
+    // so the update must be treated as a possible focus change.
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":sig"
+        replacement = "Regards"
+    "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.process(InputEvent::WindowChanged(Some(exact_window(
+        "org.example.Mail",
+        None,
+        "Inbox",
+    ))));
+    assert!(engine.process(InputEvent::Text(":si".into())).is_empty());
+    engine.process(InputEvent::WindowChanged(Some(exact_window(
+        "org.example.Mail",
+        None,
+        "Inbox",
+    ))));
+    assert!(engine.process(InputEvent::Text("g".into())).is_empty());
+}
+
+#[test]
+fn a_command_result_survives_a_repeated_no_window_update() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":slow"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sh"
+        args = ["-c", "sleep 0.2; printf done"]
+        timeout_ms = 5000
+    "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.enable_async_commands();
+    assert!(engine.process(InputEvent::Text(":slow".into())).is_empty());
+    engine.process(InputEvent::WindowChanged(None));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let completed = loop {
+        let completed = engine.drain_completed_commands();
+        if !completed.is_empty() {
+            break completed;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the command result was discarded"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(completed[0].insert, "done");
+}
