@@ -43,7 +43,8 @@ All notable changes to WayExpand are documented here.
   executable; this prevents a background shell wrapper from being mistaken for
   the process whose memory, threads, descriptors, and CPU are measured.
 - Compositor-certification runner preflight failures now write the missing
-  token permission or runner labels to the GitHub Actions job summary.
+  token permission or runner labels to the GitHub Actions job summary; the
+  workflow passes actionlint's embedded shell analysis.
 
 - Diagnostics now show the active capture and injection routes, detected
   compositor/version, route permission health, and rolling average injection
