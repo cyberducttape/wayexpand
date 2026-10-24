@@ -8,8 +8,10 @@ All notable changes to WayExpand are documented here.
   end-to-end harness and reports observed insertion and focus checks, while
   marking keyboard capture, Unicode insertion, suspend/resume, and production
   certification as unverified. Release, user, Debian, RPM, and Arch packages
-  now include its small test helpers. The harness uses a private session and
-  does not alter the active desktop. See `docs/CERTIFICATION.md`.
+  now include its small test helpers. The harness runs correctly from outside
+  the checkout with a relative `CARGO_TARGET_DIR`, and restricts permissions
+  only on its temporary work directory. It uses a private session and does
+  not alter the active desktop. See `docs/CERTIFICATION.md`.
 
 - Diagnostics now show the active capture and injection routes, detected
   compositor/version, route permission health, and rolling average injection

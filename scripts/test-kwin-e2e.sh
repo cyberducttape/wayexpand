@@ -56,20 +56,23 @@ if [ -n "${WAYEXPAND_E2E_PREBUILT_BIN:-}" ]; then
     chmod 700 "$work_parent"
     work=$(mktemp -d "$work_parent/kwin-e2e.XXXXXX")
 else
-    cargo build --quiet --locked -p wayexpand -p wayexpand-daemon -p wayexpand-e2e \
-        --manifest-path "$project_dir/Cargo.toml"
+    # Pick up the repository's rust-toolchain.toml even when the user invoked
+    # doctor from another working directory.
+    cd "$project_dir"
     target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
     case "$target_dir" in
         /*) ;;
         *) target_dir="$project_dir/$target_dir" ;;
     esac
+    export CARGO_TARGET_DIR="$target_dir"
+    cargo build --quiet --locked -p wayexpand -p wayexpand-daemon -p wayexpand-e2e \
+        --manifest-path "$project_dir/Cargo.toml"
     bin="$target_dir/debug"
     app_bin=$bin
-    # The daemon's trust checks reject configuration below shared or
-    # group-writable directories, so the work directory lives under target/.
-    chmod 700 "$target_dir"
+    # Restrict this test's files, not a possibly shared CARGO_TARGET_DIR.
     work=$(mktemp -d "$target_dir/kwin-e2e.XXXXXX")
 fi
+chmod 700 "$work"
 # Wayland and libei socket paths must fit in 108 bytes.
 runtime=$(mktemp -d /tmp/wxe2e.XXXXXX)
 # KWin's own start-up D-Bus-activates the desktop portal, which brings up
