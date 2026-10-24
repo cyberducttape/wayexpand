@@ -147,8 +147,9 @@ What's implemented:
     writer before the process exits
   - On SIGINT/SIGTERM the broker stops accepting, disconnects clients that
     have not finished sending a request, gives in-flight response writes one
-    second, and lets running actions finish within their own timeout so their
-    audit events are recorded
+    second, and cancels/reaps running action process groups so long configured
+    action timeouts cannot outlive the service stop deadline; cancellation is
+    recorded in the audit sink
   - Runtime health is published as mode `0600` JSON beside the broker socket;
     `wayexpand doctor` reports queue drops, write failures, and health state
   - By default, slow or unavailable storage does not block action execution;

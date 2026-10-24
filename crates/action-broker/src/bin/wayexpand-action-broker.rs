@@ -20,7 +20,7 @@ use std::{
     io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -70,9 +70,8 @@ enum IoPhase {
 
 /// Connections currently blocked on client I/O. On shutdown, clients that
 /// have not finished sending a request are disconnected at once and response
-/// writes get [`SHUTDOWN_WRITE_GRACE`]; connections whose action is running
-/// are left alone so the action finishes within its own deadline and its
-/// audit event is recorded.
+/// writes get [`SHUTDOWN_WRITE_GRACE`]; running actions are cancelled,
+/// reaped, and audited so they cannot outlive the service stop deadline.
 #[derive(Default)]
 struct ClientIo {
     shutting_down: bool,
@@ -583,6 +582,7 @@ async fn run() -> Result<()> {
     // Main service loop - accept connections and handle requests
     let mut connection_tasks = tokio::task::JoinSet::new();
     let client_io: ClientIoRegistry = Arc::default();
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
     let mut shutdown = Box::pin(shutdown_signals.wait());
     loop {
         // Finished tasks still hold their captured Arcs until their join
@@ -597,6 +597,7 @@ async fn run() -> Result<()> {
         let accepted = tokio::select! {
             _ = &mut shutdown => {
                 info!("shutdown signal received; flushing audit events");
+                shutdown_requested.store(true, Ordering::Release);
                 begin_client_io_shutdown(&client_io);
                 let wake_path = server.socket_path().to_owned();
                 let _ = tokio::task::spawn_blocking(move || {
@@ -642,6 +643,7 @@ async fn run() -> Result<()> {
         let request_counter = Arc::clone(&request_counter);
         let action_slots = Arc::clone(&action_slots);
         let client_io = Arc::clone(&client_io);
+        let shutdown_requested = Arc::clone(&shutdown_requested);
         connection_tasks.spawn(async move {
             let _connection_permit = connection_permit;
             let track = |phase, conn: &action_broker::ipc::ServerConnection| {
@@ -713,7 +715,10 @@ async fn run() -> Result<()> {
             let _permit = permit;
             let started_at = unix_time_ms();
             let started = Instant::now();
-            let mut action_response = match executor.execute(request).await {
+            let mut action_response = match executor
+                .execute_cancellable(request, shutdown_requested)
+                .await
+            {
                 Ok(output) => output,
                 Err(error) => action_broker::ActionResponse::Error(error),
             };

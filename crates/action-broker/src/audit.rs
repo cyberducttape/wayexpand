@@ -21,6 +21,7 @@ const AUDIT_QUEUE_CAPACITY: usize = 256;
 const AUDIT_BATCH_SIZE: usize = 64;
 const AUDIT_BATCH_WAIT: Duration = Duration::from_millis(100);
 const REQUIRED_AUDIT_ACK_TIMEOUT: Duration = Duration::from_secs(2);
+const AUDIT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct CallerIdentity {
@@ -171,11 +172,33 @@ impl AuditLogger {
             }
         }
         if let Some(worker) = self.worker.take() {
-            if worker.join().is_err() {
-                self.write_failures.fetch_add(1, Ordering::Relaxed);
-                tracing::error!("audit writer thread panicked during shutdown");
-            }
+            join_audit_worker(worker, AUDIT_SHUTDOWN_TIMEOUT, &self.write_failures);
         }
+    }
+}
+
+fn join_audit_worker(
+    worker: thread::JoinHandle<()>,
+    timeout: Duration,
+    write_failures: &AtomicU64,
+) {
+    let deadline = std::time::Instant::now() + timeout;
+    while !worker.is_finished() && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if !worker.is_finished() {
+        write_failures.fetch_add(1, Ordering::Relaxed);
+        tracing::error!(
+            timeout_ms = timeout.as_millis(),
+            "audit writer did not stop before shutdown deadline; queued events may not be flushed"
+        );
+        // Dropping JoinHandle detaches the worker. Process shutdown will
+        // reclaim it; importantly, broker teardown remains within its budget.
+        return;
+    }
+    if worker.join().is_err() {
+        write_failures.fetch_add(1, Ordering::Relaxed);
+        tracing::error!("audit writer thread panicked during shutdown");
     }
 }
 
@@ -400,6 +423,18 @@ mod tests {
         ));
         std::fs::create_dir(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn audit_worker_shutdown_wait_is_bounded() {
+        let worker = thread::spawn(|| thread::sleep(Duration::from_millis(250)));
+        let failures = AtomicU64::new(0);
+        let start = std::time::Instant::now();
+
+        join_audit_worker(worker, Duration::from_millis(20), &failures);
+
+        assert!(start.elapsed() < Duration::from_millis(150));
+        assert_eq!(failures.load(Ordering::Relaxed), 1);
     }
 
     #[test]

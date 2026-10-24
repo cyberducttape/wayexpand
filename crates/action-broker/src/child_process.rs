@@ -1,5 +1,9 @@
 use std::io::Read;
 use std::process::{Child, ChildStderr, ChildStdout, ExitStatus};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -15,6 +19,7 @@ pub enum ChildRunError {
     Timeout,
     InvalidTimeout,
     IncompleteOutput,
+    Cancelled,
     Io(std::io::Error),
 }
 
@@ -90,6 +95,17 @@ pub fn run_child_unix(
     stderr: Option<ChildStderr>,
     timeout: Duration,
 ) -> Result<ChildRunOutput, ChildRunError> {
+    run_child_unix_cancellable(child, stdout, stderr, timeout, None)
+}
+
+#[cfg(unix)]
+pub fn run_child_unix_cancellable(
+    child: Child,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    timeout: Duration,
+    cancelled: Option<Arc<AtomicBool>>,
+) -> Result<ChildRunOutput, ChildRunError> {
     let mut guard = ChildSupervisor::new(child);
     let mut stdout = stdout;
     let mut stderr = stderr;
@@ -136,6 +152,14 @@ pub fn run_child_unix(
             guard.kill_group();
             let status = guard.reap().map_err(ChildRunError::Io)?;
             break status;
+        }
+        if cancelled
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::Acquire))
+        {
+            guard.kill_group();
+            let _ = guard.reap();
+            return Err(ChildRunError::Cancelled);
         }
         if Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
@@ -257,6 +281,43 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "continuous output starved the timeout: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn broker_shutdown_cancels_a_continuous_action_promptly() {
+        use std::sync::atomic::AtomicBool;
+
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "while :; do printf x; done"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn continuous-output child");
+        let stdout = child.stdout.take().expect("child stdout");
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let signal = Arc::clone(&cancelled);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            signal.store(true, Ordering::Release);
+        });
+
+        let started = Instant::now();
+        let result = run_child_unix_cancellable(
+            child,
+            Some(stdout),
+            None,
+            Duration::from_secs(10),
+            Some(cancelled),
+        );
+
+        assert!(matches!(result, Err(ChildRunError::Cancelled)));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "shutdown did not cancel continuous action output promptly: {:?}",
             started.elapsed()
         );
     }

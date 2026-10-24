@@ -8,8 +8,9 @@ All notable changes to WayExpand are documented here.
   KWin test client when the negotiated libei route offers direct text input.
   The report marks Unicode as passed only after the client receives the exact
   accented and Japanese output; keysym-only routes show it as not tested.
-  Human reports now identify the desktop and use concise scenario labels. CI
-  exercises the report contract separately from its mandatory E2E scenarios.
+  Human reports now identify the desktop without JSON quoting and use concise
+  scenario labels. CI exercises the report contract separately from its
+  mandatory E2E scenarios.
 - A successful action whose required audit sync fails now returns an explicit
   “completed; verify before retrying” error instead of a generic broker error.
   Existing action failures remain visible, with the separate audit failure in
@@ -18,6 +19,10 @@ All notable changes to WayExpand are documented here.
 - Headless KWin CI now preserves failure diagnostics and reports the EIS relay
   startup error, so compositor-specific integration failures can be diagnosed
   from the workflow artifact.
+- Action Broker shutdown now cancels and reaps in-flight process groups, then
+  audits the cancellation, instead of waiting for each action's full timeout.
+- Action Broker shutdown bounds its audit-writer join and reports when a
+  stalled filesystem sync prevents queued audit events from being flushed.
 - Updated the locked Windows clipboard dependency from yanked `clipboard-win`
   5.4.1 to 5.4.3. The workspace suite passes with the new lockfile and
   `cargo audit` no longer reports a yanked package; it reports only the

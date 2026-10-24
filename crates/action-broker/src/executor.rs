@@ -4,17 +4,21 @@
 
 #[cfg(not(unix))]
 use crate::child_process::run_child_fallback;
-#[cfg(unix)]
-use crate::child_process::run_child_unix;
 use crate::child_process::ChildRunError;
 #[cfg(test)]
 use crate::child_process::MAX_STREAM_OUTPUT_BYTES;
+#[cfg(unix)]
+use crate::child_process::{run_child_unix, run_child_unix_cancellable};
 use crate::{
     config::{BrokerConfig, MAX_ACTION_TIMEOUT_MS},
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
 };
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 #[cfg(unix)]
 use wayexpand_process_supervisor::configure_process_group;
@@ -41,6 +45,33 @@ impl ActionExecutor {
 
     /// Execute an action with process-group containment and policy enforcement.
     pub async fn execute(&self, request: ActionRequest) -> Result<ActionResponse, ActionError> {
+        self.execute_inner(request, None).await
+    }
+
+    /// Execute an action that can be cancelled when the broker begins
+    /// shutdown. The process-group supervisor kills and reaps the action
+    /// before returning, allowing the broker to audit the cancellation.
+    pub async fn execute_cancellable(
+        &self,
+        request: ActionRequest,
+        shutdown: Arc<AtomicBool>,
+    ) -> Result<ActionResponse, ActionError> {
+        self.execute_inner(request, Some(shutdown)).await
+    }
+
+    async fn execute_inner(
+        &self,
+        request: ActionRequest,
+        shutdown: Option<Arc<AtomicBool>>,
+    ) -> Result<ActionResponse, ActionError> {
+        if shutdown
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::Acquire))
+        {
+            return Err(ActionError::CommunicationError {
+                reason: "broker is shutting down; action was not started".to_string(),
+            });
+        }
         let action_config =
             self.config
                 .get_action(&request.action_id)
@@ -143,6 +174,15 @@ impl ActionExecutor {
         #[cfg(unix)]
         configure_process_group(&mut cmd);
 
+        if shutdown
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::Acquire))
+        {
+            return Err(ActionError::CommunicationError {
+                reason: "broker is shutting down; action was not started".to_string(),
+            });
+        }
+
         let start = Instant::now();
 
         let mut child = cmd.spawn().map_err(|e| ActionError::SpawnFailed {
@@ -156,13 +196,24 @@ impl ActionExecutor {
 
         let child_stdout = child.stdout.take();
         let child_stderr = child.stderr.take();
+        #[cfg(not(unix))]
+        let _shutdown = shutdown.clone();
         // The blocking task owns the child for its entire lifetime. Its own
         // deadline kills and reaps the process group, so dropping/cancelling
         // this future cannot orphan an action behind Tokio's scheduler.
         let result = tokio::task::spawn_blocking(move || {
             #[cfg(unix)]
             {
-                run_child_unix(child, child_stdout, child_stderr, timeout)
+                match shutdown {
+                    Some(shutdown) => run_child_unix_cancellable(
+                        child,
+                        child_stdout,
+                        child_stderr,
+                        timeout,
+                        Some(shutdown),
+                    ),
+                    None => run_child_unix(child, child_stdout, child_stderr, timeout),
+                }
             }
             #[cfg(not(unix))]
             {
@@ -206,6 +257,9 @@ impl ActionExecutor {
             Err(ChildRunError::Timeout) => Err(ActionError::Timeout {
                 action_id,
                 timeout_ms: timeout.as_millis() as u64,
+            }),
+            Err(ChildRunError::Cancelled) => Err(ActionError::CommunicationError {
+                reason: "action was cancelled because the broker is shutting down".to_string(),
             }),
             Err(ChildRunError::InvalidTimeout) => Err(ActionError::Internal {
                 reason: "action timeout cannot be represented as a deadline".to_string(),
@@ -500,6 +554,60 @@ mod tests {
             500,
         );
         assert_eq!(effective, Duration::from_millis(500));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executor_cancels_a_running_action_for_bounded_broker_shutdown() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "stream".to_string(),
+            ActionConfig {
+                program: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "while :; do printf x; done".to_string()],
+                timeout_ms: 30_000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).expect("valid stream action");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let signal = Arc::clone(&shutdown);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            signal.store(true, Ordering::Release);
+        });
+        let started = Instant::now();
+
+        let result = executor
+            .execute_cancellable(
+                ActionRequest {
+                    action_id: "stream".to_string(),
+                    timeout_ms: 30_000,
+                    inherit_env: false,
+                    env_vars: vec![],
+                    stdout_capture: true,
+                },
+                shutdown,
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ActionError::CommunicationError { ref reason })
+                if reason.contains("cancelled because the broker is shutting down")
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "action outlived the bounded shutdown cancellation: {:?}",
+            started.elapsed()
+        );
     }
 
     #[tokio::test]

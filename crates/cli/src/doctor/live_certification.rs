@@ -296,7 +296,12 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
 
 fn print_human_report(report: &serde_json::Value) {
     println!("WayExpand isolated desktop compatibility report");
-    println!("  Desktop: {}", report["test_session"]["desktop"]);
+    println!(
+        "  Desktop: {}",
+        report["test_session"]["desktop"]
+            .as_str()
+            .unwrap_or("unknown")
+    );
     if let Some(version) = report["test_session"]["version"].as_str() {
         println!("  Compositor: KWin {version} / Wayland");
     } else {
