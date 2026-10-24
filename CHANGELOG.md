@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   reading the primary file and every fleet layer on the keyboard reactor.
   Full contents are still read and validated by the background loader before
   a reload is promoted, avoiding synchronous disk reads during live input.
+  Fleet signatures are captured before a build so a layer edited before the
+  reactor applies that build is detected and reloaded instead of being hidden
+  by a fresh post-build signature.
 - The Action Broker shutdown integration test now keeps its Unix socket in a
   short private runtime path, so Debian package builds with deeply nested
   staging homes do not exceed the platform's socket-path limit.

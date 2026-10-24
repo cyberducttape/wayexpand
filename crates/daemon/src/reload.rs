@@ -70,6 +70,10 @@ struct BuiltConfig {
     engine: ExpansionEngine,
     expansions: usize,
     stamp: Option<FileStamp>,
+    /// Fleet metadata as it existed before this load began. If a layer is
+    /// edited while the build is running or before the reactor applies it,
+    /// the next integrity check must still observe the change.
+    fleet_signature: u64,
 }
 
 enum BuildFailure {
@@ -82,6 +86,7 @@ enum BuildFailure {
 type BuildResult = Result<BuiltConfig, BuildFailure>;
 
 fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildResult {
+    let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
     let (config, stamp) = load_for_mode(path, fleet, policy).map_err(BuildFailure::Load)?;
     let expansions = config.expansion.len();
     let engine = ExpansionEngine::new(config)
@@ -90,6 +95,7 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         engine,
         expansions,
         stamp,
+        fleet_signature,
     })
 }
 
@@ -253,6 +259,11 @@ impl ReloadableConfig {
         fleet: bool,
         policy: OrganizationPolicy,
     ) -> Result<Self> {
+        // Take the change-detection baseline before loading. If a fleet layer
+        // changes during startup, the first integrity scan will see it rather
+        // than accepting a post-load signature for an engine built from older
+        // contents.
+        let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
         let (config, stamp) = load_for_mode(&path, fleet, &policy)?;
         let engine = ExpansionEngine::new(config)
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
@@ -267,7 +278,7 @@ impl ReloadableConfig {
             watch_check_after: None,
             _watcher: watcher,
             fleet,
-            fleet_signature: standard_fleet_signature(),
+            fleet_signature,
             policy,
             engine,
             healthy: true,
@@ -457,6 +468,7 @@ impl ReloadableConfig {
                 mut engine,
                 expansions,
                 stamp: stable_stamp,
+                fleet_signature,
             }) => {
                 // Pause, password-field, composition and window state,
                 // command restrictions and host hooks all carry over, as of
@@ -478,7 +490,7 @@ impl ReloadableConfig {
                 self.stamp = stable_stamp;
                 self.observed = stable_stamp;
                 self.last_integrity_check = Instant::now();
-                self.fleet_signature = standard_fleet_signature();
+                self.fleet_signature = fleet_signature;
                 self.healthy = true;
                 info!(expansions, "configuration reloaded");
             }
@@ -895,6 +907,30 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "new replacement");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn applying_reload_keeps_the_worker_captured_fleet_signature() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        let engine = ExpansionEngine::new(Config::parse(&config_text("new")).unwrap()).unwrap();
+        let stamp = file_stamp(&path);
+        let captured_signature = 0x51_7a_9e;
+
+        config.apply_reload(
+            Ok(BuiltConfig {
+                engine,
+                expansions: 1,
+                stamp,
+                fleet_signature: captured_signature,
+            }),
+            stamp,
+        );
+
+        assert_eq!(config.fleet_signature, captured_signature);
         let _ = fs::remove_file(path);
     }
 
