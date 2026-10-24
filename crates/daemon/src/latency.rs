@@ -227,6 +227,21 @@ pub fn profiles_json() -> String {
     serde_json::Value::Object(modes).to_string()
 }
 
+/// Record a very slow sample in every profile window, so status-size tests
+/// see the largest profile object the daemon can report.
+#[cfg(test)]
+pub(crate) fn saturate_profiles_for_test() {
+    for mode in 0..OUTPUT_MODES.len() {
+        for size in 0..OUTPUT_SIZE_BUCKETS.len() {
+            profile_windows()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .windows[mode][size]
+                .record(u64::MAX / 2);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

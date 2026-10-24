@@ -42,7 +42,8 @@ done
 
 if [ -n "${WAYEXPAND_E2E_PREBUILT_BIN:-}" ]; then
     bin=$WAYEXPAND_E2E_PREBUILT_BIN
-    app_bin=${WAYEXPAND_E2E_APP_BIN:-"$bin/../../../../bin"}
+    # Installed layout: PREFIX/libexec/wayexpand-certification/bin -> PREFIX/bin.
+    app_bin=${WAYEXPAND_E2E_APP_BIN:-"$bin/../../../bin"}
     for executable in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
         [ -x "$bin/$executable" ] || {
             printf 'error: prebuilt certification helper is missing: %s\n' "$executable" >&2

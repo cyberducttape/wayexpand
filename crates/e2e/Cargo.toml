@@ -1,6 +1,6 @@
 [package]
 name = "wayexpand-e2e"
-description = "Helpers for WayExpand's headless KWin end-to-end tests (never packaged)"
+description = "Helpers for WayExpand's headless KWin end-to-end tests and doctor --certify"
 version.workspace = true
 rust-version.workspace = true
 edition.workspace = true

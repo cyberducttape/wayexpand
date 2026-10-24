@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- An installed `wayexpand doctor --certify` now tests the certification
+  helpers installed beside it. Before, a binary built from a source checkout
+  (such as a user install) preferred that checkout's script if it still
+  existed, which built and tested a debug build of whatever commit the
+  checkout was then at. A harness whose private KWin session times out is now
+  reported as a timeout rather than as missing desktop dependencies.
+- Force-stopping a form helper's transient unit no longer passes
+  `--kill-whom=`, which systemd before 252 rejects; every process of the unit
+  is already `systemctl kill`'s default target.
+- The clipboard prefetch counted a read that expired before it started as two
+  deadline misses.
+- A daemon status test now fills every latency profile and the whole failure
+  history, so the variable-length status fields are proven to fit the
+  client's 8 KiB read limit.
+
 - Git synchronization now writes large index updates through the supervised
   nonblocking stdin pipe, so a stalled Git process or inherited pipe cannot
   strand a writer-thread join beyond the command deadline.

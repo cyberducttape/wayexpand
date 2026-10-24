@@ -207,3 +207,20 @@ pub(crate) fn recent_json() -> String {
         .collect::<Vec<_>>();
     serde_json::Value::Array(traces).to_string()
 }
+
+/// Fill the history with its longest possible records, for status-size tests.
+#[cfg(test)]
+pub(crate) fn saturate_for_test() {
+    for _ in 0..HISTORY_LIMIT {
+        push(FailureTrace {
+            at_unix: u64::MAX,
+            backend: "wlroots-virtual-keyboard".into(),
+            trigger_recognized: "yes",
+            focus_admission: "not reached",
+            backend_selected: "yes",
+            erase_acknowledged: "transaction acknowledged; substeps not exposed",
+            insertion_attempted: true,
+            completion: "inserted; cursor placement failed",
+        });
+    }
+}

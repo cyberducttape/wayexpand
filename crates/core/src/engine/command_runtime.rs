@@ -611,17 +611,13 @@ fn run_bounded_systemctl(args: &[&str]) {
 #[cfg(unix)]
 fn transient_unit_shutdown_commands(unit: &str) -> [Vec<String>; 2] {
     [
-        [
-            "--user",
-            "kill",
-            "--kill-whom=all",
-            "--signal=SIGKILL",
-            "--no-block",
-            unit,
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
+        // Every process of the unit is systemctl kill's default target;
+        // --kill-whom= is not spelled out because systemd before 252 named
+        // it --kill-who= and rejects the newer spelling.
+        ["--user", "kill", "--signal=SIGKILL", unit]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         ["--user", "stop", "--no-block", unit]
             .into_iter()
             .map(str::to_owned)
@@ -844,9 +840,7 @@ mod tests {
                 vec![
                     "--user",
                     "kill",
-                    "--kill-whom=all",
                     "--signal=SIGKILL",
-                    "--no-block",
                     "wayexpand-form-42-7.service",
                 ],
                 vec![

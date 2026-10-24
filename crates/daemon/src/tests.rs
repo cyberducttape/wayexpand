@@ -1196,6 +1196,36 @@ fn status_response_fits_the_client_read_limit() {
     );
 }
 
+/// The same limit holds once the variable-length diagnostics are full: every
+/// latency profile populated with huge values and the whole failure history.
+#[test]
+fn saturated_status_response_fits_the_client_read_limit() {
+    latency::saturate_profiles_for_test();
+    failure_trace::saturate_for_test();
+    let long_path = format!("/home/{}/expansions.toml", "d".repeat(1024));
+    let body = status::daemon_status_body_with_runtime_capabilities(
+        "input-method",
+        "wlroots-virtual-keyboard",
+        "reconnecting",
+        true,
+        Path::new(&long_path),
+        false,
+        "ei_keyboard keysym fallback (12ms key pacing)",
+        CommandMetrics::default(),
+        latency::Snapshot::default(),
+        InputSourceCapabilities::INPUT_METHOD_V2,
+        InjectorCapabilities::default(),
+        true,
+        false,
+    );
+    let response = format!("running\n{}\n", body.as_str());
+    assert!(
+        response.len() <= wayexpand_core::CONTROL_MAX_RESPONSE_BYTES,
+        "saturated status response is {} bytes",
+        response.len()
+    );
+}
+
 /// Types only ASCII, like the libei keysym fallback.
 struct AsciiOnlyInjector;
 

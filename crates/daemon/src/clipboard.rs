@@ -308,6 +308,8 @@ fn clipboard_worker(
             if !pending {
                 break;
             }
+            // Each missed deadline is counted once, below, whether the job
+            // expired in the queue or during its read.
             let value = if Instant::now() < job.deadline {
                 let started = Instant::now();
                 let active = ActiveRead::new();
@@ -321,7 +323,6 @@ fn clipboard_worker(
                 }
                 value
             } else {
-                DEADLINE_MISSES_TOTAL.fetch_add(1, Ordering::Relaxed);
                 None
             };
             let completed_at = Instant::now();

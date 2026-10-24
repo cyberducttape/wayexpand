@@ -135,6 +135,8 @@ fn run_harness() -> HarnessResult {
     if !timeout.status.success() && outcomes.is_empty() {
         let reason = if timeout.status.code() == Some(124) || timeout.status.code() == Some(137) {
             "the isolated harness exceeded its 16-minute deadline"
+        } else if stderr.contains("private KWin session exceeded its") {
+            "the private KWin session exceeded its deadline"
         } else if stderr.contains("error:") {
             "the isolated harness could not start; check the required desktop dependencies"
         } else {
@@ -215,13 +217,25 @@ fn run_harness() -> HarnessResult {
 }
 
 fn harness_paths() -> Option<(PathBuf, Option<(PathBuf, PathBuf)>)> {
-    let source_script =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test-kwin-e2e.sh");
-    if source_script.is_file() {
-        return Some((source_script, None));
-    }
-
     let executable = env::current_exe().ok()?;
+    // An installed binary certifies its own installed helpers. The checkout
+    // it was built from (if it still exists) may be at another commit, and
+    // its script would build and test those binaries instead.
+    if let Some(installed) = installed_harness(&executable) {
+        return Some(installed);
+    }
+    // A development binary running from inside its checkout uses the source
+    // harness, which builds that same checkout.
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .ok()?;
+    let source_script = source_root.join("scripts/test-kwin-e2e.sh");
+    (executable.starts_with(&source_root) && source_script.is_file())
+        .then_some((source_script, None))
+}
+
+fn installed_harness(executable: &Path) -> Option<(PathBuf, Option<(PathBuf, PathBuf)>)> {
     let prefix = executable.parent()?.parent()?;
     for directory in [
         prefix.join("libexec/wayexpand-certification"),
@@ -442,6 +456,33 @@ mod tests {
             .iter()
             .map(|scenario| ((*scenario).to_owned(), "passed"))
             .collect()
+    }
+
+    #[test]
+    fn installed_binary_uses_the_helpers_installed_beside_it() {
+        let prefix = std::env::temp_dir().join(format!(
+            "wayexpand-certify-prefix-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let harness = prefix.join("libexec/wayexpand-certification");
+        std::fs::create_dir_all(harness.join("bin")).unwrap();
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        let executable = prefix.join("bin/wayexpand");
+        std::fs::write(&executable, "").unwrap();
+        assert!(installed_harness(&executable).is_none());
+
+        std::fs::write(harness.join("test-kwin-e2e.sh"), "").unwrap();
+        for helper in ["wx-e2e-sink", "wx-e2e-type", "wx-e2e-eis-relay"] {
+            std::fs::write(harness.join("bin").join(helper), "").unwrap();
+        }
+        let (script, prebuilt) = installed_harness(&executable).unwrap();
+        assert_eq!(script, harness.join("test-kwin-e2e.sh"));
+        assert_eq!(prebuilt, Some((harness.join("bin"), prefix.join("bin"))));
+        std::fs::remove_dir_all(prefix).unwrap();
     }
 
     #[test]
