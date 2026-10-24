@@ -33,6 +33,9 @@ All notable changes to WayExpand are documented here.
   the checkout with a relative `CARGO_TARGET_DIR`, and restricts permissions
   only on its temporary work directory. It uses a private session and does
   not alter the active desktop. See `docs/CERTIFICATION.md`.
+- Certification reports now fail if the harness process exits unsuccessfully,
+  even when it emitted passing scenario results before failing during teardown
+  or evidence collection.
 
 - Diagnostics now show the active capture and injection routes, detected
   compositor/version, route permission health, and rolling average injection

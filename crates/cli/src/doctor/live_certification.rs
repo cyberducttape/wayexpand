@@ -121,6 +121,19 @@ fn run_harness() -> HarnessResult {
     for scenario in SCENARIOS {
         outcomes.entry((*scenario).to_owned()).or_insert("not-run");
     }
+    // A driver can emit passing scenario lines and still fail during session
+    // teardown or evidence collection. Never present that run as a successful
+    // partial report: the process result is part of the evidence contract.
+    if !timeout.status.success() {
+        return HarnessResult {
+            status: "failed",
+            version,
+            outcomes,
+            reason: Some(
+                "the isolated harness exited unsuccessfully after producing scenario results",
+            ),
+        };
+    }
     HarnessResult {
         status: "completed",
         version,
@@ -219,7 +232,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
     let any_failed = checks.iter().any(|check| check["status"] == "failed");
     let overall = if result.status == "unavailable" {
         "unavailable"
-    } else if any_failed {
+    } else if result.status == "failed" || any_failed {
         "failed"
     } else if required_checks_passed {
         "partial"
