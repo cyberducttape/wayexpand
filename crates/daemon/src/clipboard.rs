@@ -13,7 +13,8 @@
 //! trigger. That value is held for at most [`PREFETCH_MAX_AGE`], handed to
 //! the very next render, and then dropped; nothing monitors the clipboard.
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use wayexpand_core::{
@@ -29,6 +30,65 @@ const PREFETCH_MAX_AGE: Duration = Duration::from_secs(2);
 /// delay an expansion. Reading on demand (never caching) is deliberate, see
 /// the module docs.
 const CLIPBOARD_TIMEOUT_MS: u64 = 150;
+
+static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
+static READS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static READS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static READ_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DEADLINE_MISSES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAX_READ_DURATION_US: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct MetricsSnapshot {
+    pub worker_threads: usize,
+    pub reads_in_flight: usize,
+    pub reads_total: u64,
+    pub read_failures_total: u64,
+    pub deadline_misses_total: u64,
+    pub max_read_duration_us: u64,
+}
+
+pub(crate) fn metrics_snapshot() -> MetricsSnapshot {
+    MetricsSnapshot {
+        worker_threads: WORKER_THREADS.load(Ordering::Relaxed),
+        reads_in_flight: READS_IN_FLIGHT.load(Ordering::Relaxed),
+        reads_total: READS_TOTAL.load(Ordering::Relaxed),
+        read_failures_total: READ_FAILURES_TOTAL.load(Ordering::Relaxed),
+        deadline_misses_total: DEADLINE_MISSES_TOTAL.load(Ordering::Relaxed),
+        max_read_duration_us: MAX_READ_DURATION_US.load(Ordering::Relaxed),
+    }
+}
+
+struct WorkerRegistration;
+
+impl WorkerRegistration {
+    fn new() -> Self {
+        WORKER_THREADS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for WorkerRegistration {
+    fn drop(&mut self) {
+        WORKER_THREADS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+struct ActiveRead;
+
+impl ActiveRead {
+    fn new() -> Self {
+        READS_IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+        READS_TOTAL.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for ActiveRead {
+    fn drop(&mut self) {
+        READS_IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 fn wl_paste_command() -> CommandConfig {
     CommandConfig {
@@ -53,8 +113,18 @@ type ReadClipboard = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 enum Prefetched {
     #[default]
     Empty,
-    Pending,
-    Ready(Instant, Option<String>),
+    Pending {
+        generation: u64,
+        deadline: Instant,
+    },
+    Ready {
+        generation: u64,
+        at: Instant,
+        value: String,
+    },
+    Unavailable {
+        generation: u64,
+    },
 }
 
 #[derive(Default)]
@@ -68,6 +138,11 @@ struct Slot {
 struct Shared {
     slot: Mutex<Slot>,
     ready: Condvar,
+}
+
+struct ReadJob {
+    generation: u64,
+    deadline: Instant,
 }
 
 /// The `{{clipboard}}` reader and its prefetch hook, sharing one slot.
@@ -87,12 +162,17 @@ fn prefetching_clipboard(
         slot: Mutex::new(Slot::default()),
         ready: Condvar::new(),
     });
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker_shared = Arc::clone(&shared);
+    let _worker = std::thread::Builder::new()
+        .name("wayexpand-clipboard".into())
+        .spawn(move || clipboard_worker(receiver, worker_shared, read, max_age));
     let reader = {
         let shared = Arc::clone(&shared);
-        let read = Arc::clone(&read);
-        ClipboardReader(Arc::new(move || take_or_read(&shared, &read, max_age)))
+        let sender = sender.clone();
+        ClipboardReader(Arc::new(move || take_or_read(&shared, &sender, max_age)))
     };
-    let prefetch = ClipboardPrefetch(Arc::new(move || start_prefetch(&shared, &read, max_age)));
+    let prefetch = ClipboardPrefetch(Arc::new(move || start_prefetch(&shared, &sender)));
     (reader, prefetch)
 }
 
@@ -103,85 +183,208 @@ fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, Slot> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn start_prefetch(shared: &Arc<Shared>, read: &ReadClipboard, max_age: Duration) {
-    let generation = {
-        let mut slot = lock(shared);
-        match slot.value {
-            Prefetched::Pending => return,
-            Prefetched::Ready(at, _) if at.elapsed() < max_age => return,
-            _ => {}
-        }
-        slot.generation = slot.generation.wrapping_add(1);
-        slot.value = Prefetched::Pending;
-        slot.generation
+fn queue_read(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>, slot: &mut Slot) -> Option<u64> {
+    slot.generation = slot.generation.wrapping_add(1);
+    let generation = slot.generation;
+    let deadline = Instant::now() + Duration::from_millis(CLIPBOARD_TIMEOUT_MS);
+    slot.value = Prefetched::Pending {
+        generation,
+        deadline,
     };
-    let worker_shared = Arc::clone(shared);
-    let read = Arc::clone(read);
-    let spawned = std::thread::Builder::new()
-        .name("wayexpand-clipboard".into())
-        .spawn(move || {
-            let value = read();
-            {
-                let mut slot = lock(&worker_shared);
-                if slot.generation != generation {
-                    return;
-                }
-                slot.value = Prefetched::Ready(Instant::now(), value);
+    if sender
+        .try_send(ReadJob {
+            generation,
+            deadline,
+        })
+        .is_err()
+    {
+        slot.value = Prefetched::Unavailable { generation };
+        shared.ready.notify_all();
+        return None;
+    }
+    Some(generation)
+}
+
+fn start_prefetch(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>) {
+    let mut slot = lock(shared);
+    // A trigger has one prefetch opportunity. Don't launch overlapping reads;
+    // a later trigger can share a live in-flight operation, but a completed
+    // unconsumed value is replaced so it cannot leak into a different trigger.
+    if matches!(slot.value, Prefetched::Pending { .. }) {
+        return;
+    }
+    let _ = queue_read(shared, sender, &mut slot);
+}
+
+/// Wait for the current single-flight read. A timed-out prefetch remains
+/// pending until its worker finishes, so a later render never starts a second
+/// clipboard command while the first may still be running.
+fn take_or_read(
+    shared: &Shared,
+    sender: &mpsc::SyncSender<ReadJob>,
+    max_age: Duration,
+) -> Option<String> {
+    let mut slot = lock(shared);
+    let generation = match &slot.value {
+        Prefetched::Ready {
+            generation: _,
+            at,
+            value: _,
+        } if at.elapsed() < max_age => {
+            if let Prefetched::Ready { value, .. } = std::mem::take(&mut slot.value) {
+                shared.ready.notify_all();
+                return Some(value);
             }
-            worker_shared.ready.notify_all();
-            // Erase an unused value instead of keeping clipboard contents
-            // around until the next interaction. The wait ends early once
-            // the value is taken or superseded, so the thread only lingers
-            // while a value is actually held.
-            let slot = lock(&worker_shared);
-            let (mut slot, _) = worker_shared
-                .ready
-                .wait_timeout_while(slot, max_age, |slot| {
-                    slot.generation == generation && matches!(slot.value, Prefetched::Ready(..))
-                })
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if slot.generation == generation {
-                slot.value = Prefetched::Empty;
-            }
-        });
-    if spawned.is_err() {
-        let mut slot = lock(shared);
-        if slot.generation == generation {
+            return None;
+        }
+        Prefetched::Pending { generation, .. } => *generation,
+        Prefetched::Unavailable { .. } => {
             slot.value = Prefetched::Empty;
+            return None;
+        }
+        Prefetched::Empty | Prefetched::Ready { .. } => {
+            let _ = std::mem::take(&mut slot.value);
+            queue_read(shared, sender, &mut slot)?
+        }
+    };
+
+    loop {
+        match &slot.value {
+            Prefetched::Pending {
+                generation: active_generation,
+                deadline,
+            } if *active_generation == generation => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return None;
+                }
+                slot = shared
+                    .ready
+                    .wait_timeout(slot, remaining)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .0;
+            }
+            Prefetched::Ready {
+                generation: active_generation,
+                at,
+                ..
+            } if *active_generation == generation => {
+                if at.elapsed() >= max_age {
+                    slot.value = Prefetched::Empty;
+                    return None;
+                }
+                let Prefetched::Ready { value, .. } = std::mem::take(&mut slot.value) else {
+                    unreachable!()
+                };
+                shared.ready.notify_all();
+                return Some(value);
+            }
+            Prefetched::Unavailable {
+                generation: active_generation,
+            } if *active_generation == generation => {
+                slot.value = Prefetched::Empty;
+                return None;
+            }
+            // Another concurrent render consumed this generation or a newer
+            // trigger superseded it. Never enqueue a duplicate as a fallback.
+            _ => return None,
         }
     }
 }
 
-/// Use the prefetched value if it is fresh (waiting for an in-flight read),
-/// otherwise read synchronously. A prefetched value is used at most once.
-fn take_or_read(shared: &Shared, read: &ReadClipboard, max_age: Duration) -> Option<String> {
-    let mut slot = lock(shared);
-    // The in-flight read is itself bounded by the wl-paste timeout; this is
-    // a backstop if its thread is somehow delayed.
-    let deadline = Instant::now() + Duration::from_millis(CLIPBOARD_TIMEOUT_MS * 2);
-    while matches!(slot.value, Prefetched::Pending) {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
+fn clipboard_worker(
+    receiver: mpsc::Receiver<ReadJob>,
+    shared: Arc<Shared>,
+    read: ReadClipboard,
+    max_age: Duration,
+) {
+    let _worker = WorkerRegistration::new();
+    while let Ok(mut job) = receiver.recv() {
+        loop {
+            let pending = matches!(
+                lock(&shared).value,
+                Prefetched::Pending { generation, .. } if generation == job.generation
+            );
+            if !pending {
+                break;
+            }
+            let value = if Instant::now() < job.deadline {
+                let started = Instant::now();
+                let active = ActiveRead::new();
+                let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read()))
+                    .unwrap_or(None);
+                drop(active);
+                let duration_us = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+                MAX_READ_DURATION_US.fetch_max(duration_us, Ordering::Relaxed);
+                if value.is_none() {
+                    READ_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                }
+                value
+            } else {
+                DEADLINE_MISSES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                None
+            };
+            let completed_at = Instant::now();
+            if completed_at > job.deadline {
+                DEADLINE_MISSES_TOTAL.fetch_add(1, Ordering::Relaxed);
+            }
+            let mut slot = lock(&shared);
+            let still_pending = matches!(
+                slot.value,
+                Prefetched::Pending { generation, .. } if generation == job.generation
+            );
+            let ready_until = if still_pending && completed_at <= job.deadline {
+                match value {
+                    Some(value) => {
+                        slot.value = Prefetched::Ready {
+                            generation: job.generation,
+                            at: completed_at,
+                            value,
+                        };
+                        Some(completed_at + max_age)
+                    }
+                    None => {
+                        slot.value = Prefetched::Unavailable {
+                            generation: job.generation,
+                        };
+                        None
+                    }
+                }
+            } else if still_pending {
+                slot.value = Prefetched::Unavailable {
+                    generation: job.generation,
+                };
+                None
+            } else {
+                None
+            };
+            drop(slot);
+            shared.ready.notify_all();
+
+            if let Some(expiry) = ready_until {
+                let remaining = expiry.saturating_duration_since(Instant::now());
+                match receiver.recv_timeout(remaining) {
+                    Ok(next_job) => {
+                        job = next_job;
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let mut slot = lock(&shared);
+                        if matches!(
+                            slot.value,
+                            Prefetched::Ready { generation, .. }
+                                if generation == job.generation
+                        ) {
+                            slot.value = Prefetched::Empty;
+                        }
+                        drop(slot);
+                        shared.ready.notify_all();
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            }
             break;
         }
-        slot = shared
-            .ready
-            .wait_timeout(slot, remaining)
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .0;
-    }
-    let taken = std::mem::take(&mut slot.value);
-    if !matches!(taken, Prefetched::Ready(at, _) if at.elapsed() < max_age) {
-        // Stale, never prefetched, or still pending past the backstop: the
-        // pending read's result will be discarded by its generation check.
-        slot.generation = slot.generation.wrapping_add(1);
-    }
-    drop(slot);
-    // Release a prefetch thread waiting to erase the value just taken.
-    shared.ready.notify_all();
-    match taken {
-        Prefetched::Ready(at, value) if at.elapsed() < max_age => value,
-        _ => read(),
     }
 }
 
@@ -228,21 +431,11 @@ mod tests {
     fn unused_prefetched_value_is_erased_after_max_age() {
         let (read, calls) = counting_read(Duration::ZERO);
         let max_age = Duration::from_millis(50);
-        let shared = Arc::new(Shared {
-            slot: Mutex::new(Slot::default()),
-            ready: Condvar::new(),
-        });
-        start_prefetch(&shared, &read, max_age);
+        let (reader, prefetch) = prefetching_clipboard(read, max_age);
+        (prefetch.0)();
         std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            matches!(lock(&shared).value, Prefetched::Empty),
-            "unused clipboard contents must not stay in memory"
-        );
-        // The stale value is gone; the render reads synchronously.
-        assert_eq!(
-            take_or_read(&shared, &read, max_age).as_deref(),
-            Some("value-2")
-        );
+        // The stale value is gone; the reader obtains a fresh generation.
+        assert_eq!((reader.0)().as_deref(), Some("value-2"));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -252,5 +445,44 @@ mod tests {
         let (reader, _prefetch) = prefetching_clipboard(read, Duration::from_secs(5));
         assert_eq!((reader.0)().as_deref(), Some("value-1"));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn delayed_prefetch_deadline_does_not_start_a_duplicate_read() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let release_receiver = Mutex::new(release_receiver);
+        let counter = Arc::clone(&calls);
+        let read: ReadClipboard = Arc::new(move || {
+            let call = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if call == 1 {
+                started_sender.send(()).unwrap();
+                release_receiver.lock().unwrap().recv().ok()?;
+            }
+            Some(format!("value-{call}"))
+        });
+        let (reader, prefetch) = prefetching_clipboard(read, Duration::from_secs(1));
+
+        (prefetch.0)();
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("prefetch worker started the first read");
+
+        // A later trigger arrives while the first read is still in flight.
+        // It must share the pending operation and, once its deadline passes,
+        // report unavailable instead of starting a parallel read.
+        (prefetch.0)();
+        assert_eq!((reader.0)(), None);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        release_sender.send(()).unwrap();
+        let recovery_deadline = Instant::now() + Duration::from_secs(1);
+        while calls.load(Ordering::SeqCst) == 1 && Instant::now() < recovery_deadline {
+            (prefetch.0)();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!((reader.0)().as_deref(), Some("value-2"));
     }
 }

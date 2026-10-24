@@ -26,3 +26,11 @@ wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 wayexpand-backend-selection = { path = "../backend-selection" }
+
+[dev-dependencies]
+criterion = "0.8"
+tempfile = "3"
+
+[[bench]]
+name = "gui_edit"
+harness = false

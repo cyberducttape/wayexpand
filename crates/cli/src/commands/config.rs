@@ -807,7 +807,13 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs());
-    let report = wayexpand_core::UsageStats::load(&stats_path).report(&config, now, days);
+    let stats = wayexpand_core::UsageStats::load(&stats_path).map_err(|error| {
+        config_error(format!(
+            "could not load usage statistics at {}: {error}; the file was preserved. Use `wayexpand stats --clear` only if you intend to discard it",
+            stats_path.display()
+        ))
+    })?;
+    let report = stats.report(&config, now, days);
     if requested_json {
         println!(
             "{}",

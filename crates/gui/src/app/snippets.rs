@@ -42,10 +42,9 @@ impl GuiApp {
         } else {
             candidate.expansion[index] = expansion;
         }
-        if let Err(error) = candidate.validate() {
-            self.status = Status::error(self.strings.status_save_rejected(&error.safe_summary()));
-            return;
-        }
+        // Whole-library validation runs on the save worker immediately before
+        // serialization and the revision-checked atomic write. Avoid doing
+        // the same O(n) pass on the GUI thread for a single-snippet edit.
         self.queue_save_config(candidate, SaveIntent::Snippet { is_new, index });
     }
 

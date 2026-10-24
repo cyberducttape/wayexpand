@@ -285,15 +285,12 @@ impl GuiApp {
                 theme::section_header(ui, "", self.strings.snippet_details());
                 ui.add_space(6.0);
                 let categories = self.categories().to_vec();
-                let duplicate_trigger =
-                    self.draft.as_ref().is_some_and(|draft| {
-                        !draft.trigger.is_empty()
-                            && self.config.expansion.iter().enumerate().any(
-                                |(other_index, other)| {
-                                    other_index != index && other.answers_to(&draft.trigger)
-                                },
-                            )
-                    });
+                let duplicate_trigger = self.draft.as_ref().is_some_and(|draft| {
+                    !draft.trigger.is_empty()
+                        && self
+                            .search_index
+                            .has_trigger_conflict(&draft.trigger, Some(index))
+                });
                 let strings = &self.strings;
                 let app_detecting = self
                     .app_detection

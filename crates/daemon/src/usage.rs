@@ -420,7 +420,7 @@ mod tests {
         recorder.pending.record(&event("a"));
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
-        assert_eq!(UsageStats::load(&path).snippets["a"].count, 1);
+        assert_eq!(UsageStats::load(&path).unwrap().snippets["a"].count, 1);
 
         // A clear (file removed) is respected by the next save.
         std::fs::remove_file(&path).unwrap();
@@ -428,7 +428,7 @@ mod tests {
         recorder.pending.record(&event("b"));
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
-        let stats = UsageStats::load(&path);
+        let stats = UsageStats::load(&path).unwrap();
         assert!(!stats.snippets.contains_key("a"));
         assert_eq!(stats.snippets["b"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
@@ -454,7 +454,7 @@ mod tests {
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
         assert!(started.elapsed() < SHUTDOWN_WAIT);
-        assert_eq!(UsageStats::load(&path).snippets["kept"].count, 1);
+        assert_eq!(UsageStats::load(&path).unwrap().snippets["kept"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -478,13 +478,13 @@ mod tests {
         recorder.pending.record(&event("queued-before-clear"));
         recorder.enqueue_pending();
         recorder.clear_handle().unwrap().clear(&path).unwrap();
-        assert!(UsageStats::load(&path).snippets.is_empty());
+        assert!(UsageStats::load(&path).unwrap().snippets.is_empty());
 
         recorder.pending_generation = recorder.generation.lock().unwrap().value;
         recorder.pending.record(&event("after-clear"));
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
-        let stats = UsageStats::load(&path);
+        let stats = UsageStats::load(&path).unwrap();
         assert!(!stats.snippets.contains_key("persisted-before-clear"));
         assert!(!stats.snippets.contains_key("queued-before-clear"));
         assert_eq!(stats.snippets["after-clear"].count, 1);

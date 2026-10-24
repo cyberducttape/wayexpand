@@ -4382,11 +4382,13 @@ name = "wayexpand-gui"
 version = "1.3.3"
 dependencies = [
  "anyhow",
+ "criterion",
  "eframe",
  "libc",
  "read-fonts 0.45.1",
  "serde",
  "serde_json",
+ "tempfile",
  "toml_edit",
  "wayexpand-backend-ibus",
  "wayexpand-backend-input-method",

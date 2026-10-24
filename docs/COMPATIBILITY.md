@@ -469,7 +469,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 8,
+  "status_schema": 9,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -521,6 +521,12 @@ side never counts as a match (`commit_matches` is then `false`).
   "usage_flush_max_duration_us": 0,
   "usage_flush_failures_total": 0,
   "usage_queue_rejected_total": 0,
+  "clipboard_worker_threads": 1,
+  "clipboard_reads_in_flight": 0,
+  "clipboard_reads_total": 0,
+  "clipboard_read_failures_total": 0,
+  "clipboard_deadline_misses_total": 0,
+  "clipboard_read_max_duration_us": 0,
   "output_health": "ok",
   "output_uncertain_total": 0,
   "output_retiring_workers": 0,
@@ -578,6 +584,12 @@ side never counts as a match (`commit_matches` is then `false`).
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
 - `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable
+- `clipboard_worker_threads` (integer): Clipboard reader worker threads currently alive; the design uses at most one
+- `clipboard_reads_in_flight` (integer): Clipboard commands currently running (zero or one)
+- `clipboard_reads_total` (integer): Clipboard read attempts since daemon start
+- `clipboard_read_failures_total` (integer): Clipboard read attempts that returned unavailable data
+- `clipboard_deadline_misses_total` (integer): Clipboard operations that did not finish within their single 150 ms deadline
+- `clipboard_read_max_duration_us` (integer): Longest completed clipboard command duration in microseconds since daemon start
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.

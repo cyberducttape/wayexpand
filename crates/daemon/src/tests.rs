@@ -89,6 +89,12 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "capture_local_compose_aware",
             "capture_reliable_key_state",
             "capture_sensitive_focus",
+            "clipboard_deadline_misses_total",
+            "clipboard_read_failures_total",
+            "clipboard_read_max_duration_us",
+            "clipboard_reads_in_flight",
+            "clipboard_reads_total",
+            "clipboard_worker_threads",
             "command_failure_total",
             "command_in_flight",
             "command_queue_depth",
@@ -149,7 +155,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=8\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nbackend_mode=unknown\nstatus_schema=9\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [
@@ -167,6 +173,12 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "usage_flush_max_duration_us",
         "usage_flush_failures_total",
         "usage_queue_rejected_total",
+        "clipboard_worker_threads",
+        "clipboard_reads_in_flight",
+        "clipboard_reads_total",
+        "clipboard_read_failures_total",
+        "clipboard_deadline_misses_total",
+        "clipboard_read_max_duration_us",
     ] {
         assert!(body
             .lines()

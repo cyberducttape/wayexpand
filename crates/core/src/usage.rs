@@ -8,7 +8,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    io::Write,
+    io::{Read, Write},
     os::{
         fd::AsRawFd,
         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -128,19 +128,68 @@ pub fn usage_stats_path(config_path: &Path) -> PathBuf {
 }
 
 impl UsageStats {
-    /// Load statistics; a missing, oversized, or unreadable file starts fresh
-    /// rather than blocking expansion.
-    pub fn load(path: &Path) -> Self {
-        let Ok(metadata) = fs::metadata(path) else {
-            return Self::default();
+    /// Load local statistics. A missing file is a fresh installation; other
+    /// I/O, size, and parse failures remain errors so callers cannot silently
+    /// discard history or overwrite a damaged file on the next flush.
+    pub fn load(path: &Path) -> std::io::Result<Self> {
+        let opened = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path);
+        let file = match opened {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match fs::symlink_metadata(path) {
+                    Err(metadata_error)
+                        if metadata_error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        return Ok(Self::default())
+                    }
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "usage statistics path is a symlink",
+                        ))
+                    }
+                    Ok(_) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "usage statistics path could not be opened as a regular file",
+                        ))
+                    }
+                    Err(metadata_error) => return Err(metadata_error),
+                }
+            }
+            Err(error) => return Err(error),
         };
-        if metadata.len() > MAX_USAGE_FILE_BYTES {
-            return Self::default();
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "usage statistics path is not a regular file",
+            ));
         }
-        fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        if metadata.len() > MAX_USAGE_FILE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "usage statistics file exceeds the size limit",
+            ));
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_USAGE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_USAGE_FILE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "usage statistics file exceeds the size limit",
+            ));
+        }
+        serde_json::from_slice(&bytes).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("usage statistics file is malformed: {error}"),
+            )
+        })
     }
 
     pub fn record(&mut self, event: &UsageEvent) {
@@ -205,7 +254,7 @@ impl UsageStats {
     /// concurrent `stats --clear` cannot race a load/merge/save cycle.
     pub fn merge_and_save(path: &Path, delta: &UsageStats) -> std::io::Result<()> {
         let _lock = UsageLock::acquire(path)?;
-        let mut current = Self::load(path);
+        let mut current = Self::load(path)?;
         current.merge(delta);
         current.save_locked(path)
     }
@@ -320,6 +369,82 @@ mod locking_tests {
     }
 
     #[test]
+    fn missing_usage_file_starts_empty_but_corruption_is_preserved() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-corruption-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(USAGE_FILE);
+        assert_eq!(UsageStats::load(&path).unwrap(), UsageStats::default());
+
+        let corrupted = br#"{"snippets": "not-a-map"}"#;
+        fs::write(&path, corrupted).unwrap();
+        let mut delta = UsageStats::default();
+        delta.record(&event("new"));
+        let error = UsageStats::merge_and_save(&path, &delta).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(UsageStats::load(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), corrupted);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn oversized_usage_file_is_rejected_without_replacement() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-oversized-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(USAGE_FILE);
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(MAX_USAGE_FILE_BYTES + 1).unwrap();
+
+        assert_eq!(
+            UsageStats::load(&path).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let metadata = fs::metadata(&path).unwrap();
+        assert_eq!(metadata.len(), MAX_USAGE_FILE_BYTES + 1);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn dangling_usage_symlink_is_not_treated_as_a_missing_file() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-dangling-link-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(USAGE_FILE);
+        let missing_target = directory.join("not-created");
+        std::os::unix::fs::symlink(&missing_target, &path).unwrap();
+        let mut delta = UsageStats::default();
+        delta.record(&event("kept"));
+
+        assert_ne!(
+            UsageStats::load(&path).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert!(UsageStats::merge_and_save(&path, &delta).is_err());
+        assert_eq!(fs::read_link(&path).unwrap(), missing_target);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn concurrent_clear_and_flush_never_resurrect_pre_clear_statistics() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -355,7 +480,7 @@ mod locking_tests {
         clear.join().unwrap();
         flush.join().unwrap();
 
-        let after_race = UsageStats::load(&path);
+        let after_race = UsageStats::load(&path).unwrap();
         assert!(!after_race.snippets.contains_key("old"));
         if let Some(new_usage) = after_race.snippets.get("new") {
             assert_eq!(new_usage.count, 1);

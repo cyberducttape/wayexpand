@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "fields": {
     "response": "string",
     "source": "string",
@@ -51,6 +51,12 @@
     "usage_flush_max_duration_us": "integer",
     "usage_flush_failures_total": "integer",
     "usage_queue_rejected_total": "integer",
+    "clipboard_worker_threads": "integer",
+    "clipboard_reads_in_flight": "integer",
+    "clipboard_reads_total": "integer",
+    "clipboard_read_failures_total": "integer",
+    "clipboard_deadline_misses_total": "integer",
+    "clipboard_read_max_duration_us": "integer",
     "output_health": "string",
     "output_uncertain_total": "integer",
     "output_retiring_workers": "integer",

@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clipboard template reads now share one bounded worker and a single 150 ms
+  deadline; a timed-out prefetch returns unavailable instead of starting a
+  concurrent fallback read. Worker, in-flight, failure, deadline, and duration
+  metrics are included in daemon status (schema 9).
+- Usage statistics now treat only a missing file as an empty history. Malformed,
+  oversized, symlinked, or unreadable files are reported and preserved, and
+  background merges refuse to replace them until explicitly cleared.
+- GUI duplicate-trigger feedback now uses an indexed trigger/alias lookup
+  rather than scanning the full library on each frame; full configuration
+  validation remains mandatory before save. Added scale benchmarks for live
+  feedback and the asynchronous save pipeline from 100 to 10,000 snippets.
 - Headless KWin end-to-end harness: `scripts/test-kwin-e2e.sh` runs eleven
   scenarios against the production daemon, libei output, and KWin window
   tracker in a private `kwin_wayland --virtual` session, with text checked

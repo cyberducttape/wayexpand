@@ -4787,7 +4787,7 @@ fn usage_stats_round_trip_through_a_private_file() {
         std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
         0o600
     );
-    assert_eq!(crate::UsageStats::load(&path), stats);
+    assert_eq!(crate::UsageStats::load(&path).unwrap(), stats);
     assert_eq!(stats.daily["1970-01-02"], 1);
     let _ = std::fs::remove_dir_all(directory);
 }

@@ -122,10 +122,10 @@ cargo run --locked --release -p wayexpand-core --example matcher_memory
 
 ## Configuration editing
 
-The GUI edits a copy of the whole configuration and the save path validates
-that copy before writing, so one edit costs a full clone plus a validation.
-The `config_edit` benchmark measures both at library sizes up to the
-documented 10,000-snippet maximum:
+The GUI keeps in-progress edits in a small draft. On explicit save it clones
+the whole configuration and validates the candidate before writing. The
+`config_edit` benchmark measures those two costs separately at library sizes
+up to the documented 10,000-snippet maximum:
 
 ```sh
 cargo bench --locked -p wayexpand-core --bench config_edit
@@ -142,7 +142,38 @@ trigger, a one-sentence replacement, a description, and two tags.
 | 1,000 | 208.7 µs | 306.1 µs |
 | 10,000 | 2.14 ms | 3.32 ms |
 
-At the maximum library size an edit costs about 5.5 ms of copying and
-validation, well under one 60 Hz frame and only on an explicit edit, never
-per frame. Revisit the copy-then-validate model (for example with
-per-snippet diffs) only if this grows past a frame budget.
+At the maximum library size the standalone clone and validation together cost
+about 5.5 ms. Draft keystrokes edit only a small `Draft`; they do not clone or
+validate the library. The duplicate-trigger hint did scan the library on every
+editor frame, so it now queries a prebuilt exact trigger/alias index. Complete
+library validation remains required immediately before any save, but runs on
+the background save worker instead of the UI thread.
+
+The GUI-specific benchmark measures both the per-frame trigger-conflict lookup
+and the complete save path (config clone, edit, full validation, TOML
+serialization/comment merge, and revision-checked atomic write):
+
+```sh
+cargo bench --locked -p wayexpand-gui --bench gui_edit
+```
+
+### GUI measurements: 2026-10-24
+
+Captured on the same AMD Ryzen 7 7735U / Rust 1.96.0 host. The trigger lookup
+is size-independent; short Criterion runs varied between roughly 28 and 55 ns
+per lookup across sizes, with the spread dominated by host/sample noise. The
+full save pipeline is asynchronous in the application, so its duration is
+reported separately from typing responsiveness:
+
+| Snippets | Trigger-conflict lookup | Full save pipeline |
+| ---: | ---: | ---: |
+| 100 | 28–55 ns | 3.17 ms |
+| 1,000 | 29–32 ns | 28.81 ms |
+| 5,000 | 28 ns | 169.10 ms |
+| 10,000 | 28 ns | 354.60 ms |
+
+These save times include the actual private atomic file replacement but
+exclude setup-time loading of the starting revision and TOML document. The
+measurements show that large saves take hundreds of milliseconds, but no
+whole-library scan runs on each keystroke or GUI frame; save progress remains
+asynchronous and the full correctness gate is preserved.

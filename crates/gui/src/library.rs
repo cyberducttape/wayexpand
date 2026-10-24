@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use wayexpand_core::Config;
 #[cfg(test)]
@@ -56,10 +56,24 @@ struct SearchEntry {
 pub(crate) struct SearchIndex {
     entries: Vec<SearchEntry>,
     categories: Vec<String>,
+    trigger_indices: HashMap<String, Vec<usize>>,
 }
 
 impl SearchIndex {
     pub fn new(config: &Config) -> Self {
+        let mut trigger_indices: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, expansion) in config.expansion.iter().enumerate() {
+            trigger_indices
+                .entry(expansion.trigger.clone())
+                .or_default()
+                .push(index);
+            for alias in &expansion.aliases {
+                trigger_indices
+                    .entry(alias.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
         Self {
             entries: config
                 .expansion
@@ -74,7 +88,16 @@ impl SearchIndex {
                 })
                 .collect(),
             categories: categories(config),
+            trigger_indices,
         }
+    }
+
+    /// Check exact trigger/alias conflicts without scanning the entire
+    /// library on every editor frame. Full validation still runs before save.
+    pub fn has_trigger_conflict(&self, trigger: &str, selected_index: Option<usize>) -> bool {
+        self.trigger_indices
+            .get(trigger)
+            .is_some_and(|indices| indices.iter().any(|index| Some(*index) != selected_index))
     }
 
     pub fn categories(&self) -> &[String] {
@@ -225,6 +248,25 @@ mod tests {
             organization: wayexpand_core::OrganizationPolicy::default(),
         };
         assert_eq!(visible_indices(&config, ":office", None), [0]);
+    }
+
+    #[test]
+    fn trigger_conflict_index_checks_aliases_and_excludes_the_selected_snippet() {
+        let mut first = expansion(":one", "first", "", &[]);
+        first.aliases = vec![":shared".into()];
+        let second = expansion(":two", "second", "", &[]);
+        let config = Config {
+            expansion: vec![first, second],
+            hotkey: Vec::new(),
+            settings: wayexpand_core::Settings::default(),
+            organization: wayexpand_core::OrganizationPolicy::default(),
+        };
+        let index = SearchIndex::new(&config);
+
+        assert!(index.has_trigger_conflict(":shared", None));
+        assert!(!index.has_trigger_conflict(":shared", Some(0)));
+        assert!(index.has_trigger_conflict(":one", Some(1)));
+        assert!(!index.has_trigger_conflict(":missing", None));
     }
 
     #[test]
