@@ -6,6 +6,13 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 command -v jq >/dev/null 2>&1
 matrix="$project_dir/tests/certification/compositor-matrix.json"
+status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
+    "$project_dir/tests/contracts/status-json.json")
+set_status_schema() {
+    sed 's/\$status_schema/'"$status_schema"'/g' "$1" >"$1.tmp"
+    mv "$1.tmp" "$1"
+    chmod 0755 "$1"
+}
 scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
 layout_profiles=us,de,fr,altgr,multi-layout-switching
 target_apps=gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit
@@ -37,7 +44,7 @@ cat >"$certification_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
-    "status --json") printf '%s\\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
 EOF
@@ -106,6 +113,7 @@ case "${1-} ${2-}" in
 esac
 EOF
 chmod 0755 "$optional_status_cli"
+set_status_schema "$optional_status_cli"
 optional_status_json="$test_root/optional-status-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus \
@@ -123,10 +131,11 @@ cat >"$daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$daemon_cli"
+set_status_schema "$daemon_cli"
 daemon_json="$test_root/daemon-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend evdev+libei --layout us,de,fr,altgr,multi-layout-switching \
@@ -145,10 +154,11 @@ cat >"$mismatched_daemon_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"older-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"older-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$mismatched_daemon_cli"
+set_status_schema "$mismatched_daemon_cli"
 mismatched_daemon_json="$test_root/mismatched-daemon-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend evdev+libei --layout us,de,fr,altgr,multi-layout-switching \
@@ -167,10 +177,11 @@ cat >"$explicit_route_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayexpand_commit":"test-commit","wayland":true,"config":{"valid":true},"policy":{"policy":{"valid":true}},"control_socket":{"valid":true},"automatic_selection":{"ready":false}}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$explicit_route_cli"
+set_status_schema "$explicit_route_cli"
 explicit_route_json="$test_root/explicit-route-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.6 --backend evdev+libei \
@@ -189,10 +200,11 @@ cat >"$input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$input_method_cli"
+set_status_schema "$input_method_cli"
 input_method_json="$test_root/input-method-certification.json"
 "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend input-method-v2 --layout us,de,fr,altgr,multi-layout-switching \
@@ -207,10 +219,11 @@ cat >"$unhealthy_input_method_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$unhealthy_input_method_cli"
+set_status_schema "$unhealthy_input_method_cli"
 unhealthy_input_method_json="$test_root/unhealthy-input-method-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend input-method-v2 \
@@ -228,10 +241,11 @@ cat >"$unsafe_input_method_cli" <<'EOF'
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
 esac
 EOF
 chmod 0755 "$unsafe_input_method_cli"
+set_status_schema "$unsafe_input_method_cli"
 unsafe_input_method_json="$test_root/unsafe-input-method-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend input-method-v2 \
@@ -252,6 +266,7 @@ case "${1-} ${2-}" in
 esac
 EOF
 chmod 0755 "$stale_daemon_cli"
+set_status_schema "$stale_daemon_cli"
 stale_daemon_json="$test_root/stale-daemon-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend evdev+libei \
@@ -267,10 +282,11 @@ cat >"$wrong_desktop_cli" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"GNOME","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"evdev","backend":"libei"}' ;;
 esac
 EOF
 chmod 0755 "$wrong_desktop_cli"
+set_status_schema "$wrong_desktop_cli"
 wrong_desktop_json="$test_root/wrong-desktop-certification.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend evdev+libei \
@@ -308,10 +324,11 @@ cat >"$unhealthy_probe" <<'EOF'
 #!/bin/sh
 case "${1-} ${2-}" in
     "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit"}' ;;
+    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit"}' ;;
 esac
 EOF
 chmod 0755 "$unhealthy_probe"
+set_status_schema "$unhealthy_probe"
 unhealthy_json="$test_root/unhealthy.json"
 if "$project_dir/scripts/certify-compositor.sh" --format json \
     --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
@@ -421,11 +438,12 @@ cat >"$gnome_cli" <<EOF
 #!/bin/sh
 case "\${1-} \${2-}" in
     "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"GNOME","wayexpand_commit":"test-commit","ibus":{"installed":true},"capture_readiness":{"end_to_end_verified":true}}' ;;
-    "status --json") printf '%s\\n' '{"response":"running","status_schema":6,"daemon_commit":"test-commit"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit"}' ;;
     *) exec "$project_dir/target/debug/wayexpand" "\$@" ;;
 esac
 EOF
 chmod 0755 "$gnome_cli"
+set_status_schema "$gnome_cli"
 gnome_json="$test_root/gnome-certification.json"
 XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" \
