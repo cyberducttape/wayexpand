@@ -23,6 +23,12 @@ jq -e '
     .test_session.desktop == "KDE Plasma / Wayland" and
     .test_session.compositor == "KWin / Wayland" and
     .test_session.isolation == "private headless compositor session" and
+    .test_session.capture_route == "stdin simulation" and
+    .test_session.capture_source == "stdin" and
+    (.test_session.injection_backend | type == "string" and length > 0) and
+    (.test_session.negotiated_insertion_mode | type == "string" and length > 0) and
+    (.test_session.backend_mode_detail | type == "string" and length > 0) and
+    (.test_session.sensitive_field_detection | type == "boolean") and
     ([.checks[] | select(.name == "simple-trigger-insertion") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "focus-switching") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unavailable-unicode-refusal") | .status] == ["passed"]) and

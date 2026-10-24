@@ -35,6 +35,11 @@ pub(crate) fn run(json: bool) -> Result<()> {
 struct HarnessResult {
     status: &'static str,
     version: Option<String>,
+    capture_source: Option<String>,
+    injection_backend: Option<String>,
+    insertion_mode: Option<String>,
+    backend_mode: Option<String>,
+    sensitive_field_detection: Option<bool>,
     outcomes: BTreeMap<String, &'static str>,
     reason: Option<&'static str>,
 }
@@ -75,7 +80,36 @@ fn run_harness() -> HarnessResult {
     let stdout = String::from_utf8_lossy(&timeout.stdout);
     let stderr = String::from_utf8_lossy(&timeout.stderr);
     let mut outcomes = BTreeMap::new();
+    let mut capture_source = None;
+    let mut injection_backend = None;
+    let mut insertion_mode = None;
+    let mut backend_mode = None;
+    let mut sensitive_field_detection = None;
     for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("route capture-source ") {
+            capture_source = nonempty(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("route injection-backend ") {
+            injection_backend = nonempty(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("route insertion-mode ") {
+            insertion_mode = nonempty(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("route backend-mode ") {
+            backend_mode = nonempty(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("route sensitive-field-detection ") {
+            sensitive_field_detection = match value {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            };
+            continue;
+        }
         let mut fields = line.split_whitespace();
         let (Some(status), Some(name)) = (fields.next(), fields.next()) else {
             continue;
@@ -109,6 +143,11 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "unavailable",
             version,
+            capture_source,
+            injection_backend,
+            insertion_mode,
+            backend_mode,
+            sensitive_field_detection,
             outcomes,
             reason: Some(reason),
         };
@@ -117,6 +156,11 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "unavailable",
             version,
+            capture_source,
+            injection_backend,
+            insertion_mode,
+            backend_mode,
+            sensitive_field_detection,
             outcomes,
             reason: Some("the private compositor session produced no scenario results"),
         };
@@ -128,6 +172,11 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "incomplete",
             version,
+            capture_source,
+            injection_backend,
+            insertion_mode,
+            backend_mode,
+            sensitive_field_detection,
             outcomes,
             reason: Some(
                 "the isolated harness exceeded its deadline after producing scenario results",
@@ -141,6 +190,11 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "failed",
             version,
+            capture_source,
+            injection_backend,
+            insertion_mode,
+            backend_mode,
+            sensitive_field_detection,
             outcomes,
             reason: Some(
                 "the isolated harness exited unsuccessfully after producing scenario results",
@@ -150,6 +204,11 @@ fn run_harness() -> HarnessResult {
     HarnessResult {
         status: "completed",
         version,
+        capture_source,
+        injection_backend,
+        insertion_mode,
+        backend_mode,
+        sensitive_field_detection,
         outcomes,
         reason: None,
     }
@@ -185,9 +244,18 @@ fn unavailable(reason: &'static str) -> HarnessResult {
     HarnessResult {
         status: "unavailable",
         version: None,
+        capture_source: None,
+        injection_backend: None,
+        insertion_mode: None,
+        backend_mode: None,
+        sensitive_field_detection: None,
         outcomes: BTreeMap::new(),
         reason: Some(reason),
     }
+}
+
+fn nonempty(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 fn command_exists(name: &str) -> bool {
@@ -246,12 +314,17 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
     let required_checks_passed = [0, 1, 3]
         .into_iter()
         .all(|index| checks[index]["status"] == "passed");
+    let route_evidence_complete = result.capture_source.as_deref() == Some("stdin")
+        && result.injection_backend.as_deref() == Some("libei")
+        && result.insertion_mode.is_some()
+        && result.backend_mode.is_some()
+        && result.sensitive_field_detection.is_some();
     let any_failed = checks.iter().any(|check| check["status"] == "failed");
     let overall = if result.status == "unavailable" {
         "unavailable"
     } else if result.status == "failed" || any_failed {
         "failed"
-    } else if result.status == "completed" && required_checks_passed {
+    } else if result.status == "completed" && required_checks_passed && route_evidence_complete {
         "partial"
     } else {
         "incomplete"
@@ -266,7 +339,11 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
             "version": result.version,
             "isolation": "private headless compositor session",
             "capture_route": "stdin simulation",
-            "injection_backend": "production libei backend over a private EIS relay",
+            "capture_source": result.capture_source,
+            "injection_backend": result.injection_backend,
+            "negotiated_insertion_mode": result.insertion_mode,
+            "backend_mode_detail": result.backend_mode,
+            "sensitive_field_detection": result.sensitive_field_detection,
         },
         "harness": {
             "status": result.status,
@@ -308,7 +385,24 @@ fn print_human_report(report: &serde_json::Value) {
         println!("  Compositor: KWin / Wayland (version unavailable)");
     }
     println!("  Isolation: private headless session; current desktop is not modified");
-    println!("  Capture: simulated stdin · injection: libei/EIS");
+    println!("  Capture: simulated stdin");
+    if let Some(backend) = report["test_session"]["injection_backend"].as_str() {
+        println!("  Injection backend: {backend}");
+    }
+    if let Some(mode) = report["test_session"]["negotiated_insertion_mode"].as_str() {
+        println!("  Insertion mode: {mode}");
+        if mode.contains("keysym fallback") {
+            println!("  Warning: key-by-key fallback is slower and does not establish full Unicode support.");
+        }
+    }
+    if let Some(detail) = report["test_session"]["backend_mode_detail"].as_str() {
+        println!("  Backend detail: {detail}");
+    }
+    match report["test_session"]["sensitive_field_detection"].as_bool() {
+        Some(true) => println!("  Sensitive-field signal: available on this route"),
+        Some(false) => println!("  Sensitive-field signal: unavailable on this route"),
+        None => println!("  Sensitive-field signal: not reported"),
+    }
     if let Some(checks) = report["checks"].as_array() {
         for item in checks {
             let status = match item["status"].as_str().unwrap_or("unknown") {
@@ -355,6 +449,11 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "incomplete",
             version: Some("test".into()),
+            capture_source: None,
+            injection_backend: None,
+            insertion_mode: None,
+            backend_mode: None,
+            sensitive_field_detection: None,
             outcomes: all_completed_scenarios(),
             reason: Some("deadline"),
         });
@@ -368,11 +467,63 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "failed",
             version: Some("test".into()),
+            capture_source: None,
+            injection_backend: None,
+            insertion_mode: None,
+            backend_mode: None,
+            sensitive_field_detection: None,
             outcomes: all_completed_scenarios(),
             reason: Some("exit failure"),
         });
 
         assert_eq!(report["overall"], "failed");
+        assert_eq!(report["certified"], false);
+    }
+
+    #[test]
+    fn compatibility_report_records_the_negotiated_test_route() {
+        let report = make_report(HarnessResult {
+            status: "completed",
+            version: Some("6.6.6".into()),
+            capture_source: Some("stdin".into()),
+            injection_backend: Some("libei".into()),
+            insertion_mode: Some("libei keysym fallback".into()),
+            backend_mode: Some("ei_keyboard keysym fallback (12ms key pacing)".into()),
+            sensitive_field_detection: Some(false),
+            outcomes: all_completed_scenarios(),
+            reason: None,
+        });
+
+        assert_eq!(report["test_session"]["capture_route"], "stdin simulation");
+        assert_eq!(report["test_session"]["capture_source"], "stdin");
+        assert_eq!(report["test_session"]["injection_backend"], "libei");
+        assert_eq!(
+            report["test_session"]["negotiated_insertion_mode"],
+            "libei keysym fallback"
+        );
+        assert_eq!(
+            report["test_session"]["backend_mode_detail"],
+            "ei_keyboard keysym fallback (12ms key pacing)"
+        );
+        assert_eq!(report["test_session"]["sensitive_field_detection"], false);
+        assert_eq!(report["certified"], false);
+    }
+
+    #[test]
+    fn missing_negotiated_route_evidence_keeps_the_report_incomplete() {
+        let report = make_report(HarnessResult {
+            status: "completed",
+            version: Some("6.6.6".into()),
+            capture_source: None,
+            injection_backend: None,
+            insertion_mode: None,
+            backend_mode: None,
+            sensitive_field_detection: None,
+            outcomes: all_completed_scenarios(),
+            reason: None,
+        });
+
+        assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["certified"], false);
     }
 }

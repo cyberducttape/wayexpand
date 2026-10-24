@@ -150,6 +150,7 @@ start_daemon() {
         log "daemon never became ready: $(daemon_status | tr '\n' ' ')"
         return 1
     fi
+    daemon_status >"$work/runtime-status"
 }
 
 stop_daemon() {

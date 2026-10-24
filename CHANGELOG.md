@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   negotiated injection mode, keysym-fallback warning, sensitive-field signal,
   and separate backend-injection versus matcher latency percentiles. It also
   flags a stale or protocol-incompatible daemon with its restart guidance.
+- The isolated `wayexpand doctor --certify` report now records the test
+  daemon's negotiated insertion mode, backend detail, capture source, and
+  sensitive-field signal alongside the observed scenario results.
 - `wayexpand doctor --certify` now attempts real UTF-8 insertion in its isolated
   KWin test client when the negotiated libei route offers direct text input.
   The report marks Unicode as passed only after the client receives the exact

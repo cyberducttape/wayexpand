@@ -150,6 +150,16 @@ while read -r outcome name detail; do
             ;;
     esac
 done <"$results"
+if [ -s "$work/runtime-status" ]; then
+    status_field() {
+        sed -n "s/^$1=//p" "$work/runtime-status"
+    }
+    printf 'route capture-source %s\n' "$(status_field source)"
+    printf 'route injection-backend %s\n' "$(status_field backend)"
+    printf 'route insertion-mode %s\n' "$(status_field inject_insertion_mode)"
+    printf 'route backend-mode %s\n' "$(status_field backend_mode)"
+    printf 'route sensitive-field-detection %s\n' "$(status_field capture_sensitive_focus)"
+fi
 printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture simulated)\n' \
     "$pass" "$fail" "$unverified" "$(kwin_wayland --version 2>/dev/null | awk '{print $2}')"
 [ "$fail" -eq 0 ] && {

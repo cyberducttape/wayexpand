@@ -31,7 +31,11 @@ not tested; it never infers Unicode support from capability metadata. The
 private harness simulates keyboard capture through stdin; it does not exercise
 the user's active compositor. Its concise report therefore says `partial`,
 and keeps keyboard capture, suspend/resume, and full production certification
-unverified. Source checkouts require Rust
+unverified. The report records the negotiated insertion mode, backend detail,
+capture source, and sensitive-field signal observed from the private daemon.
+This makes keysym fallback and its pacing visible alongside the insertion
+results; it does not turn a reported capability into a tested guarantee.
+Source checkouts require Rust
 build tools, KWin, D-Bus session tools, `jq`, and `timeout`; binary packages
 ship the isolated test helpers, but still require KWin and the session tools.
 The harness uses a temporary home/config/runtime directory and does not
