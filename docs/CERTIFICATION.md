@@ -13,6 +13,26 @@ wayexpand certify
 wayexpand certify --json > wayexpand-certification.json
 ```
 
+For a reproducible live output check, run:
+
+```text
+wayexpand doctor --certify
+wayexpand doctor --certify --json > wayexpand-smoke-report.json
+```
+
+This starts a private headless KWin session, launches isolated Wayland sink
+clients, and checks the text those clients actually receive through the
+production daemon and libei output backend. It checks a basic trigger, focus
+switching between test windows, and safe refusal of an unavailable character.
+The private harness simulates keyboard capture through stdin; it does not
+exercise the user's active compositor or claim Unicode insertion. Its concise
+report therefore says `partial`, and keeps keyboard capture, suspend/resume,
+and full production certification unverified. Source checkouts require Rust
+build tools, KWin, D-Bus session tools, `jq`, and `timeout`; binary packages
+ship the isolated test helpers, but still require KWin and the session tools.
+The harness uses a temporary home/config/runtime directory and does not
+control the active desktop or its daemon.
+
 The JSON record includes the detected desktop, automatic input selection, the
 currently connected daemon route (reported separately from that selection),
 every check with a stable status, and the limitations of the selected backend.

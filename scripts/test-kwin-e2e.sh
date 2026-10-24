@@ -24,6 +24,10 @@ if [ "${1:-}" = --keep ]; then
     shift
 fi
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+session_driver=$(dirname -- "$0")/kwin-e2e-session.sh
+if [ ! -f "$session_driver" ]; then
+    session_driver="$project_dir/scripts/kwin-e2e-session.sh"
+fi
 
 for tool in kwin_wayland dbus-run-session gdbus jq mkfifo timeout; do
     command -v "$tool" >/dev/null || {
@@ -32,19 +36,40 @@ for tool in kwin_wayland dbus-run-session gdbus jq mkfifo timeout; do
     }
 done
 
-cargo build --quiet --locked -p wayexpand -p wayexpand-daemon -p wayexpand-e2e \
-    --manifest-path "$project_dir/Cargo.toml"
-target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
-case "$target_dir" in
-    /*) ;;
-    *) target_dir="$project_dir/$target_dir" ;;
-esac
-bin="$target_dir/debug"
-
-# The daemon's trust checks reject configuration below shared or
-# group-writable directories, so the work directory lives in target/.
-chmod 700 "$target_dir"
-work=$(mktemp -d "$target_dir/kwin-e2e.XXXXXX")
+if [ -n "${WAYEXPAND_E2E_PREBUILT_BIN:-}" ]; then
+    bin=$WAYEXPAND_E2E_PREBUILT_BIN
+    app_bin=${WAYEXPAND_E2E_APP_BIN:-"$bin/../../../../bin"}
+    for executable in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+        [ -x "$bin/$executable" ] || {
+            printf 'error: prebuilt certification helper is missing: %s\n' "$executable" >&2
+            exit 2
+        }
+    done
+    for executable in wayexpand wayexpand-daemon; do
+        [ -x "$app_bin/$executable" ] || {
+            printf 'error: installed WayExpand binary is missing: %s\n' "$executable" >&2
+            exit 2
+        }
+    done
+    work_parent=${XDG_CACHE_HOME:-"$HOME/.cache"}/wayexpand/certification
+    mkdir -p "$work_parent"
+    chmod 700 "$work_parent"
+    work=$(mktemp -d "$work_parent/kwin-e2e.XXXXXX")
+else
+    cargo build --quiet --locked -p wayexpand -p wayexpand-daemon -p wayexpand-e2e \
+        --manifest-path "$project_dir/Cargo.toml"
+    target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
+    case "$target_dir" in
+        /*) ;;
+        *) target_dir="$project_dir/$target_dir" ;;
+    esac
+    bin="$target_dir/debug"
+    app_bin=$bin
+    # The daemon's trust checks reject configuration below shared or
+    # group-writable directories, so the work directory lives under target/.
+    chmod 700 "$target_dir"
+    work=$(mktemp -d "$target_dir/kwin-e2e.XXXXXX")
+fi
 # Wayland and libei socket paths must fit in 108 bytes.
 runtime=$(mktemp -d /tmp/wxe2e.XXXXXX)
 # KWin's own start-up D-Bus-activates the desktop portal, which brings up
@@ -91,13 +116,14 @@ env -i \
     KDE_SESSION_VERSION=6 \
     QT_QPA_PLATFORM=offscreen \
     E2E_BIN="$bin" \
+    E2E_APP_BIN="$app_bin" \
     E2E_WORK="$work" \
     E2E_RESULTS="$results" \
     E2E_SCENARIOS="$*" \
     timeout 900 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
     --width 1280 --height 800 --socket wayexpand-e2e \
-    --exit-with-session "$project_dir/scripts/kwin-e2e-session.sh" \
+    --exit-with-session "$session_driver" \
     >"$work/kwin.log" 2>&1 || true
 
 if [ ! -s "$results" ]; then

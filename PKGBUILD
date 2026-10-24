@@ -19,6 +19,8 @@ makedepends=(
 optdepends=(
     'systemd: for user service support'
     'ibus: for native GNOME IBus input method integration'
+    'kwin: for isolated headless compositor certification'
+    'jq: for the isolated certification harness'
 )
 source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.3/wayexpand-1.3.3.tar.gz")
 sha256sums=('6c240d77090e8c93c8137ae679aab13aaaaa6df80b48bec85cad6f459df19451')
@@ -31,7 +33,7 @@ prepare() {
 
 build() {
     cd "${pkgname}-${pkgver}"
-    cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+    cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
 }
 
 check() {
@@ -49,6 +51,11 @@ package() {
     install -Dm755 target/release/wayexpand-gui "${pkgdir}/usr/bin/wayexpand-gui"
     install -Dm755 target/release/wayexpand-ui "${pkgdir}/usr/bin/wayexpand-ui"
     install -Dm755 target/release/wayexpand-ibus "${pkgdir}/usr/bin/wayexpand-ibus"
+    install -Dm755 target/release/wx-e2e-sink "${pkgdir}/usr/libexec/wayexpand-certification/bin/wx-e2e-sink"
+    install -Dm755 target/release/wx-e2e-type "${pkgdir}/usr/libexec/wayexpand-certification/bin/wx-e2e-type"
+    install -Dm755 target/release/wx-e2e-eis-relay "${pkgdir}/usr/libexec/wayexpand-certification/bin/wx-e2e-eis-relay"
+    install -Dm755 scripts/test-kwin-e2e.sh "${pkgdir}/usr/libexec/wayexpand-certification/test-kwin-e2e.sh"
+    install -Dm755 scripts/kwin-e2e-session.sh "${pkgdir}/usr/libexec/wayexpand-certification/kwin-e2e-session.sh"
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"

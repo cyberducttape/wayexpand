@@ -44,10 +44,18 @@ if [ -e "$root" ] || [ -e "$archive" ]; then
 fi
 
 mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" \
-    "$root/scripts" "$root/udev" "$root/ibus/component"
+    "$root/scripts" "$root/udev" "$root/ibus/component" \
+    "$root/libexec/wayexpand-certification/bin"
 for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
 install -m 0755 "$target_dir/release/$binary" "$root/bin/"
 done
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+    install -m 0755 "$target_dir/release/$helper" \
+        "$root/libexec/wayexpand-certification/bin/$helper"
+done
+install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
+    "$project_dir/scripts/kwin-e2e-session.sh" \
+    "$root/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" \
     "$project_dir/systemd/wayexpand-evdev.service" \
     "$project_dir/systemd/wayexpand-action-broker.service" "$root/systemd/"

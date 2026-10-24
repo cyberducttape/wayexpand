@@ -32,8 +32,14 @@ application-filter rules as typed triggers; command snippets are not run.
 .B status [--json]
 Show the active daemon status. The JSON form is stable for automation.
 .TP
-.B doctor [--json] [CONFIG]
-Report available input and output backends and their compatibility.
+.B doctor [--json] [--certify] [CONFIG]
+Report available input and output backends and their compatibility. With
+B--certifyR, run safe insertion and focus checks in a private headless KWin
+session, then report the test client's observed results. This does not change
+the active desktop or daemon. Keyboard capture and several desktop behaviors
+remain explicitly untested; the result is partial evidence, not production
+certification. Binary packages include the test helpers. Source checkouts need
+Rust build tools; either path needs the documented KWin test dependencies.
 .TP
 .B upgrade-status [--json]
 Compare the running daemon's build and status protocol with this CLI. The

@@ -13,11 +13,18 @@ export XDG_RUNTIME_DIR="$isolated_runtime"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
-mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component"
+mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
 done
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+    printf '#!/bin/sh\nexit 0\n' >"$release_dir/libexec/wayexpand-certification/bin/$helper"
+    chmod 0755 "$release_dir/libexec/wayexpand-certification/bin/$helper"
+done
+install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
+    "$project_dir/scripts/kwin-e2e-session.sh" \
+    "$release_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
@@ -93,6 +100,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ -L "$test_root/home/.local/lib/wayexpand/current" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
+[ -x "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/bin/wx-e2e-sink" ]
 # Install directories are named by version and payload content.
 first_version=$(readlink "$test_root/home/.local/lib/wayexpand/current")
 case "$first_version" in

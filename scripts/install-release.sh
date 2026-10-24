@@ -125,10 +125,18 @@ trap 'rm -rf -- "$stage_dir"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus"
+install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus" \
+    "$stage_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$release_dir/bin/$binary" "$stage_dir/bin/$binary"
 done
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+    install -m 0755 "$release_dir/libexec/wayexpand-certification/bin/$helper" \
+        "$stage_dir/libexec/wayexpand-certification/bin/$helper"
+done
+install -m 0755 "$release_dir/libexec/wayexpand-certification/test-kwin-e2e.sh" \
+    "$release_dir/libexec/wayexpand-certification/kwin-e2e-session.sh" \
+    "$stage_dir/libexec/wayexpand-certification/"
 install -m 0644 "$release_dir/systemd"/*.service "$stage_dir/systemd/"
 install -m 0644 "$release_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$release_dir/ibus/component/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"

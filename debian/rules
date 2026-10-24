@@ -20,7 +20,7 @@ override_dh_auto_configure:
 	true
 
 override_dh_auto_build:
-	cargo build --release --locked -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+	cargo build --release --locked -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
 
 # sbuild sets HOME=/sbuild-nonexistent, and the action broker's tests create
 # a private directory under HOME whose every ancestor must be owner-only.
@@ -41,6 +41,11 @@ override_dh_install:
 	dh_install --package=wayexpand target/release/wayexpand-gui usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-ui usr/bin/
 	dh_install --package=wayexpand target/release/wayexpand-ibus usr/bin/
+	install -Dm755 target/release/wx-e2e-sink debian/wayexpand/usr/libexec/wayexpand-certification/bin/wx-e2e-sink
+	install -Dm755 target/release/wx-e2e-type debian/wayexpand/usr/libexec/wayexpand-certification/bin/wx-e2e-type
+	install -Dm755 target/release/wx-e2e-eis-relay debian/wayexpand/usr/libexec/wayexpand-certification/bin/wx-e2e-eis-relay
+	install -Dm755 scripts/test-kwin-e2e.sh debian/wayexpand/usr/libexec/wayexpand-certification/test-kwin-e2e.sh
+	install -Dm755 scripts/kwin-e2e-session.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-session.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
 	dh_install --package=wayexpand io.github.cyberducttape.WayExpand.metainfo.xml usr/share/metainfo/

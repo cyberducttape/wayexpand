@@ -24,7 +24,7 @@ snippet templates, and optional command-backed expansions.
 %autosetup -n %{name}-%{version}
 
 %build
-cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus
+cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
 
 %check
 cargo test --frozen --workspace
@@ -36,6 +36,11 @@ install -Dm755 target/release/wayexpand-action-broker %{buildroot}%{_bindir}/way
 install -Dm755 target/release/wayexpand-gui %{buildroot}%{_bindir}/wayexpand-gui
 install -Dm755 target/release/wayexpand-ui %{buildroot}%{_bindir}/wayexpand-ui
 install -Dm755 target/release/wayexpand-ibus %{buildroot}%{_bindir}/wayexpand-ibus
+install -Dm755 target/release/wx-e2e-sink %{buildroot}%{_libexecdir}/wayexpand-certification/bin/wx-e2e-sink
+install -Dm755 target/release/wx-e2e-type %{buildroot}%{_libexecdir}/wayexpand-certification/bin/wx-e2e-type
+install -Dm755 target/release/wx-e2e-eis-relay %{buildroot}%{_libexecdir}/wayexpand-certification/bin/wx-e2e-eis-relay
+install -Dm755 scripts/test-kwin-e2e.sh %{buildroot}%{_libexecdir}/wayexpand-certification/test-kwin-e2e.sh
+install -Dm755 scripts/kwin-e2e-session.sh %{buildroot}%{_libexecdir}/wayexpand-certification/kwin-e2e-session.sh
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
 install -Dm644 desktop/wayexpand-ibus.xml %{buildroot}%{_datadir}/ibus/component/wayexpand-ibus.xml
 install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
@@ -67,6 +72,11 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_bindir}/wayexpand-ui
 %{_bindir}/wayexpand-ibus
 %{_bindir}/wayexpand-install-evdev-access
+%{_libexecdir}/wayexpand-certification/bin/wx-e2e-sink
+%{_libexecdir}/wayexpand-certification/bin/wx-e2e-type
+%{_libexecdir}/wayexpand-certification/bin/wx-e2e-eis-relay
+%{_libexecdir}/wayexpand-certification/test-kwin-e2e.sh
+%{_libexecdir}/wayexpand-certification/kwin-e2e-session.sh
 %{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml

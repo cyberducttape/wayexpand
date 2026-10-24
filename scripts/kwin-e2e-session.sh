@@ -19,6 +19,7 @@
 set -u
 
 bin=${E2E_BIN:?}
+app_bin=${E2E_APP_BIN:-$bin}
 work=${E2E_WORK:?}
 results=${E2E_RESULTS:?}
 scenarios=${E2E_SCENARIOS:-all}
@@ -112,7 +113,7 @@ user_types() {
 }
 
 daemon_status() {
-    "$bin/wayexpand" status 2>/dev/null
+    "$app_bin/wayexpand" status 2>/dev/null
 }
 
 daemon_ready() {
@@ -141,7 +142,7 @@ write_config() {
 start_daemon() {
     rm -f "$case_dir/stdin"
     mkfifo -m 600 "$case_dir/stdin"
-    "$bin/wayexpand-daemon" --source=stdin --backend=libei <"$case_dir/stdin" \
+    "$app_bin/wayexpand-daemon" --source=stdin --backend=libei <"$case_dir/stdin" \
         >>"$case_dir/daemon.log" 2>&1 &
     daemon_pid=$!
     exec 3>"$case_dir/stdin"

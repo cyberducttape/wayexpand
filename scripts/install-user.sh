@@ -96,7 +96,8 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand \
     -p wayexpand-ui \
     -p wayexpand-gui \
-    -p wayexpand-backend-ibus
+    -p wayexpand-backend-ibus \
+    -p wayexpand-e2e
 
 # Development builds intentionally retain the package version and encode the
 # source commit in the binary version. Use that complete build identity for
@@ -140,10 +141,18 @@ trap 'rm -rf -- "$stage_dir"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus"
+install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus" \
+    "$stage_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$target_dir/release/$binary" "$stage_dir/bin/$binary"
 done
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+    install -m 0755 "$target_dir/release/$helper" \
+        "$stage_dir/libexec/wayexpand-certification/bin/$helper"
+done
+install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
+    "$project_dir/scripts/kwin-e2e-session.sh" \
+    "$stage_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"

@@ -8,6 +8,8 @@ for relative in \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
     systemd/wayexpand-action-broker.service \
+    scripts/test-kwin-e2e.sh \
+    scripts/kwin-e2e-session.sh \
     broker.toml.example \
     udev/71-wayexpand-evdev.rules \
     udev/69-wayexpand-evdev-uaccess.rules; do
@@ -15,6 +17,26 @@ for relative in \
         printf '%s\n' "missing required asset: $relative" >&2
         exit 1
     }
+done
+
+for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
+    "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml" \
+    "$project_dir/scripts/install-user.sh"; do
+    grep -q -F 'wayexpand-e2e' "$manifest" || {
+        printf '%s\n' "manifest omits the isolated certification helper build: $manifest" >&2
+        exit 1
+    }
+done
+
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
+    for manifest in "$project_dir/PKGBUILD" "$project_dir/wayexpand.spec" \
+        "$project_dir/debian/rules" "$project_dir/scripts/install-user.sh" \
+        "$project_dir/scripts/install-release.sh" "$project_dir/scripts/package-release-binaries.sh"; do
+        grep -q -F "$helper" "$manifest" || {
+            printf '%s\n' "manifest omits certification helper $helper: $manifest" >&2
+            exit 1
+        }
+    done
 done
 
 # Debian/Launchpad builds are network-isolated and must consume the vendored

@@ -17,5 +17,15 @@ manifest=$(
         file_hash=$(sha256sum "$path") || exit 1
         printf '%s  %s\n' "${file_hash%% *}" "$path"
     done
+    if [ -d libexec/wayexpand-certification ]; then
+        for path in libexec/wayexpand-certification/bin/* libexec/wayexpand-certification/*.sh; do
+            if [ ! -f "$path" ] || [ -L "$path" ]; then
+                printf '%s\n' "error: staged payload entry is missing or not a regular file: $path" >&2
+                exit 1
+            fi
+            file_hash=$(sha256sum "$path") || exit 1
+            printf '%s  %s\n' "${file_hash%% *}" "$path"
+        done
+    fi
 )
 printf '%s\n' "$manifest" | sha256sum | awk '{print $1}'
