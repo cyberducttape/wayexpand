@@ -68,9 +68,11 @@ category, and enabled state. The editor exposes matching mode and tags for the
 selected snippet. Word-boundary snippets wait until a trailing boundary is
 observed, preventing accidental expansion inside larger words. Command-backed
 snippets use an explicit preview action. Managed actions run through the
-configured Action Broker; direct programs are clearly labelled as advanced
-local GUI execution and do not reproduce the daemon service sandbox. See the
-command security limits in the operations guide.
+configured Action Broker. Direct programs run in a transient systemd unit with
+the daemon's sandbox directives when the user manager is available; otherwise
+they run locally with GUI-process privileges. The preview label and warning
+describe the selected mode. Direct programs are not recorded in the broker
+audit. See the command security limits in the operations guide.
 
 If the daemon is not running, editing and preview still work. Pause/resume is
 reported in the status area as unavailable until the user session socket is

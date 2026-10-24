@@ -78,6 +78,20 @@ impl Strings {
         }
     }
 
+    pub fn sandboxed_direct_command_preview_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "This direct program runs as your desktop user in a transient systemd unit with WayExpand's service sandbox restrictions. It is not recorded in the Action Broker audit; use only for trusted commands."
+            }
+            Language::Indonesian => {
+                "Program langsung ini berjalan sebagai pengguna desktop Anda di unit systemd sementara dengan pembatasan sandbox layanan WayExpand. Program ini tidak dicatat dalam audit Action Broker; gunakan hanya untuk perintah tepercaya."
+            }
+            Language::German => {
+                "Dieses Programm läuft als Ihr Desktop-Benutzer in einer temporären systemd-Unit mit den Sandbox-Beschränkungen des WayExpand-Dienstes. Es wird nicht im Action-Broker-Audit protokolliert; nur für vertrauenswürdige Befehle verwenden."
+            }
+        }
+    }
+
     pub fn detecting_app(&self) -> &'static str {
         match self.lang {
             Language::English => "Now click a window of the app…",
@@ -147,6 +161,24 @@ impl Strings {
             Language::English => "Configuration",
             Language::Indonesian => "Konfigurasi",
             Language::German => "Konfiguration",
+        }
+    }
+}
+
+#[cfg(test)]
+mod preview_help_tests {
+    use super::*;
+
+    #[test]
+    fn direct_preview_help_matches_the_selected_execution_boundary() {
+        for language in [Language::English, Language::Indonesian, Language::German] {
+            let strings = Strings::new(language);
+            let local = strings.direct_command_preview_help();
+            let sandboxed = strings.sandboxed_direct_command_preview_help();
+
+            assert!(!local.is_empty());
+            assert!(sandboxed.contains("systemd"));
+            assert_ne!(local, sandboxed);
         }
     }
 }

@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI command-preview warnings now distinguish direct programs run in a
+  transient systemd unit with WayExpand's service sandbox from programs run
+  locally when no user manager is available.
 - Human `wayexpand doctor` output now includes latency percentiles by negotiated
   output mode and replacement-size bucket, making keysym-fallback costs for
   longer expansions visible without changing the configured pacing.

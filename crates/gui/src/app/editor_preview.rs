@@ -42,8 +42,11 @@ impl GuiApp {
                         .draft
                         .as_ref()
                         .is_some_and(|draft| draft.command_action_mode);
+                    let sandboxed_preview = wayexpand_core::command_preview_sandboxed();
                     ui.label(if managed_action {
                         self.strings.managed_command_preview_help()
+                    } else if sandboxed_preview {
+                        self.strings.sandboxed_direct_command_preview_help()
                     } else {
                         self.strings.direct_command_preview_help()
                     });
@@ -58,7 +61,7 @@ impl GuiApp {
                                     self.strings.running()
                                 } else if managed_action {
                                     self.strings.run_through_broker()
-                                } else if wayexpand_core::command_preview_sandboxed() {
+                                } else if sandboxed_preview {
                                     self.strings.run_in_service_sandbox()
                                 } else {
                                     self.strings.run_once()
