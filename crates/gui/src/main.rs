@@ -194,6 +194,8 @@ struct GuiApp {
     recommended_route: Option<RecommendedRoute>,
     selection_capabilities: Option<Capabilities>,
     protocol_probes: Vec<(String, String)>,
+    compositor_info: String,
+    permission_health: String,
     diagnostics_sender: Option<SyncSender<runtime::Request>>,
     runtime_sender: Option<SyncSender<runtime::Request>>,
     runtime_receiver: Option<mpsc::Receiver<runtime::Completion>>,
@@ -260,6 +262,8 @@ struct GuiApp {
     window_title: String,
     /// Matcher preview state: the saved library expanding as the user types.
     playground: playground::Playground,
+    /// Form values used only by the editor's local template playground.
+    form_preview_values: std::collections::HashMap<String, String>,
     try_live_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
     setup_task: Option<SetupTask>,
@@ -418,6 +422,8 @@ impl GuiApp {
             recommended_route: None,
             selection_capabilities: None,
             protocol_probes: Vec::new(),
+            compositor_info: strings.not_checked().into(),
+            permission_health: strings.not_checked().into(),
             diagnostics_sender: None,
             runtime_sender: None,
             runtime_receiver: None,
@@ -452,6 +458,7 @@ impl GuiApp {
             close_after_confirm: false,
             window_title: String::new(),
             playground: playground::Playground::default(),
+            form_preview_values: std::collections::HashMap::new(),
             try_live_open: true,
             setup_task: None,
             sync_task: None,
@@ -491,10 +498,13 @@ impl eframe::App for GuiApp {
                         let mut text = self.playground.text.clone();
                         text.push(character);
                         self.playground.text = text.clone();
-                        if let Some(rewrite) =
-                            self.playground
-                                .edit(&self.config, &self.preview_app, &text, true)
-                        {
+                        if let Some(rewrite) = self.playground.edit(
+                            &self.config,
+                            &self.preview_app,
+                            "unknown",
+                            &text,
+                            true,
+                        ) {
                             self.playground.text = rewrite.text;
                         }
                     }

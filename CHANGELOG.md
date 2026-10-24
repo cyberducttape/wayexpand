@@ -4,6 +4,20 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Diagnostics now show the active capture and injection routes, detected
+  compositor/version, route permission health, and rolling average injection
+  latency. They also report sensitive-field capability alongside the explicit
+  compositor-certification state. The GUI includes a bounded, session-local
+  expansion failure trace with lifecycle stages and no trigger, inserted
+  text, clipboard data, or raw keystrokes. The daemon status contract is now
+  schema 10.
+- The snippet editor's matcher explanation and trigger suggestions now sit
+  alongside a form test playground with editable field values, rendered
+  output, and cursor-position preview. Form values remain in the editor
+  session. New optional packs provide parameterized Linux operations,
+  Kubernetes, container, developer, and support-reply snippets; see
+  `docs/PACKS.md`.
+
 - Clipboard template reads now share one bounded worker and a single 150 ms
   deadline; a timed-out prefetch returns unavailable instead of starting a
   concurrent fallback read. Worker, in-flight, failure, deadline, and duration

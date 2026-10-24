@@ -1,0 +1,43 @@
+[[expansion]]
+trigger = ";;git-review"
+description = "Review repository state without changing the worktree"
+category = "Developer"
+tags = ["git", "review"]
+replacement = "git status --short --branch && git diff --stat"
+
+[[expansion]]
+trigger = ";;git-log"
+description = "Compact recent commit history for a selected branch"
+category = "Developer"
+tags = ["git", "history"]
+replacement = "git log --oneline --decorate -{{field:count=12}} {{field:ref=HEAD}}"
+
+[[expansion]]
+trigger = ";;sql-select"
+description = "Parameterized read-only SQL query starter"
+category = "Developer"
+tags = ["sql", "database"]
+replacement = """SELECT {{field:columns=*}}
+FROM {{field:table=schema.table}}
+WHERE {{field:condition=1 = 1}}
+ORDER BY {{field:sort_column=created_at}} DESC
+LIMIT {{field:limit=100}};
+"""
+
+[[expansion]]
+trigger = ";;md-incident"
+description = "Incident note template with a cursor in the first field"
+category = "Developer"
+tags = ["markdown", "incident"]
+replacement = """## {{field:incident=Incident title}}{{cursor}}
+
+- **Impact:** {{field:impact=Describe affected users or systems}}
+- **Started:** {{field:started=UTC timestamp}}
+- **Current status:** {{choice:status=Investigating|Mitigating|Monitoring|Resolved}}
+
+### Timeline
+- {{field:time=UTC}} — {{field:event=Update}}
+
+### Next update
+{{field:next_update=Time or condition}}
+"""

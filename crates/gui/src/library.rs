@@ -100,6 +100,19 @@ impl SearchIndex {
             .is_some_and(|indices| indices.iter().any(|index| Some(*index) != selected_index))
     }
 
+    pub fn trigger_suggestions(&self, trigger: &str, selected_index: Option<usize>) -> Vec<String> {
+        let stem = if trigger.trim().is_empty() {
+            ":new-snippet"
+        } else {
+            trigger.trim()
+        };
+        (2..100)
+            .map(|suffix| format!("{stem}-{suffix}"))
+            .filter(|candidate| !self.has_trigger_conflict(candidate, selected_index))
+            .take(3)
+            .collect()
+    }
+
     pub fn categories(&self) -> &[String] {
         &self.categories
     }

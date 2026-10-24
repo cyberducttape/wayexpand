@@ -111,5 +111,83 @@ impl GuiApp {
                     });
                 });
         }
+        self.render_form_test(ui, palette);
+    }
+
+    fn render_form_test(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let Some(draft) = self.draft.as_ref() else {
+            return;
+        };
+        let fields = match wayexpand_core::form_fields(&draft.replacement) {
+            Ok(fields) if !fields.is_empty() => fields,
+            _ => return,
+        };
+        let template = draft.replacement.clone();
+        let snippets = Arc::clone(&self.preview_library_snippets);
+        ui.collapsing(self.strings.form_test_values(), |ui| {
+            ui.label(
+                RichText::new(self.strings.form_preview_privacy())
+                    .small()
+                    .color(palette.muted),
+            );
+            for (index, field) in fields.iter().enumerate() {
+                let default = match &field.kind {
+                    wayexpand_core::FormFieldKind::Text { default } => default.clone(),
+                    wayexpand_core::FormFieldKind::Choice { options } => {
+                        options.first().cloned().unwrap_or_default()
+                    }
+                };
+                let value = self
+                    .form_preview_values
+                    .entry(field.key.clone())
+                    .or_insert(default);
+                ui.horizontal(|ui| {
+                    ui.label(&field.label);
+                    match &field.kind {
+                        wayexpand_core::FormFieldKind::Text { .. } => {
+                            ui.add(TextEdit::singleline(value).desired_width(260.0));
+                        }
+                        wayexpand_core::FormFieldKind::Choice { options } => {
+                            egui::ComboBox::from_id_salt(("form_test_choice", index))
+                                .selected_text(value.as_str())
+                                .show_ui(ui, |ui| {
+                                    for option in options {
+                                        ui.selectable_value(value, option.clone(), option);
+                                    }
+                                });
+                        }
+                    }
+                });
+            }
+            match preview::render_form_template(
+                &template,
+                &self.form_preview_values,
+                Arc::clone(&snippets),
+            ) {
+                Ok((rendered, cursor_offset)) => {
+                    ui.label(self.strings.form_template_rendered());
+                    egui::Frame::new()
+                        .fill(palette.extreme_bg)
+                        .inner_margin(egui::Margin::symmetric(10, 8))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(RichText::new(rendered.clone()).monospace())
+                                    .wrap(),
+                            );
+                        });
+                    if let Some(offset) = cursor_offset {
+                        let position = rendered.chars().count().saturating_sub(offset);
+                        ui.label(
+                            RichText::new(self.strings.cursor_placement(position))
+                                .small()
+                                .color(palette.muted),
+                        );
+                    }
+                }
+                Err(error) => {
+                    ui.colored_label(palette.danger, self.strings.template_error(&error));
+                }
+            }
+        });
     }
 }

@@ -36,6 +36,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "inject_expected_throughput_chars_per_sec"
                         | "injection_latency_sample_count"
                         | "injection_latency_window_count"
+                        | "injection_latency_mean_us"
                         | "injection_latency_p50_us"
                         | "injection_latency_p95_us"
                         | "injection_latency_p99_us"
@@ -72,6 +73,8 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                 }
             }
             "injection_latency_profiles" => serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.into())),
+            "recent_expansion_failures" => serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.into())),
             _ => value.into(),
         };

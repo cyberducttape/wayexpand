@@ -1,0 +1,7 @@
+format_version = 1
+id = "wayexpand.developer-workflows"
+version = "1.0.0"
+name = "Developer Workflows"
+publisher = "WayExpand project"
+description = "Parameterized Git, SQL, shell, and Markdown starters; commands are inserted as text only."
+capabilities = ["forms"]

@@ -91,6 +91,7 @@ impl GuiApp {
         self.new_draft = true;
         self.set_selected_index(None);
         self.draft = Some(Draft::from_expansion(&draft_expansion));
+        self.form_preview_values.clear();
         self.preview_input = draft_expansion.trigger;
         self.clear_command_preview();
         self.status = Status::info(self.strings.new_snippet_draft());

@@ -275,7 +275,7 @@ impl GuiApp {
     ) {
         let mut detect_app_clicked = false;
         let mut variable_inserted = false;
-        let daemon_capabilities = self.daemon_capabilities;
+        let daemon_capabilities = self.daemon_capabilities.clone();
         egui::Frame::new()
             .fill(palette.surface)
             .stroke(egui::Stroke::new(1.0, palette.border))
@@ -291,6 +291,15 @@ impl GuiApp {
                             .search_index
                             .has_trigger_conflict(&draft.trigger, Some(index))
                 });
+                let trigger_suggestions = self
+                    .draft
+                    .as_ref()
+                    .filter(|_| duplicate_trigger)
+                    .map(|draft| {
+                        self.search_index
+                            .trigger_suggestions(&draft.trigger, Some(index))
+                    })
+                    .unwrap_or_default();
                 let strings = &self.strings;
                 let app_detecting = self
                     .app_detection
@@ -352,6 +361,18 @@ impl GuiApp {
                             ui,
                             RichText::new(strings.duplicate_trigger()).color(palette.danger),
                         );
+                        ui.label(
+                            RichText::new(strings.trigger_suggestions())
+                                .small()
+                                .color(palette.muted),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            for suggestion in &trigger_suggestions {
+                                if ui.small_button(suggestion).clicked() {
+                                    draft.trigger = suggestion.clone();
+                                }
+                            }
+                        });
                     } else {
                         hint(
                             ui,
@@ -374,11 +395,13 @@ impl GuiApp {
                         );
                     }
                     if let Some(limit) = daemon_capabilities
+                        .as_ref()
                         .and_then(|capabilities| capabilities.injection_max_text_chars)
                     {
                         let count = draft.replacement.chars().count();
                         if limit > 0 && count > limit {
                             let mode = daemon_capabilities
+                                .as_ref()
                                 .and_then(|capabilities| capabilities.injection_mode)
                                 .unwrap_or("active injection");
                             hint(
@@ -760,6 +783,8 @@ impl GuiApp {
     /// "Matcher preview": exercise core matching and template rendering in
     /// an in-process field. This is not a desktop integration test.
     pub(crate) fn render_try_live(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let backend = runtime::status_field(&self.daemon_status, "backend")
+            .unwrap_or_else(|| "unknown".into());
         egui::Frame::new()
             .fill(theme::tint(palette.accent, 18))
             .stroke(egui::Stroke::new(1.0, theme::tint(palette.accent, 110)))
@@ -840,10 +865,13 @@ impl GuiApp {
                     let caret_at_end = output
                         .cursor_range
                         .is_none_or(|range| range.primary.index == text.chars().count());
-                    if let Some(rewrite) =
-                        self.playground
-                            .edit(&self.config, &self.preview_app, &text, caret_at_end)
-                    {
+                    if let Some(rewrite) = self.playground.edit(
+                        &self.config,
+                        &self.preview_app,
+                        &backend,
+                        &text,
+                        caret_at_end,
+                    ) {
                         let caret = rewrite
                             .caret
                             .unwrap_or_else(|| rewrite.text.chars().count());
@@ -856,6 +884,25 @@ impl GuiApp {
                             )));
                         state.store(ui.ctx(), id);
                     }
+                }
+                if let Some(explanation) = self.playground.explanation.as_ref() {
+                    ui.collapsing(
+                        self.strings.match_explanation(explanation.would_expand()),
+                        |ui| {
+                            for check in &explanation.checks {
+                                let color = match check.status {
+                                    wayexpand_core::CheckStatus::Pass => palette.success,
+                                    wayexpand_core::CheckStatus::Fail => palette.danger,
+                                    wayexpand_core::CheckStatus::Warn => palette.warning,
+                                    wayexpand_core::CheckStatus::Info => palette.muted,
+                                };
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.colored_label(color, check.name);
+                                    ui.label(RichText::new(&check.detail).small());
+                                });
+                            }
+                        },
+                    );
                 }
             });
     }

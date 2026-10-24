@@ -35,6 +35,7 @@ pub struct Snapshot {
     pub p50_us: u64,
     pub p95_us: u64,
     pub p99_us: u64,
+    pub mean_us: u64,
 }
 
 #[derive(Default)]
@@ -80,6 +81,11 @@ impl Window {
             p50_us: percentile_us(&sorted, 50),
             p95_us: percentile_us(&sorted, 95),
             p99_us: percentile_us(&sorted, 99),
+            mean_us: sorted
+                .iter()
+                .map(|sample| u128::from(*sample))
+                .sum::<u128>()
+                .div_ceil(sorted.len() as u128 * 1_000) as u64,
         };
         self.dirty = false;
         self.cached
@@ -136,7 +142,9 @@ pub fn matcher_snapshot() -> Snapshot {
 pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
     let mode = output_mode(injector.status_detail());
     let size = output_size_bucket(result.insert.chars().count());
-    let outcome = measure(mode, size, || ExpansionEngine::apply(injector, result));
+    let mut traced = crate::failure_trace::TracedInjector::new(injector);
+    let outcome = measure(mode, size, || ExpansionEngine::apply(&mut traced, result));
+    traced.record_failure(&outcome);
     crate::output_health::note_outcome(&outcome);
     outcome
 }
@@ -208,6 +216,7 @@ pub fn profiles_json() -> String {
                     "p50_us": snapshot.p50_us,
                     "p95_us": snapshot.p95_us,
                     "p99_us": snapshot.p99_us,
+                    "mean_us": snapshot.mean_us,
                 }),
             );
         }

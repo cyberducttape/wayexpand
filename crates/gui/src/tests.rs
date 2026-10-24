@@ -1563,6 +1563,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         injection_max_text_chars: None,
         injection_throughput_chars_per_sec: None,
         injection_latency_p50_us: None,
+        injection_latency_mean_us: None,
         injection_latency_p95_us: None,
         injection_latency_p99_us: None,
         matcher_latency_p50_us: None,
@@ -1586,6 +1587,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_refused_total: Some(2),
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
+        recent_expansion_failures: Vec::new(),
     });
     app.import_open = true;
     app.settings_open = true;

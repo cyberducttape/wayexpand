@@ -1,5 +1,37 @@
 # WayExpand local packs
 
+## Optional sysadmin and developer libraries
+
+This repository includes five local example packs in `packs/`. They are
+optional: inspect and import only the categories you want.
+
+| Pack | Contents |
+| --- | --- |
+| `linux-operations` | Bash, SSH, systemd, and journalctl templates |
+| `kubernetes` | Parameterized, read-only `kubectl` inspection commands |
+| `containers` | Docker, Podman, and Compose inspection templates |
+| `developer` | Git, SQL, shell, and Markdown starters |
+| `support-replies` | Status updates, maintenance notices, and support replies |
+
+For example, review then import the Kubernetes pack:
+
+```bash
+wayexpand pack inspect ./packs/kubernetes
+wayexpand pack import ./packs/kubernetes > /tmp/kubernetes-snippets.toml
+wayexpand validate /tmp/kubernetes-snippets.toml
+```
+
+Import produces ordinary TOML; it does not install or activate snippets.
+Review the triggers and defaults, then merge the entries into your library or
+deploy them through your normal fleet configuration process. These repository
+examples are unsigned. Managed deployments that require signed packs must
+review and sign the selected content with their own trusted key.
+
+The snippets insert command text for the user to inspect. They do not run the
+commands. Defaults favor inspection, explicit namespaces/targets, and bounded
+queries where the command supports them. As with any template, review field
+values before using the resulting command.
+
 WayExpand supports a deliberately small local pack format. Packs are
 directories, not downloaded archives, in this first version:
 

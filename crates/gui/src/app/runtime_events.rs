@@ -48,6 +48,8 @@ impl GuiApp {
                     self.selection_capabilities = Some(snapshot.selection_capabilities);
                     self.fleet_status = snapshot.fleet_status;
                     self.protocol_probes = snapshot.protocol_probes;
+                    self.compositor_info = snapshot.compositor_info;
+                    self.permission_health = snapshot.permission_health;
                     self.daemon_status = snapshot.daemon_status;
                     self.daemon_capabilities = snapshot.daemon_capabilities;
                     self.daemon_reachable = snapshot.daemon_reachable;

@@ -1,0 +1,36 @@
+[[expansion]]
+trigger = ";;support-ack"
+description = "Acknowledge a support request and request bounded diagnostic details"
+category = "Support"
+tags = ["support", "response"]
+replacement = """Hi {{field:name=there}},
+
+Thanks for reporting this. I’m looking into {{field:issue=the issue}}. Could you share {{field:requested_detail=the approximate time and any non-sensitive error text}}?
+
+I’ll follow up by {{field:follow_up=the next update time}}.
+"""
+
+[[expansion]]
+trigger = ";;support-update"
+description = "Share an incident status update without promising an unverified resolution"
+category = "Support"
+tags = ["support", "incident"]
+replacement = """Hello {{field:name=there}},
+
+Current status: {{choice:status=Investigating|Mitigating|Monitoring|Resolved}}.
+What we know: {{field:summary=brief factual update}}.
+Next step: {{field:next_step=the next action}}.
+
+Next update: {{field:next_update=time or condition}}.
+"""
+
+[[expansion]]
+trigger = ";;maintenance-notice"
+description = "Maintenance notice with an explicit timezone and impact window"
+category = "Support"
+tags = ["maintenance", "notice"]
+replacement = """Scheduled maintenance: {{field:service=service name}}
+Window: {{field:start=YYYY-MM-DD HH:MM}} to {{field:end=YYYY-MM-DD HH:MM}} {{field:timezone=UTC}}
+Expected impact: {{field:impact=describe expected impact}}
+Updates: {{field:status_url=status page URL}}
+"""

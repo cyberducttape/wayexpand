@@ -56,6 +56,7 @@ impl GuiApp {
         self.new_draft_origin = None;
         self.set_selected_index(Some(index));
         self.draft = Some(Draft::from_expansion(&self.config.expansion[index]));
+        self.form_preview_values.clear();
         self.preview_input = self.config.expansion[index].trigger.clone();
         self.pending_action = None;
         self.clear_command_preview();

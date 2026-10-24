@@ -96,7 +96,8 @@ impl GuiApp {
             Some(runtime::RouteState::Connected) => {
                 let full_protection = self
                     .daemon_capabilities
-                    .is_some_and(runtime::DaemonCapabilities::provides_full_protection);
+                    .as_ref()
+                    .is_some_and(|capabilities| capabilities.provides_full_protection());
                 // "Ready" claims verified text expansion on this desktop;
                 // without certification evidence the route is only running.
                 let certified = self
@@ -236,7 +237,7 @@ impl GuiApp {
         }
         // Whether replacing a trigger is verified against the field's text or
         // relies on keystrokes, shown wherever the route is visible.
-        if let Some(capabilities) = self.daemon_capabilities {
+        if let Some(capabilities) = self.daemon_capabilities.as_ref() {
             if let Some(assurance) = capabilities.insertion_assurance {
                 let color = match assurance {
                     runtime::InsertionAssurance::Verified => palette.success,

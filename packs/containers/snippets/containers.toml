@@ -1,0 +1,27 @@
+[[expansion]]
+trigger = ";;container-ps"
+description = "List running containers with useful columns"
+category = "Containers"
+tags = ["docker", "podman", "inspection"]
+replacement = "{{choice:engine=docker|podman}} ps --format 'table {{{{.Names}}}}\\t{{{{.Status}}}}\\t{{{{.Ports}}}}'"
+
+[[expansion]]
+trigger = ";;container-logs"
+description = "Read a bounded tail of container logs"
+category = "Containers"
+tags = ["docker", "podman", "logs"]
+replacement = "{{choice:engine=docker|podman}} logs --since {{field:since=15m}} --tail {{field:lines=200}} {{field:container=container-name}}"
+
+[[expansion]]
+trigger = ";;compose-check"
+description = "Validate the rendered Compose model before applying it"
+category = "Containers"
+tags = ["docker", "podman", "compose"]
+replacement = "{{choice:engine=docker compose|podman compose}} config --quiet"
+
+[[expansion]]
+trigger = ";;compose-service-logs"
+description = "Inspect recent logs for one Compose service"
+category = "Containers"
+tags = ["compose", "logs"]
+replacement = "{{choice:engine=docker compose|podman compose}} logs --since {{field:since=15m}} --tail {{field:lines=200}} {{field:service=service-name}}"

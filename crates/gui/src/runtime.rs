@@ -82,6 +82,8 @@ pub(crate) struct DiagnosticsSnapshot {
     pub selection_capabilities: Capabilities,
     pub fleet_status: String,
     pub protocol_probes: Vec<(String, String)>,
+    pub compositor_info: String,
+    pub permission_health: String,
     pub daemon_status: String,
     pub daemon_capabilities: Option<DaemonCapabilities>,
     pub daemon_reachable: Option<bool>,
@@ -92,12 +94,13 @@ pub(crate) struct DiagnosticsSnapshot {
 
 pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonCapabilities {
     pub injection_mode: Option<&'static str>,
     pub injection_max_text_chars: Option<usize>,
     pub injection_throughput_chars_per_sec: Option<u32>,
     pub injection_latency_p50_us: Option<u64>,
+    pub injection_latency_mean_us: Option<u64>,
     pub injection_latency_p95_us: Option<u64>,
     pub injection_latency_p99_us: Option<u64>,
     pub matcher_latency_p50_us: Option<u64>,
@@ -122,6 +125,19 @@ pub(crate) struct DaemonCapabilities {
     pub output_refused_total: Option<u64>,
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
+    pub recent_expansion_failures: Vec<FailureTrace>,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, PartialEq, Eq)]
+pub(crate) struct FailureTrace {
+    pub at_unix: u64,
+    pub backend: String,
+    pub trigger_recognized: String,
+    pub focus_admission: String,
+    pub backend_selected: String,
+    pub erase_acknowledged: String,
+    pub insertion_attempted: bool,
+    pub completion: String,
 }
 
 /// What the daemon's output route promises before it erases a trigger.
@@ -145,7 +161,7 @@ pub(crate) enum OutputRefusal {
 }
 
 impl DaemonCapabilities {
-    pub fn provides_full_protection(self) -> bool {
+    pub fn provides_full_protection(&self) -> bool {
         self.capture_sensitive_focus == Some(true)
             && self.capture_composition_aware == Some(true)
             && self.capture_key_passthrough == Some(true)
@@ -192,6 +208,10 @@ impl DaemonCapabilities {
             found |= capabilities.injection_throughput_chars_per_sec.is_some();
         }
         for (key, slot) in [
+            (
+                "injection_latency_mean_us",
+                &mut capabilities.injection_latency_mean_us,
+            ),
             (
                 "injection_latency_p50_us",
                 &mut capabilities.injection_latency_p50_us,
@@ -251,6 +271,10 @@ impl DaemonCapabilities {
                 });
         capabilities.output_refused_total = status.u64_field("output_refused_total");
         capabilities.output_uncertain_total = status.u64_field("output_uncertain_total");
+        capabilities.recent_expansion_failures = status
+            .field("recent_expansion_failures")
+            .and_then(|value| serde_json::from_str(value).ok())
+            .unwrap_or_default();
         found |= capabilities.insertion_assurance.is_some();
         for (key, slot) in [
             (
@@ -459,12 +483,20 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         ),
         Err(error) => (format!("Unavailable: {error}"), None, None, None),
     };
+    let compositor_info = diagnostics::compositor_info();
+    let permission_health = diagnostics::permission_health(
+        &backend_status,
+        daemon_capabilities.as_ref(),
+        &daemon_status,
+    );
     DiagnosticsSnapshot {
         backend_status,
         recommended_route,
         selection_capabilities,
         fleet_status,
         protocol_probes,
+        compositor_info,
+        permission_health,
         daemon_status,
         daemon_capabilities,
         daemon_reachable,
@@ -477,6 +509,12 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
 pub(crate) fn status_field(response: &str, key: &str) -> Option<String> {
     wayexpand_core::DaemonStatus::parse(response)
         .field(key)
+        .or_else(|| {
+            response.split(" · ").find_map(|part| {
+                part.strip_prefix(key)
+                    .and_then(|part| part.strip_prefix('='))
+            })
+        })
         .map(str::to_owned)
 }
 
@@ -512,7 +550,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=9\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=10\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -528,7 +566,7 @@ mod tests {
         assert_eq!(capabilities.inject_full_unicode, Some(true));
         assert_eq!(capabilities.inject_key_passthrough, None);
         assert_eq!(
-            super::DaemonCapabilities::parse("status_schema=9\nstate=connected\n"),
+            super::DaemonCapabilities::parse("status_schema=10\nstate=connected\n"),
             None
         );
     }
@@ -536,7 +574,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=9\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=10\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -547,7 +585,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_insertion_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=9\ninsertion_assurance=compatibility\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
+            "status_schema=10\ninsertion_assurance=compatibility\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
         )
         .unwrap();
         assert_eq!(
@@ -563,7 +601,7 @@ mod tests {
         assert_eq!(capabilities.output_uncertain_total, Some(1));
 
         let blocked = super::DaemonCapabilities::parse(
-            "status_schema=9\ninsertion_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+            "status_schema=10\ninsertion_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
         )
         .unwrap();
         assert_eq!(
@@ -587,13 +625,13 @@ mod tests {
         );
         assert_eq!(
             super::DaemonCapabilities::parse(&format!(
-                "status_schema=invalid\nstatus_schema=9\n{capabilities}"
+                "status_schema=invalid\nstatus_schema=10\n{capabilities}"
             )),
             None
         );
         assert_eq!(
             super::DaemonCapabilities::parse(&format!(
-                "status_schema=9\nstatus_schema=5\n{capabilities}"
+                "status_schema=10\nstatus_schema=5\n{capabilities}"
             )),
             None
         );

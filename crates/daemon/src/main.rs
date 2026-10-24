@@ -6,6 +6,7 @@ mod clipboard;
 mod control;
 mod counters;
 mod events;
+mod failure_trace;
 mod focus;
 mod input_loop;
 mod latency;

@@ -1,0 +1,7 @@
+format_version = 1
+id = "wayexpand.kubernetes-operations"
+version = "1.0.0"
+name = "Kubernetes Operations"
+publisher = "WayExpand project"
+description = "Parameterized kubectl inspection commands with safe, read-only defaults."
+capabilities = ["forms"]

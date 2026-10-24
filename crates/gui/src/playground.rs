@@ -6,7 +6,7 @@
 //! insertion.
 
 use wayexpand_core::{
-    form_fields, Config, ExpansionEngine, ExpansionResult, InputEvent, WindowContext,
+    form_fields, Config, ExpansionEngine, ExpansionResult, Explanation, InputEvent, WindowContext,
 };
 
 /// What the field should become after an edit.
@@ -31,6 +31,8 @@ pub(crate) struct Playground {
     /// True when the current text ends with a form trigger. Forms need the
     /// deferred form overlay and cannot be simulated by this text-only field.
     pub form_detected: bool,
+    /// Side-effect-free explanation of the current text and preview app.
+    pub explanation: Option<Explanation>,
 }
 
 impl Playground {
@@ -43,6 +45,7 @@ impl Playground {
         self.text.clear();
         self.seen.clear();
         self.form_detected = false;
+        self.explanation = None;
         if let Some(engine) = self.engine.as_mut() {
             engine.process(InputEvent::Reset);
         }
@@ -55,6 +58,7 @@ impl Playground {
         &mut self,
         config: &Config,
         app: &str,
+        backend: &str,
         new_text: &str,
         caret_at_end: bool,
     ) -> Option<Rewrite> {
@@ -98,6 +102,7 @@ impl Playground {
                 }
             }
             self.seen = new_text.to_owned();
+            self.explanation = Some(engine.explain(new_text, backend));
             return None;
         };
 
@@ -123,6 +128,7 @@ impl Playground {
             }
         }
         self.seen = text.clone();
+        self.explanation = Some(engine.explain(&text, backend));
         rewritten.then_some(Rewrite { text, caret })
     }
 }
@@ -196,7 +202,7 @@ mod tests {
             let mut next = playground.text.clone();
             next.push(character);
             playground.text = next.clone();
-            if let Some(rewrite) = playground.edit(config, "", &next, true) {
+            if let Some(rewrite) = playground.edit(config, "", "libei", &next, true) {
                 playground.text = rewrite.text;
                 caret = rewrite.caret;
             }
@@ -251,14 +257,16 @@ mod tests {
         type_text(&mut playground, &config, ";six");
         // Backspace twice, then finish the trigger.
         playground.text = ";s".into();
-        assert!(playground.edit(&config, "", ";s", true).is_none());
+        assert!(playground.edit(&config, "", "libei", ";s", true).is_none());
         type_text(&mut playground, &config, "ig");
         assert_eq!(playground.text, "Best regards");
 
         // An edit away from the end resets matching instead of expanding.
         playground.clear();
         type_text(&mut playground, &config, ";si");
-        assert!(playground.edit(&config, "", "X;si", false).is_none());
+        assert!(playground
+            .edit(&config, "", "libei", "X;si", false)
+            .is_none());
         playground.text = "X;si".into();
         type_text(&mut playground, &config, "g");
         assert_eq!(playground.text, "X;sig");

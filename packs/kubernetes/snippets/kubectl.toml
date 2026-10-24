@@ -1,0 +1,34 @@
+[[expansion]]
+trigger = ";;kube-pods"
+description = "List pods in a namespace"
+category = "Kubernetes"
+tags = ["kubectl", "pods"]
+replacement = "kubectl get pods --namespace {{field:namespace=default}} --output wide"
+
+[[expansion]]
+trigger = ";;kube-logs"
+description = "Read recent logs from a selected pod and container"
+category = "Kubernetes"
+tags = ["kubectl", "logs"]
+replacement = "kubectl logs --namespace {{field:namespace=default}} {{field:pod=pod-name}} --container {{field:container=app}} --since={{field:since=15m}} --tail={{field:lines=200}}"
+
+[[expansion]]
+trigger = ";;kube-events"
+description = "Inspect recent namespace events"
+category = "Kubernetes"
+tags = ["kubectl", "events"]
+replacement = "kubectl get events --namespace {{field:namespace=default}} --sort-by=.metadata.creationTimestamp"
+
+[[expansion]]
+trigger = ";;kube-rollout"
+description = "Check rollout status for a deployment"
+category = "Kubernetes"
+tags = ["kubectl", "deployment"]
+replacement = "kubectl rollout status deployment/{{field:deployment=deployment-name}} --namespace {{field:namespace=default}} --timeout={{field:timeout=120s}}"
+
+[[expansion]]
+trigger = ";;kube-context"
+description = "Show active Kubernetes context and namespace before an operation"
+category = "Kubernetes"
+tags = ["kubectl", "context", "safety"]
+replacement = "kubectl config current-context"

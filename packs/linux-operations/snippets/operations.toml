@@ -1,0 +1,57 @@
+[[expansion]]
+trigger = ";;journal-service"
+description = "Inspect recent service logs without following or modifying the unit"
+category = "Linux operations"
+tags = ["systemd", "journalctl"]
+replacement = "journalctl --user -u {{field:unit=example.service}} --since '{{field:since=1 hour ago}}' --no-pager -n {{field:lines=100}}"
+
+[[expansion]]
+trigger = ";;service-status"
+description = "Check a system service's current state"
+category = "Linux operations"
+tags = ["systemd", "status"]
+replacement = "systemctl status {{field:unit=example.service}} --no-pager"
+
+[[expansion]]
+trigger = ";;ssh-check"
+description = "Run a read-only remote host identity and uptime check"
+category = "Linux operations"
+tags = ["ssh", "diagnostics"]
+replacement = "ssh {{field:user=admin}}@{{field:host=host.example.net}} 'hostname; uptime'"
+
+[[expansion]]
+trigger = ";;bash-safe"
+description = "Bash script starter with strict mode and explicit argument validation"
+category = "Linux operations"
+tags = ["bash", "shell"]
+replacement = """#!/usr/bin/env bash
+set -Eeuo pipefail
+
+main() {
+    local target="{{field:target=/path/to/target}}"
+    printf 'Review target before continuing: %s\\n' \"$target\"
+}
+
+main \"$@\"
+"""
+
+[[expansion]]
+trigger = ";;systemd-unit"
+description = "Hardened user service unit starter"
+category = "Linux operations"
+tags = ["systemd", "unit"]
+replacement = """[Unit]
+Description={{field:description=Example user service}}
+
+[Service]
+Type=simple
+ExecStart={{field:executable=/usr/bin/example}} {{field:arguments=--foreground}}
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target
+"""

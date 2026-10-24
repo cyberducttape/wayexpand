@@ -61,13 +61,116 @@ impl GuiApp {
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        theme::section_header(ui, "", self.strings.runtime_dashboard());
+        let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
+        let backend = compact_status_value(&self.daemon_status, "backend").unwrap_or("unknown");
+        let capabilities = self.daemon_capabilities.as_ref();
+        let mean = capabilities.and_then(|caps| caps.injection_latency_mean_us);
+        let protection_available = capabilities
+            .and_then(|caps| caps.capture_sensitive_focus)
+            .unwrap_or(false);
+        theme::card(ui, palette, |ui| {
+            ui.set_width(ui.available_width());
+            ui.columns(2, |columns| {
+                dashboard_value(
+                    &mut columns[0],
+                    self.strings.capture_route(),
+                    source,
+                    palette.accent,
+                );
+                dashboard_value(
+                    &mut columns[1],
+                    self.strings.injection_backend(),
+                    capabilities
+                        .and_then(|caps| caps.injection_mode)
+                        .unwrap_or(backend),
+                    palette.accent,
+                );
+                dashboard_value(
+                    &mut columns[0],
+                    self.strings.compositor_version(),
+                    &self.compositor_info,
+                    palette.muted,
+                );
+                let permission_color = if self.permission_health.starts_with("available") {
+                    palette.success
+                } else {
+                    palette.warning
+                };
+                dashboard_value(
+                    &mut columns[1],
+                    self.strings.permission_health(),
+                    &self.permission_health,
+                    permission_color,
+                );
+                dashboard_value(
+                    &mut columns[0],
+                    self.strings.average_latency(),
+                    &mean.map_or_else(
+                        || self.strings.no_samples().to_owned(),
+                        |value| format!("{value} µs"),
+                    ),
+                    palette.accent,
+                );
+                let protection_detail = if protection_available {
+                    format!(
+                        "runtime signal available · {}",
+                        self.strings.protection_uncertified()
+                    )
+                } else {
+                    format!("unavailable · {}", self.strings.protection_uncertified())
+                };
+                dashboard_value(
+                    &mut columns[1],
+                    self.strings.sensitive_verification(),
+                    &protection_detail,
+                    if protection_available {
+                        palette.warning
+                    } else {
+                        palette.danger
+                    },
+                );
+            });
+            ui.label(
+                RichText::new("Sensitivity capability is a runtime report; certification requires compositor and real-client evidence.")
+                    .small()
+                    .color(palette.muted),
+            );
+        });
+
+        ui.collapsing(self.strings.recent_expansion_failures(), |ui| {
+            let traces = capabilities
+                .map(|caps| caps.recent_expansion_failures.as_slice())
+                .unwrap_or_default();
+            if traces.is_empty() {
+                ui.label(self.strings.no_recent_failures());
+            }
+            for trace in traces.iter().rev() {
+                ui.group(|ui| {
+                    ui.label(RichText::new(format!("{} · {}", trace.completion, trace.backend)).strong());
+                    ui.label(
+                        RichText::new(format!(
+                            "trigger recognized: {} · focus/admission: {} · backend selected: {} · erase acknowledged: {} · insertion attempted: {}",
+                            trace.trigger_recognized,
+                            trace.focus_admission,
+                            trace.backend_selected,
+                            trace.erase_acknowledged,
+                            if trace.insertion_attempted { "yes" } else { "no" },
+                        ))
+                        .small()
+                        .color(palette.muted),
+                    );
+                });
+            }
+        });
+        ui.add_space(8.0);
         theme::section_header(ui, "", self.strings.compatibility_center());
         ui.label(
             RichText::new(self.strings.onboarding_certification_note())
                 .small()
                 .color(palette.warning),
         );
-        let readiness = match self.daemon_capabilities {
+        let readiness = match self.daemon_capabilities.as_ref() {
             None => (
                 self.strings.production_readiness_unavailable(),
                 palette.muted,
@@ -89,7 +192,7 @@ impl GuiApp {
                 .small()
                 .color(palette.muted),
         );
-        if let Some(capabilities) = self.daemon_capabilities {
+        if let Some(capabilities) = self.daemon_capabilities.as_ref() {
             if let Some(assurance) = capabilities.insertion_assurance {
                 let color = match assurance {
                     runtime::InsertionAssurance::Verified => palette.success,
@@ -204,7 +307,7 @@ impl GuiApp {
             ui.add(egui::Label::new(RichText::new(&self.daemon_status).monospace()).wrap());
         });
         if self.daemon_reachable == Some(true) {
-            let capabilities = self.daemon_capabilities.unwrap_or_default();
+            let capabilities = self.daemon_capabilities.clone().unwrap_or_default();
             theme::section_header(ui, "", self.strings.configuration_health());
             let configuration_ok = !self.fleet_status.starts_with("invalid:");
             ui.horizontal(|ui| {
@@ -415,4 +518,22 @@ impl GuiApp {
             ui.label(RichText::new(text).monospace().small().color(palette.muted));
         });
     }
+}
+
+fn compact_status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
+    status.split(" · ").find_map(|part| {
+        part.strip_prefix(key)
+            .and_then(|part| part.strip_prefix('='))
+    })
+}
+
+fn dashboard_value(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add(egui::Label::new(RichText::new(value).strong().color(color)).wrap());
+    });
 }

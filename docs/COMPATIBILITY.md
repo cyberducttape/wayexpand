@@ -469,7 +469,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "source": "input-method",
   "backend": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 9,
+  "status_schema": 10,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
