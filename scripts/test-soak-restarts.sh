@@ -29,6 +29,11 @@ if ! grep -Eq '^daemon_restarts=[2-9][0-9]*$' "$report_dir/summary.txt"; then
 fi
 test -f "$report_dir/daemon.log"
 test -s "$report_dir/resource-samples.csv"
+grep -Fx 'timestamp_utc,elapsed_seconds,round,daemon_pid,rss_kib,threads,open_fds,cpu_percent_since_previous_sample' \
+    "$report_dir/resource-samples.csv" >/dev/null
+awk -F, 'NR > 1 && $4 !~ /^[0-9]+$/ { exit 1 } END { if (NR < 2) exit 1 }' \
+    "$report_dir/resource-samples.csv"
+grep -Eq '^sampled_executable=.*/wayexpand-daemon$' "$report_dir/summary.txt"
 restart_count=$(sed -n 's/^daemon_restarts=//p' "$report_dir/summary.txt")
 test "$(wc -l <"$report_dir/daemon-restart-latency-ms.txt")" -eq "$restart_count"
 grep -Eq '^restart_latency_p50_ms=[0-9]+\.[0-9]{3}$' "$report_dir/summary.txt"

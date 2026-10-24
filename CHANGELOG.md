@@ -39,6 +39,9 @@ All notable changes to WayExpand are documented here.
 - Daemon soak cleanup now terminates every process carrying its private runtime
   environment, including an orphaned daemon after a control-check failure. Soak
   evidence no longer records the host's potentially sensitive hostname.
+- Daemon soak resource samples now verify and record the actual daemon PID and
+  executable; this prevents a background shell wrapper from being mistaken for
+  the process whose memory, threads, descriptors, and CPU are measured.
 
 - Diagnostics now show the active capture and injection routes, detected
   compositor/version, route permission health, and rolling average injection

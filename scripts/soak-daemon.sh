@@ -180,7 +180,14 @@ mkfifo "$fifo"
 daemon_restarts=0
 
 start_daemon() {
-    run_isolated "$runtime_dir" "$config_path" "$daemon" --source=stdin --backend=none \
+    env -i \
+        PATH="$PATH" \
+        HOME="$runtime_dir/home" \
+        TMPDIR="$runtime_dir" \
+        XDG_RUNTIME_DIR="$runtime_dir" \
+        WAYEXPAND_CONFIG="$config_path" \
+        RUST_LOG=warn \
+        "$daemon" --source=stdin --backend=none \
         <"$fifo" >>"$runtime_dir/daemon.log" 2>&1 &
     daemon_pid=$!
     (
@@ -208,6 +215,14 @@ start_daemon() {
         cat "$runtime_dir/daemon.log" >&2
         return 1
     fi
+    daemon_executable=$(readlink "/proc/$daemon_pid/exe" 2>/dev/null || true)
+    case "$daemon_executable" in
+        */wayexpand-daemon) ;;
+        *)
+            printf '%s\n' 'error: soak resource tracking did not attach to the daemon process' >&2
+            return 1
+            ;;
+    esac
 }
 
 restart_daemon() {
@@ -269,8 +284,8 @@ sample() {
     previous_cpu_ticks=$cpu_ticks
     previous_sample_wall_ns=$wall_ns
     timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    printf '%s,%s,%s,%s,%s,%s,%s\n' \
-        "$timestamp" "$elapsed" "$round" "$rss" "$threads" "$fds" "$cpu_percent" \
+    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$timestamp" "$elapsed" "$round" "$daemon_pid" "$rss" "$threads" "$fds" "$cpu_percent" \
         >>"$metrics_path"
     if [ -z "$baseline" ] && [ "$elapsed" -ge "$warmup_seconds" ]; then
         baseline="$rss $fds"
@@ -304,7 +319,7 @@ percentile() {
 ticks_per_second=$(getconf CLK_TCK)
 previous_cpu_ticks=$(sed 's/^.*) //' "/proc/$daemon_pid/stat" | awk '{print $12 + $13}')
 previous_sample_wall_ns=$(date +%s%N)
-printf '%s\n' 'timestamp_utc,elapsed_seconds,round,rss_kib,threads,open_fds,cpu_percent_since_previous_sample' >"$metrics_path"
+printf '%s\n' 'timestamp_utc,elapsed_seconds,round,daemon_pid,rss_kib,threads,open_fds,cpu_percent_since_previous_sample' >"$metrics_path"
 : >"$status_latency_path"
 : >"$explain_latency_path"
 : >"$restart_latency_path"
@@ -391,6 +406,8 @@ if [ -n "$report_dir" ]; then
         echo "source_worktree=$source_worktree"
         echo "wayexpand_version=$("$cli" --version)"
         echo "daemon_version=$("$daemon" --version)"
+        echo "sampled_executable=$daemon_executable"
+        echo "sampled_daemon_pid=$daemon_pid"
         echo "duration_seconds=$soak_seconds"
         echo "warmup_seconds=$warmup_seconds"
         echo "rounds=$round"

@@ -46,7 +46,9 @@ workflow pin deliberately when changing the release compiler.
    release). The compositor-independent soak uses paced synthetic input,
    configuration reloads, control requests, and controlled daemon restarts
    every six hours by default; it records resource samples and control latency
-   and fails if memory or open descriptors keep growing after warmup. It does
+   and fails if memory or open descriptors keep growing after warmup. Every
+   resource row records the verified daemon PID; the script checks `/proc/<pid>/exe`
+   so a supervising shell cannot be sampled as if it were the daemon. It does
    not replace the real-session lifecycle exercises in
    [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md). CI runs the same script
    for 3 minutes and separately tests restart cycles.
