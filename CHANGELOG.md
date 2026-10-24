@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved the 11/11 production-daemon KWin 6.6.6 headless end-to-end run as
+  a redacted machine-readable artifact. It records the source commit and
+  explicitly marks simulated capture and headless-session limitations; it is
+  supporting evidence, not compositor certification.
+
 - Increased the daemon control response limit to 8 KiB so the expanded
   diagnostics status, including privacy-safe failure traces, fits without
   weakening the bounded IPC read. Updated the CLI and daemon status contract

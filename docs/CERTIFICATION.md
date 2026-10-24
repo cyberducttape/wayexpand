@@ -137,6 +137,15 @@ outside its declared certification paths, and requires the layout profiles
 drivers. A layout profile is evidence metadata only until the driver records
 the actual keymap and observed behavior.
 
+## Supporting headless evidence
+
+[`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
+records an 11-scenario run against the production daemon, libei injector, and
+KWin window tracker on KWin 6.6.6. All 11 scenarios passed. The private KWin
+session was headless and keyboard capture was simulated through stdin, so this
+artifact supports the output and focus paths only. It does not certify a
+compositor route and does not satisfy any real-session acceptance gate.
+
 The workflow's backend column identifies the path a runner driver exercises;
 it does not mean that path is currently eligible for production certification.
 Both evdev paths are explicitly ineligible because they cannot meet the
