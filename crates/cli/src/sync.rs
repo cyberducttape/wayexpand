@@ -315,6 +315,7 @@ fn write_git_input(pipe: &mut Option<ChildStdin>, input: &[u8], offset: &mut usi
             }
             Ok(written) => *offset += written,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
                 pipe.take();
                 return Ok(());
