@@ -24,10 +24,14 @@ This starts a private headless KWin session, launches isolated Wayland sink
 clients, and checks the text those clients actually receive through the
 production daemon and libei output backend. It checks a basic trigger, focus
 switching between test windows, and safe refusal of an unavailable character.
-The private harness simulates keyboard capture through stdin; it does not
-exercise the user's active compositor or claim Unicode insertion. Its concise
-report therefore says `partial`, and keeps keyboard capture, suspend/resume,
-and full production certification unverified. Source checkouts require Rust
+When KWin offers the negotiated `ei_text` route, it also inserts a replacement
+containing accented Latin and Japanese text and verifies the exact contents
+received by the test client. A keysym-only route reports Unicode insertion as
+not tested; it never infers Unicode support from capability metadata. The
+private harness simulates keyboard capture through stdin; it does not exercise
+the user's active compositor. Its concise report therefore says `partial`,
+and keeps keyboard capture, suspend/resume, and full production certification
+unverified. Source checkouts require Rust
 build tools, KWin, D-Bus session tools, `jq`, and `timeout`; binary packages
 ship the isolated test helpers, but still require KWin and the session tools.
 The harness uses a temporary home/config/runtime directory and does not

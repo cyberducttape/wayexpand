@@ -13,6 +13,7 @@ use std::{
 
 const SCENARIOS: &[&str] = &[
     "expansion-replaces-trigger",
+    "unicode-insertion",
     "app-filter-follows-focus",
     "unreachable-character-is-refused",
 ];
@@ -84,6 +85,7 @@ fn run_harness() -> HarnessResult {
         let status = match status {
             "pass" => "passed",
             "fail" => "failed",
+            "unverified" => "not-tested",
             _ => "not-run",
         };
         outcomes.insert(name.to_owned(), status);
@@ -213,8 +215,12 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
     ));
     checks.push(check(
         "unicode-insertion",
-        "not-tested",
-        "This smoke run does not certify Unicode insertion; its Unicode scenario only verifies safe refusal when a character is unavailable.",
+        result
+            .outcomes
+            .get("unicode-insertion")
+            .copied()
+            .unwrap_or("not-run"),
+        "The isolated client checks exact UTF-8 output when the negotiated route offers direct text insertion; keysym-only routes are not counted as tested.",
     ));
     checks.push(check(
         "unavailable-unicode-refusal",
@@ -254,6 +260,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "overall": overall,
         "certified": false,
         "test_session": {
+            "desktop": "KDE Plasma / Wayland",
             "compositor": "KWin / Wayland",
             "version": result.version,
             "isolation": "private headless compositor session",
@@ -274,30 +281,52 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
 }
 
 fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
-    serde_json::json!({ "name": name, "status": status, "evidence": evidence })
+    let label = match name {
+        "simple-trigger-insertion" => "Simple trigger insertion",
+        "unicode-insertion" => "Unicode insertion",
+        "focus-switching" => "Focus switching",
+        "unavailable-unicode-refusal" => "Unavailable character refusal",
+        "suspend-resume" => "Suspend/resume",
+        "keyboard-capture" => "Keyboard capture",
+        _ => name,
+    };
+    serde_json::json!({ "name": name, "label": label, "status": status, "evidence": evidence })
 }
 
 fn print_human_report(report: &serde_json::Value) {
     println!("WayExpand isolated desktop compatibility report");
-    println!("  Test session: {}", report["test_session"]["compositor"]);
+    println!("  Desktop: {}", report["test_session"]["desktop"]);
     if let Some(version) = report["test_session"]["version"].as_str() {
-        println!("  KWin version: {version}");
+        println!("  Compositor: KWin {version} / Wayland");
+    } else {
+        println!("  Compositor: KWin / Wayland (version unavailable)");
     }
     println!("  Isolation: private headless session; current desktop is not modified");
     println!("  Capture: simulated stdin · injection: libei/EIS");
     if let Some(checks) = report["checks"].as_array() {
         for item in checks {
+            let status = match item["status"].as_str().unwrap_or("unknown") {
+                "passed" => "Pass",
+                "failed" => "Fail",
+                "not-tested" | "not-run" => "Not tested",
+                other => other,
+            };
             println!(
-                "  {:25} {}",
-                item["name"].as_str().unwrap_or("unknown"),
-                item["status"].as_str().unwrap_or("unknown")
+                "  {:30} {}",
+                item["label"].as_str().unwrap_or("unknown"),
+                status
             );
         }
     }
-    println!(
-        "Overall: {}",
-        report["overall"].as_str().unwrap_or("unavailable")
-    );
+    let overall = match report["overall"].as_str().unwrap_or("unavailable") {
+        "partial" => "Partial certification",
+        "certified" => "Certified",
+        "failed" => "Certification failed",
+        "incomplete" => "Certification incomplete",
+        "unavailable" => "Certification unavailable",
+        other => other,
+    };
+    println!("Overall: {overall}");
     println!("This report is partial evidence, not a compositor certification.");
     if let Some(reason) = report["harness"]["reason"].as_str() {
         println!("Reason: {reason}");

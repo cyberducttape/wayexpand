@@ -217,6 +217,31 @@ EOF
     return "$result"
 }
 
+scenario_unicode_insertion() {
+    # Only claim Unicode insertion when the negotiated production route
+    # supports direct UTF-8 text. A keysym-only route is reported as
+    # unverified here; its safe refusal behavior has its own scenario.
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";unicode"
+replacement = "café 東京"
+EOF
+    start_sink e2e-a && start_daemon || return 2
+    mode=$(daemon_status | sed -n 's/^inject_insertion_mode=//p')
+    case "$mode" in
+        *ei_text*) ;;
+        *)
+            printf 'route=%s; direct UTF-8 text unavailable' "${mode:-unknown}"
+            return 2
+            ;;
+    esac
+    expand_in e2e-a "" ";unicode" || return 2
+    wait_until 50 sink_text_is e2e-a "café 東京"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
 scenario_word_boundary_reinserts_delimiter() {
     write_config <<'EOF'
 [[expansion]]
@@ -422,7 +447,7 @@ EOF
     return "$result"
 }
 
-all_scenarios="expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
+all_scenarios="expansion-replaces-trigger unicode-insertion word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart"
 
