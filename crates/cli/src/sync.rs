@@ -1256,14 +1256,18 @@ mod tests {
 
     #[test]
     fn git_stdin_writer_yields_when_a_child_stops_reading() {
-        let mut child = Command::new("/bin/sh")
-            .args(["-c", "sleep 10"])
+        let mut command = Command::new("/bin/sleep");
+        command
+            .arg("10")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_group(&mut command);
+        let mut child = command
             .spawn()
             .expect("start a child that does not read stdin");
         let mut pipe = Some(child.stdin.take().expect("capture stdin"));
+        let mut supervisor = ChildSupervisor::new(child);
         set_nonblocking(pipe.as_ref().unwrap()).expect("make test pipe nonblocking");
         let input = vec![b'x'; 1024 * 1024];
         let mut offset = 0;
@@ -1277,8 +1281,8 @@ mod tests {
         );
         assert!(started.elapsed() < Duration::from_secs(1));
         drop(pipe);
-        let _ = child.kill();
-        let _ = child.wait();
+        supervisor.kill_group();
+        let _ = supervisor.reap();
     }
 
     #[test]
