@@ -112,6 +112,7 @@ mkdir -m 700 "$work/home"
 results="$work/results.txt"
 : >"$results"
 
+session_status=0
 env -i \
     PATH="$PATH" \
     HOME="$work/home" \
@@ -131,7 +132,13 @@ env -i \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
     --width 1280 --height 800 --socket wayexpand-e2e \
     --exit-with-session "$session_driver" \
-    >"$work/kwin.log" 2>&1 || true
+    >"$work/kwin.log" 2>&1 || session_status=$?
+
+if [ "$session_status" -eq 124 ] || [ "$session_status" -eq 137 ]; then
+    printf '%s\n' 'error: private KWin session exceeded its 900s timeout; compositor log:' >&2
+    tail -20 "$work/kwin.log" >&2
+    exit 2
+fi
 
 if [ ! -s "$results" ]; then
     printf '%s\n' 'error: the session produced no results; compositor log:' >&2

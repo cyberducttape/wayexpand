@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The headless KWin E2E runner now rejects a timed-out compositor session even
+  when it already wrote passing scenario results, and includes the compositor
+  log tail in the failure report. CI covers this timeout-after-results case.
 - Human `wayexpand doctor` output now shows the active capture/output route,
   negotiated injection mode, keysym-fallback warning, sensitive-field signal,
   and separate backend-injection versus matcher latency percentiles. It also

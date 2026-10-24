@@ -408,6 +408,7 @@ jobs:
           bash scripts/test-certification-matrix.sh
           bash scripts/test-certification.sh
           bash scripts/test-certification-driver.sh
+          bash scripts/test-kwin-e2e-timeout.sh
       - name: TUI smoke test
         run: bash scripts/test-ui.sh
       - name: Installer test (user)
