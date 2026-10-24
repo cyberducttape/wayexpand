@@ -151,8 +151,14 @@ What's implemented:
     audit events are recorded
   - Runtime health is published as mode `0600` JSON beside the broker socket;
     `wayexpand doctor` reports queue drops, write failures, and health state
-  - Slow or unavailable storage never blocks action execution; dropped events
-    and writer failures are counted and reported to the service journal
+  - By default, slow or unavailable storage does not block action execution;
+    dropped events and writer failures are counted and reported to the service
+    journal
+  - Managed deployments can set `[broker] audit_required = true`. The broker
+    waits up to two seconds for each event to be synced before returning action
+    success. If the action succeeded but persistence could not be confirmed,
+    the error says the action already completed and warns against automatic
+    retry; audit health becomes unhealthy.
 
 - Captured action output is limited to 128 KiB total (64 KiB per stream). A
   successful response remains successful when a stream reaches its limit and
@@ -288,7 +294,10 @@ missing broker service from an unknown or disabled action.
   write failures.
 - The sink rotates at 16 MiB. A dedicated writer batches `sync_data` calls off
   the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
-  and persistence failures are journaled and do not block action execution.
+  and persistence failures are journaled. In default best-effort mode they do
+  not block action execution. `audit_required = true` adds a bounded durability
+  acknowledgment before a successful response and can add up to two seconds
+  of action-response latency.
 
 ## Implementation Status
 
