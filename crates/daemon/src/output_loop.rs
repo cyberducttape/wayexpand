@@ -723,6 +723,108 @@ mod tests {
         }
     }
 
+    struct GateInjector {
+        started: Arc<AtomicBool>,
+        release: Arc<AtomicBool>,
+    }
+
+    impl TextInjector for GateInjector {
+        fn name(&self) -> &'static str {
+            "gate-test"
+        }
+
+        fn replace(&mut self, _: &str, _: &str) -> Result<(), InjectorError> {
+            self.started.store(true, Ordering::Release);
+            while !self.release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(())
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
+    fn test_transaction() -> ExpansionResult {
+        ExpansionResult {
+            snippet_id: String::new(),
+            trigger: String::new(),
+            matched_text: String::new(),
+            insert: "replacement".into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+            folded_suffix_chars: 0,
+        }
+    }
+
+    #[test]
+    fn full_transaction_queue_rejects_excess_work_and_recovers() {
+        let started = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let (_injector, failures, worker) = spawn_async_injector(
+            Box::new(GateInjector {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+            None,
+        )
+        .unwrap();
+        let submitter = worker.submitter().unwrap();
+
+        let first = submitter.submit(&test_transaction()).unwrap();
+        let startup_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !started.load(Ordering::Acquire) {
+            assert!(
+                std::time::Instant::now() < startup_deadline,
+                "backend did not start"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let queued = (0..ASYNC_OUTPUT_QUEUE_CAPACITY)
+            .map(|_| submitter.submit(&test_transaction()).unwrap())
+            .collect::<Vec<_>>();
+        let error = submitter
+            .submit(&test_transaction())
+            .err()
+            .expect("excess output must be rejected while the bounded queue is full");
+        assert_eq!(error.message, "serialized output queue is full");
+
+        release.store(true, Ordering::Release);
+        assert!(first
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the in-flight transaction completes")
+            .is_applied());
+        for transaction in queued {
+            assert!(transaction
+                .outcome
+                .recv_timeout(Duration::from_secs(2))
+                .expect("each admitted transaction completes")
+                .is_applied());
+        }
+        assert!(
+            failures.try_recv().is_err(),
+            "queue saturation is not a backend failure"
+        );
+
+        let fresh = submitter
+            .submit(&test_transaction())
+            .expect("the queue accepts fresh work after draining");
+        assert!(fresh
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("fresh work completes")
+            .is_applied());
+    }
+
     /// Rejects the first replacement as a sensitive target, then succeeds.
     struct RejectOnceInjector {
         rejected: bool,

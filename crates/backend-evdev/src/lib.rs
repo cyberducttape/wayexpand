@@ -1050,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_event_overflow_resets_the_queue() {
+    fn pending_event_overflow_resets_the_queue_and_accepts_fresh_input() {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
@@ -1066,5 +1066,13 @@ mod tests {
 
         assert_eq!(source.pending.len(), 1);
         assert_eq!(source.pending.front(), Some(&InputEvent::Reset));
+
+        // Overflow is a synchronization boundary, not a permanent failure:
+        // newer input must follow the reset so the daemon can resume matching.
+        source.queue_event(InputEvent::Text("recovered".into()));
+        assert_eq!(
+            source.pending,
+            VecDeque::from([InputEvent::Reset, InputEvent::Text("recovered".into())])
+        );
     }
 }
