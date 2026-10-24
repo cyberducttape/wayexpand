@@ -14,7 +14,7 @@ use std::{
     os::fd::AsRawFd,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{ChildStdin, Command, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -187,36 +187,53 @@ fn run_git(
         .context("could not run git; is it installed?")?;
     let mut stdout = child.stdout.take().context("git stdout was not captured")?;
     let mut stderr = child.stderr.take().context("git stderr was not captured")?;
-    let stdin_pipe = child.stdin.take();
+    let mut stdin_pipe = child.stdin.take();
     let mut supervisor = ChildSupervisor::new(child);
-    if let Err(error) = set_nonblocking(&stdout).and_then(|_| set_nonblocking(&stderr)) {
+    if let Err(error) = set_nonblocking(&stdout)
+        .and_then(|_| set_nonblocking(&stderr))
+        .and_then(|_| {
+            if let Some(pipe) = stdin_pipe.as_ref() {
+                set_nonblocking(pipe)?;
+            }
+            Ok(())
+        })
+    {
         supervisor.kill_group();
         let _ = supervisor.reap();
         return Err(error);
     }
-    // A writer thread, so a large input cannot deadlock against git's
-    // output; it ends when the input is written or git closes its stdin.
-    let writer = stdin.zip(stdin_pipe).map(|(input, mut pipe)| {
-        thread::spawn(move || {
-            use std::io::Write;
-            let _ = pipe.write_all(&input);
-        })
-    });
-    let result = supervise_git(&mut supervisor, &mut stdout, &mut stderr, args, on_stdout);
+    let mut stdin_offset = 0;
+    let mut git_input = GitInput {
+        pipe: &mut stdin_pipe,
+        bytes: stdin.as_deref(),
+        offset: &mut stdin_offset,
+    };
+    let result = supervise_git(
+        &mut supervisor,
+        &mut stdout,
+        &mut stderr,
+        &mut git_input,
+        args,
+        on_stdout,
+    );
     if result.is_err() {
         supervisor.kill_group();
         let _ = supervisor.reap();
     }
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
     result
+}
+
+struct GitInput<'a> {
+    pipe: &'a mut Option<ChildStdin>,
+    bytes: Option<&'a [u8]>,
+    offset: &'a mut usize,
 }
 
 fn supervise_git(
     supervisor: &mut ChildSupervisor,
     stdout: &mut std::process::ChildStdout,
     stderr: &mut std::process::ChildStderr,
+    stdin: &mut GitInput<'_>,
     args: &[&str],
     on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>)> {
@@ -237,6 +254,9 @@ fn supervise_git(
     };
     let deadline = Instant::now() + GIT_TIMEOUT;
     loop {
+        if let Some(input) = stdin.bytes {
+            write_git_input(stdin.pipe, input, stdin.offset)?;
+        }
         let (stdout_eof, stderr_eof) = drain(stdout, stderr, &mut stderr_bytes)?;
         match supervisor.has_exited() {
             Ok(true) => {
@@ -270,6 +290,42 @@ fn supervise_git(
             ),
         }
     }
+}
+
+/// Write only a bounded amount of Git stdin per supervision turn. The pipe is
+/// nonblocking, so a Git child that stops reading cannot pin sync past its
+/// deadline, and no writer thread needs an unbounded join during cleanup.
+fn write_git_input(pipe: &mut Option<ChildStdin>, input: &[u8], offset: &mut usize) -> Result<()> {
+    const WRITES_PER_TURN: usize = 64;
+    for _ in 0..WRITES_PER_TURN {
+        if *offset >= input.len() {
+            pipe.take();
+            return Ok(());
+        }
+        let Some(result) = pipe
+            .as_mut()
+            .map(|stdin| std::io::Write::write(stdin, &input[*offset..]))
+        else {
+            return Ok(());
+        };
+        match result {
+            Ok(0) => {
+                pipe.take();
+                return Ok(());
+            }
+            Ok(written) => *offset += written,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                pipe.take();
+                return Ok(());
+            }
+            Err(error) => return Err(error).context("could not write git stdin"),
+        }
+    }
+    if *offset >= input.len() {
+        pipe.take();
+    }
+    Ok(())
 }
 
 /// Bounds for a NUL-separated Git listing, read record by record.
@@ -1194,6 +1250,33 @@ mod tests {
         })
         .expect("drain output");
         assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn git_stdin_writer_yields_when_a_child_stops_reading() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 10"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start a child that does not read stdin");
+        let mut pipe = Some(child.stdin.take().expect("capture stdin"));
+        set_nonblocking(pipe.as_ref().unwrap()).expect("make test pipe nonblocking");
+        let input = vec![b'x'; 1024 * 1024];
+        let mut offset = 0;
+        let started = Instant::now();
+
+        write_git_input(&mut pipe, &input, &mut offset).expect("nonblocking write yields");
+
+        assert!(
+            offset < input.len(),
+            "the unconsumed input should fill the pipe"
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(pipe);
         let _ = child.kill();
         let _ = child.wait();
     }

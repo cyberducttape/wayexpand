@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Git synchronization now writes large index updates through the supervised
+  nonblocking stdin pipe, so a stalled Git process or inherited pipe cannot
+  strand a writer-thread join beyond the command deadline.
 - GUI latency diagnostics now label matcher and backend injection latency
   explicitly, and accessibility tests cover the keysym-fallback warning and
   the separate percentile rows.
