@@ -96,7 +96,7 @@ pub const MAX_PACK_BYTES: usize = 16 * 1024 * 1024;
 
 /// Largest control-socket response a client reads. Shared by the CLI, TUI,
 /// and GUI clients; the daemon's status body is tested to fit within it.
-pub const CONTROL_MAX_RESPONSE_BYTES: usize = 4096;
+pub const CONTROL_MAX_RESPONSE_BYTES: usize = 8 * 1024;
 
 // ---- Local state ------------------------------------------------------------
 

@@ -615,23 +615,27 @@ mod tests {
     #[test]
     fn daemon_capability_parser_rejects_stale_or_missing_status_schema() {
         let capabilities = "capture_sensitive_focus=true\ninject_atomic_replace=true\n";
+        let current_schema = super::CONTROL_STATUS_SCHEMA;
         assert_eq!(
             super::DaemonCapabilities::parse(&format!("status_schema=5\n{capabilities}")),
             None
         );
         assert_eq!(
-            super::DaemonCapabilities::parse(&format!("status_schema=10\n{capabilities}")),
-            None
-        );
-        assert_eq!(
             super::DaemonCapabilities::parse(&format!(
-                "status_schema=invalid\nstatus_schema=10\n{capabilities}"
+                "status_schema={}\n{capabilities}",
+                super::CONTROL_STATUS_SCHEMA + 1
             )),
             None
         );
         assert_eq!(
             super::DaemonCapabilities::parse(&format!(
-                "status_schema=10\nstatus_schema=5\n{capabilities}"
+                "status_schema=invalid\nstatus_schema={current_schema}\n{capabilities}"
+            )),
+            None
+        );
+        assert_eq!(
+            super::DaemonCapabilities::parse(&format!(
+                "status_schema={current_schema}\nstatus_schema=5\n{capabilities}"
             )),
             None
         );

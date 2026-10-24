@@ -509,6 +509,7 @@ side never counts as a match (`commit_matches` is then `false`).
   },
   "injection_latency_sample_count": 0,
   "injection_latency_window_count": 0,
+  "injection_latency_mean_us": 0,
   "injection_latency_p50_us": 0,
   "injection_latency_p95_us": 0,
   "injection_latency_p99_us": 0,
@@ -538,6 +539,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_last_refusal": "none",
   "output_unsupported_total": 0,
   "output_last_unsupported": "none",
+  "recent_expansion_failures": [],
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
   "input_overflow_total": 0,
@@ -576,6 +578,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `action_broker` (object): Current named-action broker dependency status, matching the doctor field
 - `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
 - `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
+- `injection_latency_mean_us` (integer): Mean synchronous backend apply duration across the rolling latency window, in microseconds
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
 - `injection_latency_profiles` (object): Non-empty rolling percentile profiles keyed by negotiated output mode (`ei_text`, `libei_keysym_fallback`, `input_method_v2`, `wlroots_virtual_keyboard`, or `other`) and replacement-size bucket (`small` ≤32, `medium` 33–256, `large` >256 Unicode scalar values). Each profile contains `sample_count`, `window_count`, and p50/p95/p99 microsecond values; empty profiles are omitted.
 - `matcher_latency_sample_count` (integer): Lifetime count of input events processed by the matcher
@@ -601,6 +604,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_last_refusal` (string): Reason for the most recent refusal: `compatibility-mode-off`, `focus-changed`, `focus-unconfirmed`, or `none`. Added in status schema 8.
 - `output_unsupported_total` (integer): Expansions refused before typing because the output route could not type them exactly: a character outside its set (keystroke routes type only ASCII), more characters than it accepts, or a cursor move it cannot make. Not counted in `output_refused_total`. `wayexpand explain` names the cause for a given trigger. Added in 1.3.x without a schema change.
 - `output_last_unsupported` (string): Cause of the most recent of those: `unicode`, `too-long`, `cursor`, or `none`. Added in 1.3.x without a schema change.
+- `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, trigger-recognition marker, focus/admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, and completion result. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added in status schema 10.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
 - `input_overflow_total` (integer): Times evdev input arrived faster than it could be applied and the queue (4,096 events) was dropped, resetting the matcher; always 0 for other sources. Added in 1.2.x without a schema change.

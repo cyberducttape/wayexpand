@@ -232,14 +232,14 @@ fn doctor_reports_stalled_output_with_route_specific_recovery() {
 #[test]
 fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
     assert!(status_schema_compatible(
-        &serde_json::json!({ "status_schema": 10 })
+        &serde_json::json!({ "status_schema": CONTROL_STATUS_SCHEMA })
     ));
     assert!(!status_schema_compatible(&serde_json::json!({})));
     assert!(!status_schema_compatible(
         &serde_json::json!({ "status_schema": 7 })
     ));
     assert!(!status_schema_compatible(
-        &serde_json::json!({ "status_schema": 10 })
+        &serde_json::json!({ "status_schema": CONTROL_STATUS_SCHEMA + 1 })
     ));
     assert!(!status_schema_compatible(
         &serde_json::json!({ "status_schema": "1" })
@@ -346,6 +346,7 @@ fn status_json_matches_documented_stable_contract() {
          command_failure_total=0\n\
          injection_latency_sample_count=0\n\
          injection_latency_window_count=0\n\
+         injection_latency_mean_us=0\n\
          injection_latency_p50_us=0\n\
          injection_latency_p95_us=0\n\
          injection_latency_p99_us=0\n\
@@ -375,6 +376,7 @@ fn status_json_matches_documented_stable_contract() {
          output_last_refusal=focus-changed\n\
          output_unsupported_total=7\n\
          output_last_unsupported=unicode\n\
+         recent_expansion_failures=[]\n\
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
          input_overflow_total=3\n\
@@ -522,6 +524,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "command_failure_total",
             "injection_latency_sample_count",
             "injection_latency_window_count",
+            "injection_latency_mean_us",
             "injection_latency_p50_us",
             "injection_latency_p95_us",
             "injection_latency_p99_us",
@@ -551,6 +554,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_last_refusal",
             "output_unsupported_total",
             "output_last_unsupported",
+            "recent_expansion_failures",
             "output_reconnect_total",
             "input_reconnect_total",
             "input_overflow_total",

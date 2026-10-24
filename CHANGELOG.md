@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Increased the daemon control response limit to 8 KiB so the expanded
+  diagnostics status, including privacy-safe failure traces, fits without
+  weakening the bounded IPC read. Updated the CLI and daemon status contract
+  fixtures to include the new fields and use the shared schema version.
+
 - Added `wayexpand doctor --certify`: it runs the isolated headless KWin
   end-to-end harness and reports observed insertion and focus checks, while
   marking keyboard capture, Unicode insertion, suspend/resume, and production
