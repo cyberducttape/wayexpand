@@ -1369,6 +1369,14 @@ fn protocol_event_queue_is_bounded_and_fails_closed() {
     );
     assert_eq!(state.pending_key_pass_through.len(), 1);
 
+    // The reset marks the dropped-input boundary; later events remain usable
+    // so one burst cannot leave the backend permanently unable to expand.
+    state.queue_event(InputEvent::Text("recovered".into()));
+    assert_eq!(
+        state.events.back(),
+        Some(&InputEvent::Text("recovered".into()))
+    );
+
     let mut injector = RecordingInjector {
         calls: Vec::new(),
         events: Vec::new(),
