@@ -275,7 +275,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "checks": checks,
         "limitations": [
             "This is a reproducible output/focus smoke certification, not production compositor certification.",
-            "Keyboard capture, Unicode insertion, password-field behavior, suspend/resume, and long-running stability are not certified.",
+            "Keyboard capture, password-field behavior, suspend/resume, and long-running stability are not certified by this smoke run.",
             "The private KWin result does not describe the user's active compositor session."
         ],
     })

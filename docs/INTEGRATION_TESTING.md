@@ -28,10 +28,10 @@ backend behavior.
 ## Headless KWin end-to-end harness
 
 `scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [SCENARIO...]`
-runs WayExpand against a real KWin without touching the desktop: it starts a private
-`kwin_wayland --virtual` with its own D-Bus session, runtime directory, home,
-and configuration, and stops every process it started (including the portal
-services KWin activates) when it finishes. It needs `kwin_wayland`,
+runs WayExpand against a real KWin without touching the desktop: it starts a
+private `kwin_wayland --virtual` with its own D-Bus session, runtime directory,
+home, and configuration, and stops every process it started (including the
+portal services KWin activates) when it finishes. It needs `kwin_wayland`,
 `dbus-run-session`, `gdbus`, and `jq`.
 
 Inside that session (`scripts/kwin-e2e-session.sh`):
