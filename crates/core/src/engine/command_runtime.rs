@@ -646,12 +646,24 @@ pub(super) fn stop_transient_unit(unit: Option<&str>) {
 }
 
 #[cfg(unix)]
+fn terminate_form_helper_in_order(stop_wrapper: impl FnOnce(), stop_unit: impl FnOnce()) {
+    // Stop the systemd-run client first so it cannot submit a late unit-start
+    // request after the unit cleanup has already run.
+    stop_wrapper();
+    stop_unit();
+}
+
+#[cfg(unix)]
 fn terminate_form_helper(guard: &mut ChildSupervisor, unit: Option<&str>) {
-    // systemd-run owns a separate transient cgroup; stopping the wrapper
-    // alone does not guarantee that a GUI descendant releases the pipe.
-    stop_transient_unit(unit);
-    guard.kill_group();
-    let _ = guard.reap();
+    // systemd-run owns a separate transient cgroup; stopping the wrapper's
+    // group does not terminate GUI descendants in that cgroup.
+    terminate_form_helper_in_order(
+        || {
+            guard.kill_group();
+            let _ = guard.reap();
+        },
+        || stop_transient_unit(unit),
+    );
 }
 
 /// Show a form for `fields` and return the entered values by field key.
@@ -845,6 +857,17 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn form_cleanup_stops_the_wrapper_before_the_transient_unit() {
+        let steps = std::cell::RefCell::new(Vec::new());
+        terminate_form_helper_in_order(
+            || steps.borrow_mut().push("wrapper"),
+            || steps.borrow_mut().push("unit"),
+        );
+        assert_eq!(steps.into_inner(), ["wrapper", "unit"]);
     }
 
     #[test]

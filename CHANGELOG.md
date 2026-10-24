@@ -5,9 +5,9 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Cancelling a form helper launched through `systemd-run` now force-stops all
-  processes in its unique transient unit before cleaning up the wrapper,
-  preventing GUI descendants in the separate systemd cgroup from surviving
-  daemon cancellation or timeout.
+  processes in its unique transient unit after stopping the wrapper, preventing
+  late unit starts and GUI descendants in the separate systemd cgroup from
+  surviving daemon cancellation or timeout.
 - Configuration integrity polling now fingerprints file metadata rather than
   reading the primary file and every fleet layer on the keyboard reactor.
   Full contents are still read and validated by the background loader before
