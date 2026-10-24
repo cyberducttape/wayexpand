@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Updated the locked Windows clipboard dependency from yanked `clipboard-win`
+  5.4.1 to 5.4.3. The workspace suite passes with the new lockfile and
+  `cargo audit` no longer reports a yanked package; it reports only the
+  already-documented informational zbus 5 unmaintained notices.
+
 - Preserved the 11/11 production-daemon KWin 6.6.6 headless end-to-end run as
   a redacted machine-readable artifact. It records the source commit and
   explicitly marks simulated capture and headless-session limitations; it is
