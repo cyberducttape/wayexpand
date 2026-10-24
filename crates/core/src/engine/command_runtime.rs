@@ -584,12 +584,9 @@ fn read_available_form_output(
 }
 
 #[cfg(unix)]
-pub(super) fn stop_transient_unit(unit: Option<&str>) {
-    let Some(unit) = unit else {
-        return;
-    };
-    let Ok(mut stop) = Command::new("systemctl")
-        .args(["--user", "stop", "--no-block", unit])
+fn run_bounded_systemctl(args: &[&str]) {
+    let Ok(mut child) = Command::new("systemctl")
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -599,16 +596,37 @@ pub(super) fn stop_transient_unit(unit: Option<&str>) {
     };
     let deadline = Instant::now() + Duration::from_millis(100);
     loop {
-        match stop.try_wait() {
-            Ok(Some(_)) => return,
+        match child.try_wait() {
+            Ok(Some(_)) => break,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
             Ok(None) | Err(_) => {
-                let _ = stop.kill();
-                let _ = stop.wait();
-                return;
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
             }
         }
     }
+}
+
+#[cfg(unix)]
+pub(super) fn stop_transient_unit(unit: Option<&str>) {
+    let Some(unit) = unit else {
+        return;
+    };
+    // The transient service runs in a systemd-owned cgroup, separate from the
+    // systemd-run wrapper's process group. Stop must therefore target every
+    // process in that unit explicitly. The unit name is unique to this form
+    // helper (PID plus sequence number), so a force-kill cannot affect another
+    // WayExpand operation.
+    run_bounded_systemctl(&[
+        "--user",
+        "kill",
+        "--kill-whom=all",
+        "--signal=SIGKILL",
+        "--no-block",
+        unit,
+    ]);
+    run_bounded_systemctl(&["--user", "stop", "--no-block", unit]);
 }
 
 #[cfg(unix)]
