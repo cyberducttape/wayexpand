@@ -9,7 +9,7 @@
 //! previews therefore run in a transient unit with the same directives.
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
@@ -139,14 +139,24 @@ fn sandboxed_preview_args(
     for property in DAEMON_SANDBOX_PROPERTIES {
         args.push(format!("--property={property}"));
     }
-    // The units grant %t and %h/.config/wayexpand. "-" tolerates a path that
-    // does not exist instead of failing the unit.
+    // Match the installed units' resolved XDG writable paths. "-" tolerates a
+    // path that does not exist instead of failing the transient unit.
     let mut writable = Vec::new();
     if let Some(runtime) = env("XDG_RUNTIME_DIR") {
-        writable.push(format!("-{runtime}"));
+        writable.push(systemd_path_argument(Path::new(&runtime)));
     }
-    if let Some(home) = env("HOME") {
-        writable.push(format!("-{home}/.config/wayexpand"));
+    let home = env("HOME").map(PathBuf::from);
+    let config_home = env("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|home| home.join(".config")));
+    if let Some(config_home) = config_home {
+        writable.push(systemd_path_argument(&config_home.join("wayexpand")));
+    }
+    let state_home = env("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|home| home.join(".local/state")));
+    if let Some(state_home) = state_home {
+        writable.push(systemd_path_argument(&state_home.join("wayexpand")));
     }
     if !writable.is_empty() {
         args.push(format!("--property=ReadWritePaths={}", writable.join(" ")));
@@ -177,6 +187,25 @@ fn sandboxed_preview_args(
     args.push(command.program.clone());
     args.extend(command.args.iter().cloned());
     args
+}
+
+/// Quote a single path in systemd's whitespace-separated path-list syntax.
+/// Double percent signs to prevent unit-specifier expansion, and escape the
+/// characters that would otherwise alter the quoted token.
+fn systemd_path_argument(path: &Path) -> String {
+    let mut escaped = String::with_capacity(path.as_os_str().len());
+    for character in path.to_string_lossy().chars() {
+        match character {
+            '%' => escaped.push_str("%%"),
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    format!("\"-{}\"", escaped)
 }
 
 #[cfg(test)]
@@ -274,9 +303,7 @@ mod tests {
                 "+%F".into(),
             ]
         );
-        assert!(args.contains(
-            &"--property=ReadWritePaths=-/run/user/1000 -/home/u/.config/wayexpand".to_string()
-        ));
+        assert!(args.contains(&"--property=ReadWritePaths=\"-/run/user/1000\" \"-/home/u/.config/wayexpand\" \"-/home/u/.local/state/wayexpand\"".to_string()));
         assert!(args.contains(&"--property=MemoryDenyWriteExecute=yes".to_string()));
         assert!(args.contains(&"--property=RuntimeMaxSec=2500ms".to_string()));
     }
@@ -334,6 +361,79 @@ mod tests {
         );
     }
 
+    /// Needs a systemd user manager: `cargo test -p wayexpand-core
+    /// live_preview_respects_custom_xdg_paths -- --ignored`.
+    #[test]
+    #[ignore = "requires a systemd user manager"]
+    fn live_preview_respects_custom_xdg_paths() {
+        assert!(command_preview_sandboxed(), "no systemd user manager");
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("HOME is required for the systemd user service");
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = home.join(format!(
+            ".wayexpand-preview-xdg-{}-{suffix}",
+            std::process::id()
+        ));
+        let config_home = root.join("config dir%home");
+        let state_home = root.join("state \"home\"");
+        let config_dir = config_home.join("wayexpand");
+        let state_dir = state_home.join("wayexpand");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let config_probe = config_dir.join("preview-writable");
+        let state_probe = state_dir.join("preview-writable");
+        let command = CommandConfig {
+            action: None,
+            program: "/usr/bin/touch".into(),
+            args: vec![
+                config_probe.to_string_lossy().into_owned(),
+                state_probe.to_string_lossy().into_owned(),
+            ],
+            timeout_ms: 5_000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Inherit,
+            pass_env: Vec::new(),
+        };
+        let env = |name: &str| match name {
+            "HOME" => Some(home.to_string_lossy().into_owned()),
+            "XDG_RUNTIME_DIR" => std::env::var(name).ok(),
+            "XDG_CONFIG_HOME" => Some(config_home.to_string_lossy().into_owned()),
+            "XDG_STATE_HOME" => Some(state_home.to_string_lossy().into_owned()),
+            _ => None,
+        };
+        let unit = format!(
+            "wayexpand-preview-xdg-{}-{suffix}.service",
+            std::process::id()
+        );
+        let args = sandboxed_preview_args(&command, &unit, env);
+        let mut process = Command::new("systemd-run");
+        process
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_process_group(&mut process);
+        let mut child = process.spawn().unwrap();
+        let Some(stdout) = child.stdout.take() else {
+            panic!("systemd-run stdout was not piped");
+        };
+        let Some(stderr) = child.stderr.take() else {
+            panic!("systemd-run stderr was not piped");
+        };
+        let result = run_command_unix(child, stdout, stderr, 6_000, None);
+        if result.is_err() {
+            stop_transient_unit(Some(&unit));
+        }
+        let files_created = config_probe.is_file() && state_probe.is_file();
+        let _ = std::fs::remove_dir_all(&root);
+        result.expect("transient preview unit should accept escaped XDG paths");
+        assert!(files_created, "both configured XDG paths must be writable");
+    }
+
     #[test]
     fn inherited_preview_runs_the_program_directly() {
         let args = sandboxed_preview_args(
@@ -343,5 +443,19 @@ mod tests {
         );
         let command_start = args.iter().position(|arg| arg == "--").unwrap() + 1;
         assert_eq!(&args[command_start..], ["date", "+%F"]);
+    }
+
+    #[test]
+    fn preview_writable_paths_follow_custom_xdg_roots_and_escape_systemd_values() {
+        let env = |name: &str| match name {
+            "XDG_RUNTIME_DIR" => Some("/run/user/1000".into()),
+            "HOME" => Some("/home/u".into()),
+            "XDG_CONFIG_HOME" => Some("/tmp/config dir%home".into()),
+            "XDG_STATE_HOME" => Some("/tmp/state \"dir\"".into()),
+            _ => None,
+        };
+        let args =
+            sandboxed_preview_args(&command(CommandEnvironment::Inherit), "unit.service", env);
+        assert!(args.contains(&"--property=ReadWritePaths=\"-/run/user/1000\" \"-/tmp/config dir%%home/wayexpand\" \"-/tmp/state \\\"dir\\\"/wayexpand\"".to_string()));
     }
 }

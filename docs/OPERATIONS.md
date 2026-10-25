@@ -190,7 +190,9 @@ durability contract is required.
 editor's **Run in service sandbox** button runs the command in a transient
 user unit (`wayexpand-preview-*.service`) with the same sandbox directives as
 the packaged capture units, the same minimal environment, and the command's
-timeout. A preview therefore fails where the daemon would. Without a systemd
+timeout. Its writable config and state directories follow the resolved XDG
+paths installed for the daemon. A preview therefore fails where the daemon
+would. Without a systemd
 user manager the button reads **Run locally (advanced)** and runs the command
 directly, which matches a daemon that is also running outside systemd. The
 sandbox is only as strong as the host allows; see the host limitation in

@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
 - Scoped KWin protocol-availability documentation to the tested headless
   session; a default-configured private compositor run is not a universal
   capability result for a user's configured virtual keyboard.
+- GUI command-preview transient units now grant the same resolved XDG config
+  and state paths as installed daemon units, with paths quoted against spaces
+  and systemd specifier expansion.
 - In managed safe mode, snippet-pack imports can no longer replace the
   organization’s required signer list with a caller-supplied `--signers` file.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids
