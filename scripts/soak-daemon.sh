@@ -17,13 +17,16 @@ fi
 soak_seconds=${SOAK_SECONDS:-60}
 warmup_seconds=$(( soak_seconds / 6 ))
 [ "$warmup_seconds" -ge 5 ] || warmup_seconds=5
-# Allowed growth after warmup: memory in KiB, descriptors in count.
+# Allowed peak growth after warmup: memory in KiB, descriptors and threads in count.
 rss_slack_kib=${SOAK_RSS_SLACK_KIB:-8192}
 fd_slack=${SOAK_FD_SLACK:-4}
+# A small amount of transient worker variation is allowed; sustained thread
+# growth beyond this limit fails the soak just like descriptor growth.
+thread_slack=${SOAK_THREAD_SLACK:-2}
 sample_interval=${SOAK_SAMPLE_INTERVAL_SECONDS:-60}
 feed_interval=${SOAK_FEED_INTERVAL_SECONDS:-1}
 restart_interval=${SOAK_RESTART_INTERVAL_SECONDS:-21600}
-case "$soak_seconds:$sample_interval:$rss_slack_kib:$fd_slack:$feed_interval:$restart_interval" in
+case "$soak_seconds:$sample_interval:$rss_slack_kib:$fd_slack:$thread_slack:$feed_interval:$restart_interval" in
     *[!0-9:]*|:*|*::*|*:) printf '%s\n' 'error: duration, feed/sample intervals, and slack values must be non-negative integers' >&2; exit 2 ;;
 esac
 if [ "$soak_seconds" -le 0 ] || [ "$sample_interval" -le 0 ]; then
@@ -93,6 +96,17 @@ preserve_partial_report() {
         echo "elapsed_seconds=$elapsed_seconds"
         echo "rounds=${round:-0}"
         echo "daemon_restarts=${daemon_restarts:-0}"
+        echo "failure_reason=${failure_reason:-not-recorded}"
+        echo "rss_slack_kib=$rss_slack_kib"
+        echo "fd_slack=$fd_slack"
+        echo "rss_peak_after_warmup_kib=${rss_peak_after_warmup:-not-sampled}"
+        echo "fds_peak_after_warmup=${fds_peak_after_warmup:-not-sampled}"
+        echo "rss_baseline_kib=${base_rss:-not-sampled}"
+        echo "fd_baseline=${base_fds:-not-sampled}"
+        echo "thread_slack=$thread_slack"
+        echo "threads_baseline=${base_threads:-not-sampled}"
+        echo "threads_peak_after_warmup=${threads_peak_after_warmup:-not-sampled}"
+        echo "threads_final=${threads:-not-sampled}"
     } >"$report_dir/summary.txt" || true
 }
 
@@ -288,7 +302,14 @@ sample() {
         "$timestamp" "$elapsed" "$round" "$daemon_pid" "$rss" "$threads" "$fds" "$cpu_percent" \
         >>"$metrics_path"
     if [ -z "$baseline" ] && [ "$elapsed" -ge "$warmup_seconds" ]; then
-        baseline="$rss $fds"
+        baseline="$rss $fds $threads"
+        rss_peak_after_warmup=$rss
+        fds_peak_after_warmup=$fds
+        threads_peak_after_warmup=$threads
+    elif [ -n "$baseline" ]; then
+        [ "$rss" -le "$rss_peak_after_warmup" ] || rss_peak_after_warmup=$rss
+        [ "$fds" -le "$fds_peak_after_warmup" ] || fds_peak_after_warmup=$fds
+        [ "$threads" -le "$threads_peak_after_warmup" ] || threads_peak_after_warmup=$threads
     fi
 }
 
@@ -329,8 +350,11 @@ start=$(date +%s)
 started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 next_restart=$((start + restart_interval))
 baseline=
+rss_peak_after_warmup=0
+fds_peak_after_warmup=0
+threads_peak_after_warmup=0
 round=0
-next_sample=$sample_interval
+next_sample=$warmup_seconds
 while [ $(( $(date +%s) - start )) -lt "$soak_seconds" ]; do
     kill -0 "$daemon_pid" 2>/dev/null || { echo "daemon exited during soak" >&2; cat "$runtime_dir/daemon.log" >&2; exit 1; }
     round=$((round + 1))
@@ -358,29 +382,43 @@ while [ $(( $(date +%s) - start )) -lt "$soak_seconds" ]; do
     fi
     if [ "$elapsed" -ge "$next_sample" ]; then
         sample "$elapsed"
-        next_sample=$((next_sample + sample_interval))
+        next_sample=$((elapsed + sample_interval))
     fi
     sleep 0.5
 done
 elapsed=$(( $(date +%s) - start ))
 sample "$elapsed"
-[ -n "$baseline" ] || baseline="$rss $fds"
+[ -n "$baseline" ] || {
+    baseline="$rss $fds $threads"
+    rss_peak_after_warmup=$rss
+    fds_peak_after_warmup=$fds
+    threads_peak_after_warmup=$threads
+}
 
-base_rss=${baseline% *}
-base_fds=${baseline#* }
+base_rss=$(printf '%s\n' "$baseline" | awk '{print $1}')
+base_fds=$(printf '%s\n' "$baseline" | awk '{print $2}')
+base_threads=$(printf '%s\n' "$baseline" | awk '{print $3}')
 final_rss=$rss
 final_fds=$fds
-echo "soak ${soak_seconds}s, ${round} rounds: rss ${base_rss} -> ${final_rss} KiB, fds ${base_fds} -> ${final_fds}"
-echo "final sample: threads=$threads, cpu=${cpu_percent}% since previous sample"
+final_threads=$threads
+echo "soak ${soak_seconds}s, ${round} rounds: rss ${base_rss} -> ${final_rss} KiB (peak ${rss_peak_after_warmup}), fds ${base_fds} -> ${final_fds} (peak ${fds_peak_after_warmup}), threads ${base_threads} -> ${final_threads} (peak ${threads_peak_after_warmup})"
+echo "final sample: cpu=${cpu_percent}% since previous sample"
 echo "control latency ms: status p50=$(percentile 50 "$status_latency_path") p95=$(percentile 95 "$status_latency_path"); explain p50=$(percentile 50 "$explain_latency_path") p95=$(percentile 95 "$explain_latency_path")"
 echo 'resource samples (CSV):'
 cat "$metrics_path"
-if [ "$final_rss" -gt $((base_rss + rss_slack_kib)) ]; then
-    echo "resident memory grew by more than ${rss_slack_kib} KiB after warmup" >&2
+if [ "$rss_peak_after_warmup" -gt $((base_rss + rss_slack_kib)) ]; then
+    failure_reason="resident memory grew by more than ${rss_slack_kib} KiB after warmup"
+    echo "$failure_reason" >&2
     exit 1
 fi
-if [ "$final_fds" -gt $((base_fds + fd_slack)) ]; then
-    echo "open descriptors grew by more than ${fd_slack} after warmup" >&2
+if [ "$fds_peak_after_warmup" -gt $((base_fds + fd_slack)) ]; then
+    failure_reason="open descriptors grew by more than ${fd_slack} after warmup"
+    echo "$failure_reason" >&2
+    exit 1
+fi
+if [ "$threads_peak_after_warmup" -gt $((base_threads + thread_slack)) ]; then
+    failure_reason="threads grew by more than ${thread_slack} after warmup (peak ${threads_peak_after_warmup}, baseline ${base_threads})"
+    echo "$failure_reason" >&2
     exit 1
 fi
 if [ -n "$report_dir" ]; then
@@ -414,9 +452,16 @@ if [ -n "$report_dir" ]; then
         echo "daemon_restarts=$daemon_restarts"
         echo "rss_baseline_kib=$base_rss"
         echo "rss_final_kib=$final_rss"
+        echo "rss_slack_kib=$rss_slack_kib"
+        echo "rss_peak_after_warmup_kib=$rss_peak_after_warmup"
         echo "fd_baseline=$base_fds"
         echo "fd_final=$final_fds"
-        echo "threads_final=$threads"
+        echo "fd_peak_after_warmup=$fds_peak_after_warmup"
+        echo "fd_slack=$fd_slack"
+        echo "threads_baseline=$base_threads"
+        echo "threads_peak_after_warmup=$threads_peak_after_warmup"
+        echo "threads_final=$final_threads"
+        echo "thread_slack=$thread_slack"
         echo "cpu_percent_last_interval=$cpu_percent"
         echo "status_latency_p50_ms=$(percentile 50 "$status_latency_path")"
         echo "status_latency_p95_ms=$(percentile 95 "$status_latency_path")"

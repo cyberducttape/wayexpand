@@ -46,7 +46,8 @@ session evidence; unit tests alone do not satisfy them.
 - [ ] Publish p50/p95/p99 insertion latency per approved backend.
 - [ ] Complete a 24-hour continuous desktop soak test.
 - [ ] Demonstrate stable memory, thread count, and file descriptors during
-      that soak.
+      that soak. The isolated soak harness now enforces peak RSS, descriptor,
+      and thread-count growth limits; it does not replace this desktop test.
 - [x] Demonstrate bounded behavior and recovery under event-queue saturation.
       Evdev and input-method event queues reset stale input and accept fresh
       input after overflow; the serialized output queue rejects excess work

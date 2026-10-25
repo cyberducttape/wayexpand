@@ -221,10 +221,13 @@ and clears inherited D-Bus/display handles so it cannot load a tracker script
 into the operator's live desktop. CI regression-tests that environment
 allowlist. It periodically records daemon RSS, thread count, open descriptors,
 and CPU percentage, and reports p50/p95 CLI round-trip latency for status and
-explain requests. By default it also performs a controlled daemon restart every
-six hours and records the restart count; use `SOAK_RESTART_INTERVAL_SECONDS=0`
-to disable restarts or a shorter interval for a focused regression test. This
-also records each stop-to-ready latency and reports its p50/p95 values. It does
+explain requests. After warmup it enforces configured limits against peak RSS,
+open descriptors, and thread-count growth (`SOAK_RSS_SLACK_KIB`,
+`SOAK_FD_SLACK`, and `SOAK_THREAD_SLACK`). By default it also performs a
+controlled daemon restart every six hours and records the restart count; use
+`SOAK_RESTART_INTERVAL_SECONDS=0` to disable restarts or a shorter interval for
+a focused regression test. This also records each stop-to-ready latency and
+reports its p50/p95 values. It does
 not simulate compositor, portal, keyboard, suspend, or systemd-restart
 events; those must be exercised by a real-session operator or the
 compositor-specific driver. Set `SOAK_REPORT_DIR` to a new directory to
