@@ -229,7 +229,12 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{process::Command, thread, time::Duration};
+    use std::{
+        io::BufRead,
+        process::{Command, Stdio},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn already_exited_group_is_not_a_cleanup_failure() {
@@ -300,17 +305,56 @@ mod tests {
         supervisor.kill_group();
     }
 
+    #[cfg(target_os = "linux")]
+    fn process_is_gone_or_zombie(pid: u32) -> bool {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return true;
+        };
+        // The command name is parenthesized and may contain spaces. The first
+        // field after the final ')' is the process state.
+        stat.rsplit_once(')')
+            .and_then(|(_, fields)| fields.split_whitespace().next())
+            .is_some_and(|state| state == "Z")
+    }
+
     #[test]
-    fn reap_also_invalidates_group_identifier() {
-        let mut command = Command::new("true");
+    #[cfg(target_os = "linux")]
+    fn reap_terminates_group_descendants_and_invalidates_identifier() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & echo $!"])
+            .stdout(Stdio::piped());
         configure_process_group(&mut command);
         let child = command.spawn().expect("spawn test child");
         let mut supervisor = ChildSupervisor::new(child);
+        let mut stdout = std::io::BufReader::new(
+            supervisor
+                .child_mut()
+                .and_then(|child| child.stdout.take())
+                .expect("capture descendant PID"),
+        );
+        let mut descendant_pid = String::new();
+        stdout
+            .read_line(&mut descendant_pid)
+            .expect("read descendant PID");
+        let descendant_pid = descendant_pid
+            .trim()
+            .parse::<u32>()
+            .expect("valid descendant PID");
         wait_until_exited(&mut supervisor);
 
         let status = supervisor.reap().expect("reap and clean up group");
         assert!(status.success());
         assert!(supervisor.pid.is_none());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !process_is_gone_or_zombie(descendant_pid) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            process_is_gone_or_zombie(descendant_pid),
+            "process-group descendant {descendant_pid} survived reap()"
+        );
 
         // Once reaped, dropping or cleaning up again cannot signal a reused
         // process-group identifier.

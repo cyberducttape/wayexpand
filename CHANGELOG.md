@@ -6,7 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Process supervision now invalidates and cleans up the process group as part
   of `reap()`, preventing a later drop from signalling a recycled group ID
-  when callers omit an explicit cleanup call.
+  when callers omit an explicit cleanup call; a regression test verifies a
+  descendant is terminated when `reap()` is called directly.
 - Preserved a current-source `doctor --certify` run from commit `2111dba66512`:
   11 isolated KWin insertion/focus checks passed using libei keysym fallback;
   Unicode insertion, physical keyboard capture, and suspend/resume remain
