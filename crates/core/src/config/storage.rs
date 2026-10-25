@@ -12,6 +12,18 @@ pub(super) fn save_atomic_serialized_relative(
     file_name: &str,
     serialized: &[u8],
 ) -> Result<(), ConfigError> {
+    save_atomic_serialized_relative_with_sync(resolved, file_name, serialized, |directory| {
+        directory.sync_all()
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn save_atomic_serialized_relative_with_sync(
+    resolved: &Path,
+    file_name: &str,
+    serialized: &[u8],
+    mut sync_directory: impl FnMut(&fs::File) -> std::io::Result<()>,
+) -> Result<(), ConfigError> {
     let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
     let parent_fd = open_secure_directory(parent).map_err(|source| ConfigError::Read {
         path: parent.display().to_string(),
@@ -74,9 +86,9 @@ pub(super) fn save_atomic_serialized_relative(
             )?;
             parent_fd
                 .try_clone()
-                .and_then(|directory| directory.sync_all())
-                .map_err(|source| ConfigError::Read {
-                    path: parent.display().to_string(),
+                .and_then(|directory| sync_directory(&directory))
+                .map_err(|source| ConfigError::CommitDurabilityUncertain {
+                    path: resolved.display().to_string(),
                     source,
                 })?;
             Ok(())
@@ -93,6 +105,43 @@ pub(super) fn save_atomic_serialized_relative(
             "temporary path collision",
         ),
     }))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod durability_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn directory_sync_failure_reports_that_replacement_already_happened() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-config-durability-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("expansions.toml");
+        fs::write(&path, b"old").unwrap();
+
+        let error =
+            save_atomic_serialized_relative_with_sync(&path, "expansions.toml", b"new", |_| {
+                Err(std::io::Error::other("injected directory sync failure"))
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::CommitDurabilityUncertain { .. }
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert!(error
+            .safe_summary()
+            .contains("replaced, but its durability could not be confirmed"));
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(target_os = "linux")]

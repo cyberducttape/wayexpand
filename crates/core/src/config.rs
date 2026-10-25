@@ -1081,8 +1081,8 @@ impl Config {
                 })?;
                 fs::File::open(parent)
                     .and_then(|directory| directory.sync_all())
-                    .map_err(|source| ConfigError::Read {
-                        path: parent.display().to_string(),
+                    .map_err(|source| ConfigError::CommitDurabilityUncertain {
+                        path: resolved.display().to_string(),
                         source,
                     })?;
                 Ok(())

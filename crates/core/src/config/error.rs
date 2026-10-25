@@ -19,6 +19,13 @@ pub enum ConfigError {
     RootOwnedWriteRequiresAdmin { path: String },
     #[error("configuration changed since it was loaded; reload before saving")]
     RevisionConflict,
+    #[error(
+        "configuration {path} was replaced, but its directory could not be synced; durability is uncertain: {source}"
+    )]
+    CommitDurabilityUncertain {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("configuration {path} is busy; another writer holds its lock")]
     Busy { path: String },
     #[error(
@@ -149,6 +156,9 @@ impl ConfigError {
             }
             Self::RevisionConflict => {
                 "configuration changed externally; reload before saving".into()
+            }
+            Self::CommitDurabilityUncertain { .. } => {
+                "configuration was replaced, but its durability could not be confirmed; reload and verify it before retrying".into()
             }
             Self::Busy { .. } => "configuration is busy; another writer holds its lock".into(),
             Self::InsecureParent { mode, .. } => format!(
