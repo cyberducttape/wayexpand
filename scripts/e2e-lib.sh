@@ -228,7 +228,11 @@ EOF
 }
 
 scenario_output_latency() {
-    local latency_expected= sample=0 status profiles profile
+    latency_expected=''
+    sample=0
+    status=''
+    profiles=''
+    profile=''
     write_config <<'EOF'
 [[expansion]]
 trigger = ";lat"

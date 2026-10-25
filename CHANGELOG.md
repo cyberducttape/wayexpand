@@ -9,6 +9,8 @@ All notable changes to WayExpand are documented here.
   files no longer make their evidence appear to come from a dirty source tree.
 - Added a script regression check proving unrelated reports are ignored while
   untracked source inputs still mark the checkout dirty.
+- Fixed a POSIX shell compatibility issue in the isolated E2E latency scenario
+  so the repository-wide ShellCheck CI step can validate it.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;
