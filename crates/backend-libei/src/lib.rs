@@ -948,6 +948,26 @@ mod tests {
     }
 
     #[test]
+    fn checkpointed_replacement_stops_after_a_mid_send_failure() {
+        let mut sent = 0;
+        let result = super::run_checkpointed(
+            4,
+            || Ok::<(), &'static str>(()),
+            || {
+                sent += 1;
+                if sent == 2 {
+                    Err("injected output flush failure")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+
+        assert_eq!(result, Err("injected output flush failure"));
+        assert_eq!(sent, 2, "no replacement keys follow the failed send");
+    }
+
+    #[test]
     fn erase_count_treats_decomposed_accent_and_devanagari_as_one() {
         for grapheme in ["e\u{301}", "ü", "u\u{308}", "👍🏽", "👩‍💻", "क्ष", "क्‍ष"]
         {

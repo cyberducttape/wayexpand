@@ -9,6 +9,8 @@ All notable changes to WayExpand are documented here.
   a later pass.
 - Source-checkout certification reports whether the tested tree was clean;
   dirty-tree results no longer count as an identified build.
+- Added backend failure-injection coverage proving libei and wlroots key
+  sequences stop immediately after a mid-replacement send failure.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor
   protocol-probe statuses, so support diagnostics preserve why an integration
   route is unavailable without including raw daemon or configuration details.

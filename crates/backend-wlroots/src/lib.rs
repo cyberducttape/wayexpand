@@ -615,6 +615,26 @@ mod tests {
     }
 
     #[test]
+    fn checked_key_sequence_stops_after_a_mid_replacement_send_failure() {
+        let mut sent = Vec::new();
+        let result = send_checked_key_sequence(
+            [BACKSPACE_KEYCODE, 11, 12, 13],
+            || Ok(()),
+            |key| {
+                sent.push(key);
+                if key == 11 {
+                    Err(WlrootsError::Transport("injected flush failure".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+
+        assert!(matches!(result, Err(WlrootsError::Transport(message)) if message == "injected flush failure"));
+        assert_eq!(sent, [BACKSPACE_KEYCODE, 11]);
+    }
+
+    #[test]
     fn keymap_contains_unicode_and_control_symbols() {
         let (keymap, mappings) = build_keymap("a🙂\n".chars()).unwrap();
         assert_eq!(mappings.len(), 3);
