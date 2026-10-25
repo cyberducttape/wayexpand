@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a current-build `doctor --certify` report for commit
+  `480206ce7d1f`: 12 required isolated KWin 6.6.6 output, focus, reload,
+  restart, and refusal scenarios passed using libei keysym fallback. Unicode,
+  physical keyboard capture, and suspend/resume remain untested; this evidence
+  is partial and does not claim active-desktop certification.
 - Process supervision now exposes child stdout without exposing raw `Child`
   lifecycle methods, preventing callers from reaping a leader before its group
   cleanup and invalidating the PID-reuse safety guarantee. Raw process-group
