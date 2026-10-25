@@ -292,6 +292,10 @@ impl TextInjector for AssuredInjector {
         self.inner.status_detail()
     }
 
+    fn replace_error_may_have_applied(&self) -> bool {
+        self.inner.replace_error_may_have_applied()
+    }
+
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
         // Keep the focus check; add the caller's (for example cancellation).
         self.inner.set_output_checkpoint(

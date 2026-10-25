@@ -983,6 +983,13 @@ impl TextInjector for InputMethodSource {
         }
     }
 
+    fn replace_error_may_have_applied(&self) -> bool {
+        // `flush` can report an error after the compositor received the full
+        // delete/commit batch, so every replace error must be handled as an
+        // uncertain outcome by the caller.
+        true
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         let bytes = trigger_delete_length(self.state.surrounding_text.as_ref(), trigger)?;
         let Some(input_method) = self.state.input_method.as_ref() else {

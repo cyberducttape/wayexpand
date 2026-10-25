@@ -1464,6 +1464,55 @@ struct AtomicInjector {
     calls: Vec<String>,
 }
 
+struct UncertainAtomicFailureInjector;
+
+impl crate::TextInjector for UncertainAtomicFailureInjector {
+    fn name(&self) -> &'static str {
+        "uncertain-atomic-test"
+    }
+
+    fn capabilities(&self) -> crate::InjectorCapabilities {
+        crate::InjectorCapabilities {
+            atomic_replace: true,
+            ..crate::InjectorCapabilities::default()
+        }
+    }
+
+    fn replace_error_may_have_applied(&self) -> bool {
+        true
+    }
+
+    fn erase(&mut self, _: &str) -> Result<(), crate::InjectorError> {
+        unreachable!("atomic replacement uses replace")
+    }
+
+    fn insert(&mut self, _: &str) -> Result<(), crate::InjectorError> {
+        unreachable!("atomic replacement uses replace")
+    }
+
+    fn replace(&mut self, _: &str, _: &str) -> Result<(), crate::InjectorError> {
+        Err(crate::InjectorError {
+            backend: self.name(),
+            message: "flush acknowledgement lost".into(),
+            retryable: true,
+        })
+    }
+}
+
+#[test]
+fn atomic_replace_error_with_lost_acknowledgement_is_non_replayable() {
+    let outcome = ExpansionEngine::apply(
+        &mut UncertainAtomicFailureInjector,
+        &failure_injection_result(),
+    );
+
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::UnknownApplicationOutcome { ref source }
+            if source.message == "flush acknowledgement lost"
+    ));
+}
+
 impl crate::TextInjector for AtomicInjector {
     fn name(&self) -> &'static str {
         "atomic-test"

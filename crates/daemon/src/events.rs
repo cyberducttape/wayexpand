@@ -385,6 +385,13 @@ pub(crate) fn finish_expansion(
                 source: outcome,
             }));
         }
+        wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
+            warn!("expansion replacement outcome is unknown; refusing automatic retry");
+            return Err(Box::new(EventError {
+                result,
+                source: outcome,
+            }));
+        }
         wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
             warn!("expansion transaction may have partially applied; refusing automatic retry");
             return Err(Box::new(EventError {

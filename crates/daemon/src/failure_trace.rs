@@ -65,6 +65,7 @@ impl<'a> TracedInjector<'a> {
                 "inserted; cursor placement failed"
             }
             TransactionOutcome::NotApplied { .. } => "not applied",
+            TransactionOutcome::UnknownApplicationOutcome { .. } => "application outcome unknown",
             TransactionOutcome::UnknownPartialFailure { .. } => "partial result unknown",
         };
         let erase_acknowledged = if self.stages.erase.is_empty() {
@@ -101,6 +102,9 @@ impl TextInjector for TracedInjector<'_> {
     }
     fn status_detail(&self) -> &'static str {
         self.inner.status_detail()
+    }
+    fn replace_error_may_have_applied(&self) -> bool {
+        self.inner.replace_error_may_have_applied()
     }
     fn admit(&self, erases: bool) -> Result<(), InjectorError> {
         match self.inner.admit(erases) {

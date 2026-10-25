@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand doctor --certify` runs an isolated KWin test session and verifies
+  received output from real Wayland test clients, reporting insertion, focus,
+  and Unicode outcomes without claiming to certify the active desktop.
+- Atomic input-method replacement errors after submission are now reported as
+  an unknown application outcome. The daemon refuses automatic replay when a
+  compositor may have applied the replacement but its acknowledgement was
+  lost.
 - The GUI diagnostics dashboard no longer reports permissions as available when
   environment probes say they are not applicable; granted, required, and
   unreported/not-applicable states are now distinct.

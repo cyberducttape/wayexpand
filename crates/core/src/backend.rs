@@ -483,6 +483,15 @@ pub trait TextInjector: Send {
     fn capabilities(&self) -> InjectorCapabilities {
         InjectorCapabilities::default()
     }
+    /// Whether a `replace` error can be reported after the target may already
+    /// have received the transaction. Atomic backends that can lose
+    /// acknowledgement after submission must return `true`; callers then
+    /// treat errors as uncertain and never replay the trigger. The default is
+    /// appropriate only when every replace error guarantees that no output
+    /// was submitted.
+    fn replace_error_may_have_applied(&self) -> bool {
+        false
+    }
     /// Human-readable negotiated capability detail for diagnostics. Backends
     /// that have no additional runtime mode may use the stable default.
     fn status_detail(&self) -> &'static str {

@@ -241,6 +241,7 @@ struct AsyncInjector {
     cancel: Arc<AtomicBool>,
     failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
+    replace_error_may_have_applied: bool,
     name: &'static str,
     status_detail: &'static str,
 }
@@ -317,6 +318,7 @@ pub fn spawn_async_injector(
 ) -> std::result::Result<AsyncInjectorHandle, OutputConnectError> {
     let mut backend = backend;
     let capabilities = backend.capabilities();
+    let replace_error_may_have_applied = backend.replace_error_may_have_applied();
     let name = backend.name();
     let status_detail = backend.status_detail();
     let (sender, receiver) = sync_channel(ASYNC_OUTPUT_QUEUE_CAPACITY);
@@ -439,6 +441,7 @@ pub fn spawn_async_injector(
         cancel,
         failure_sender,
         capabilities,
+        replace_error_may_have_applied,
         name,
         status_detail,
     };
@@ -478,6 +481,10 @@ impl TextInjector for AsyncInjector {
 
     fn status_detail(&self) -> &'static str {
         self.status_detail
+    }
+
+    fn replace_error_may_have_applied(&self) -> bool {
+        self.replace_error_may_have_applied
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

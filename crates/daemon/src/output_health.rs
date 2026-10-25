@@ -58,7 +58,11 @@ pub fn note_outcome(outcome: &TransactionOutcome) {
 }
 
 fn is_uncertain(outcome: &TransactionOutcome) -> bool {
-    matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. })
+    matches!(
+        outcome,
+        TransactionOutcome::UnknownApplicationOutcome { .. }
+            | TransactionOutcome::UnknownPartialFailure { .. }
+    )
 }
 
 /// Record the retired workers still running and when the oldest retired.
@@ -104,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn only_unknown_partial_failures_are_counted_as_uncertain() {
+    fn unknown_application_and_partial_failures_are_counted_as_uncertain() {
         let error = || wayexpand_core::InjectorError {
             backend: "test",
             message: "failed".into(),
@@ -120,6 +124,9 @@ mod tests {
         assert!(is_uncertain(&TransactionOutcome::UnknownPartialFailure {
             source: error()
         }));
+        assert!(is_uncertain(
+            &TransactionOutcome::UnknownApplicationOutcome { source: error() }
+        ));
     }
 
     #[test]

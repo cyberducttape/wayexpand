@@ -8,15 +8,16 @@ use crate::{InjectorCapabilities, InjectorError, TextInjector};
 
 /// Result of the multi-stage replacement transaction.
 ///
-/// The distinction between `NotApplied` and `UnknownPartialFailure` is
-/// intentional: callers may safely restore/retry only the former. Once a
-/// non-atomic backend may have erased or inserted part of the replacement,
-/// the original text must not be replayed automatically.
+/// Failures are separated by what can safely be inferred about their effect.
+/// Callers may restore/retry only `NotApplied`; an uncertain acknowledgement
+/// from an atomic protocol is also non-replayable, even though the protocol
+/// itself cannot have applied only part of the replacement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionOutcome {
     Applied,
     AppliedWithCursorPositionFailure { source: InjectorError },
     NotApplied { source: InjectorError },
+    UnknownApplicationOutcome { source: InjectorError },
     UnknownPartialFailure { source: InjectorError },
 }
 
@@ -32,6 +33,7 @@ impl TransactionOutcome {
         match self {
             Self::Applied => None,
             Self::AppliedWithCursorPositionFailure { source }
+            | Self::UnknownApplicationOutcome { source }
             | Self::NotApplied { source }
             | Self::UnknownPartialFailure { source } => Some(source),
         }
@@ -51,6 +53,9 @@ impl std::fmt::Display for TransactionOutcome {
             Self::NotApplied { source } => write!(formatter, "transaction not applied: {source}"),
             Self::UnknownPartialFailure { source } => {
                 write!(formatter, "transaction may be partially applied: {source}")
+            }
+            Self::UnknownApplicationOutcome { source } => {
+                write!(formatter, "replacement outcome is unknown: {source}")
             }
         }
     }
@@ -206,8 +211,12 @@ impl ExpansionEngine {
         match result.reinsert_after {
             None => {
                 if let Err(source) = injector.replace(&result.matched_text, &result.insert) {
-                    return if injector.capabilities().atomic_replace {
+                    return if injector.capabilities().atomic_replace
+                        && !injector.replace_error_may_have_applied()
+                    {
                         TransactionOutcome::NotApplied { source }
+                    } else if injector.capabilities().atomic_replace {
+                        TransactionOutcome::UnknownApplicationOutcome { source }
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };
@@ -222,8 +231,12 @@ impl ExpansionEngine {
                 insert.push_str(&result.insert);
                 insert.push(character);
                 if let Err(source) = injector.replace(&erase, &insert) {
-                    return if injector.capabilities().atomic_replace {
+                    return if injector.capabilities().atomic_replace
+                        && !injector.replace_error_may_have_applied()
+                    {
                         TransactionOutcome::NotApplied { source }
+                    } else if injector.capabilities().atomic_replace {
+                        TransactionOutcome::UnknownApplicationOutcome { source }
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };

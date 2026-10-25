@@ -134,6 +134,7 @@ impl EventError {
         matches!(
             &self.source,
             wayexpand_core::TransactionOutcome::NotApplied { source }
+                | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source }
                 | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source }
                 if source.kind() == wayexpand_core::InjectorErrorKind::ExpansionRejected
         )
