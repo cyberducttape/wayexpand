@@ -251,4 +251,17 @@ mod tests {
         assert_eq!(version.as_deref(), Some("KWin 99.1"));
         assert!(started.elapsed() < Duration::from_secs(1));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn compositor_version_probe_deadline_survives_continuous_output() {
+        let started = Instant::now();
+        let version = super::bounded_version("sh", &["-c", "while :; do printf x; done"]);
+        assert_eq!(version, None);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "continuous output exceeded the version-probe deadline: {:?}",
+            started.elapsed()
+        );
+    }
 }
