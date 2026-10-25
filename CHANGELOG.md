@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The headless GUI screenshot runner now terminates its optional daemon and
+  other private-session processes before removing temporary state.
 - The daemon soak now enforces configurable peak RSS, descriptor, and thread
   growth limits after warmup, and records baseline, peak, and final counts.
 - `wayexpand doctor --certify` now includes in-flight focus-change and target-

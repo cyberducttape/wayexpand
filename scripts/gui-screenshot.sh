@@ -25,6 +25,7 @@ size=${3:-1240x850}
 width=${size%x*}
 height=${size#*x}
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+source "$project_dir/scripts/private-home-cleanup.sh"
 
 for tool in kwin_wayland dbus-run-session convert; do
     command -v "$tool" >/dev/null || {
@@ -42,7 +43,17 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-gui-shot.XXXXXXXX")
 # The compositor's socket path must fit in 108 bytes, so its runtime
 # directory gets a short path of its own.
 runtime=$(mktemp -d /tmp/wxshot.XXXXXX)
-trap 'rm -rf "$work" "$runtime"' EXIT
+cleanup() {
+    # KWin's session wrapper backgrounds the optional daemon pipeline. Reap
+    # every process with this run's private HOME before deleting its runtime.
+    reap_private_home_processes "$work/home"
+    sleep 0.2
+    reap_private_home_processes "$work/home"
+    rm -rf "$work" "$runtime"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 chmod 700 "$runtime"
 # The GUI opens its default configuration path, which must be private. It
 # sits under HOME so the status bar shows ~/.config/wayexpand/expansions.toml.

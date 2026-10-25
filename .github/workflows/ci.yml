@@ -309,6 +309,8 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: Verify daemon soak environment isolation
         run: bash scripts/test-soak-isolation.sh
+      - name: Verify isolated screenshot process cleanup
+        run: bash scripts/test-private-home-cleanup.sh
       - name: Check Rust dependency hygiene
         run: cargo install cargo-machete --version 0.9.2 --locked && cargo machete
       - name: Test commit identity failure handling
