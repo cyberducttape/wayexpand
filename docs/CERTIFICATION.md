@@ -150,6 +150,16 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-cb70c9ee3.json`](evidence/doctor-certify-cb70c9ee3.json)
+preserves the 12-scenario `wayexpand doctor --certify --json` run from commit
+`cb70c9ee303e` on KWin 6.6.6. The isolated clients passed insertion,
+word-boundary, cursor, multiline, focus-switch, focus-change, target-close,
+command-completion, configuration-reload, daemon-restart, and unavailable-
+Unicode-refusal checks. Unicode insertion, physical keyboard capture, and
+suspend/resume were not tested. The route used libei keysym fallback with
+12 ms key pacing. This remains headless output/focus evidence and does not
+certify the active desktop or production keyboard-capture route.
+
 [`evidence/kwin-headless-99b4bdc50.json`](evidence/kwin-headless-99b4bdc50.json)
 records an 11-scenario run against the production daemon, libei injector, and
 KWin window tracker from commit `99b4bdc50` on KWin 6.6.6. All scenarios

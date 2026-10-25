@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved the current 12-scenario isolated KWin doctor-certification JSON
+  report, including each verified result and its explicit headless-route limits.
 - `wayexpand doctor --certify` now reports word-boundary, cursor, multiline,
   command completion, reload, and restart scenarios alongside its insertion
   and focus safety checks; missing scenario evidence keeps the report incomplete.
