@@ -1,7 +1,8 @@
 use std::{
     fs::{self, OpenOptions},
-    io::Write,
+    io::{self, Write},
     path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
@@ -90,35 +91,104 @@ pub(crate) fn save_gui_prefs(
     };
     let contents = toml_edit::ser::to_string_pretty(&stored)
         .map_err(|error| format!("could not serialize preferences: {error}"))?;
-    let temp = parent.join(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("gui-prefs.toml"),
-        std::process::id()
-    ));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)
-        .map_err(|error| format!("could not create temporary preferences file: {error}"))?;
-    let result = (|| {
-        file.write_all(contents.as_bytes())
-            .map_err(|error| format!("could not write preferences: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("could not flush preferences: {error}"))?;
-        fs::rename(&temp, &path).map_err(|error| format!("could not replace preferences: {error}"))
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
+    write_gui_prefs_atomic(&path, &contents, |parent| {
+        fs::File::open(parent)?.sync_all()
+    })
+}
+
+fn write_gui_prefs_atomic(
+    path: &std::path::Path,
+    contents: &str,
+    sync_directory: impl FnOnce(&std::path::Path) -> io::Result<()>,
+) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "preferences path has no parent directory".to_owned())?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("gui-prefs.toml");
+    let mut temporary = None;
+    let mut file = None;
+    let mut last_error = None;
+    for attempt in 0..16 {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let candidate = parent.join(format!(
+            ".{file_name}.tmp.{}.{}.{}",
+            std::process::id(),
+            nonce,
+            attempt
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&candidate)
+        {
+            Ok(opened) => {
+                temporary = Some(candidate);
+                file = Some(opened);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => {
+                return Err(format!(
+                    "could not create temporary preferences file: {error}"
+                ));
+            }
+        }
     }
-    result
+    let temporary = temporary.ok_or_else(|| {
+        format!(
+            "could not allocate a unique temporary preferences file: {}",
+            last_error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "temporary path collision".into())
+        )
+    })?;
+    let mut file = file.expect("temporary preferences path and file are allocated together");
+    let prepared = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all());
+    if let Err(error) = prepared {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("could not write preferences: {error}"));
+    }
+    drop(file);
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("could not replace preferences: {error}"));
+    }
+    sync_directory(parent).map_err(|error| {
+        format!(
+            "preferences were replaced, but syncing their parent directory failed; durability is uncertain and the saved settings should be reloaded before retrying: {error}"
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-gui-prefs-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).unwrap();
+        path
+    }
 
     #[test]
     fn malformed_boolean_is_rejected_instead_of_coerced() {
@@ -126,5 +196,38 @@ mod tests {
             "language = \"en\"\ncolorpack = \"default\"\ndark_mode = \"maybe\"\n",
         );
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn stale_process_id_temp_file_does_not_block_preferences_save() {
+        let directory = test_directory();
+        let path = directory.join("gui-prefs.toml");
+        let stale = directory.join(format!(".gui-prefs.toml.tmp-{}", std::process::id()));
+        fs::write(&stale, "stale temp").unwrap();
+
+        write_gui_prefs_atomic(&path, "language = \"en\"\n", |parent| {
+            fs::File::open(parent)?.sync_all()
+        })
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&stale).unwrap(), "stale temp");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "language = \"en\"\n");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn directory_sync_failure_reports_that_preferences_were_replaced() {
+        let directory = test_directory();
+        let path = directory.join("gui-prefs.toml");
+
+        let error = write_gui_prefs_atomic(&path, "language = \"en\"\n", |_| {
+            Err(io::Error::other("injected directory sync failure"))
+        })
+        .unwrap_err();
+
+        assert!(error.contains("preferences were replaced"));
+        assert!(error.contains("durability is uncertain"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "language = \"en\"\n");
+        fs::remove_dir_all(directory).unwrap();
     }
 }

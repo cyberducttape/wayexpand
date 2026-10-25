@@ -16,6 +16,9 @@ All notable changes to WayExpand are documented here.
 - Snippet-pack signing now reports when the signature was replaced but the
   parent directory could not be synced, so callers can distinguish that
   uncertain durability outcome from a failed signature write.
+- GUI preference saves use collision-resistant temporary names and sync their
+  parent directory; post-replacement sync failures identify that preferences
+  were saved with durability still uncertain.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,
