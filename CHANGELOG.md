@@ -12,6 +12,9 @@ All notable changes to WayExpand are documented here.
   missing build metadata cannot overwrite or satisfy the identity check.
 - Added backend failure-injection coverage proving libei and wlroots key
   sequences stop immediately after a mid-replacement send failure.
+- GUI command previews now refresh systemd user-manager availability instead
+  of caching the startup result, so a later-started manager cannot leave
+  preview execution on the stale unsandboxed path.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor
   protocol-probe statuses, so support diagnostics preserve why an integration
   route is unavailable without including raw daemon or configuration details.

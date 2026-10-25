@@ -9,6 +9,7 @@
 //! previews therefore run in a transient unit with the same directives.
 
 use std::{
+    ffi::OsStr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -56,13 +57,14 @@ static PREVIEW_UNIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Whether previews will run in the service sandbox: a systemd user manager
 /// is reachable. Without one the daemon also runs unsandboxed, so a direct
-/// preview matches it. Checked once per process; the GUI asks every frame.
+/// preview matches it. This is checked dynamically because the user manager
+/// can become available after the GUI starts.
 pub fn command_preview_sandboxed() -> bool {
-    static SANDBOXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *SANDBOXED.get_or_init(|| {
-        std::env::var_os("XDG_RUNTIME_DIR")
-            .is_some_and(|dir| Path::new(&dir).join("systemd/private").exists())
-    })
+    systemd_manager_socket_exists(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+}
+
+fn systemd_manager_socket_exists(runtime_dir: Option<&OsStr>) -> bool {
+    runtime_dir.is_some_and(|dir| Path::new(dir).join("systemd/private").exists())
 }
 
 /// Run a command preview the way the daemon would run the command: in the
@@ -230,6 +232,24 @@ mod tests {
         "SyslogIdentifier",
         "ReadWritePaths",
     ];
+
+    #[test]
+    fn preview_sandbox_probe_observes_a_manager_started_later() {
+        let runtime = std::env::temp_dir().join(format!(
+            "wayexpand-preview-manager-{}-{}",
+            std::process::id(),
+            PREVIEW_UNIT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        assert!(!systemd_manager_socket_exists(Some(runtime.as_os_str())));
+
+        let socket_path = runtime.join("systemd/private");
+        std::fs::create_dir_all(socket_path.parent().unwrap()).unwrap();
+        std::fs::write(&socket_path, b"test socket marker").unwrap();
+        assert!(systemd_manager_socket_exists(Some(runtime.as_os_str())));
+        assert!(!systemd_manager_socket_exists(None));
+
+        std::fs::remove_dir_all(runtime).unwrap();
+    }
 
     #[test]
     fn preview_sandbox_matches_the_packaged_daemon_units() {
