@@ -38,6 +38,8 @@ All notable changes to WayExpand are documented here.
   accurately instead of implying the configuration or control socket failed.
 - In managed safe mode, snippet-pack imports can no longer replace the
   organization’s required signer list with a caller-supplied `--signers` file.
+- Snippet-pack signature hashing now fails on directory enumeration errors and
+  hashes non-UTF-8 filenames without lossy-name collisions.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids
   blocking on special files, refreshes at most every two seconds, and shares
   cached action IDs without cloning the whole list on each frame.

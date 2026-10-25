@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::{self, Read, Write},
-    os::fd::AsRawFd,
     os::unix::fs::OpenOptionsExt,
+    os::{fd::AsRawFd, unix::ffi::OsStrExt},
     path::{Path, PathBuf},
     process::{Command, Output},
     sync::{
@@ -359,33 +359,58 @@ fn check_declared_capabilities(
 /// SHA-256 of the manifest and of every snippet file, sorted by path.
 /// Any change to any signed file changes the digest.
 pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
-    use sha2::{Digest, Sha256};
     let path = path.as_ref();
-    let mut files = vec![MANIFEST_FILE.to_owned()];
+    let files = [MANIFEST_FILE];
     let snippets = path.join(SNIPPETS_DIR);
-    let mut snippet_names: Vec<String> = fs::read_dir(&snippets)
-        .map_err(|source| PackError::Read {
+    let mut snippet_files = Vec::new();
+    for entry in fs::read_dir(&snippets).map_err(|source| PackError::Read {
+        path: snippets.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| PackError::Read {
             path: snippets.clone(),
             source,
-        })?
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".toml"))
-        .collect();
-    snippet_names.sort();
-    files.extend(
-        snippet_names
-            .into_iter()
-            .map(|name| format!("{SNIPPETS_DIR}/{name}")),
-    );
+        })?;
+        let name = entry.file_name();
+        if Path::new(&name)
+            .extension()
+            .is_some_and(|extension| extension == "toml")
+        {
+            snippet_files.push((name, entry.path()));
+        }
+    }
+    snippet_files.sort_by(|left, right| left.0.cmp(&right.0));
     let mut digest = String::from("wayexpand-pack-digest-v1\n");
     for file in files {
-        let text = read_bounded_text(&path.join(&file), MAX_SNIPPET_FILE_BYTES)?;
-        let hash = Sha256::digest(text.as_bytes());
-        let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
-        digest.push_str(&format!("{hex}  {file}\n"));
+        append_pack_digest_file(&mut digest, &path.join(file), file)?;
+    }
+    for (name, file_path) in snippet_files {
+        let name = match name.to_str() {
+            Some(name) => format!("{SNIPPETS_DIR}/{name}"),
+            // A NUL cannot occur in a filename, making this byte-exact label
+            // unambiguous with every valid UTF-8 filename. Avoid lossy
+            // conversion, which can map distinct names to the same label.
+            None => format!(
+                "{SNIPPETS_DIR}/\0{}",
+                name.as_bytes()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        };
+        append_pack_digest_file(&mut digest, &file_path, &name)?;
     }
     Ok(digest)
+}
+
+fn append_pack_digest_file(digest: &mut String, path: &Path, label: &str) -> Result<(), PackError> {
+    use sha2::{Digest, Sha256};
+
+    let text = read_bounded_text(path, MAX_SNIPPET_FILE_BYTES)?;
+    let hash = Sha256::digest(text.as_bytes());
+    let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+    digest.push_str(&format!("{hex}  {label}\n"));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -756,6 +781,64 @@ mod tests {
             read_signature_tool_output(&vec![b'x'; MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1][..])
                 .is_err()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pack_digest_keeps_distinct_non_utf8_filenames_distinct() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = test_pack_path();
+        let snippets = path.join(SNIPPETS_DIR);
+        fs::create_dir_all(&snippets).unwrap();
+        fs::write(path.join(MANIFEST_FILE), "manifest").unwrap();
+        let first = std::ffi::OsStr::from_bytes(b"entry-\xfe.toml");
+        let second = std::ffi::OsStr::from_bytes(b"entry-\xff.toml");
+        fs::write(snippets.join(first), "first").unwrap();
+        fs::write(snippets.join(second), "second").unwrap();
+
+        let digest = pack_digest(&path).unwrap();
+
+        let labels = digest
+            .lines()
+            .filter_map(|line| line.split_once("  ").map(|(_, label)| label))
+            .filter(|label| label.starts_with("snippets/"))
+            .collect::<Vec<_>>();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(
+            labels
+                .iter()
+                .filter(|label| label.as_bytes().contains(&0))
+                .count(),
+            2
+        );
+        assert_ne!(labels[0], labels[1]);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn pack_digest_preserves_the_existing_utf8_signature_format() {
+        use sha2::{Digest, Sha256};
+
+        let path = test_pack_path();
+        let snippets = path.join(SNIPPETS_DIR);
+        fs::create_dir_all(&snippets).unwrap();
+        fs::write(path.join(MANIFEST_FILE), "manifest").unwrap();
+        fs::write(snippets.join("main.toml"), "snippet").unwrap();
+
+        let hash = |bytes: &[u8]| {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let expected = format!(
+            "wayexpand-pack-digest-v1\n{}  wayexpand-pack.toml\n{}  snippets/main.toml\n",
+            hash(b"manifest"),
+            hash(b"snippet")
+        );
+        assert_eq!(pack_digest(&path).unwrap(), expected);
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
