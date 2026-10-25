@@ -238,6 +238,8 @@ struct AuditWriter {
     fail_next_batch_write: bool,
     #[cfg(test)]
     fail_next_rollback: bool,
+    #[cfg(test)]
+    fail_next_rollback_sync: bool,
 }
 
 impl AuditWriter {
@@ -251,6 +253,8 @@ impl AuditWriter {
             fail_next_batch_write: false,
             #[cfg(test)]
             fail_next_rollback: false,
+            #[cfg(test)]
+            fail_next_rollback_sync: false,
         })
     }
 
@@ -308,7 +312,17 @@ impl AuditWriter {
                     "could not roll back a failed audit batch"
                 );
             } else {
-                if let Err(sync_error) = self.file.sync_data() {
+                #[cfg(test)]
+                let inject_rollback_sync_failure =
+                    std::mem::take(&mut self.fail_next_rollback_sync);
+                #[cfg(not(test))]
+                let inject_rollback_sync_failure = false;
+                let rollback_sync = if inject_rollback_sync_failure {
+                    Err(io::Error::other("injected audit rollback sync failure"))
+                } else {
+                    self.file.sync_data()
+                };
+                if let Err(sync_error) = rollback_sync {
                     self.poisoned = true;
                     tracing::error!(
                         error = %sync_error,
@@ -589,6 +603,30 @@ mod tests {
             b"even",
             "a poisoned audit file must not receive later records"
         );
+        assert_eq!(failures.load(Ordering::Relaxed), 2);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_rollback_sync_poisons_writer_and_prevents_a_false_durable_success() {
+        let directory = test_directory("poisoned-rollback-sync");
+        let path = directory.join("audit.jsonl");
+        let mut writer = AuditWriter::open(&path).unwrap();
+        writer.fail_next_batch_write = true;
+        writer.fail_next_rollback_sync = true;
+        let failures = AtomicU64::new(0);
+
+        let error = write_with_retry(&mut writer, &[b"event-record\n".to_vec()], &failures)
+            .expect_err("unsynced rollback must fail the required audit");
+        assert!(error
+            .to_string()
+            .contains("injected audit batch write failure"));
+        assert!(writer.poisoned);
+        assert!(std::fs::read(&path).unwrap().is_empty());
+        assert_eq!(failures.load(Ordering::Relaxed), 1);
+
+        assert!(write_with_retry(&mut writer, &[b"later-event\n".to_vec()], &failures).is_err());
+        assert!(std::fs::read(&path).unwrap().is_empty());
         assert_eq!(failures.load(Ordering::Relaxed), 2);
         std::fs::remove_dir_all(directory).unwrap();
     }
