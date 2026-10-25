@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand new --gui` now bounds form-helper runtime and output, and kills
+  the helper's process group on timeout or when a descendant keeps stdout
+  open after the GUI exits.
 - Preserved a build-identity-checked isolated KWin certification report from
   commit `552f1c1377eb`; all 12 executed insertion, focus, safety, and identity
   checks passed, with keyboard capture, Unicode insertion, and suspend/resume

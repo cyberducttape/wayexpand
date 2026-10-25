@@ -8,16 +8,20 @@
 
 use std::{
     collections::HashMap,
-    io::{BufRead, IsTerminal},
+    io::{BufRead, IsTerminal, Read},
+    os::fd::AsRawFd,
     os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
-    process::Stdio,
+    process::{Command, ExitStatus, Stdio},
     sync::Arc,
+    thread,
+    time::{Duration, Instant},
 };
 
 use wayexpand_core::{
     form_fields, render_template_with_cursor, ExpansionConfig, FormField, FormFieldKind,
     TemplateContext,
 };
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 use super::Args;
 use crate::*;
@@ -56,6 +60,9 @@ fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
 /// Bytes in one value given with `--set` or typed at a prompt.
 const MAX_VALUE_BYTES: usize = 64 * 1024;
 const GENERATED_FILE_MODE: u32 = 0o600;
+const FORM_HELPER_TIMEOUT: Duration = Duration::from_secs(600);
+const FORM_HELPER_DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
+const FORM_HELPER_READS_PER_DRAIN: usize = 64;
 
 pub(crate) fn new_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
@@ -509,17 +516,19 @@ fn ask_with_form(title: &str, fields: &[&FormField]) -> Result<HashMap<String, S
                 .filter(|candidate| candidate.is_file())
         })
         .unwrap_or_else(|| PathBuf::from("wayexpand-gui"));
-    let output = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(["--form", &spec])
         .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .output()
-        .with_context(|| format!("could not start {}", program.display()))?;
-    if !output.status.success() {
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    let (status, output) = run_form_helper_process(command, FORM_HELPER_TIMEOUT)
+        .with_context(|| format!("could not run {}", program.display()))?;
+    if !status.success() {
         bail!("cancelled; nothing was written");
     }
-    let values: HashMap<String, String> = serde_json::from_slice(&output.stdout)
-        .context("the form window returned an unreadable answer")?;
+    let values: HashMap<String, String> =
+        serde_json::from_slice(&output).context("the form window returned an unreadable answer")?;
     let mut checked = HashMap::new();
     for field in fields {
         let value = values
@@ -529,6 +538,114 @@ fn ask_with_form(title: &str, fields: &[&FormField]) -> Result<HashMap<String, S
         checked.insert(field.key.clone(), value.clone());
     }
     Ok(checked)
+}
+
+fn set_nonblocking_form_stdout(stdout: &std::process::ChildStdout) -> io::Result<()> {
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn drain_form_stdout(
+    stdout: &mut std::process::ChildStdout,
+    output: &mut Vec<u8>,
+) -> io::Result<bool> {
+    let mut buffer = [0_u8; 8192];
+    for _ in 0..FORM_HELPER_READS_PER_DRAIN {
+        match stdout.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(count) => {
+                let next_len = output.len().checked_add(count).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "form output size overflow")
+                })?;
+                if next_len > wayexpand_core::limits::MAX_FORM_OUTPUT_BYTES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "form output exceeded its size limit",
+                    ));
+                }
+                output.extend_from_slice(&buffer[..count]);
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+/// Run the interactive form with bounded output and a hard deadline. Killing
+/// the whole process group also closes stdout if a helper descendant inherits
+/// its descriptor after the GUI process exits.
+fn run_form_helper_process(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<(ExitStatus, Vec<u8>)> {
+    configure_process_group(&mut command);
+    let child = command.spawn().context("could not start the form helper")?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let mut stdout = match supervisor.child_mut().and_then(|child| child.stdout.take()) {
+        Some(stdout) => stdout,
+        None => {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            bail!("form helper stdout was not captured");
+        }
+    };
+    if let Err(error) = set_nonblocking_form_stdout(&stdout) {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+        return Err(error).context("could not configure form output");
+    }
+
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .context("form helper timeout is too large")?;
+    let mut output = Vec::new();
+    loop {
+        let mut stdout_eof = match drain_form_stdout(&mut stdout, &mut output) {
+            Ok(eof) => eof,
+            Err(error) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                return Err(error).context("could not read form output");
+            }
+        };
+        let exited = match supervisor.has_exited() {
+            Ok(exited) => exited,
+            Err(error) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                return Err(error).context("could not monitor form helper");
+            }
+        };
+        if exited {
+            supervisor.kill_group();
+            let status = supervisor.reap().context("could not reap form helper")?;
+            let drain_deadline = Instant::now() + FORM_HELPER_DRAIN_TIMEOUT;
+            while !stdout_eof && Instant::now() < drain_deadline {
+                stdout_eof = match drain_form_stdout(&mut stdout, &mut output) {
+                    Ok(eof) => eof,
+                    Err(error) => return Err(error).context("could not finish form output"),
+                };
+                if !stdout_eof {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+            if !stdout_eof {
+                bail!("form helper stdout did not close after process-group cleanup");
+            }
+            return Ok((status, output));
+        }
+        if Instant::now() >= deadline {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            bail!("form helper exceeded its deadline");
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// Write `contents` to `path`, creating missing parent directories. An
@@ -649,6 +766,46 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn form_helper_timeout_kills_its_process_group() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & wait"])
+            .stdout(Stdio::piped());
+        let started = Instant::now();
+        let error = run_form_helper_process(command, Duration::from_millis(75))
+            .expect_err("the hanging form helper should time out");
+        assert!(error.to_string().contains("deadline"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn form_helper_reaps_descendant_holding_stdout_after_parent_exit() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & printf '{\"answer\":\"ok\"}'"])
+            .stdout(Stdio::piped());
+        let started = Instant::now();
+        let (status, output) = run_form_helper_process(command, Duration::from_secs(2))
+            .expect("the parent result should be collected after group cleanup");
+        assert!(status.success());
+        assert_eq!(output, br#"{"answer":"ok"}"#);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn form_helper_output_is_bounded() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "head -c 2097153 /dev/zero"])
+            .stdout(Stdio::piped());
+        let started = Instant::now();
+        let error = run_form_helper_process(command, Duration::from_secs(2))
+            .expect_err("oversized form output should be rejected");
+        assert!(format!("{error:#}").contains("size limit"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 
     fn config(text: &str) -> Config {
         Config::parse(text).unwrap()
