@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a build-identity-checked isolated KWin certification report from
+  commit `552f1c1377eb`; all 12 executed insertion, focus, safety, and identity
+  checks passed, with keyboard capture, Unicode insertion, and suspend/resume
+  still untested.
 - Isolated `doctor --certify` now records the commit of the CLI and daemon
   binaries it exercises, and rejects evidence produced by a different build
   than the reporting CLI.
