@@ -628,71 +628,10 @@ fn redact_query(tail: &str) -> String {
     let Some((path, query)) = tail.split_once('?') else {
         return tail.to_owned();
     };
-    let query = query
-        .split('&')
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            if query_key_is_sensitive(key) {
-                format!("{key}=[REDACTED]")
-            } else if value.is_empty() {
-                key.to_owned()
-            } else {
-                format!("{key}={value}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("&");
-    format!("{path}?{query}")
-}
-
-fn query_key_is_sensitive(key: &str) -> bool {
-    let key = key.as_bytes();
-    let mut decoded = Vec::with_capacity(key.len());
-    let mut index = 0;
-    while index < key.len() {
-        if key[index] == b'%' {
-            let Some(hex) = key.get(index + 1..index + 3) else {
-                // A malformed key cannot be classified safely. Hide its
-                // value rather than risk exposing a credential.
-                return true;
-            };
-            let (Some(high), Some(low)) = (hex_digit(hex[0]), hex_digit(hex[1])) else {
-                return true;
-            };
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(key[index]);
-            index += 1;
-        }
-    }
-    let Ok(key_lower) = std::str::from_utf8(&decoded) else {
-        return true;
-    };
-    let key_lower = key_lower.to_ascii_lowercase();
-    [
-        "token",
-        "password",
-        "passwd",
-        "secret",
-        "auth",
-        "credential",
-        "api_key",
-        "access_key",
-        "key",
-        // Shared-access signatures (`sig=`, `X-Amz-Signature=`).
-        "sig",
-    ]
-    .iter()
-    .any(|sensitive| key_lower.contains(sensitive))
-}
-
-fn hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
+    if query.is_empty() {
+        tail.to_owned()
+    } else {
+        format!("{path}?[REDACTED]")
     }
 }
 
@@ -1882,7 +1821,7 @@ mod tests {
     fn remote_reporting_redacts_credentials_and_diagnostic_urls() {
         assert_eq!(
             redact_remote_url("https://alice:topsecret@example.invalid/lib.git?token=private&ref=main#fragment-secret"),
-            "https://example.invalid/lib.git?token=[REDACTED]&ref=main#[REDACTED]"
+            "https://example.invalid/lib.git?[REDACTED]#[REDACTED]"
         );
         assert_eq!(
             redact_remote_url("ssh://git@example.invalid/team/lib.git"),
@@ -1893,20 +1832,25 @@ mod tests {
             redact_remote_url("https://alice:p@ss@example.invalid/lib.git"),
             "https://example.invalid/lib.git"
         );
-        // Shared-access signatures carry the secret in a query parameter.
+        // Query strings may contain arbitrary credential names, separators,
+        // or encoded data. Status output redacts the whole query.
         assert_eq!(
             redact_remote_url(
                 "https://store.example.invalid/lib.git?sv=2024&sig=abc%3D&X-Amz-Signature=def"
             ),
-            "https://store.example.invalid/lib.git?sv=2024&sig=[REDACTED]&X-Amz-Signature=[REDACTED]"
+            "https://store.example.invalid/lib.git?[REDACTED]"
         );
         assert_eq!(
             redact_remote_url("https://store.example.invalid/lib.git?%74oken=private&ref=main"),
-            "https://store.example.invalid/lib.git?%74oken=[REDACTED]&ref=main"
+            "https://store.example.invalid/lib.git?[REDACTED]"
         );
         assert_eq!(
             redact_remote_url("https://store.example.invalid/lib.git?%ZZ=private&ref=main"),
-            "https://store.example.invalid/lib.git?%ZZ=[REDACTED]&ref=main"
+            "https://store.example.invalid/lib.git?[REDACTED]"
+        );
+        assert_eq!(
+            redact_remote_url("https://store.example.invalid/lib.git?custom=private;token=secret"),
+            "https://store.example.invalid/lib.git?[REDACTED]"
         );
         let diagnostic = redact_git_diagnostic(
             "fatal: https://alice:topsecret@example.invalid/lib.git?password=hidden failed\n",
@@ -1937,10 +1881,7 @@ mod tests {
         let shown = remote(&directory)
             .expect("read remote")
             .expect("origin exists");
-        assert_eq!(
-            shown,
-            "https://example.invalid/library.git?access_token=[REDACTED]"
-        );
+        assert_eq!(shown, "https://example.invalid/library.git?[REDACTED]");
         let status = status(&config_path).expect("format status");
         assert!(!status.contains("credential-secret"));
         assert!(!status.contains("query-secret"));
