@@ -11,6 +11,8 @@ All notable changes to WayExpand are documented here.
 - The Action Broker now poisons its audit writer if a failed batch cannot be
   rolled back and synced, preventing later retries from reporting success over
   a log with uncertain contents.
+- Mandatory Action Broker audit now syncs file creation and rotation directory
+  entries before acknowledging persisted events.
 - Preserved a current-build `doctor --certify` report for commit `611017a88cec`:
   11 isolated KWin 6.6.6 insertion, focus, reload, restart, and refusal checks
   passed using libei keysym fallback; Unicode insertion, physical keyboard

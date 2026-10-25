@@ -550,8 +550,12 @@ async fn run() -> Result<()> {
     }
     let audit_logger = match config.audit_path.as_deref() {
         Some(path) => {
-            let logger = AuditLogger::new(Path::new(path), policy_hash.clone())
-                .map_err(|e| anyhow!("Failed to open audit log {}: {}", path, e))?;
+            let logger = if audit_required {
+                AuditLogger::new_required(Path::new(path), policy_hash.clone())
+            } else {
+                AuditLogger::new(Path::new(path), policy_hash.clone())
+            }
+            .map_err(|e| anyhow!("Failed to open audit log {}: {}", path, e))?;
             info!(audit_path = %path, policy_hash = %logger.policy_hash(), "execution audit enabled");
             Some(Arc::new(logger))
         }

@@ -73,7 +73,21 @@ enum AuditMessage {
 
 impl AuditLogger {
     pub fn new(path: &Path, policy_hash: String) -> io::Result<Self> {
-        let writer = AuditWriter::open(path)?;
+        Self::with_durable_directory(path, policy_hash, false)
+    }
+
+    /// Create an audit logger whose file creation and rotation directory
+    /// entries are synced before a required event can be acknowledged.
+    pub fn new_required(path: &Path, policy_hash: String) -> io::Result<Self> {
+        Self::with_durable_directory(path, policy_hash, true)
+    }
+
+    fn with_durable_directory(
+        path: &Path,
+        policy_hash: String,
+        durable_directory: bool,
+    ) -> io::Result<Self> {
+        let writer = AuditWriter::open_with_durability(path, durable_directory)?;
         let (sender, receiver) = mpsc::sync_channel(AUDIT_QUEUE_CAPACITY);
         let dropped_events = Arc::new(AtomicU64::new(0));
         let write_failures = Arc::new(AtomicU64::new(0));
@@ -233,6 +247,7 @@ impl Drop for AuditLogger {
 struct AuditWriter {
     path: PathBuf,
     file: File,
+    durable_directory: bool,
     poisoned: bool,
     #[cfg(test)]
     fail_next_batch_write: bool,
@@ -243,11 +258,12 @@ struct AuditWriter {
 }
 
 impl AuditWriter {
-    fn open(path: &Path) -> io::Result<Self> {
-        let file = open_audit_file(path)?;
+    fn open_with_durability(path: &Path, durable_directory: bool) -> io::Result<Self> {
+        let file = open_audit_file(path, durable_directory)?;
         Ok(Self {
             path: path.to_owned(),
             file,
+            durable_directory,
             poisoned: false,
             #[cfg(test)]
             fail_next_batch_write: false,
@@ -346,18 +362,18 @@ impl AuditWriter {
         ));
         drop(std::mem::replace(
             &mut self.file,
-            open_audit_file(&self.path)?,
+            open_audit_file(&self.path, self.durable_directory)?,
         ));
         // On Unix rename atomically replaces an existing file or symlink.
         // Removing the backup first would destroy the last retained audit
         // history if moving the active log then failed.
         std::fs::rename(&self.path, &rotated)?;
-        self.file = open_audit_file(&self.path)?;
+        self.file = open_audit_file(&self.path, self.durable_directory)?;
         Ok(())
     }
 }
 
-fn open_audit_file(path: &Path) -> io::Result<File> {
+fn open_audit_file(path: &Path, durable_directory: bool) -> io::Result<File> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -383,7 +399,19 @@ fn open_audit_file(path: &Path) -> io::Result<File> {
             "audit file permissions could not be made private",
         ));
     }
+    if durable_directory {
+        file.sync_all()?;
+        sync_audit_parent_directory(path)?;
+    }
     Ok(file)
+}
+
+fn sync_audit_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    File::open(parent)?.sync_all()
 }
 
 fn run_writer(
@@ -455,7 +483,9 @@ fn write_with_retry(
                 if writer.poisoned {
                     break;
                 }
-                if let Ok(reopened) = AuditWriter::open(&writer.path) {
+                if let Ok(reopened) =
+                    AuditWriter::open_with_durability(&writer.path, writer.durable_directory)
+                {
                     *writer = reopened;
                 }
             }
@@ -544,7 +574,7 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
-        let logger = AuditLogger::new(&path, "policy-hash".to_string()).unwrap();
+        let logger = AuditLogger::new_required(&path, "policy-hash".to_string()).unwrap();
         logger
             .record_required(&AuditEvent {
                 timestamp: 1,
@@ -583,7 +613,7 @@ mod tests {
     fn failed_rollback_poisons_writer_and_prevents_a_false_durable_success() {
         let directory = test_directory("poisoned-writer");
         let path = directory.join("audit.jsonl");
-        let mut writer = AuditWriter::open(&path).unwrap();
+        let mut writer = AuditWriter::open_with_durability(&path, false).unwrap();
         writer.fail_next_batch_write = true;
         writer.fail_next_rollback = true;
         let failures = AtomicU64::new(0);
@@ -611,7 +641,7 @@ mod tests {
     fn failed_rollback_sync_poisons_writer_and_prevents_a_false_durable_success() {
         let directory = test_directory("poisoned-rollback-sync");
         let path = directory.join("audit.jsonl");
-        let mut writer = AuditWriter::open(&path).unwrap();
+        let mut writer = AuditWriter::open_with_durability(&path, false).unwrap();
         writer.fail_next_batch_write = true;
         writer.fail_next_rollback_sync = true;
         let failures = AtomicU64::new(0);
@@ -642,7 +672,7 @@ mod tests {
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
         symlink(&target, &link).unwrap();
 
-        assert!(AuditWriter::open(&link).is_err());
+        assert!(AuditWriter::open_with_durability(&link, false).is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"do not modify");
         assert_eq!(
             std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
@@ -657,7 +687,7 @@ mod tests {
 
         let directory = test_directory("private");
         let path = directory.join("audit.jsonl");
-        let file = open_audit_file(&path).unwrap();
+        let file = open_audit_file(&path, false).unwrap();
         let metadata = file.metadata().unwrap();
         assert!(metadata.file_type().is_file());
         assert_eq!(metadata.nlink(), 1);
@@ -677,7 +707,7 @@ mod tests {
         std::fs::write(&target, "do not rotate over this").unwrap();
         symlink(&target, &rotated).unwrap();
 
-        let mut writer = AuditWriter::open(&path).unwrap();
+        let mut writer = AuditWriter::open_with_durability(&path, false).unwrap();
         writer
             .write_batch(&[vec![b'x'; MAX_AUDIT_BYTES as usize]])
             .unwrap();
