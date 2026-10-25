@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Isolated KWin certification now determines source cleanliness from build and
+  harness inputs, so unrelated untracked files do not invalidate otherwise
+  matching CLI/daemon identity evidence.
 - Exact-tag release version stamping now rejects staged changes and untracked
   files as well as unstaged edits, preventing modified source trees from being
   labeled as clean releases. Builds using an externally supplied commit

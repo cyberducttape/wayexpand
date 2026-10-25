@@ -79,7 +79,16 @@ else
     # doctor from another working directory.
     cd "$project_dir"
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+        # Only files that can affect the binaries or this harness determine
+        # whether the tested source is clean. Unrelated files in the user's
+        # repository root (for example a generated report) must not make an
+        # otherwise matching CLI/daemon build unverifiable.
+        certification_inputs=(
+            Cargo.toml Cargo.lock .cargo rust-toolchain.toml crates
+            scripts tests/certification
+        )
+        certification_source_status=$(git status --porcelain --untracked-files=all -- "${certification_inputs[@]}")
+        if [ -z "$certification_source_status" ]; then
             source_tree_state=clean
         else
             source_tree_state=dirty
