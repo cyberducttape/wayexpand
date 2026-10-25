@@ -95,6 +95,18 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
 
+fn run_checkpointed<E>(
+    count: usize,
+    mut checkpoint: impl FnMut() -> Result<(), E>,
+    mut action: impl FnMut() -> Result<(), E>,
+) -> Result<(), E> {
+    for _ in 0..count {
+        checkpoint()?;
+        action()?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum LibeiError {
     #[error("relative LIBEI_SOCKET requires XDG_RUNTIME_DIR")]
@@ -429,12 +441,36 @@ impl LibeiInjector {
         Ok(())
     }
 
-    /// Queues `text` through the `ei_text` interface. Only valid in
-    /// `TextMode::Text`; `TextMode::Keysym` types through `type_keys`
-    /// instead, because synthesized key events have to be paced.
-    fn send_text_unflushed(&mut self, text: &str) {
+    /// Sends text through `ei_text`, checking focus before each protocol chunk
+    /// and flushing it before checking again. Keysym output uses `type_keys`
+    /// because synthesized key events also need inter-key pacing.
+    fn send_text_chunks(
+        &mut self,
+        text_interface: &ei::Text,
+        text: &str,
+    ) -> Result<(), LibeiError> {
+        for chunk in split_text_chunks(text) {
+            self.checkpoint.check().map_err(LibeiError::Interrupted)?;
+            let serial = self.connection.serial();
+            self.device.device().start_emulating(serial, self.sequence);
+            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+            text_interface.utf8(chunk);
+            self.device
+                .device()
+                .frame(serial, self.started_at.elapsed().as_micros() as u64);
+            self.device.device().stop_emulating(serial);
+            self.connection
+                .flush()
+                .map_err(|error| LibeiError::Flush(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn send_text(&mut self, text: &str) -> Result<(), LibeiError> {
+        validate_text(text)?;
+        self.ensure_representable(text)?;
         let TextMode::Text(text_interface) = &self.mode else {
-            return;
+            return self.type_keys(text);
         };
         let text_interface = text_interface.clone();
         // Split on newlines and tabs since ei_text doesn't handle control characters.
@@ -443,40 +479,18 @@ impl LibeiInjector {
         for c in text.chars() {
             match c {
                 '\n' | '\t' => {
-                    // Send accumulated text first
-                    if !current_text.is_empty() {
-                        for chunk in split_text_chunks(&current_text) {
-                            let serial = self.connection.serial();
-                            self.device.device().start_emulating(serial, self.sequence);
-                            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-                            text_interface.utf8(chunk);
-                            self.device
-                                .device()
-                                .frame(serial, self.started_at.elapsed().as_micros() as u64);
-                            self.device.device().stop_emulating(serial);
-                        }
-                        current_text.clear();
-                    }
-                    // Send control character as keyboard event
-                    // (Will be flushed and handled separately)
+                    self.send_text_chunks(&text_interface, &current_text)?;
+                    current_text.clear();
+                    self.checkpoint.check().map_err(LibeiError::Interrupted)?;
                     self.send_control_char(c);
+                    self.connection
+                        .flush()
+                        .map_err(|error| LibeiError::Flush(error.to_string()))?;
                 }
                 _ => current_text.push(c),
             }
         }
-        // Send any remaining text
-        if !current_text.is_empty() {
-            for chunk in split_text_chunks(&current_text) {
-                let serial = self.connection.serial();
-                self.device.device().start_emulating(serial, self.sequence);
-                self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-                text_interface.utf8(chunk);
-                self.device
-                    .device()
-                    .frame(serial, self.started_at.elapsed().as_micros() as u64);
-                self.device.device().stop_emulating(serial);
-            }
-        }
+        self.send_text_chunks(&text_interface, &current_text)
     }
 
     fn send_control_char(&mut self, c: char) {
@@ -560,21 +574,6 @@ impl LibeiInjector {
         Ok(())
     }
 
-    fn send_text(&mut self, text: &str) -> Result<(), LibeiError> {
-        validate_text(text)?;
-        self.ensure_representable(text)?;
-        if matches!(self.mode, TextMode::Keysym(_)) {
-            return self.type_keys(text);
-        }
-        self.send_text_unflushed(text);
-        if !text.is_empty() {
-            self.connection
-                .flush()
-                .map_err(|error| LibeiError::Flush(error.to_string()))?;
-        }
-        Ok(())
-    }
-
     fn send_backspaces_unflushed(&mut self, chars: usize) {
         let serial = self.connection.serial();
         for _ in 0..chars {
@@ -599,10 +598,17 @@ impl LibeiInjector {
         if chars == 0 {
             return Ok(());
         }
-        self.send_backspaces_unflushed(chars);
-        self.connection
-            .flush()
-            .map_err(|error| LibeiError::Flush(error.to_string()))
+        let checkpoint = self.checkpoint.clone();
+        run_checkpointed(
+            chars,
+            || checkpoint.check().map_err(LibeiError::Interrupted),
+            || {
+                self.send_backspaces_unflushed(1);
+                self.connection
+                    .flush()
+                    .map_err(|error| LibeiError::Flush(error.to_string()))
+            },
+        )
     }
 
     /// Sends `count` Left-arrow key presses, for `{{cursor}}` placement
@@ -611,24 +617,29 @@ impl LibeiInjector {
         if count == 0 {
             return Ok(());
         }
-        let serial = self.connection.serial();
-        for _ in 0..count {
-            self.device.device().start_emulating(serial, self.sequence);
-            self.sequence = self.sequence.checked_add(1).unwrap_or(1);
-            self.keyboard.key(KEY_LEFT, ei::keyboard::KeyState::Press);
-            self.device
-                .device()
-                .frame(serial, self.started_at.elapsed().as_micros() as u64);
-            self.keyboard
-                .key(KEY_LEFT, ei::keyboard::KeyState::Released);
-            self.device
-                .device()
-                .frame(serial, self.started_at.elapsed().as_micros() as u64);
-            self.device.device().stop_emulating(serial);
-        }
-        self.connection
-            .flush()
-            .map_err(|error| LibeiError::Flush(error.to_string()))
+        let checkpoint = self.checkpoint.clone();
+        run_checkpointed(
+            count,
+            || checkpoint.check().map_err(LibeiError::Interrupted),
+            || {
+                let serial = self.connection.serial();
+                self.device.device().start_emulating(serial, self.sequence);
+                self.sequence = self.sequence.checked_add(1).unwrap_or(1);
+                self.keyboard.key(KEY_LEFT, ei::keyboard::KeyState::Press);
+                self.device
+                    .device()
+                    .frame(serial, self.started_at.elapsed().as_micros() as u64);
+                self.keyboard
+                    .key(KEY_LEFT, ei::keyboard::KeyState::Released);
+                self.device
+                    .device()
+                    .frame(serial, self.started_at.elapsed().as_micros() as u64);
+                self.device.device().stop_emulating(serial);
+                self.connection
+                    .flush()
+                    .map_err(|error| LibeiError::Flush(error.to_string()))
+            },
+        )
     }
 
     fn send_key_with_modifiers(
@@ -776,6 +787,11 @@ impl TextInjector for LibeiInjector {
             retryable: error.is_retryable(),
         })?;
         if let Some(client) = &self.fcitx5 {
+            self.checkpoint.check().map_err(|message| InjectorError {
+                backend: BACKEND_NAME,
+                message,
+                retryable: false,
+            })?;
             match client.replace(trigger, text) {
                 fcitx5::ReplaceResult::Committed => return Ok(()),
                 fcitx5::ReplaceResult::FallbackAllowed(_) => {}
@@ -804,17 +820,17 @@ impl TextInjector for LibeiInjector {
                 message: error.to_string(),
                 retryable: error.is_retryable(),
             })?;
-        self.send_backspaces_unflushed(erase_grapheme_count(trigger));
+        self.send_backspaces(erase_grapheme_count(trigger))
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })?;
         if matches!(self.mode, TextMode::Keysym(_)) {
             // Send the erase on its own and let it land before typing: in
             // keysym mode both halves are key events on the same device, so
             // batching them into one flush lets a late-applied backspace eat
             // a character that was already typed.
-            self.connection.flush().map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: LibeiError::Flush(error.to_string()).to_string(),
-                retryable: true,
-            })?;
             std::thread::sleep(KEY_EVENT_INTERVAL);
             return self.type_keys(text).map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
@@ -822,15 +838,16 @@ impl TextInjector for LibeiInjector {
                 retryable: error.is_retryable(),
             });
         }
-        self.send_text_unflushed(text);
-        if !trigger.is_empty() || !text.is_empty() {
-            self.connection.flush().map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: LibeiError::Flush(error.to_string()).to_string(),
-                retryable: true,
-            })?;
-        }
-        Ok(())
+        self.checkpoint.check().map_err(|message| InjectorError {
+            backend: BACKEND_NAME,
+            message,
+            retryable: false,
+        })?;
+        self.send_text(text).map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: error.is_retryable(),
+        })
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
@@ -905,6 +922,30 @@ mod tests {
         os::unix::{fs::PermissionsExt, net::UnixStream},
         time::Duration,
     };
+
+    #[test]
+    fn checkpointed_sequence_stops_before_the_next_action() {
+        let mut checks = 0;
+        let mut sent = 0;
+        let result = super::run_checkpointed(
+            3,
+            || {
+                checks += 1;
+                if checks == 2 {
+                    Err("focus changed")
+                } else {
+                    Ok(())
+                }
+            },
+            || {
+                sent += 1;
+                Ok(())
+            },
+        );
+
+        assert_eq!(result, Err("focus changed"));
+        assert_eq!(sent, 1);
+    }
 
     #[test]
     fn erase_count_treats_decomposed_accent_and_devanagari_as_one() {

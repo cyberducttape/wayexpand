@@ -14,7 +14,7 @@ use std::{
 };
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
-use wayexpand_core::{InjectorCapabilities, InjectorError, TextInjector};
+use wayexpand_core::{InjectorCapabilities, InjectorError, OutputCheckpoint, TextInjector};
 use wayland_client::{
     protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat::WlSeat},
     Connection, Dispatch, EventQueue, QueueHandle,
@@ -69,6 +69,8 @@ pub enum WlrootsError {
     Timeout(String),
     #[error("Wayland transport failed: {0}")]
     Transport(String),
+    #[error("output interrupted by a failed safety checkpoint: {0}")]
+    Interrupted(String),
 }
 
 impl WlrootsError {
@@ -178,6 +180,7 @@ pub struct WlrootsInjector {
     keymap: Option<File>,
     mappings: HashMap<char, u32>,
     minimal_keymap: File,
+    checkpoint: OutputCheckpoint,
 }
 
 impl WlrootsInjector {
@@ -241,6 +244,7 @@ impl WlrootsInjector {
             keymap: None,
             mappings: HashMap::new(),
             minimal_keymap,
+            checkpoint: OutputCheckpoint::default(),
         })
     }
 
@@ -284,27 +288,42 @@ impl WlrootsInjector {
             .map_err(|error| WlrootsError::Flush(error.to_string()))
     }
 
-    fn send_key_unflushed(&mut self, keycode: u32) {
-        let key = wire_keycode(keycode);
-        self.keyboard
-            .key(0, key, wl_keyboard::KeyState::Pressed.into());
-        self.keyboard
-            .key(0, key, wl_keyboard::KeyState::Released.into());
-    }
-
     fn send_keys<I>(&mut self, keycodes: I) -> Result<(), WlrootsError>
     where
         I: IntoIterator<Item = u32>,
     {
-        for keycode in keycodes {
-            self.send_key_unflushed(keycode);
-        }
-        self.connection
-            .flush()
-            .map_err(|error| WlrootsError::Flush(error.to_string()))?;
-        self.event_queue.dispatch_pending(&mut self.state)?;
-        Ok(())
+        let checkpoint = &self.checkpoint;
+        let keyboard = &self.keyboard;
+        let connection = &self.connection;
+        let event_queue = &mut self.event_queue;
+        let state = &mut self.state;
+        send_checked_key_sequence(
+            keycodes,
+            || checkpoint.check().map_err(WlrootsError::Interrupted),
+            |keycode| {
+                let key = wire_keycode(keycode);
+                keyboard.key(0, key, wl_keyboard::KeyState::Pressed.into());
+                keyboard.key(0, key, wl_keyboard::KeyState::Released.into());
+                connection
+                    .flush()
+                    .map_err(|error| WlrootsError::Flush(error.to_string()))?;
+                event_queue.dispatch_pending(state)?;
+                Ok(())
+            },
+        )
     }
+}
+
+fn send_checked_key_sequence(
+    keycodes: impl IntoIterator<Item = u32>,
+    mut check: impl FnMut() -> Result<(), WlrootsError>,
+    mut send: impl FnMut(u32) -> Result<(), WlrootsError>,
+) -> Result<(), WlrootsError> {
+    for keycode in keycodes {
+        check()?;
+        send(keycode)?;
+    }
+    Ok(())
 }
 
 fn roundtrip_with_timeout(
@@ -409,6 +428,10 @@ fn create_minimal_keymap() -> Result<File, WlrootsError> {
 }
 
 impl TextInjector for WlrootsInjector {
+    fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+        self.checkpoint = checkpoint;
+    }
+
     fn name(&self) -> &'static str {
         BACKEND_NAME
     }
@@ -565,6 +588,30 @@ mod tests {
         {
             assert_eq!(erase_grapheme_count(grapheme), 1, "{grapheme:?}");
         }
+    }
+
+    #[test]
+    fn checked_key_sequence_stops_before_sending_after_checkpoint_failure() {
+        let mut checks = 0;
+        let mut sent = Vec::new();
+        let result = send_checked_key_sequence(
+            [BACKSPACE_KEYCODE, 11, 12],
+            || {
+                checks += 1;
+                if checks == 2 {
+                    Err(WlrootsError::Interrupted("focus changed".into()))
+                } else {
+                    Ok(())
+                }
+            },
+            |key| {
+                sent.push(key);
+                Ok(())
+            },
+        );
+
+        assert!(matches!(result, Err(WlrootsError::Interrupted(_))));
+        assert_eq!(sent, [BACKSPACE_KEYCODE]);
     }
 
     #[test]
