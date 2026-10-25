@@ -366,8 +366,9 @@ pub(crate) fn expansion_allowed(
     true
 }
 
-/// Record the outcome of an expansion transaction in the engine. Failures
-/// are returned for recovery; the expansion is never replayed.
+/// Record an expansion transaction outcome. Only a known-not-applied result
+/// is restored for retry. Uncertain results discard the deferred reservation
+/// so the engine cannot replay a trigger that may already have been replaced.
 pub(crate) fn finish_expansion(
     engine: &mut ExpansionEngine,
     result: ExpansionResult,
@@ -386,6 +387,7 @@ pub(crate) fn finish_expansion(
             }));
         }
         wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
+            engine.discard_deferred_result(&result);
             warn!("expansion replacement outcome is unknown; refusing automatic retry");
             return Err(Box::new(EventError {
                 result,
@@ -393,6 +395,7 @@ pub(crate) fn finish_expansion(
             }));
         }
         wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+            engine.discard_deferred_result(&result);
             warn!("expansion transaction may have partially applied; refusing automatic retry");
             return Err(Box::new(EventError {
                 result,
@@ -435,4 +438,52 @@ pub(crate) fn apply_results(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uncertain_replacement_does_not_restore_its_deferred_trigger() {
+        let config = wayexpand_core::Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":x"
+            replacement = "replacement"
+        "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":x".into()))
+            .pop()
+            .expect("trigger should be reserved");
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            wayexpand_core::PendingExpansionDispatch::Ready(result) => result,
+            wayexpand_core::PendingExpansionDispatch::Queued => {
+                panic!("static replacement must be ready")
+            }
+        };
+        let error = wayexpand_core::InjectorError {
+            backend: "test",
+            message: "acknowledgement lost".into(),
+            retryable: true,
+        };
+
+        let failure = finish_expansion(
+            &mut engine,
+            result,
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source: error },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            failure.source,
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+        ));
+        assert!(engine
+            .process_deferred(InputEvent::Text(" ".into()))
+            .is_empty());
+    }
 }

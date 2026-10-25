@@ -1,6 +1,15 @@
 use super::*;
 
 impl ExpansionEngine {
+    /// Forget the deferred trigger reservation after an output transaction
+    /// whose effect is uncertain. The trigger may already have been replaced
+    /// in the focused application, so restoring it before the next input
+    /// event could replay the expansion into that application a second time.
+    /// This does not record usage or create undo state.
+    pub fn discard_deferred_result(&mut self, result: &ExpansionResult) {
+        self.release_deferred_match_for_result(result);
+    }
+
     /// Commit undo state after an expansion result was successfully injected.
     /// Deferred callers must not record undo state before their own safety and
     /// output checks have completed.

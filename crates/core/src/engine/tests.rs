@@ -1513,6 +1513,32 @@ fn atomic_replace_error_with_lost_acknowledgement_is_non_replayable() {
     ));
 }
 
+#[test]
+fn uncertain_deferred_result_is_discarded_before_the_next_input_event() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":x"
+        replacement = "replacement"
+    "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let pending = engine
+        .process_deferred(InputEvent::Text(":x".into()))
+        .pop()
+        .expect("trigger should be reserved");
+    let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+        PendingExpansionDispatch::Ready(result) => result,
+        PendingExpansionDispatch::Queued => panic!("static replacement must be ready"),
+    };
+
+    engine.discard_deferred_result(&result);
+    let next = engine.process_deferred(InputEvent::Text(" ".into()));
+
+    assert!(next.is_empty(), "uncertain trigger must not be replayed");
+}
+
 impl crate::TextInjector for AtomicInjector {
     fn name(&self) -> &'static str {
         "atomic-test"

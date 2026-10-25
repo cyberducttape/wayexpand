@@ -10,9 +10,9 @@ All notable changes to WayExpand are documented here.
 - Atomic input-method replacement errors after submission are now reported as
   an unknown application outcome. The daemon refuses automatic replay when a
   compositor may have applied the replacement but its acknowledgement was
-  lost.
-- Preserved a current-revision `doctor --certify --json` run on KWin 6.6.6,
-  including its partial outcomes and explicit keysym-fallback limitations.
+  lost, and discards its deferred trigger reservation before the next input.
+- Preserved a `doctor --certify --json` run from build `c9d9f3eac46c` on KWin
+  6.6.6, including its partial outcomes and explicit keysym-fallback limits.
 - The GUI diagnostics dashboard no longer reports permissions as available when
   environment probes say they are not applicable; granted, required, and
   unreported/not-applicable states are now distinct.
