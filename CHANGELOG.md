@@ -14,7 +14,8 @@ All notable changes to WayExpand are documented here.
   sequences stop immediately after a mid-replacement send failure.
 - GUI command previews now refresh systemd user-manager availability instead
   of caching the startup result, so a later-started manager cannot leave
-  preview execution on the stale unsandboxed path.
+  preview execution on the stale unsandboxed path. Once detected, a transient
+  socket failure keeps previews on the sandbox route and fails closed.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor
   protocol-probe statuses, so support diagnostics preserve why an integration
   route is unavailable without including raw daemon or configuration details.

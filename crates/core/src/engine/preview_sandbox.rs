@@ -12,7 +12,10 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
 };
 
 use super::command_runtime::{
@@ -60,11 +63,25 @@ static PREVIEW_UNIT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 /// preview matches it. This is checked dynamically because the user manager
 /// can become available after the GUI starts.
 pub fn command_preview_sandboxed() -> bool {
-    systemd_manager_socket_exists(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+    static MANAGER_SEEN: OnceLock<Mutex<bool>> = OnceLock::new();
+    let manager_seen = MANAGER_SEEN.get_or_init(|| Mutex::new(false));
+    systemd_manager_available(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), manager_seen)
 }
 
-fn systemd_manager_socket_exists(runtime_dir: Option<&OsStr>) -> bool {
-    runtime_dir.is_some_and(|dir| Path::new(dir).join("systemd/private").exists())
+fn systemd_manager_available(runtime_dir: Option<&OsStr>, manager_seen: &Mutex<bool>) -> bool {
+    let mut manager_seen = manager_seen
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *manager_seen {
+        // Once the GUI has observed the user manager, a transiently missing
+        // socket must not switch command previews to unrestricted execution.
+        // Keep attempting the sandbox route; systemd-run will fail closed if
+        // the manager is still unavailable.
+        return true;
+    }
+    let available = runtime_dir.is_some_and(|dir| Path::new(dir).join("systemd/private").exists());
+    *manager_seen = available;
+    available
 }
 
 /// Run a command preview the way the daemon would run the command: in the
@@ -240,13 +257,22 @@ mod tests {
             std::process::id(),
             PREVIEW_UNIT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
-        assert!(!systemd_manager_socket_exists(Some(runtime.as_os_str())));
+        let observed = Mutex::new(false);
+        assert!(!systemd_manager_available(
+            Some(runtime.as_os_str()),
+            &observed
+        ));
 
         let socket_path = runtime.join("systemd/private");
         std::fs::create_dir_all(socket_path.parent().unwrap()).unwrap();
         std::fs::write(&socket_path, b"test socket marker").unwrap();
-        assert!(systemd_manager_socket_exists(Some(runtime.as_os_str())));
-        assert!(!systemd_manager_socket_exists(None));
+        assert!(systemd_manager_available(
+            Some(runtime.as_os_str()),
+            &observed
+        ));
+
+        std::fs::remove_file(&socket_path).unwrap();
+        assert!(systemd_manager_available(None, &observed));
 
         std::fs::remove_dir_all(runtime).unwrap();
     }
