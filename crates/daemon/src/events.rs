@@ -444,8 +444,7 @@ pub(crate) fn apply_results(
 mod tests {
     use super::*;
 
-    #[test]
-    fn uncertain_replacement_does_not_restore_its_deferred_trigger() {
+    fn deferred_engine_and_result() -> (ExpansionEngine, ExpansionResult) {
         let config = wayexpand_core::Config::parse(
             r#"
             [[expansion]]
@@ -465,25 +464,47 @@ mod tests {
                 panic!("static replacement must be ready")
             }
         };
-        let error = wayexpand_core::InjectorError {
-            backend: "test",
-            message: "acknowledgement lost".into(),
-            retryable: true,
-        };
+        (engine, result)
+    }
 
-        let failure = finish_expansion(
+    fn failure() -> wayexpand_core::InjectorError {
+        wayexpand_core::InjectorError {
+            backend: "test",
+            message: "output acknowledgement lost".into(),
+            retryable: true,
+        }
+    }
+
+    #[test]
+    fn known_not_applied_result_restores_the_deferred_trigger_for_retry() {
+        let (mut engine, result) = deferred_engine_and_result();
+        let failed = finish_expansion(
             &mut engine,
             result,
-            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source: error },
-        )
-        .unwrap_err();
+            wayexpand_core::TransactionOutcome::NotApplied { source: failure() },
+        );
 
-        assert!(matches!(
-            failure.source,
-            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
-        ));
-        assert!(engine
-            .process_deferred(InputEvent::Text(" ".into()))
-            .is_empty());
+        assert!(failed.is_err());
+        assert_eq!(
+            engine.process_deferred(InputEvent::Text(" ".into())).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn uncertain_results_discard_the_deferred_trigger_instead_of_replaying_it() {
+        for outcome in [
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source: failure() },
+            wayexpand_core::TransactionOutcome::UnknownPartialFailure { source: failure() },
+        ] {
+            let (mut engine, result) = deferred_engine_and_result();
+
+            let error = finish_expansion(&mut engine, result, outcome).unwrap_err();
+
+            assert!(error.retryable());
+            assert!(engine
+                .process_deferred(InputEvent::Text(" ".into()))
+                .is_empty());
+        }
     }
 }
