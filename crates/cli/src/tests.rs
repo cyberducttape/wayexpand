@@ -4,10 +4,37 @@ use crate::doctor::backends::{
 };
 use crate::doctor::certification::certification_selection_status;
 use crate::doctor::files::existing_control_socket_is_healthy;
-use crate::doctor::json::production_readiness;
+use crate::doctor::json::{production_readiness, protocol_probe_report};
 use crate::doctor::policy::{absolute_command_policy_diagnostic, print_policy_diagnostics_json};
 use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[test]
+fn doctor_protocol_probe_report_distinguishes_available_and_missing_globals() {
+    let capabilities = wayexpand_backend_selection::Capabilities {
+        has_input_method_v2: false,
+        has_virtual_keyboard: true,
+        has_window_tracker: false,
+        compositor: wayexpand_backend_selection::Compositor::KdePlasma,
+        ..Default::default()
+    };
+    let probes = protocol_probe_report(&capabilities, true);
+    assert_eq!(probes["input_method_v2"]["status"], "unavailable");
+    assert_eq!(probes["wlroots_virtual_keyboard"]["status"], "available");
+    assert_eq!(probes["kwin_window_tracker"]["status"], "unavailable");
+
+    let kde_without_wayland = wayexpand_backend_selection::Capabilities {
+        compositor: wayexpand_backend_selection::Compositor::KdePlasma,
+        ..Default::default()
+    };
+    let probes = protocol_probe_report(&kde_without_wayland, false);
+    assert_eq!(probes["input_method_v2"]["status"], "not_applicable");
+    assert_eq!(
+        probes["wlroots_virtual_keyboard"]["status"],
+        "not_applicable"
+    );
+    assert_eq!(probes["kwin_window_tracker"]["status"], "not_applicable");
+}
 
 #[test]
 fn doctor_policy_json_reports_absolute_command_requirement() {
@@ -486,6 +513,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "action_broker",
             "policy",
             "backends",
+            "protocol_probes",
             "capabilities",
             "automatic_selection",
             "setup_recommendation",

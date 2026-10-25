@@ -352,14 +352,19 @@ Diagnostic output suitable for health checks and monitoring systems.
     {
       "kind": "input-method-v2",
       "state": "Implemented",
-      "detail": "manager available; seat connection pending"
+      "detail": "probe implemented; exclusive-grab integration is opt-in"
     },
     {
       "kind": "wlroots-virtual-keyboard",
       "state": "Implemented",
-      "detail": "virtual keyboard globals available"
+      "detail": "output implemented; requires compositor protocol probe"
     }
   ],
+  "protocol_probes": {
+    "input_method_v2": {"status": "unavailable", "detail": "input-method-v2 manager and Wayland seat probe"},
+    "wlroots_virtual_keyboard": {"status": "available", "detail": "zwp_virtual_keyboard_manager_v1 probe"},
+    "kwin_window_tracker": {"status": "available", "detail": "KWin scripting D-Bus probe"}
+  },
   "automatic_selection": {
     "source": "stdin",
     "backend": "libei",
@@ -425,6 +430,11 @@ Diagnostic output suitable for health checks and monitoring systems.
     permits this selectable backend; null for input sources, trackers, and
     unshipped entries that are not directly governed as output backends.
   - `detail` (string): Human-readable details (e.g., reason for unavailability)
+- `protocol_probes` (object): Bounded, non-interactive compositor protocol
+  probes performed for this report. Each entry has a stable `status` of
+  `available`, `unavailable`, or `not_applicable`, plus a human-readable
+  `detail`. These report protocol availability only; they do not imply
+  keyboard capture, safe sensitive-field behavior, or end-to-end certification.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.

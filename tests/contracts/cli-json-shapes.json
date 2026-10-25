@@ -24,6 +24,7 @@
     "action_broker",
     "policy",
     "backends",
+    "protocol_probes",
     "capabilities",
     "automatic_selection",
     "setup_recommendation",

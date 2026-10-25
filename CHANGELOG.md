@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand doctor --json` now includes bounded live protocol-probe results
+  for input-method-v2, wlroots virtual keyboard, and the KWin window tracker.
+  This separates compositor availability from static backend implementation
+  status without requesting portal consent or implying certification.
 - Added an opt-in KWin input-method E2E path with a text-input-v3 target and
   simulated key capture for replacement and password-field suppression. The
   current headless KWin setup does not expose input-method-v2, so these checks

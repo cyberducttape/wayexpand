@@ -16,8 +16,8 @@ use super::status::{
 use crate::*;
 
 /// Stable, automation-friendly diagnostic output for service managers and
-/// fleet health checks. It deliberately avoids compositor probes that can
-/// block or mutate session state; those remain in the human doctor output.
+/// fleet health checks. Probes are bounded and non-interactive; portal
+/// authorization and other state-changing checks are deliberately excluded.
 pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let config_result = Config::load(path);
     let config_ok = config_result.is_ok();
@@ -58,6 +58,9 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let policy_json = print_policy_diagnostics_json(&policy_result);
     let capabilities = print_capabilities_diagnostics_json();
     let live_capabilities = probe_capabilities();
+    let wayland_session = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var_os("WAYLAND_SOCKET").is_some();
+    let protocol_probes = protocol_probe_report(&live_capabilities, wayland_session);
     let (capture_state, capture_detail) =
         capture_readiness(&live_capabilities, ibus_installed, &policy);
     let recommendation = recommended_setup_backend(&live_capabilities, &policy);
@@ -199,6 +202,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             },
             "policy": policy_json,
             "backends": backends,
+            "protocol_probes": protocol_probes,
             "capabilities": capabilities,
             "automatic_selection": automatic_selection,
             "setup_recommendation": setup_recommendation,
@@ -210,6 +214,47 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+/// Report live protocol checks separately from environment-level backend
+/// discovery. A backend can be implemented while its compositor protocol is
+/// unavailable in this session.
+pub(crate) fn protocol_probe_report(
+    capabilities: &wayexpand_backend_selection::Capabilities,
+    wayland: bool,
+) -> serde_json::Value {
+    let wayland_probe = |available: bool| {
+        if !wayland {
+            "not_applicable"
+        } else if available {
+            "available"
+        } else {
+            "unavailable"
+        }
+    };
+    let window_tracker = if !wayland {
+        "not_applicable"
+    } else if capabilities.has_window_tracker {
+        "available"
+    } else if capabilities.compositor == wayexpand_backend_selection::Compositor::KdePlasma {
+        "unavailable"
+    } else {
+        "not_applicable"
+    };
+    serde_json::json!({
+        "input_method_v2": {
+            "status": wayland_probe(capabilities.has_input_method_v2),
+            "detail": "input-method-v2 manager and Wayland seat probe",
+        },
+        "wlroots_virtual_keyboard": {
+            "status": wayland_probe(capabilities.has_virtual_keyboard),
+            "detail": "zwp_virtual_keyboard_manager_v1 probe",
+        },
+        "kwin_window_tracker": {
+            "status": window_tracker,
+            "detail": "KWin scripting D-Bus probe",
+        },
+    })
 }
 
 /// Derive the production-safety summary from the daemon probe without
