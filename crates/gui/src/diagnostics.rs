@@ -145,13 +145,13 @@ pub(crate) fn permission_health(
     if !granted.is_empty() {
         return format!("granted · {}", granted.join(" · "));
     }
-    // `NotApplicable` means the environment probe did not verify a permission
-    // grant. In particular, it must not be promoted into a green health claim
+    // `NotApplicable` means the environment probe did not report a permission
+    // result. In particular, it must not be promoted into a green health claim
     // merely because a daemon status response exists. Portal authorization is
     // a separate capability and is reflected by the active route status.
     if capabilities.is_some() && !checks.is_empty() {
         return format!(
-            "OS permission not required · {} (portal/compositor authorization is separate)",
+            "OS permission not reported/applicable · {} (portal/compositor authorization is separate)",
             checks
                 .iter()
                 .map(|(name, _)| *name)
@@ -263,7 +263,10 @@ mod tests {
             Some(&crate::runtime::DaemonCapabilities::default()),
             route_status(),
         );
-        assert!(health.starts_with("OS permission not required"), "{health}");
+        assert!(
+            health.starts_with("OS permission not reported/applicable"),
+            "{health}"
+        );
         assert!(!health.starts_with("available"), "{health}");
     }
 

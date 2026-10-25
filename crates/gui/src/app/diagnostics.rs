@@ -96,7 +96,7 @@ impl GuiApp {
                     palette.success
                 } else if self
                     .permission_health
-                    .starts_with("OS permission not required")
+                    .starts_with("OS permission not reported/applicable")
                 {
                     palette.muted
                 } else {
