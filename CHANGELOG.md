@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI now flags a running daemon built from a different commit and explains
+  that the user service must be restarted before relying on the editor's newer
+  behavior; matching or unidentifiable build identities are kept distinct.
 - Focus checkpoints now guard every libei text chunk and synthesized key, and
   every wlroots output key. The backends flush between chunks or key events so
   a focus change cannot send the remaining replacement into another window;

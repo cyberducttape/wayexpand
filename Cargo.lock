@@ -4516,6 +4516,7 @@ dependencies = [
  "wayexpand-backend-kwin-window",
  "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
+ "wayexpand-build-info",
  "wayexpand-core",
  "wayexpand-process-supervisor",
 ]

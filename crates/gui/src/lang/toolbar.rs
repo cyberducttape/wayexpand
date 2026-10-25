@@ -126,6 +126,22 @@ impl Strings {
         }
     }
 
+    pub fn daemon_restart_required_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Restart daemon",
+            Language::Indonesian => "Mulai ulang daemon",
+            Language::German => "Daemon neu starten",
+        }
+    }
+
+    pub fn daemon_restart_required_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The running daemon is from a different build. Restart the WayExpand user service before relying on this editor's fixes.",
+            Language::Indonesian => "Daemon yang berjalan berasal dari build berbeda. Mulai ulang layanan pengguna WayExpand sebelum mengandalkan perbaikan di editor ini.",
+            Language::German => "Der laufende Daemon stammt aus einem anderen Build. Starten Sie den WayExpand-Benutzerdienst neu, bevor Sie sich auf Korrekturen dieses Editors verlassen.",
+        }
+    }
+
     pub fn daemon_unreachable_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Daemon: Unreachable",

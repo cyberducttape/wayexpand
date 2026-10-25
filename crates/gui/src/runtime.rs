@@ -518,6 +518,29 @@ pub(crate) fn status_field(response: &str, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DaemonBuildState {
+    Current,
+    RestartRequired,
+    Unverified,
+}
+
+/// A responsive daemon can still be running old safety or output behavior.
+/// Compare exact build identities when available, as `wayexpand doctor` does.
+pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
+    let daemon_commit = status_field(response, "daemon_commit");
+    let gui_commit = env!("WAYEXPAND_COMMIT");
+    match (daemon_commit.as_deref(), gui_commit) {
+        (Some(daemon), gui) if daemon != "unknown" && gui != "unknown" && daemon == gui => {
+            DaemonBuildState::Current
+        }
+        (Some(daemon), gui) if daemon != "unknown" && gui != "unknown" => {
+            DaemonBuildState::RestartRequired
+        }
+        _ => DaemonBuildState::Unverified,
+    }
+}
+
 pub(crate) fn control_command(
     operation: wayexpand_core::DaemonOperation,
 ) -> anyhow::Result<String> {
@@ -568,6 +591,35 @@ mod tests {
         assert_eq!(
             super::DaemonCapabilities::parse("status_schema=10\nstate=connected\n"),
             None
+        );
+    }
+
+    #[test]
+    fn daemon_build_state_requires_exact_commit_identity() {
+        let commit = env!("WAYEXPAND_COMMIT");
+        assert_eq!(
+            super::daemon_build_state(&format!("daemon_commit={commit}\n")),
+            if commit == "unknown" {
+                super::DaemonBuildState::Unverified
+            } else {
+                super::DaemonBuildState::Current
+            }
+        );
+        assert_eq!(
+            super::daemon_build_state("daemon_commit=older-build\n"),
+            if commit == "unknown" {
+                super::DaemonBuildState::Unverified
+            } else {
+                super::DaemonBuildState::RestartRequired
+            }
+        );
+        assert_eq!(
+            super::daemon_build_state("status_schema=10\n"),
+            super::DaemonBuildState::Unverified
+        );
+        assert_eq!(
+            super::daemon_build_state("daemon_commit=unknown\n"),
+            super::DaemonBuildState::Unverified
         );
     }
 

@@ -31,6 +31,9 @@ wayexpand-backend-selection = { path = "../backend-selection" }
 criterion = "0.8"
 tempfile = "3"
 
+[build-dependencies]
+wayexpand-build-info = { path = "../build-info" }
+
 [[bench]]
 name = "gui_edit"
 harness = false

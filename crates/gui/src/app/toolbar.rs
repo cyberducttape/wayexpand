@@ -273,6 +273,27 @@ impl GuiApp {
             daemon_color,
             theme::tint(daemon_color, 38),
         );
+        if self.daemon_reachable == Some(true)
+            && runtime::daemon_build_state(&self.daemon_status)
+                == runtime::DaemonBuildState::RestartRequired
+        {
+            let response = ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(self.strings.daemon_restart_required_status())
+                            .color(palette.warning),
+                    )
+                    .fill(theme::tint(palette.warning, 38))
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(255))
+                    .min_size(egui::vec2(0.0, 30.0)),
+                )
+                .on_hover_text(self.strings.daemon_restart_required_help());
+            if response.clicked() {
+                self.diagnostics_open = true;
+                self.refresh_diagnostics(true);
+            }
+        }
         if self.daemon_reachable == Some(false) && !self.config.expansion.is_empty() {
             self.turn_on_button(ui, palette);
         }
