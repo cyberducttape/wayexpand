@@ -27,10 +27,16 @@ unrelated_pid=$!
 sleep 0.1
 
 reap_private_home_processes "$private_home"
-if kill -0 "$private_pid" 2>/dev/null; then
-    printf '%s\n' 'private test process survived private-HOME cleanup' >&2
+set +e
+wait "$private_pid"
+private_status=$?
+set -e
+if [ "$private_status" -ne 143 ]; then
+    printf 'private test process was not terminated by cleanup (status %s)\n' \
+        "$private_status" >&2
     exit 1
 fi
+private_pid=
 if ! kill -0 "$unrelated_pid" 2>/dev/null; then
     printf '%s\n' 'cleanup terminated a process outside the private HOME' >&2
     exit 1
