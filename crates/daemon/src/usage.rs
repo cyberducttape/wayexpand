@@ -110,9 +110,23 @@ impl UsageClearHandle {
                     std::io::Error::new(std::io::ErrorKind::WouldBlock, error.to_string())
                 })?;
         }
-        result
-            .recv_timeout(CLEAR_REPLY_WAIT)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut, error.to_string()))?
+        receive_clear_result(&result, CLEAR_REPLY_WAIT)
+    }
+}
+
+fn receive_clear_result(
+    result: &Receiver<std::io::Result<bool>>,
+    timeout: Duration,
+) -> std::io::Result<bool> {
+    match result.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "usage statistics clear timed out; its outcome is unknown and it may still complete. Check stats before retrying",
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::other(
+            "usage statistics worker stopped before confirming the clear; its outcome is unknown. Check stats before retrying",
+        )),
     }
 }
 
@@ -489,6 +503,23 @@ mod tests {
         assert!(!stats.snippets.contains_key("queued-before-clear"));
         assert_eq!(stats.snippets["after-clear"].count, 1);
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn clear_timeout_reports_that_the_operation_may_still_complete() {
+        let (reply, result) = mpsc::sync_channel(1);
+        let delayed_reply = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            reply.send(Ok(true)).unwrap();
+        });
+
+        let error = receive_clear_result(&result, Duration::from_millis(1))
+            .expect_err("the caller's deadline should expire");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(error.to_string().contains("outcome is unknown"));
+        assert!(error.to_string().contains("Check stats before retrying"));
+        delayed_reply.join().unwrap();
     }
 
     #[test]

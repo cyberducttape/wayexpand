@@ -289,7 +289,9 @@ used recently, keystrokes avoided, your most-used snippets, snippets unused for
 immediate mode). The daemon records only snippet IDs, counts, and dates, never
 text, in `usage-stats.json` next to your configuration; nothing leaves your
 machine. `wayexpand stats --clear` deletes it, and
-`[settings] usage_stats = false` stops recording.
+`[settings] usage_stats = false` stops recording. If a daemon clear request
+times out, its result is unknown; check `wayexpand stats` before retrying
+because the queued clear may still complete.
 
 See [TEMPLATES.md](TEMPLATES.md) for every variable, including snippet
 includes, allowlisted environment variables, and the opt-in clipboard.

@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- A timed-out daemon usage-statistics clear now says its outcome is unknown and
+  directs the user to inspect statistics before retrying; the queued clear can
+  still finish after the caller's response deadline.
 - Mandatory Action Broker audit now applies bounded backpressure while the
   queue is full and uses one deadline for queue admission and durable-write
   confirmation; queue exhaustion remains visible as a counted, explicit audit
