@@ -4,7 +4,8 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 binary=${1:-"$project_dir/target/debug/wayexpand"}
 report=$(mktemp "${TMPDIR:-/tmp}/wayexpand-doctor-certify.XXXXXX")
-trap 'rm -f "$report" "$report.invalid"' EXIT INT TERM
+report_error="$report.stderr"
+trap 'rm -f "$report" "$report.stderr" "$report.invalid"' EXIT INT TERM
 
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required' >&2
@@ -21,8 +22,13 @@ if "$binary" doctor --certify unexpected >"$report.invalid" 2>&1; then
 fi
 grep -F 'usage: wayexpand doctor --certify [--json]' "$report.invalid" >/dev/null
 
-"$binary" doctor --certify --json >"$report"
-jq -e '
+if ! "$binary" doctor --certify --json >"$report" 2>"$report_error"; then
+    printf '%s\n' 'error: doctor --certify failed; captured report follows:' >&2
+    cat "$report" >&2
+    cat "$report_error" >&2
+    exit 1
+fi
+if ! jq -e '
     .schema == 1 and
     (.generated_at_unix | type == "number" and . > 0) and
     (.wayexpand.version | type == "string" and length > 0) and
@@ -57,6 +63,10 @@ jq -e '
     ([.checks[] | select(.name == "suspend-resume") | .status] == ["not-tested"]) and
     ([.checks[] | select(.status == "not-run")] | length == 0) and
     (tostring | contains("café 東京") | not)
-' "$report" >/dev/null
+' "$report" >/dev/null; then
+    printf '%s\n' 'error: certification report violated the contract; captured report follows:' >&2
+    cat "$report" >&2
+    exit 1
+fi
 
 printf '%s\n' 'isolated doctor certification contract passed'

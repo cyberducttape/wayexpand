@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
   untracked source inputs still mark the checkout dirty.
 - Fixed a POSIX shell compatibility issue in the isolated E2E latency scenario
   so the repository-wide ShellCheck CI step can validate it.
+- Certification contract failures now print the captured machine-readable
+  report, preserving the reason and scenario outcomes when the private KWin
+  harness exits intermittently.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;
