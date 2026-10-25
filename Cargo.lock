@@ -4337,6 +4337,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wayexpand-core",
+ "wayexpand-process-supervisor",
  "xkeysym",
  "zbus",
 ]

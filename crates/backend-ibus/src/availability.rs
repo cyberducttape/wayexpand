@@ -10,6 +10,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_IBUS_REGISTRY_OUTPUT_BYTES: usize = 64 * 1024;
 const IBUS_REGISTRY_READS_PER_DRAIN: usize = 64;
@@ -73,40 +74,53 @@ pub fn engine_available() -> bool {
 }
 
 fn ibus_registry_contains_engine() -> bool {
-    let Ok(mut child) = Command::new("ibus")
-        .args(["list-engine"])
+    registry_command_contains_engine("ibus", &["list-engine"], Duration::from_millis(500))
+}
+
+fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Duration) -> bool {
+    let mut command = Command::new(program);
+    command
+        .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let Ok(child) = command.spawn() else {
         return false;
     };
-    let Some(mut stdout) = child.stdout.take() else {
+    let mut supervisor = ChildSupervisor::new(child);
+    let Some(mut stdout) = supervisor.child_mut().and_then(|child| child.stdout.take()) else {
         return false;
     };
     if set_nonblocking(&stdout).is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
+        supervisor.kill_group();
+        let _ = supervisor.reap();
         return false;
     }
-    let deadline = Instant::now() + Duration::from_millis(500);
+    let deadline = Instant::now() + timeout;
     let mut output = Vec::new();
     loop {
         let drain = match drain_registry_output(&mut stdout, &mut output) {
             Ok(drain) => drain,
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                supervisor.kill_group();
+                let _ = supervisor.reap();
                 return false;
             }
         };
         if drain.truncated {
-            let _ = child.kill();
-            let _ = child.wait();
+            supervisor.kill_group();
+            let _ = supervisor.reap();
             return false;
         }
-        match child.try_wait() {
-            Ok(Some(status)) => {
+        match supervisor.has_exited() {
+            Ok(true) => {
+                // A child can exit while a descendant still holds stdout.
+                // Kill the process group before draining the final bytes so
+                // this informational probe never waits on inherited pipes.
+                supervisor.kill_group();
+                let Ok(status) = supervisor.reap() else {
+                    return false;
+                };
                 // Output written just before exit is still in the pipe; read
                 // it to EOF (bounded) before deciding, or the engine line can
                 // be missed.
@@ -123,10 +137,10 @@ fn ibus_registry_contains_engine() -> bool {
                 };
                 return complete && status.success() && registry_output_contains_engine(&output);
             }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(false) | Err(_) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
                 return false;
             }
         }
@@ -179,8 +193,8 @@ mod tests {
     };
 
     use super::{
-        drain_registry_output, registry_output_contains_engine, set_nonblocking,
-        MAX_IBUS_REGISTRY_OUTPUT_BYTES,
+        drain_registry_output, registry_command_contains_engine, registry_output_contains_engine,
+        set_nonblocking, MAX_IBUS_REGISTRY_OUTPUT_BYTES,
     };
 
     #[test]
@@ -216,5 +230,21 @@ mod tests {
         assert!(!drain.truncated || output.len() > MAX_IBUS_REGISTRY_OUTPUT_BYTES);
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registry_probe_kills_descendant_holding_stdout() {
+        let started = Instant::now();
+        assert!(registry_command_contains_engine(
+            "/bin/sh",
+            &["-c", "sleep 5 & printf 'wayexpand\\n'"],
+            Duration::from_millis(500),
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "registry probe waited on an inherited stdout pipe: {:?}",
+            started.elapsed()
+        );
     }
 }
