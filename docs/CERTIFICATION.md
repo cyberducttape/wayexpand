@@ -147,6 +147,14 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-2026-10-25.json`](evidence/doctor-certify-2026-10-25.json)
+is a preserved run of `wayexpand doctor --certify --json` from build
+`c9d9f3eac46c` on KWin 6.6.6. The private test clients verified simple
+replacement, focus switching, and refusal of an unavailable character. The
+session negotiated libei keysym fallback, so Unicode insertion, physical
+keyboard capture, and suspend/resume remain explicitly untested. This report
+does not describe or certify the active desktop.
+
 [`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
 records an 11-scenario run against the production daemon, libei injector, and
 KWin window tracker on KWin 6.6.6. All 11 scenarios passed. The private KWin

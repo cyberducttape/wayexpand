@@ -11,6 +11,8 @@ All notable changes to WayExpand are documented here.
   an unknown application outcome. The daemon refuses automatic replay when a
   compositor may have applied the replacement but its acknowledgement was
   lost.
+- Preserved a current-revision `doctor --certify --json` run on KWin 6.6.6,
+  including its partial outcomes and explicit keysym-fallback limitations.
 - The GUI diagnostics dashboard no longer reports permissions as available when
   environment probes say they are not applicable; granted, required, and
   unreported/not-applicable states are now distinct.

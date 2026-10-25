@@ -1,0 +1,69 @@
+{
+  "certified": false,
+  "checks": [
+    {
+      "evidence": "The isolated Wayland test client verified the received replacement text.",
+      "label": "Simple trigger insertion",
+      "name": "simple-trigger-insertion",
+      "status": "passed"
+    },
+    {
+      "evidence": "Two isolated clients checked that focus and app filtering target the intended window.",
+      "label": "Focus switching",
+      "name": "focus-switching",
+      "status": "passed"
+    },
+    {
+      "evidence": "The isolated client checks exact UTF-8 output when the negotiated route offers direct text insertion; keysym-only routes are not counted as tested.",
+      "label": "Unicode insertion",
+      "name": "unicode-insertion",
+      "status": "not-tested"
+    },
+    {
+      "evidence": "The test client verifies that unsupported output is refused before the trigger is erased.",
+      "label": "Unavailable character refusal",
+      "name": "unavailable-unicode-refusal",
+      "status": "passed"
+    },
+    {
+      "evidence": "Suspend and resume are outside this isolated smoke run.",
+      "label": "Suspend/resume",
+      "name": "suspend-resume",
+      "status": "not-tested"
+    },
+    {
+      "evidence": "The test harness supplies trigger input over stdin; it does not test physical keyboard capture.",
+      "label": "Keyboard capture",
+      "name": "keyboard-capture",
+      "status": "not-tested"
+    }
+  ],
+  "generated_at_unix": 1792892569,
+  "harness": {
+    "reason": null,
+    "status": "completed"
+  },
+  "limitations": [
+    "This is a reproducible output/focus smoke certification, not production compositor certification.",
+    "Keyboard capture, password-field behavior, suspend/resume, and long-running stability are not certified by this smoke run.",
+    "The private KWin result does not describe the user's active compositor session."
+  ],
+  "overall": "partial",
+  "schema": 1,
+  "test_session": {
+    "backend_mode_detail": "ei_keyboard keysym fallback (12ms key pacing)",
+    "capture_route": "stdin simulation",
+    "capture_source": "stdin",
+    "compositor": "KWin / Wayland",
+    "desktop": "Private headless KWin / Wayland",
+    "injection_backend": "libei",
+    "isolation": "private headless compositor session",
+    "negotiated_insertion_mode": "libei keysym fallback",
+    "sensitive_field_detection": false,
+    "version": "6.6.6"
+  },
+  "wayexpand": {
+    "commit": "c9d9f3eac46c",
+    "version": "1.3.3-dev+c9d9f3eac46c"
+  }
+}
