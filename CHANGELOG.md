@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Isolated desktop certification reports now identify the private session as
+  headless KWin instead of KDE Plasma, so saved evidence cannot imply that the
+  Plasma desktop shell was exercised.
 - Release smoke testing now builds the binary archive, verifies its checksum,
   and checks that runtime binaries and certification helpers are present while
   excluded repository content stays out.

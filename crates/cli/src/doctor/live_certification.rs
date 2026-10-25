@@ -358,7 +358,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "overall": overall,
         "certified": false,
         "test_session": {
-            "desktop": "KDE Plasma / Wayland",
+            "desktop": "Private headless KWin / Wayland",
             "compositor": "KWin / Wayland",
             "version": result.version,
             "isolation": "private headless compositor session",
@@ -403,7 +403,7 @@ fn print_human_report(report: &serde_json::Value) {
         report["wayexpand"]["commit"].as_str().unwrap_or("unknown")
     );
     println!(
-        "  Desktop: {}",
+        "  Test session: {}",
         report["test_session"]["desktop"]
             .as_str()
             .unwrap_or("unknown")

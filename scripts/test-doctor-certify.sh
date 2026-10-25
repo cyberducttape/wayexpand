@@ -23,7 +23,7 @@ jq -e '
     (.wayexpand.commit | type == "string" and length > 0) and
     .overall == "partial" and
     .certified == false and
-    .test_session.desktop == "KDE Plasma / Wayland" and
+    .test_session.desktop == "Private headless KWin / Wayland" and
     .test_session.compositor == "KWin / Wayland" and
     .test_session.isolation == "private headless compositor session" and
     .test_session.capture_route == "stdin simulation" and
