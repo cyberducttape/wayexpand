@@ -14,6 +14,9 @@ All notable changes to WayExpand are documented here.
 - Certification contract failures now print the captured machine-readable
   report, preserving the reason and scenario outcomes when the private KWin
   harness exits intermittently.
+- Refreshed the preserved October 25 KWin smoke report with current-source
+  evidence for all insertion/focus scenarios and backend-only latency samples;
+  the report remains partial and explicitly records untested paths.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

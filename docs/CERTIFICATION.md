@@ -224,12 +224,14 @@ keysym fallback, so Unicode insertion remains untested. This artifact supports
 output and focus behavior only and does not certify a compositor route.
 
 [`evidence/doctor-certify-2026-10-25.json`](evidence/doctor-certify-2026-10-25.json)
-is a preserved run of `wayexpand doctor --certify --json` from build
-`c9d9f3eac46c` on KWin 6.6.6. The private test clients verified simple
-replacement, focus switching, and refusal of an unavailable character. The
-session negotiated libei keysym fallback, so Unicode insertion, physical
-keyboard capture, and suspend/resume remain explicitly untested. This report
-does not describe or certify the active desktop.
+is the current-source run of `wayexpand doctor --certify --json` from build
+`c2d4a153a232` on KWin 6.6.6. The private test clients passed 12 insertion,
+focus, reload, restart, refusal, and build-identity checks. The session
+negotiated libei keysym fallback; its 20 small-insertion samples measured
+12,447 µs p50, 12,591 µs p95, and 12,591 µs p99 inside the injector, excluding
+capture and client paint. Unicode insertion, physical keyboard capture, and
+suspend/resume remain explicitly untested. This partial report does not
+describe or certify the active desktop.
 
 [`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
 records an 11-scenario run against the production daemon, libei injector, and
