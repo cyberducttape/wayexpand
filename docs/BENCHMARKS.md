@@ -149,9 +149,10 @@ editor frame, so it now queries a prebuilt exact trigger/alias index. Complete
 library validation remains required immediately before any save, but runs on
 the background save worker instead of the UI thread.
 
-The GUI-specific benchmark measures both the per-frame trigger-conflict lookup
-and the complete save path (config clone, edit, full validation, TOML
-serialization/comment merge, and revision-checked atomic write):
+The GUI-specific benchmark measures the per-frame trigger-conflict lookup,
+the draft-edit plus live-preview computation, and the complete save path
+(config clone, edit, full validation, TOML serialization/comment merge, and
+revision-checked atomic write):
 
 ```sh
 cargo bench --locked -p wayexpand-gui --bench gui_edit
@@ -177,3 +178,32 @@ exclude setup-time loading of the starting revision and TOML document. The
 measurements show that large saves take hundreds of milliseconds, but no
 whole-library scan runs on each keystroke or GUI frame; save progress remains
 asynchronous and the full correctness gate is preserved.
+
+### Typing preview measurements: 2026-10-25
+
+The `gui_typing_preview_edit` case models one replacement-field character edit
+followed by the same draft-to-preview computation the GUI runs on repaint. It
+prebuilds the shared snippet library outside the timed loop, so it measures
+editing and preview work rather than reloading the library. This excludes egui
+layout/painting, window-system event delivery, and physical keyboard latency;
+it is a preview-computation measure, not an end-to-end keystroke SLO. Run only
+these cases with:
+
+```sh
+cargo bench --locked -p wayexpand-gui --bench gui_edit -- \
+  gui_typing_preview_edit --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+On the same AMD Ryzen 7 7735U / Rust 1.96.0 host, Criterion measured:
+
+| Snippets | Estimate (95% interval) |
+| ---: | ---: |
+| 100 | 13.073 µs (13.015–13.113 µs) |
+| 1,000 | 13.309 µs (13.163–13.412 µs) |
+| 5,000 | 13.054 µs (13.002–13.145 µs) |
+| 10,000 | 13.093 µs (13.061–13.155 µs) |
+
+The preview computation stayed approximately constant with library size,
+consistent with the GUI reusing its prebuilt snippet library and constructing
+a one-expansion preview engine. Full saves remain size-dependent and
+asynchronous as shown above.

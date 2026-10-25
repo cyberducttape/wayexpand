@@ -3,10 +3,16 @@
 
 #![allow(dead_code)]
 
-use std::{fs, hint::black_box};
+use std::{fs, hint::black_box, sync::Arc};
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use wayexpand_core::Config;
+
+#[path = "../src/editor.rs"]
+#[allow(unused_imports)]
+mod editor;
+#[path = "../src/preview.rs"]
+mod preview;
 
 #[path = "../src/library.rs"]
 mod library;
@@ -38,6 +44,40 @@ fn bench_editor_feedback(c: &mut Criterion) {
                 bench.iter(|| black_box(index.has_trigger_conflict(black_box(query), Some(0))));
             },
         );
+    }
+    group.finish();
+}
+
+fn bench_gui_typing_preview(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gui_typing_preview_edit");
+    for count in [100, 1_000, 5_000, 10_000] {
+        let config = library_config(count);
+        let expansion = config.expansion[0].clone();
+        let mut draft = editor::Draft::from_expansion(&expansion);
+        let snippets = config.includable_snippets();
+        let input = expansion.trigger.clone();
+        group.bench_function(BenchmarkId::from_parameter(count), |bench| {
+            bench.iter(|| {
+                // Model one replacement-field keystroke followed by the
+                // editor's actual plain-text preview path. The library and
+                // trigger input are prepared as they are in GuiApp; cloning
+                // the shared snippet index is an Arc increment, not a library
+                // rebuild. Restore the draft without reallocating so each
+                // sample measures the same single-character edit.
+                draft.replacement.push('x');
+                let result = preview::render_with_library_snippets(
+                    Some(&expansion),
+                    &config.settings,
+                    &config.organization,
+                    Some(&draft),
+                    &input,
+                    "",
+                    Some(Arc::clone(&snippets)),
+                );
+                draft.replacement.pop();
+                black_box(result);
+            });
+        });
     }
     group.finish();
 }
@@ -102,5 +142,10 @@ fn bench_gui_save(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_editor_feedback, bench_gui_save);
+criterion_group!(
+    benches,
+    bench_editor_feedback,
+    bench_gui_typing_preview,
+    bench_gui_save
+);
 criterion_main!(benches);
