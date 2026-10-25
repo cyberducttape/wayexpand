@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a current-build `doctor --certify` report for commit `611017a88cec`:
+  11 isolated KWin 6.6.6 insertion, focus, reload, restart, and refusal checks
+  passed using libei keysym fallback; Unicode insertion, physical keyboard
+  capture, and suspend/resume remain untested. The report explicitly remains
+  partial and does not claim active-desktop certification.
 - `wayexpand new --gui` now bounds form-helper runtime and output, and kills
   the helper's process group on timeout or when a descendant keeps stdout
   open after the GUI exits.
