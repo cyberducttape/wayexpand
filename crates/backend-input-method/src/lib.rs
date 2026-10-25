@@ -892,6 +892,34 @@ impl Drop for InputMethodSource {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ReplacementRequest<'a> {
+    DeleteSurroundingText { before: u32, after: u32 },
+    CommitString(&'a str),
+    Done(u32),
+}
+
+/// Queue a complete input-method replacement batch and flush it once. Keeping
+/// this ordering in one helper makes it possible to test the ambiguous
+/// acknowledgement boundary without a live compositor.
+fn send_replacement_batch<'a>(
+    delete_bytes: u32,
+    text: &'a str,
+    serial: u32,
+    mut queue: impl FnMut(ReplacementRequest<'a>),
+    flush: impl FnOnce() -> Result<(), InputMethodError>,
+) -> Result<(), InputMethodError> {
+    queue(ReplacementRequest::DeleteSurroundingText {
+        before: delete_bytes,
+        after: 0,
+    });
+    if !text.is_empty() {
+        queue(ReplacementRequest::CommitString(text));
+    }
+    queue(ReplacementRequest::Done(serial));
+    flush()
+}
+
 fn roundtrip_with_timeout(
     connection: &Connection,
     event_queue: &mut EventQueue<StateData>,
@@ -1042,12 +1070,22 @@ impl TextInjector for InputMethodSource {
                 retryable: true,
             });
         };
-        input_method.delete_surrounding_text(bytes, 0);
-        if !text.is_empty() {
-            input_method.commit_string(text.to_owned());
-        }
-        input_method.commit(self.state.commit_serial);
-        self.transport.flush().map_err(|error| InjectorError {
+        send_replacement_batch(
+            bytes,
+            text,
+            self.state.commit_serial,
+            |request| match request {
+                ReplacementRequest::DeleteSurroundingText { before, after } => {
+                    input_method.delete_surrounding_text(before, after)
+                }
+                ReplacementRequest::CommitString(text) => {
+                    input_method.commit_string(text.to_owned())
+                }
+                ReplacementRequest::Done(serial) => input_method.commit(serial),
+            },
+            || self.transport.flush(),
+        )
+        .map_err(|error| InjectorError {
             backend: SOURCE_NAME,
             message: error.to_string(),
             retryable: true,

@@ -151,6 +151,38 @@ fn atomic_replacement_capability_marks_errors_as_uncertain() {
 }
 
 #[test]
+fn replacement_flush_failure_happens_after_the_complete_atomic_batch_is_queued() {
+    let mut requests = Vec::new();
+    let mut flushed = false;
+    let result = send_replacement_batch(
+        4,
+        "replacement",
+        17,
+        |request| requests.push(request),
+        || {
+            flushed = true;
+            Err(InputMethodError::Transport("injected flush failure".into()))
+        },
+    );
+
+    assert_eq!(
+        requests,
+        [
+            ReplacementRequest::DeleteSurroundingText {
+                before: 4,
+                after: 0,
+            },
+            ReplacementRequest::CommitString("replacement"),
+            ReplacementRequest::Done(17),
+        ]
+    );
+    assert!(flushed);
+    assert!(
+        matches!(result, Err(InputMethodError::Transport(message)) if message == "injected flush failure")
+    );
+}
+
+#[test]
 fn input_method_source_disconnect_is_reported_as_retryable() {
     let (mut source, writer) = fake_input_method_source([]);
     drop(writer);
