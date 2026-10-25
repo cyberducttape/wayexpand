@@ -23,13 +23,16 @@ wayexpand doctor --certify --json > wayexpand-smoke-report.json
 This starts a private headless KWin session, launches isolated Wayland sink
 clients, and checks the text those clients actually receive through the
 production daemon and libei output backend. It checks a basic trigger, focus
-switching between test windows, and safe refusal of an unavailable character.
-When KWin offers the negotiated `ei_text` route, it also inserts a replacement
-containing accented Latin and Japanese text and verifies the exact contents
-received by the test client. A keysym-only route reports Unicode insertion as
-not tested; it never infers Unicode support from capability metadata. The
-private harness simulates keyboard capture through stdin; it does not exercise
-the user's active compositor. Its concise report therefore says `partial`,
+switching between test windows, word-boundary delimiters, cursor placement,
+multiline output, command completion, configuration reload, daemon restart,
+and safe refusal of an unavailable character. All these scenarios must pass
+for the report to say `partial`. When KWin offers the negotiated `ei_text`
+route, it also inserts a replacement containing accented Latin and Japanese
+text and verifies the exact contents received by the test client. A keysym-only
+route reports Unicode insertion as not tested; it never infers Unicode support
+from capability metadata. The private harness simulates keyboard capture
+through stdin; it does not exercise the user's active compositor. Its concise
+report therefore says `partial`,
 and keeps keyboard capture, suspend/resume, and full production certification
 unverified. The report records the negotiated insertion mode, backend detail,
 capture source, and sensitive-field signal observed from the private daemon.

@@ -51,10 +51,11 @@ with the Sway harness in `scripts/e2e-lib.sh`):
   Real keyboard capture needs `/dev/input` or an input method and is not
   exercised. The standard E2E suite omits the capability-gated Unicode probe;
   `doctor --certify` explicitly runs it. The doctor report also requires the
-in-flight focus-change and target-close scenarios to pass: a delayed result
-must leave the original trigger intact and must not type into the newly
-focused client. These checks remain isolated headless evidence, not a claim
-that physical keyboard capture or an active desktop has been certified.
+  word-boundary, cursor, multiline, command completion, reload, restart,
+  in-flight focus-change, and target-close scenarios to pass. A delayed result
+  must leave the original trigger intact and must not type into the newly
+  focused client. These checks remain isolated headless evidence, not a claim
+  that physical keyboard capture or an active desktop has been certified.
 
 The JSON report includes the WayExpand build version, commit, and Unix run
 timestamp so an archived result can be tied to the tested binary. Its scope

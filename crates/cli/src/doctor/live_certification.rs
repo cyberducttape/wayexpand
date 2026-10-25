@@ -14,10 +14,16 @@ use std::{
 
 const SCENARIOS: &[&str] = &[
     "expansion-replaces-trigger",
+    "word-boundary-reinserts-delimiter",
+    "cursor-placement",
+    "multiline-replacement",
     "unicode-insertion",
     "app-filter-follows-focus",
     "focus-change-during-expansion",
     "target-closes-during-expansion",
+    "command-expansion-completes",
+    "config-reload",
+    "daemon-restart",
     "unreachable-character-is-refused",
 ];
 
@@ -291,6 +297,33 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "The isolated Wayland test client verified the received replacement text.",
     )];
     checks.push(check(
+        "word-boundary-delimiter",
+        result
+            .outcomes
+            .get("word-boundary-reinserts-delimiter")
+            .copied()
+            .unwrap_or("not-run"),
+        "A word-boundary expansion preserves the terminating delimiter after replacement.",
+    ));
+    checks.push(check(
+        "cursor-placement",
+        result
+            .outcomes
+            .get("cursor-placement")
+            .copied()
+            .unwrap_or("not-run"),
+        "The isolated client verifies the final text and caret position for a cursor marker.",
+    ));
+    checks.push(check(
+        "multiline-replacement",
+        result
+            .outcomes
+            .get("multiline-replacement")
+            .copied()
+            .unwrap_or("not-run"),
+        "The isolated client verifies that line breaks arrive in the replacement.",
+    ));
+    checks.push(check(
         "focus-switching",
         result
             .outcomes
@@ -316,6 +349,33 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
             .copied()
             .unwrap_or("not-run"),
         "Closing the target during a delayed expansion must not send output to the client that receives focus, and the daemon must remain alive.",
+    ));
+    checks.push(check(
+        "command-completion",
+        result
+            .outcomes
+            .get("command-expansion-completes")
+            .copied()
+            .unwrap_or("not-run"),
+        "A delayed command result is inserted when the original target remains focused.",
+    ));
+    checks.push(check(
+        "configuration-reload",
+        result
+            .outcomes
+            .get("config-reload")
+            .copied()
+            .unwrap_or("not-run"),
+        "The isolated daemon applies a configuration edit without restarting.",
+    ));
+    checks.push(check(
+        "daemon-restart",
+        result
+            .outcomes
+            .get("daemon-restart")
+            .copied()
+            .unwrap_or("not-run"),
+        "The isolated daemon reconnects to its output route and expands after restart.",
     ));
     checks.push(check(
         "unicode-insertion",
@@ -348,9 +408,15 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
 
     let required_checks_passed = [
         "simple-trigger-insertion",
+        "word-boundary-delimiter",
+        "cursor-placement",
+        "multiline-replacement",
         "focus-switching",
         "focus-change-during-expansion",
         "target-closes-during-expansion",
+        "command-completion",
+        "configuration-reload",
+        "daemon-restart",
         "unavailable-unicode-refusal",
     ]
     .into_iter()
@@ -415,10 +481,16 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
 fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
     let label = match name {
         "simple-trigger-insertion" => "Simple trigger insertion",
+        "word-boundary-delimiter" => "Word-boundary delimiter",
+        "cursor-placement" => "Cursor placement",
+        "multiline-replacement" => "Multiline replacement",
         "unicode-insertion" => "Unicode insertion",
         "focus-switching" => "Focus switching",
         "focus-change-during-expansion" => "Focus change during expansion",
         "target-closes-during-expansion" => "Target closes during expansion",
+        "command-completion" => "Command completion",
+        "configuration-reload" => "Configuration reload",
+        "daemon-restart" => "Daemon restart",
         "unavailable-unicode-refusal" => "Unavailable character refusal",
         "suspend-resume" => "Suspend/resume",
         "keyboard-capture" => "Keyboard capture",
@@ -663,6 +735,35 @@ mod tests {
                 .unwrap()
                 .iter()
                 .find(|check| check["name"] == "target-closes-during-expansion")
+                .unwrap()["status"],
+            "not-run"
+        );
+    }
+
+    #[test]
+    fn missing_reload_scenario_keeps_the_report_incomplete() {
+        let mut outcomes = all_completed_scenarios();
+        outcomes.remove("config-reload");
+        let report = make_report(HarnessResult {
+            status: "completed",
+            version: Some("6.6.6".into()),
+            capture_source: Some("stdin".into()),
+            injection_backend: Some("libei".into()),
+            insertion_mode: Some("libei ei_text".into()),
+            backend_mode: Some("ei_keyboard and ei_text".into()),
+            sensitive_field_detection: Some(false),
+            outcomes,
+            reason: None,
+        });
+
+        assert_eq!(report["overall"], "incomplete");
+        assert_eq!(report["certified"], false);
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "configuration-reload")
                 .unwrap()["status"],
             "not-run"
         );

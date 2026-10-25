@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand doctor --certify` now reports word-boundary, cursor, multiline,
+  command completion, reload, and restart scenarios alongside its insertion
+  and focus safety checks; missing scenario evidence keeps the report incomplete.
 - The headless GUI screenshot runner now terminates its optional daemon and
   other private-session processes before removing temporary state.
 - The daemon soak now enforces configurable peak RSS, descriptor, and thread
