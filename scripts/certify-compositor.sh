@@ -71,16 +71,18 @@ fi
     exit 2
 }
 layout_profiles_lower=$(printf '%s' "$keyboard_layout" | tr '[:upper:]' '[:lower:]')
-required_layout_profiles=$(jq -r '.required_layout_profiles[]' "$matrix")
-while IFS= read -r profile; do
-    [ -n "$profile" ] || continue
-    case ",$layout_profiles_lower," in
-        *,"$profile",*) ;;
-        *) printf '%s\n' "error: --layout must include required profile '$profile'" >&2; exit 2 ;;
-    esac
-done <<EOF
-$required_layout_profiles
-EOF
+required_layout_profiles=$(jq -c '.required_layout_profiles | map(ascii_downcase)' "$matrix")
+valid_layout_profiles=$(jq -en --arg profiles "$layout_profiles_lower" \
+    --argjson required "$required_layout_profiles" '
+    ($profiles | split(",")) as $items |
+    ($items | all(.[]; test("^[a-z0-9][a-z0-9._+-]*$"))) and
+    ($items | unique | length == ($items | length)) and
+    ($items | sort == ($required | sort))
+' 2>/dev/null) || valid_layout_profiles=false
+[ "$valid_layout_profiles" = true ] || {
+    printf '%s\n' 'error: --layout must contain each declared profile exactly once, using simple profile names' >&2
+    exit 2
+}
 [ -n "$target_apps" ] || {
     printf '%s\n' "error: --target-apps is required for reproducible evidence" >&2
     exit 2

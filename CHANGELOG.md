@@ -40,6 +40,8 @@ All notable changes to WayExpand are documented here.
   organization’s required signer list with a caller-supplied `--signers` file.
 - Snippet-pack signature hashing now fails on directory enumeration errors and
   hashes non-UTF-8 filenames without lossy-name collisions.
+- Compositor certification evidence now requires the exact declared keyboard
+  layout profile set, rejecting duplicates and undeclared profiles.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids
   blocking on special files, refreshes at most every two seconds, and shares
   cached action IDs without cloning the whole list on each frame.

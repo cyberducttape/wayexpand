@@ -424,6 +424,18 @@ if "$project_dir/scripts/certify-compositor.sh" \
     exit 1
 fi
 
+for invalid_layout in \
+    "us,de,fr,altgr,multi-layout-switching,us" \
+    "us,de,fr,altgr,multi-layout-switching,unknown"; do
+    if "$project_dir/scripts/certify-compositor.sh" \
+        --compositor kde --version 6.6.2 --backend ibus \
+        --layout "$invalid_layout" --target-apps "$target_apps" \
+        --cli /bin/false --output "$test_root/invalid-layout.md" >/dev/null 2>&1; then
+        printf '%s\n' "certification accepted an invalid layout profile list: $invalid_layout" >&2
+        exit 1
+    fi
+done
+
 if "$project_dir/scripts/certify-compositor.sh" \
     --compositor sway --version 1.10 --backend ibus \
     --layout us,de,fr,altgr,multi-layout-switching --target-apps gtk >/dev/null 2>&1; then
