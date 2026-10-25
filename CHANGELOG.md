@@ -7,7 +7,9 @@ All notable changes to WayExpand are documented here.
 - Focus checkpoints now guard every libei text chunk and synthesized key, and
   every wlroots output key. The backends flush between chunks or key events so
   a focus change cannot send the remaining replacement into another window;
-  regression tests cover interruption before the next output event.
+  regression tests cover interruption before the next output event. A daemon
+  actor regression verifies partial output is not replayed and the worker
+  remains usable after focus is refreshed.
 - `wayexpand doctor --certify` runs an isolated KWin test session and verifies
   received output from real Wayland test clients, reporting insertion, focus,
   and Unicode outcomes without claiming to certify the active desktop. The

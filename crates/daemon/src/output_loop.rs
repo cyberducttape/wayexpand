@@ -869,6 +869,61 @@ mod tests {
         checkpoint: wayexpand_core::OutputCheckpoint,
     }
 
+    struct FocusSwitchingInjector {
+        typed: Arc<Mutex<String>>,
+        checkpoint: wayexpand_core::OutputCheckpoint,
+        focus_sender: wayexpand_core::WindowUpdateSender,
+        switch_on_third_character: bool,
+    }
+
+    impl TextInjector for FocusSwitchingInjector {
+        fn name(&self) -> &'static str {
+            "focus-switching-test"
+        }
+
+        fn capabilities(&self) -> InjectorCapabilities {
+            InjectorCapabilities {
+                insertion_mode: "checkpointed test keystrokes",
+                replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
+                ..InjectorCapabilities::default()
+            }
+        }
+
+        fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+            self.checkpoint = checkpoint;
+        }
+
+        fn replace(&mut self, _trigger: &str, text: &str) -> Result<(), InjectorError> {
+            for (index, character) in text.chars().enumerate() {
+                self.checkpoint.check().map_err(|message| InjectorError {
+                    backend: self.name(),
+                    message,
+                    retryable: false,
+                })?;
+                self.typed.lock().unwrap().push(character);
+                if index == 2 && self.switch_on_third_character {
+                    self.focus_sender
+                        .send(Some(wayexpand_core::WindowContext {
+                            app_id: Some("editor".into()),
+                            title: None,
+                            instance_id: Some("w2".into()),
+                        }))
+                        .unwrap();
+                    self.switch_on_third_character = false;
+                }
+            }
+            Ok(())
+        }
+
+        fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+            self.replace("", text)
+        }
+    }
+
     impl TextInjector for PacedInjector {
         fn name(&self) -> &'static str {
             "paced"
@@ -985,6 +1040,83 @@ mod tests {
             "{typed_at_cancel} -> {typed_after}"
         );
         assert!(typed_after < 200);
+    }
+
+    #[test]
+    fn focus_interruption_stops_partial_output_without_retiring_the_worker() {
+        use wayexpand_core::{window_update_channel, CompatibilityMode, TransactionOutcome};
+
+        let guard = Arc::new(crate::assurance::GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (focus_sender, focus_receiver) = window_update_channel();
+        guard.set_witness(Some(focus_receiver.focus_witness()));
+        let window = |instance: &str| {
+            Some(wayexpand_core::WindowContext {
+                app_id: Some("editor".into()),
+                title: None,
+                instance_id: Some(instance.into()),
+            })
+        };
+        focus_sender.send(window("w1")).unwrap();
+        guard.set_stamp(focus_receiver.try_recv_stamped().unwrap().1);
+
+        let typed = Arc::new(Mutex::new(String::new()));
+        let guarded = crate::assurance::AssuredInjector::wrap(
+            Box::new(FocusSwitchingInjector {
+                typed: Arc::clone(&typed),
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
+                focus_sender: focus_sender.clone(),
+                switch_on_third_character: true,
+            }),
+            Arc::clone(&guard),
+        );
+        let (_injector, failures, worker) = spawn_async_injector(Box::new(guarded), None).unwrap();
+        let submitter = worker.submitter().unwrap();
+        let first = ExpansionResult {
+            snippet_id: String::new(),
+            trigger: ":x".into(),
+            matched_text: ":x".into(),
+            insert: "replacement".into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+            folded_suffix_chars: 0,
+        };
+
+        let outcome = submitter
+            .submit(&first)
+            .unwrap()
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("focus interruption must complete the transaction");
+        assert!(
+            matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. }),
+            "{outcome}"
+        );
+        assert_eq!(*typed.lock().unwrap(), "rep");
+        assert!(failures.try_recv().is_err());
+        assert!(worker.is_running());
+
+        // The reactor accepts the new focus snapshot before another user
+        // transaction may start. That transaction should reuse the actor.
+        let (_, stamp) = focus_receiver.try_recv_stamped().unwrap();
+        guard.set_stamp(stamp);
+        focus_sender.send(window("w1")).unwrap();
+        guard.set_stamp(focus_receiver.try_recv_stamped().unwrap().1);
+        let second = ExpansionResult {
+            insert: "done".into(),
+            ..first
+        };
+        let next = submitter
+            .submit(&second)
+            .unwrap()
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the worker should accept the next transaction");
+        assert!(next.is_applied(), "{next}");
+        assert_eq!(*typed.lock().unwrap(), "repdone");
+        assert!(failures.try_recv().is_err());
     }
 
     #[test]
