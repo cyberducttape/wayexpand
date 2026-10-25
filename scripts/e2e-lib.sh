@@ -143,7 +143,15 @@ start_daemon() {
         daemon_pid=$!
     fi
     if ! wait_until 100 daemon_ready; then
-        log "daemon never became ready: $(daemon_status | tr '\n' ' ')"
+        status=$(daemon_status | tr '\n' ' ' | cut -c 1-512)
+        [ -n "$status" ] || status=unavailable
+        reason='daemon did not report a ready route'
+        if [ "$e2e_input_source" = input-method ] &&
+            grep -q 'input-method-v2 manager and seat probe failed' "$case_dir/daemon.log"; then
+            reason='compositor input-method-v2 manager/seat probe unavailable'
+        fi
+        log "daemon never became ready: $status"
+        printf 'daemon readiness timed out: %s; status=%s\n' "$reason" "$status"
         return 1
     fi
     daemon_status >"$work/runtime-status"

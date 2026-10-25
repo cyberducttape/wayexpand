@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   simulated key capture for replacement and password-field suppression. The
   current headless KWin setup does not expose input-method-v2, so these checks
   remain conditional and are not counted as certification or CI coverage.
+- Certification harness reports now include bounded daemon readiness details
+  on unverified startup cases, so archived results explain why a scenario
+  could not run without requiring a separate log lookup.
 - Daemon status schema 11 publishes a canonical `route_id`; the GUI now
   resolves route diagnostics from that stable ID instead of recombining source
   and injection fields.
