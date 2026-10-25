@@ -279,7 +279,7 @@ impl IbusEngineAdapter {
                 continue;
             }
             if let Err(error) = emit(&actions) {
-                self.reset();
+                self.output_failed();
                 return Err(error);
             }
             self.engine.commit_applied_expansion(&result);
@@ -326,6 +326,15 @@ impl IbusEngineAdapter {
     pub fn reset(&mut self) {
         self.surrounding = None;
         self.engine.process(InputEvent::Reset);
+    }
+
+    /// Retire this engine instance after output could have been partially
+    /// applied. IBus emits deletion and committed text as separate signals,
+    /// so an emission error cannot prove the client document is unchanged.
+    /// A fresh focus lifecycle is required before matching resumes.
+    pub fn output_failed(&mut self) {
+        self.enabled = false;
+        self.reset();
     }
 
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
@@ -1386,15 +1395,20 @@ timeout_ms = 1000
     }
 
     #[test]
-    fn async_emit_failure_resets_without_recording_the_expansion() {
+    fn output_failure_disables_matching_until_a_new_focus_lifecycle() {
         let mut adapter = adapter();
-        let mut calls = 0;
-        let result = adapter.drain_completed_commands_with(|_| {
-            calls += 1;
-            Err::<(), _>("unreachable")
-        });
-        // Nothing completed, so nothing is emitted.
-        assert_eq!(result, Ok(0));
-        assert_eq!(calls, 0);
+        adapter.output_failed();
+        assert!(!adapter.process_key_event(':' as u32, 0, 0).handled);
+
+        // IBus calls FocusIn, Enable, capabilities, and content type for a
+        // newly focused context. Matching may resume only after that sequence.
+        let mut adapter = focused(adapter);
+        let mut client = Client::default();
+        let actions = client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), "signature");
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            IbusAction::CommitText(text) if text == "signature"
+        )));
     }
 }

@@ -285,11 +285,12 @@ impl EngineObject {
             Err(_) => return false,
         };
         if self.emit_actions(&result.actions).await.is_err() {
-            // The engine has already consumed this event. Reset its matcher
-            // before returning false so a client retry cannot combine with a
-            // half-applied replacement or stale trigger buffer.
+            // IBus emits delete and commit as separate signals. An error may
+            // therefore leave a partial edit; retire this engine until a new
+            // focus lifecycle instead of allowing more expansions in an
+            // uncertain document state.
             if let Ok(mut adapter) = self.adapter.lock() {
-                adapter.reset();
+                adapter.output_failed();
             }
             return false;
         }
@@ -639,6 +640,45 @@ mod tests {
         assert!(!engine.adapter.lock().unwrap().engine().is_sensitive_focus());
     }
 
+    #[test]
+    fn synchronous_signal_failure_disables_the_engine_until_refocus() {
+        let config: Config = toml::from_str(
+            r#"[[expansion]]
+trigger = "sig"
+replacement = "signature"
+"#,
+        )
+        .unwrap();
+        let adapter = Arc::new(Mutex::new(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        )));
+        {
+            let mut adapter = adapter.lock().unwrap();
+            adapter.focus_in();
+            adapter.set_capabilities(crate::IBUS_CAP_SURROUNDING_TEXT);
+            adapter.set_content_type(0, 0);
+            adapter.set_surrounding_text("", 0, 0);
+        }
+        let engine = EngineObject {
+            adapter: Arc::clone(&adapter),
+            connection: Arc::new(Mutex::new(None)),
+            path: engine_path(2),
+            instances: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        // Ordinary key output fails because there is no live D-Bus transport.
+        // The service must retire this engine rather than processing a
+        // partial trigger if more keys arrive in the same focus context.
+        assert!(!zbus::block_on(engine.process_key_event('s' as u32, 0, 0)));
+        assert!(
+            !adapter
+                .lock()
+                .unwrap()
+                .process_key_event('i' as u32, 0, 0)
+                .handled
+        );
+    }
+
     /// Broker-backed tests share the process-wide broker socket variable, so
     /// they must not overlap even when tests run on many threads.
     static BROKER_LOCK: Mutex<()> = Mutex::new(());
@@ -952,6 +992,7 @@ mod tests {
         );
         let undo = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
         assert!(adapter.engine().prepare_undo(&undo).is_none());
+        assert!(!adapter.process_key_event('x' as u32, 0, 0).handled);
         assert_eq!(
             adapter.drain_completed_commands_with(|_| Ok::<(), &str>(())),
             Ok(0)

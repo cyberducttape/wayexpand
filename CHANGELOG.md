@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- IBus now retires an engine instance after an output signal fails, preventing
+  further expansion while a delete/commit transaction may have left the
+  client document partially changed. Matching resumes after a fresh focus
+  lifecycle.
 - Isolated KWin certification now determines source cleanliness from build and
   harness inputs, so unrelated untracked files do not invalidate otherwise
   matching CLI/daemon identity evidence.
