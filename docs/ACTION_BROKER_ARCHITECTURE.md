@@ -157,7 +157,9 @@ What's implemented:
     journal
   - Managed deployments can set `[broker] audit_required = true`. The broker
     waits up to two seconds for each event to be synced before returning action
-    success. If the action succeeded but persistence could not be confirmed,
+    success; file creation and rotation also sync the parent directory. Startup
+    fails if required directory durability is unavailable. If the action
+    succeeded but persistence could not be confirmed,
     the error says the action already completed and warns against automatic
     retry; audit health becomes unhealthy.
 
@@ -297,8 +299,9 @@ missing broker service from an unknown or disabled action.
   the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
   and persistence failures are journaled. In default best-effort mode they do
   not block action execution. `audit_required = true` adds a bounded durability
-  acknowledgment before a successful response and can add up to two seconds
-  of action-response latency.
+  acknowledgment before a successful response, syncs directory entries on
+  file creation and rotation, and can add up to two seconds of action-response
+  latency.
 
 ## Implementation Status
 

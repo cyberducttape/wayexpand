@@ -179,7 +179,9 @@ health, queue drops, and audit write failures. See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md).
 For managed use, set `audit_required = true` under `[broker]` and configure
 `audit_path`; the broker then waits for each event to be synced before
-reporting action success. If the final audit write fails or cannot be confirmed
+reporting action success. Required mode syncs file contents and the parent
+directory when the log is created or rotated; startup fails if that durability
+cannot be established. If the final audit write fails or cannot be confirmed
 after a successful command, the response explicitly says the action already
 completed and warns against automatic retry. Verify the action's effects
 before retrying. Unconfirmed writes also make broker audit health unhealthy.
