@@ -22,6 +22,8 @@ All notable changes to WayExpand are documented here.
 - Configuration backups compare the opened source file's identity and change
   timestamps before and after copying, rejecting a same-size concurrent edit
   instead of preserving a potentially inconsistent backup.
+- Snippet-pack signing no longer joins its stdin writer after the signing
+  process times out, and bounds the writer completion handshake after exit.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,

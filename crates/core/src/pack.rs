@@ -9,7 +9,7 @@ use std::{
     process::{Command, Output},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        mpsc, Arc,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -489,6 +489,22 @@ fn write_signature_tool_input<W: Write + AsRawFd>(
     Ok(())
 }
 
+fn wait_for_signature_tool_writer(
+    result: &mpsc::Receiver<io::Result<()>>,
+    timeout: Duration,
+) -> Result<(), PackError> {
+    match result.recv_timeout(timeout) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(PackError::SignatureTool(error.to_string())),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(PackError::SignatureTool(
+            "ssh-keygen stdin writer did not finish after process exit".into(),
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(PackError::SignatureTool(
+            "ssh-keygen stdin writer stopped without reporting a result".into(),
+        )),
+    }
+}
+
 fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
     let mut command = Command::new("ssh-keygen");
     configure_process_group(&mut command);
@@ -518,13 +534,31 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
     let input = input.as_bytes().to_owned();
     let stdin_cancelled = Arc::new(AtomicBool::new(false));
     let writer_cancelled = Arc::clone(&stdin_cancelled);
-    let stdin_writer = thread::spawn(move || {
-        stdin
-            .map(|mut stdin| {
-                write_signature_tool_input(&mut stdin, &input, deadline, &writer_cancelled)
-            })
-            .transpose()
-    });
+    let (writer_result_sender, writer_result_receiver) = mpsc::sync_channel(1);
+    let stdin_writer = match thread::Builder::new()
+        .name("wayexpand-pack-signature-stdin".into())
+        .spawn(move || {
+            let result = match stdin {
+                Some(mut stdin) => {
+                    write_signature_tool_input(&mut stdin, &input, deadline, &writer_cancelled)
+                }
+                None => Ok(()),
+            };
+            let _ = writer_result_sender.send(result);
+        }) {
+        Ok(writer) => writer,
+        Err(error) => {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            return Err(PackError::SignatureTool(format!(
+                "could not start ssh-keygen stdin writer: {error}"
+            )));
+        }
+    };
+    // The completion channel is the synchronization point. Dropping the join
+    // handle avoids making cancellation depend on the OS scheduling this
+    // short-lived writer thread.
+    drop(stdin_writer);
     let mut stdout = stdout;
     let mut stderr = stderr;
     let mut stdout_bytes = Vec::new();
@@ -570,7 +604,6 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
                 stdin_cancelled.store(true, Ordering::Release);
                 supervisor.kill_group();
                 let _ = supervisor.reap();
-                let _ = stdin_writer.join();
                 return Err(PackError::SignatureTool(
                     "ssh-keygen timed out or could not be monitored".into(),
                 ));
@@ -578,10 +611,7 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
         }
     };
     stdin_cancelled.store(true, Ordering::Release);
-    stdin_writer
-        .join()
-        .map_err(|_| PackError::SignatureTool("ssh-keygen stdin writer failed".into()))?
-        .map_err(|error| PackError::SignatureTool(error.to_string()))?;
+    wait_for_signature_tool_writer(&writer_result_receiver, Duration::from_millis(100))?;
     Ok(Output {
         status,
         stdout: stdout_bytes,
@@ -898,6 +928,19 @@ mod tests {
             read_signature_tool_output(&vec![b'x'; MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1][..])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn signature_tool_writer_wait_is_bounded() {
+        let (_sender, receiver) = mpsc::sync_channel(1);
+        let started = Instant::now();
+        let error = wait_for_signature_tool_writer(&receiver, Duration::from_millis(10))
+            .expect_err("a writer that does not report completion must time out");
+
+        assert!(
+            matches!(error, PackError::SignatureTool(message) if message.contains("did not finish"))
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[cfg(unix)]
