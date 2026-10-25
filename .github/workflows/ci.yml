@@ -309,6 +309,8 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: Verify daemon soak environment isolation
         run: bash scripts/test-soak-isolation.sh
+      - name: Verify source cleanliness path filtering
+        run: bash scripts/test-source-tree-state.sh
       - name: Verify isolated screenshot process cleanup
         run: bash scripts/test-private-home-cleanup.sh
       - name: Check Rust dependency hygiene

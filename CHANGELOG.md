@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Daemon soak reports and isolated KWin certification now share source-tree
+  cleanliness checks scoped to build and harness inputs. Unrelated generated
+  files no longer make their evidence appear to come from a dirty source tree.
+- Added a script regression check proving unrelated reports are ignored while
+  untracked source inputs still mark the checkout dirty.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

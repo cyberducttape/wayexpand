@@ -83,16 +83,8 @@ else
         # whether the tested source is clean. Unrelated files in the user's
         # repository root (for example a generated report) must not make an
         # otherwise matching CLI/daemon build unverifiable.
-        certification_inputs=(
-            Cargo.toml Cargo.lock .cargo rust-toolchain.toml crates
-            scripts tests/certification
-        )
-        certification_source_status=$(git status --porcelain --untracked-files=all -- "${certification_inputs[@]}")
-        if [ -z "$certification_source_status" ]; then
-            source_tree_state=clean
-        else
-            source_tree_state=dirty
-        fi
+        source_tree_state=$(sh "$project_dir/scripts/source-tree-state.sh" "$project_dir" \
+            Cargo.toml Cargo.lock .cargo rust-toolchain.toml crates scripts tests/certification)
     else
         source_tree_state=unknown
     fi

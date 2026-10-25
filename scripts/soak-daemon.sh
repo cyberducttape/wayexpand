@@ -9,11 +9,8 @@ umask 077
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 source_revision=$(git -C "$project_dir" rev-parse HEAD)
-if [ -z "$(git -C "$project_dir" status --porcelain)" ]; then
-    source_worktree=clean
-else
-    source_worktree=dirty
-fi
+source_worktree=$(sh "$project_dir/scripts/source-tree-state.sh" "$project_dir" \
+    Cargo.toml Cargo.lock .cargo rust-toolchain.toml crates scripts tests/certification)
 soak_seconds=${SOAK_SECONDS:-60}
 warmup_seconds=$(( soak_seconds / 6 ))
 [ "$warmup_seconds" -ge 5 ] || warmup_seconds=5
