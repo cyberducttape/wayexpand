@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added a backend contract regression test ensuring input-method-v2 replacement
+  flush errors remain non-replayable because the compositor may have applied
+  the atomic replacement before its acknowledgement was lost.
 - Preserved the current 12-scenario isolated KWin doctor-certification JSON
   report, including each verified result and its explicit headless-route limits.
 - `wayexpand doctor --certify` now reports word-boundary, cursor, multiline,

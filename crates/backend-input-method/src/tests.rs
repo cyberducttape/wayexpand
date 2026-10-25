@@ -140,6 +140,17 @@ fn input_method_source_flush_failure_is_reported_as_retryable() {
 }
 
 #[test]
+fn atomic_replacement_capability_marks_errors_as_uncertain() {
+    let (source, _writer) = fake_input_method_source([]);
+
+    assert_eq!(
+        TextInjector::capabilities(&source).replacement_guarantee,
+        wayexpand_core::ReplacementGuarantee::Atomic
+    );
+    assert!(source.replace_error_may_have_applied());
+}
+
+#[test]
 fn input_method_source_disconnect_is_reported_as_retryable() {
     let (mut source, writer) = fake_input_method_source([]);
     drop(writer);
