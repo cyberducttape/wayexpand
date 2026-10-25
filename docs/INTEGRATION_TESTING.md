@@ -52,6 +52,11 @@ with the Sway harness in `scripts/e2e-lib.sh`):
   exercised. The standard E2E suite omits the capability-gated Unicode probe;
   `doctor --certify` explicitly runs it.
 
+The JSON report includes the WayExpand build version, commit, and Unix run
+timestamp so an archived result can be tied to the tested binary. Its scope
+and limitations are included in the report; a private headless result is not
+evidence of physical keyboard capture or certification on the active desktop.
+
 | Scenario | Shows |
 |---|---|
 | `expansion-replaces-trigger` | The trigger is erased and the replacement typed into a real window |

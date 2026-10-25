@@ -18,6 +18,9 @@ command -v jq >/dev/null 2>&1 || {
 "$binary" doctor --certify --json >"$report"
 jq -e '
     .schema == 1 and
+    (.generated_at_unix | type == "number" and . > 0) and
+    (.wayexpand.version | type == "string" and length > 0) and
+    (.wayexpand.commit | type == "string" and length > 0) and
     .overall == "partial" and
     .certified == false and
     .test_session.desktop == "KDE Plasma / Wayland" and

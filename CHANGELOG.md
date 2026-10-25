@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Isolated `wayexpand doctor --certify` reports now include the exact
+  WayExpand build version, commit, and run timestamp, making saved compatibility
+  results traceable to the binary that produced them.
 - In managed safe mode, snippet-pack imports can no longer replace the
   organization’s required signer list with a caller-supplied `--signers` file.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids

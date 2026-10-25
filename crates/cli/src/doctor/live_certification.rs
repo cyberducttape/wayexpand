@@ -9,6 +9,7 @@ use crate::*;
 use std::{
     collections::BTreeMap,
     process::{Command, Stdio},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const SCENARIOS: &[&str] = &[
@@ -343,8 +344,17 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
     } else {
         "incomplete"
     };
+    let generated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     serde_json::json!({
         "schema": 1,
+        "generated_at_unix": generated_at_unix,
+        "wayexpand": {
+            "version": env!("WAYEXPAND_BUILD_VERSION"),
+            "commit": env!("WAYEXPAND_COMMIT"),
+        },
         "overall": overall,
         "certified": false,
         "test_session": {
@@ -387,6 +397,11 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
 
 fn print_human_report(report: &serde_json::Value) {
     println!("WayExpand isolated desktop compatibility report");
+    println!(
+        "  WayExpand: {} (commit {})",
+        report["wayexpand"]["version"].as_str().unwrap_or("unknown"),
+        report["wayexpand"]["commit"].as_str().unwrap_or("unknown")
+    );
     println!(
         "  Desktop: {}",
         report["test_session"]["desktop"]
@@ -535,6 +550,12 @@ mod tests {
             reason: None,
         });
 
+        assert!(report["generated_at_unix"].as_u64().unwrap() > 0);
+        assert_eq!(
+            report["wayexpand"]["version"],
+            env!("WAYEXPAND_BUILD_VERSION")
+        );
+        assert_eq!(report["wayexpand"]["commit"], env!("WAYEXPAND_COMMIT"));
         assert_eq!(report["test_session"]["capture_route"], "stdin simulation");
         assert_eq!(report["test_session"]["capture_source"], "stdin");
         assert_eq!(report["test_session"]["injection_backend"], "libei");
