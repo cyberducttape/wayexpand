@@ -1,0 +1,70 @@
+{
+  "evidence_type": "headless-production-daemon-e2e",
+  "observed_at": "2026-10-24T20:12:09-06:00",
+  "source_commit": "99b4bdc50",
+  "compositor": "KWin",
+  "compositor_version": "kwin 6.6.6",
+  "session": "private-headless-kwin-wayland",
+  "capture": "simulated-stdin",
+  "injection": "production-libei-backend",
+  "insertion_mode": "libei keysym fallback",
+  "backend_mode": "ei_keyboard keysym fallback (12ms key pacing)",
+  "window_tracking": "production-kwin-window-tracker",
+  "certification_status": "not-certified",
+  "limitations": [
+    "Does not exercise physical keyboard capture.",
+    "Does not represent a user desktop session.",
+    "Does not test suspend/resume or password-field signaling.",
+    "The negotiated output mode was ei_keyboard keysym fallback; Unicode insertion was not tested."
+  ],
+  "scenario_count": 11,
+  "passed": 11,
+  "failed": 0,
+  "unverified": 0,
+  "scenarios": [
+    {
+      "scenario": "expansion-replaces-trigger",
+      "result": "pass"
+    },
+    {
+      "scenario": "word-boundary-reinserts-delimiter",
+      "result": "pass"
+    },
+    {
+      "scenario": "cursor-placement",
+      "result": "pass"
+    },
+    {
+      "scenario": "multiline-replacement",
+      "result": "pass"
+    },
+    {
+      "scenario": "unreachable-character-is-refused",
+      "result": "pass"
+    },
+    {
+      "scenario": "app-filter-follows-focus",
+      "result": "pass"
+    },
+    {
+      "scenario": "command-expansion-completes",
+      "result": "pass"
+    },
+    {
+      "scenario": "focus-change-during-expansion",
+      "result": "pass"
+    },
+    {
+      "scenario": "target-closes-during-expansion",
+      "result": "pass"
+    },
+    {
+      "scenario": "config-reload",
+      "result": "pass"
+    },
+    {
+      "scenario": "daemon-restart",
+      "result": "pass"
+    }
+  ]
+}
