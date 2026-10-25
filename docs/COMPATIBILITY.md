@@ -468,8 +468,9 @@ side never counts as a match (`commit_matches` is then `false`).
   "response": "running",
   "source": "input-method",
   "backend": "input-method-v2",
+  "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 10,
+  "status_schema": 11,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -553,8 +554,9 @@ side never counts as a match (`commit_matches` is then `false`).
 - `response` (string): The control socket's status line, e.g. `"running"`
 - `source` (string): Active input source (`"input-method"`, `"stdin"`, `"evdev"`, ...)
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
+- `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file

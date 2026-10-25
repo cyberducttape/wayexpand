@@ -130,12 +130,13 @@ fn backup_refuses_existing_destination_atomically() {
 #[test]
 fn status_json_preserves_types_and_ignores_banner() {
     let value = status_as_json(
-        "running\nsource=stdin\nstatus_schema=10\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\nclipboard_reads_total=6\nclipboard_read_max_duration_us=125000\n",
+        "running\nsource=stdin\nroute_id=stdin-test\nstatus_schema=11\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\nclipboard_reads_total=6\nclipboard_read_max_duration_us=125000\n",
     )
     .unwrap();
     assert_eq!(value["response"], "running");
     assert_eq!(value["source"], "stdin");
-    assert_eq!(value["status_schema"], 10);
+    assert_eq!(value["route_id"], "stdin-test");
+    assert_eq!(value["status_schema"], 11);
     assert_eq!(value["daemon_commit"], "test-commit");
     assert_eq!(value["paused"], true);
     assert_eq!(value["command_queue_depth"], 3);
@@ -324,8 +325,9 @@ fn status_json_matches_documented_stable_contract() {
     let daemon_response = "running\n\
          source=input-method\n\
          backend=input-method-v2\n\
+         route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=10\n\
+         status_schema=11\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\

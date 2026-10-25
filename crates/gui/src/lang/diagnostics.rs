@@ -26,6 +26,14 @@ impl Strings {
         }
     }
 
+    pub fn route_id(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Route ID",
+            Language::Indonesian => "ID rute",
+            Language::German => "Routen-ID",
+        }
+    }
+
     pub fn compositor_version(&self) -> &'static str {
         match self.lang {
             Language::English => "Compositor",

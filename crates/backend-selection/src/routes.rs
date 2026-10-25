@@ -117,6 +117,22 @@ pub fn route_contract_for(source: &str, injection: &str) -> Option<&'static Rout
         .find(|route| route.capture == capture && route.injection == injection)
 }
 
+/// Return the stable catalog ID for a capture/injection pair reported by a
+/// running daemon. The stdin route is a test harness and is intentionally not
+/// part of the selectable production route catalog.
+pub fn route_id_for(source: &str, injection: &str) -> &'static str {
+    if source == "stdin" {
+        return "stdin-test";
+    }
+    route_contract_for(source, injection)
+        .map(|route| route.id.as_str())
+        .unwrap_or("unknown")
+}
+
+pub fn route_contract_by_id(id: &str) -> Option<&'static RouteContract> {
+    route_catalog().routes.iter().find(|route| route.id == id)
+}
+
 impl RecommendedRoute {
     pub fn contract(self) -> &'static RouteContract {
         self.0

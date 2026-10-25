@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=10\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=11\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(capabilities.inject_full_unicode, Some(true));
         assert_eq!(capabilities.inject_key_passthrough, None);
         assert_eq!(
-            super::DaemonCapabilities::parse("status_schema=10\nstate=connected\n"),
+            super::DaemonCapabilities::parse("status_schema=11\nstate=connected\n"),
             None
         );
     }
@@ -614,7 +614,7 @@ mod tests {
             }
         );
         assert_eq!(
-            super::daemon_build_state("status_schema=10\n"),
+            super::daemon_build_state("status_schema=11\n"),
             super::DaemonBuildState::Unverified
         );
         assert_eq!(
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=10\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=11\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_insertion_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=10\ninsertion_assurance=compatibility\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
+            "status_schema=11\ninsertion_assurance=compatibility\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
         )
         .unwrap();
         assert_eq!(
@@ -653,7 +653,7 @@ mod tests {
         assert_eq!(capabilities.output_uncertain_total, Some(1));
 
         let blocked = super::DaemonCapabilities::parse(
-            "status_schema=10\ninsertion_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+            "status_schema=11\ninsertion_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
         )
         .unwrap();
         assert_eq!(

@@ -182,8 +182,9 @@ Still open:
       adapters (Sway, Hyprland) as fallbacks, and an optional GNOME Shell
       extension exposing a small authenticated window-identity API. Missing
       identity must keep failing closed.
-- [ ] Publish a canonical `route_id` in daemon status (additive schema change)
-      so consumers stop reconstructing routes from `source`/`backend`.
+- [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
+      resolves route contracts from that ID instead of reconstructing routes
+      from `source`/`backend`.
 - [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
       template library and parsed templates, parsed hotkeys, normalized IDs,
       policy-resolved settings) during validation, and have the engine, reload

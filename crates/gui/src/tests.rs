@@ -1451,7 +1451,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     let mut app = GuiApp::load(path.clone()).unwrap();
     app.diagnostics_open = true;
     app.daemon_reachable = Some(true);
-    app.daemon_status = "source=evdev · backend=libei".into();
+    app.daemon_status = "source=evdev · backend=libei · route_id=kde-evdev-libei".into();
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
         injection_mode: Some("libei keysym fallback"),
         injection_latency_mean_us: Some(420_000),
@@ -1492,6 +1492,8 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("Keysym fallback is active"));
     assert!(semantics.contains("Matcher latency"));
     assert!(semantics.contains("Backend injection latency"));
+    assert!(semantics.contains("Route ID"));
+    assert!(semantics.contains("kde-evdev-libei"));
     assert!(semantics.contains("700 µs"));
     assert!(semantics.contains("10 µs"));
     fs::remove_file(path).unwrap();

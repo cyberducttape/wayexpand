@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Daemon status schema 11 publishes a canonical `route_id`; the GUI now
+  resolves route diagnostics from that stable ID instead of recombining source
+  and injection fields.
 - Configuration saves now distinguish a failed parent-directory sync after
   atomic replacement from a pre-commit failure, warning that the new file is
   visible but crash durability is uncertain and should be verified before retry.

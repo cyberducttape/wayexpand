@@ -41,7 +41,7 @@ use std::{
 
 use theme::Palette;
 use wayexpand_backend_selection::{
-    route_contract_for, Capabilities, RecommendedRoute, RouteBackend,
+    route_contract_by_id, Capabilities, RecommendedRoute, RouteBackend,
 };
 use wayexpand_core::{
     default_config_path, BackendState, BackendStatus, Config, ExpansionConfig, FontScale,

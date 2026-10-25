@@ -18,8 +18,9 @@ mod routes;
 use routes::{catalog_for_tests, route_rank};
 pub use routes::{
     injection_status_label, plan_routes, recommended_mode_description, recommended_route,
-    route_allowed_by_policy, route_contract_for, setup_backend_allowed, PlannedRoute,
-    RecommendedRoute, RouteBackend, RouteContract, RoutePlan, RouteStanding, SensitiveFieldSupport,
+    route_allowed_by_policy, route_contract_by_id, route_contract_for, route_id_for,
+    setup_backend_allowed, PlannedRoute, RecommendedRoute, RouteBackend, RouteContract, RoutePlan,
+    RouteStanding, SensitiveFieldSupport,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -733,7 +734,15 @@ mod tests {
     fn daemon_route_status_resolves_through_the_shared_contract() {
         let contract = route_contract_for("input-method", "input-method-v2").unwrap();
         assert_eq!(contract.id, "input-method-v2");
+        assert_eq!(route_id_for("input-method", "none"), "input-method-v2");
+        assert_eq!(
+            route_contract_by_id("input-method-v2").unwrap().id,
+            "input-method-v2"
+        );
+        assert_eq!(route_id_for("stdin", "libei"), "stdin-test");
+        assert_eq!(route_id_for("unknown", "backend"), "unknown");
         assert!(route_contract_for("unknown", "backend").is_none());
+        assert!(route_contract_by_id("unknown").is_none());
     }
 
     #[test]
@@ -792,6 +801,8 @@ mod tests {
                     .id,
                 id
             );
+            assert_eq!(route_id_for(pair.source(), pair.backend()), id);
+            assert_eq!(route_contract_by_id(id).unwrap().id, id);
         }
         assert_eq!(
             route_contract_for("evdev", "wlroots-virtual-keyboard")

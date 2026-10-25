@@ -1,9 +1,10 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
+    "route_id": "string",
     "backend_mode": "string",
     "status_schema": "integer",
     "daemon_commit": "string",

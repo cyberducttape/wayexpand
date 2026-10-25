@@ -302,9 +302,8 @@ impl GuiApp {
     pub(crate) fn active_route_contract(
         &self,
     ) -> Option<&'static wayexpand_backend_selection::RouteContract> {
-        let source = runtime::status_field(&self.daemon_status, "source")?;
-        let backend = runtime::status_field(&self.daemon_status, "backend")?;
-        route_contract_for(&source, &backend)
+        let route_id = runtime::status_field(&self.daemon_status, "route_id")?;
+        route_contract_by_id(&route_id)
     }
 
     /// The search field, a clear button, and its field-scope menu, filling

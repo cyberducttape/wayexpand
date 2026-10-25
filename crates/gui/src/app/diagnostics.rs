@@ -88,6 +88,12 @@ impl GuiApp {
                 );
                 dashboard_value(
                     &mut columns[0],
+                    self.strings.route_id(),
+                    compact_status_value(&self.daemon_status, "route_id").unwrap_or("unknown"),
+                    palette.muted,
+                );
+                dashboard_value(
+                    &mut columns[1],
                     self.strings.compositor_version(),
                     &self.compositor_info,
                     palette.muted,
