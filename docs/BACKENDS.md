@@ -212,11 +212,14 @@ boundary. This needs to know which window is focused, and unlike
 text capture and injection there is no Wayland protocol for that which
 works across compositors: `wlr-foreign-toplevel-management-unstable-v1`
 is implemented by some wlroots compositors (Sway, Hyprland), but WayExpand
-does not currently ship a tracker using it. KDE Plasma's KWin
-implements neither it nor the newer `ext-foreign-toplevel-list-v1`
-staging protocol -- a deliberate privacy stance, the same one that keeps
-KWin off `zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1`
-(see the evdev fallback above).
+does not currently ship a tracker using it. KDE Plasma's KWin implements
+neither it nor the newer `ext-foreign-toplevel-list-v1` staging protocol.
+Input-method and virtual-keyboard protocol availability must be checked in the
+configured session: KWin lets users select a virtual keyboard, and a headless
+run without that session configuration is not a universal KWin capability
+result. Use `wayexpand doctor` (or `wayland-info`) after configuring the
+intended input method before choosing a route. See
+[KDE's Virtual Keyboard settings](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinvirtualkeyboard/).
 
 `wayexpand-backend-kwin-window` bridges this gap for KDE Plasma the only
 way currently available: KWin's scripting engine, reached over the session

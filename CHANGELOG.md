@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Isolated `wayexpand doctor --certify` reports now include the exact
   WayExpand build version, commit, and run timestamp, making saved compatibility
   results traceable to the binary that produced them.
+- Scoped KWin protocol-availability documentation to the tested headless
+  session; a default-configured private compositor run is not a universal
+  capability result for a user's configured virtual keyboard.
 - In managed safe mode, snippet-pack imports can no longer replace the
   organization’s required signer list with a caller-supplied `--signers` file.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids

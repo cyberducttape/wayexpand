@@ -88,12 +88,17 @@ tracking on the tested KWin version, in a headless session, with capture
 simulated. They are not compositor certification and do not replace the
 real-desktop procedures below.
 
-Findings from KWin 6.6.6 that this harness surfaced:
+Findings from the private, default-configured KWin 6.6.6 session that this
+harness surfaced:
 
-- KWin implements `zwp_input_method_v1` and `org_kde_kwin_fake_input`, but not
-  `zwp_input_method_v2` or `zwp_virtual_keyboard_v1`, so WayExpand's
-  input-method-v2 and wlroots routes cannot run on KWin; on KDE the output
-  route is libei.
+- This headless session advertised `zwp_input_method_v1` and
+  `org_kde_kwin_fake_input`, but not `zwp_input_method_v2` or
+  `zwp_virtual_keyboard_v1`. This observation applies to the tested KWin
+  version and session configuration only. KDE allows users to select a
+  virtual keyboard, so probe the configured desktop session before concluding
+  that an input-method route is unavailable; see
+  [KDE's Virtual Keyboard settings](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinvirtualkeyboard/).
+- In this headless run, the WayExpand output route was libei.
 - KWin's EIS offers no `ei_text`, so libei output is limited to characters
   the current keyboard layout can type.
 
