@@ -32,6 +32,49 @@ fn key_code(name: &str) -> Option<u32> {
     })
 }
 
+fn ascii_key_code(character: char) -> Option<u32> {
+    Some(match character {
+        'a' => 30,
+        'b' => 48,
+        'c' => 46,
+        'd' => 32,
+        'e' => 18,
+        'f' => 33,
+        'g' => 34,
+        'h' => 35,
+        'i' => 23,
+        'j' => 36,
+        'k' => 37,
+        'l' => 38,
+        'm' => 50,
+        'n' => 49,
+        'o' => 24,
+        'p' => 25,
+        'q' => 16,
+        'r' => 19,
+        's' => 31,
+        't' => 20,
+        'u' => 22,
+        'v' => 47,
+        'w' => 17,
+        'x' => 45,
+        'y' => 21,
+        'z' => 44,
+        '0' => 11,
+        '1' => 2,
+        '2' => 3,
+        '3' => 4,
+        '4' => 5,
+        '5' => 6,
+        '6' => 7,
+        '7' => 8,
+        '8' => 9,
+        '9' => 10,
+        ' ' => 57,
+        _ => return None,
+    })
+}
+
 fn connect() -> Result<Box<dyn TextInjector>> {
     match std::env::var("WX_E2E_TYPIST").as_deref() {
         Ok("libei") | Err(std::env::VarError::NotPresent) => Ok(Box::new(
@@ -52,19 +95,28 @@ fn connect() -> Result<Box<dyn TextInjector>> {
 fn main() -> Result<()> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let mut injector = connect()?;
-    let result = match arguments.as_slice() {
-        [mode, text] if mode == "text" => injector.insert(text),
+    let result: Result<(), String> = match arguments.as_slice() {
+        [mode, text] if mode == "text" => injector.insert(text).map_err(|error| error.message),
+        [mode, text] if mode == "keys" => text.chars().try_for_each(|character| {
+            let code = ascii_key_code(character)
+                .ok_or_else(|| format!("unsupported test key {character:?}"))?;
+            injector.inject_key(code).map_err(|error| error.message)
+        }),
         [mode, name, rest @ ..] if mode == "key" && rest.len() <= 1 => {
-            let code = key_code(name).with_context(|| format!("unknown key {name:?}"))?;
+            let Some(code) = key_code(name) else {
+                bail!("unknown key {name:?}");
+            };
             let count: usize = match rest.first() {
-                Some(count) => count.parse().context("COUNT must be a number")?,
+                Some(count) => count
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("COUNT must be a number"))?,
                 None => 1,
             };
-            (0..count).try_for_each(|_| injector.inject_key(code))
+            (0..count).try_for_each(|_| injector.inject_key(code).map_err(|error| error.message))
         }
-        _ => bail!("usage: wx-e2e-type text TEXT | wx-e2e-type key NAME [COUNT]"),
+        _ => bail!("usage: wx-e2e-type text TEXT | keys ASCII | key NAME [COUNT]"),
     };
-    let outcome = result.map_err(|error| anyhow::anyhow!("typing failed: {}", error.message));
+    let outcome = result.map_err(|message| anyhow::anyhow!("typing failed: {message}"));
     if injector.name() == "wlroots-virtual-keyboard" {
         // Sway 1.11 delivers none of a virtual keyboard's keys when its
         // client disconnects right after sending them. The daemon's keyboard

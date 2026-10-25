@@ -21,6 +21,7 @@ export LIBEI_SOCKET="$XDG_RUNTIME_DIR/eis.sock"
 export WX_E2E_TYPIST=libei
 e2e_output_backend=libei
 e2e_compatibility_mode=tracked-focus
+e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 
 # Activate the window whose app_id is $1 through KWin scripting.
 activate() {
@@ -47,6 +48,14 @@ EOF
 }
 
 route_ready() {
+    if [ "$e2e_input_source" = input-method ]; then
+        case "$1" in
+            *"source=input-method"*"backend=input-method-v2"*"state=connected"*"window_tracker_connected=true"*)
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    fi
     # Output is connected once the route reports its assurance, and focus
     # checks need the KWin tracker.
     case "$1" in
@@ -86,6 +95,10 @@ if ! wait_until 50 test -S "$LIBEI_SOCKET"; then
     exit 0
 fi
 
-run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
+if [ "$e2e_input_source" = input-method ]; then
+    run_scenarios "input-method-expansion input-method-password-field"
+else
+    run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart"
+fi

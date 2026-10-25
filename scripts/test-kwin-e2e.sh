@@ -20,10 +20,23 @@ set -euo pipefail
 
 keep=false
 allow_unicode_unverified=false
+input_source=stdin
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --keep) keep=true; shift ;;
         --allow-unverified-unicode) allow_unicode_unverified=true; shift ;;
+        --source=stdin|--source=input-method)
+            input_source=${1#--source=}
+            shift
+            ;;
+        --source)
+            input_source=${2:?missing value for --source}
+            [ "$input_source" = stdin ] || [ "$input_source" = input-method ] || {
+                printf '%s\n' 'error: --source must be stdin or input-method' >&2
+                exit 2
+            }
+            shift 2
+            ;;
         *) break ;;
     esac
 done
@@ -150,6 +163,7 @@ env -i \
     E2E_APP_BIN="$app_bin" \
     E2E_WORK="$work" \
     E2E_RESULTS="$results" \
+    E2E_INPUT_SOURCE="$input_source" \
     E2E_SCENARIOS="$*" \
     timeout 900 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \

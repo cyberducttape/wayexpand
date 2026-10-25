@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added an opt-in KWin input-method E2E path with a text-input-v3 target and
+  simulated key capture for replacement and password-field suppression. The
+  current headless KWin setup does not expose input-method-v2, so these checks
+  remain conditional and are not counted as certification or CI coverage.
 - Daemon status schema 11 publishes a canonical `route_id`; the GUI now
   resolves route diagnostics from that stable ID instead of recombining source
   and injection fields.

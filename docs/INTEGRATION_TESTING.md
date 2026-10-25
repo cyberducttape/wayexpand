@@ -62,6 +62,17 @@ timestamp so an archived result can be tied to the tested binary. Its scope
 and limitations are included in the report; a private headless result is not
 evidence of physical keyboard capture or certification on the active desktop.
 
+An experimental input-method capture path is available with
+`scripts/test-kwin-e2e.sh --source=input-method`. It uses the daemon's
+input-method-v2 route and exercises trigger capture, replacement, and password
+field suppression through a text-input-v3 test client. The KWin virtual
+session used in CI does not currently advertise the input-method-v2 manager,
+so these cases cannot run there and are not part of the CI gate. On that
+session they are reported as unverified before daemon startup. Run them only
+under a KWin session configured with a virtual keyboard that exposes
+input-method-v2; passing still represents headless simulated-input evidence,
+not physical keyboard certification.
+
 | Scenario | Shows |
 |---|---|
 | `expansion-replaces-trigger` | The trigger is erased and the replacement typed into a real window |

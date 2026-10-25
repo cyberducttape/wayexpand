@@ -26,6 +26,10 @@ use wayland_client::{
     },
     Connection, Dispatch, QueueHandle, WEnum,
 };
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
+    zwp_text_input_v3::{ContentHint, ContentPurpose, ZwpTextInputV3},
+};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use xkbcommon::xkb;
 
@@ -38,11 +42,19 @@ struct Sink {
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
+    text_input_manager: Option<ZwpTextInputManagerV3>,
+    seat: Option<wl_seat::WlSeat>,
+    text_input: Option<ZwpTextInputV3>,
     surface: Option<wl_surface::WlSurface>,
     buffer: Option<wl_buffer::WlBuffer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     xkb: Option<xkb::State>,
     focused: bool,
+    text_input_enabled: bool,
+    password_field: bool,
+    text_input_active: bool,
+    pending_commit: Option<String>,
+    pending_delete: Option<(u32, u32)>,
     text: Vec<char>,
     cursor: usize,
     keys: u64,
@@ -54,6 +66,8 @@ impl Sink {
         let state = serde_json::json!({
             "app_id": self.app_id,
             "focused": self.focused,
+            "text_input_active": self.text_input_active,
+            "content_purpose": if self.password_field { "password" } else { "normal" },
             "text": self.text.iter().collect::<String>(),
             "cursor": self.cursor,
             "keys": self.keys,
@@ -109,6 +123,74 @@ impl Sink {
             self.text.insert(self.cursor, character);
             self.cursor += 1;
         }
+    }
+
+    fn start_text_input(&mut self, qh: &QueueHandle<Self>) -> Result<()> {
+        let (Some(manager), Some(seat)) = (self.text_input_manager.as_ref(), self.seat.as_ref())
+        else {
+            bail!("compositor lacks text-input-v3 or a Wayland seat");
+        };
+        let text_input = manager.get_text_input(seat, qh, ());
+        self.text_input = Some(text_input);
+        Ok(())
+    }
+
+    fn enable_text_input(&self) {
+        let Some(text_input) = self.text_input.as_ref() else {
+            return;
+        };
+        text_input.enable();
+        self.set_text_input_content(text_input);
+        self.set_surrounding_text(text_input);
+        text_input.commit();
+    }
+
+    fn set_text_input_content(&self, text_input: &ZwpTextInputV3) {
+        if self.password_field {
+            text_input.set_content_type(
+                ContentHint::SensitiveData | ContentHint::HiddenText,
+                ContentPurpose::Password,
+            );
+        } else {
+            text_input.set_content_type(ContentHint::empty(), ContentPurpose::Normal);
+        }
+    }
+
+    fn set_surrounding_text(&self, text_input: &ZwpTextInputV3) {
+        let text: String = self.text.iter().collect();
+        let cursor_byte: i32 = self.text[..self.cursor]
+            .iter()
+            .map(|character| character.len_utf8())
+            .sum::<usize>()
+            .try_into()
+            .unwrap_or(i32::MAX);
+        text_input.set_surrounding_text(text, cursor_byte, cursor_byte);
+    }
+
+    fn apply_text_input_batch(&mut self) {
+        if let Some((before, after)) = self.pending_delete.take() {
+            let cursor_byte = self.text[..self.cursor]
+                .iter()
+                .map(|character| character.len_utf8())
+                .sum::<usize>();
+            let text: String = self.text.iter().collect();
+            let start_byte = cursor_byte.saturating_sub(before as usize);
+            let end_byte = cursor_byte.saturating_add(after as usize).min(text.len());
+            if text.is_char_boundary(start_byte) && text.is_char_boundary(end_byte) {
+                let start = text[..start_byte].chars().count();
+                let end = text[..end_byte].chars().count();
+                self.text.drain(start..end);
+                self.cursor = start;
+            }
+        }
+        if let Some(text) = self.pending_commit.take() {
+            self.insert(&text);
+        }
+        if let Some(text_input) = self.text_input.clone() {
+            self.set_surrounding_text(&text_input);
+            text_input.commit();
+        }
+        self.write_state();
     }
 
     fn draw(&mut self, qh: &QueueHandle<Self>) -> Result<()> {
@@ -180,10 +262,57 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Sink {
             "wl_shm" => state.shm = Some(registry.bind(name, 1, qh, ())),
             "xdg_wm_base" => state.wm_base = Some(registry.bind(name, version.min(2), qh, ())),
             "wl_seat" => {
-                let _: wl_seat::WlSeat = registry.bind(name, version.min(7), qh, ());
+                state.seat = Some(registry.bind(name, version.min(7), qh, ()));
+            }
+            "zwp_text_input_manager_v3" => {
+                state.text_input_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
             _ => {}
         }
+    }
+}
+
+impl Dispatch<ZwpTextInputManagerV3, ()> for Sink {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTextInputManagerV3,
+        _: <ZwpTextInputManagerV3 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpTextInputV3, ()> for Sink {
+    fn event(
+        state: &mut Self,
+        _: &ZwpTextInputV3,
+        event: <ZwpTextInputV3 as wayland_client::Proxy>::Event,
+        _: &(),
+        connection: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::Event;
+        match event {
+            Event::Enter { .. } => {
+                state.text_input_active = true;
+                state.write_state();
+            }
+            Event::Leave { .. } => {
+                state.text_input_active = false;
+                state.write_state();
+            }
+            Event::CommitString { text } => state.pending_commit = text,
+            Event::DeleteSurroundingText {
+                before_length,
+                after_length,
+            } => state.pending_delete = Some((before_length, after_length)),
+            Event::Done { .. } => state.apply_text_input_batch(),
+            Event::PreeditString { .. } => {}
+            _ => {}
+        }
+        let _ = connection.flush();
     }
 }
 
@@ -225,7 +354,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Sink {
         _: &wl_keyboard::WlKeyboard,
         event: wl_keyboard::Event,
         _: &(),
-        _: &Connection,
+        connection: &Connection,
         _: &QueueHandle<Self>,
     ) {
         match event {
@@ -260,10 +389,21 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Sink {
             }
             wl_keyboard::Event::Enter { .. } => {
                 state.focused = true;
+                if state.text_input_enabled {
+                    state.enable_text_input();
+                    let _ = connection.flush();
+                }
                 state.write_state();
             }
             wl_keyboard::Event::Leave { .. } => {
                 state.focused = false;
+                if state.text_input_enabled {
+                    if let Some(text_input) = state.text_input.as_ref() {
+                        text_input.disable();
+                        text_input.commit();
+                        let _ = connection.flush();
+                    }
+                }
                 state.write_state();
             }
             wl_keyboard::Event::Key {
@@ -377,11 +517,24 @@ ignore_events!(
 
 fn main() -> Result<()> {
     let mut arguments = std::env::args().skip(1);
-    let (Some(app_id), Some(state_path), None) =
-        (arguments.next(), arguments.next(), arguments.next())
-    else {
-        bail!("usage: wx-e2e-sink APP_ID STATE_FILE");
+    let Some(app_id) = arguments.next() else {
+        bail!("usage: wx-e2e-sink APP_ID STATE_FILE [--text-input] [--password]");
     };
+    let Some(state_path) = arguments.next() else {
+        bail!("usage: wx-e2e-sink APP_ID STATE_FILE [--text-input] [--password]");
+    };
+    let mut text_input_enabled = false;
+    let mut password_field = false;
+    for argument in arguments {
+        match argument.as_str() {
+            "--text-input" => text_input_enabled = true,
+            "--password" => {
+                text_input_enabled = true;
+                password_field = true;
+            }
+            _ => bail!("unknown wx-e2e-sink option {argument:?}"),
+        }
+    }
     let connection = Connection::connect_to_env().context("connecting to Wayland")?;
     let mut queue = connection.new_event_queue();
     let qh = queue.handle();
@@ -392,11 +545,19 @@ fn main() -> Result<()> {
         compositor: None,
         shm: None,
         wm_base: None,
+        text_input_manager: None,
+        seat: None,
+        text_input: None,
         surface: None,
         buffer: None,
         keyboard: None,
         xkb: None,
         focused: false,
+        text_input_enabled,
+        password_field,
+        text_input_active: false,
+        pending_commit: None,
+        pending_delete: None,
         text: Vec::new(),
         cursor: 0,
         keys: 0,
@@ -413,6 +574,10 @@ fn main() -> Result<()> {
     toplevel.set_title(format!("WayExpand e2e sink {app_id}"));
     surface.commit();
     sink.surface = Some(surface);
+    if text_input_enabled {
+        sink.start_text_input(&qh)?;
+        connection.flush()?;
+    }
     sink.write_state();
     while !sink.closed {
         queue.blocking_dispatch(&mut sink)?;

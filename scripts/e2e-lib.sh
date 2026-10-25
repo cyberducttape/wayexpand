@@ -24,6 +24,8 @@ app_bin=${E2E_APP_BIN:-$bin}
 work=${E2E_WORK:?}
 results=${E2E_RESULTS:?}
 scenarios=${E2E_SCENARIOS:-all}
+e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
+stdin_open=0
 
 export WAYEXPAND_SOCKET="$XDG_RUNTIME_DIR/wayexpand.sock"
 export WAYEXPAND_CONFIG="$work/expansions.toml"
@@ -68,8 +70,24 @@ sink_focused() {
     [ "$(sink_field "$1" focused)" = true ]
 }
 
+sink_text_input_active() {
+    [ "$(sink_field "$1" text_input_active)" = true ]
+}
+
 start_sink() {
-    "$bin/wx-e2e-sink" "$1" "$case_dir/$1.json" >>"$case_dir/$1.log" 2>&1 &
+    if [ "$e2e_input_source" = input-method ]; then
+        "$bin/wx-e2e-sink" "$1" "$case_dir/$1.json" --text-input >>"$case_dir/$1.log" 2>&1 &
+    else
+        "$bin/wx-e2e-sink" "$1" "$case_dir/$1.json" >>"$case_dir/$1.log" 2>&1 &
+    fi
+    sink_pids="$sink_pids $!"
+    eval "pid_$(printf '%s' "$1" | tr -c 'a-z0-9\n' _)=$!"
+    wait_until 50 test -s "$case_dir/$1.json"
+}
+
+start_password_sink() {
+    "$bin/wx-e2e-sink" "$1" "$case_dir/$1.json" --password \
+        >>"$case_dir/$1.log" 2>&1 &
     sink_pids="$sink_pids $!"
     eval "pid_$(printf '%s' "$1" | tr -c 'a-z0-9\n' _)=$!"
     wait_until 50 test -s "$case_dir/$1.json"
@@ -84,8 +102,12 @@ user_types() {
     sink=$1
     expected=$2
     text=$3
-    "$bin/wx-e2e-type" text "$text" >>"$case_dir/type.log" 2>&1 &&
-        wait_until 30 sink_text_is "$sink" "$expected"
+    if [ "$e2e_input_source" = input-method ]; then
+        "$bin/wx-e2e-type" keys "$text" >>"$case_dir/type.log" 2>&1
+    else
+        "$bin/wx-e2e-type" text "$text" >>"$case_dir/type.log" 2>&1 &&
+            wait_until 30 sink_text_is "$sink" "$expected"
+    fi
 }
 
 daemon_status() {
@@ -107,12 +129,19 @@ write_config() {
 }
 
 start_daemon() {
-    rm -f "$case_dir/stdin"
-    mkfifo -m 600 "$case_dir/stdin"
-    "$app_bin/wayexpand-daemon" --source=stdin --backend="${e2e_output_backend:?}" \
-        <"$case_dir/stdin" >>"$case_dir/daemon.log" 2>&1 &
-    daemon_pid=$!
-    exec 3>"$case_dir/stdin"
+    if [ "$e2e_input_source" = stdin ]; then
+        rm -f "$case_dir/stdin"
+        mkfifo -m 600 "$case_dir/stdin"
+        "$app_bin/wayexpand-daemon" --source=stdin --backend="${e2e_output_backend:?}" \
+            <"$case_dir/stdin" >>"$case_dir/daemon.log" 2>&1 &
+        daemon_pid=$!
+        exec 3>"$case_dir/stdin"
+        stdin_open=1
+    else
+        "$app_bin/wayexpand-daemon" --source=input-method \
+            >>"$case_dir/daemon.log" 2>&1 &
+        daemon_pid=$!
+    fi
     if ! wait_until 100 daemon_ready; then
         log "daemon never became ready: $(daemon_status | tr '\n' ' ')"
         return 1
@@ -121,7 +150,10 @@ start_daemon() {
 }
 
 stop_daemon() {
-    exec 3>&-
+    if [ "$stdin_open" -eq 1 ]; then
+        exec 3>&-
+        stdin_open=0
+    fi
     if [ -n "$daemon_pid" ]; then
         kill "$daemon_pid" 2>/dev/null || true
         wait "$daemon_pid" 2>/dev/null || true
@@ -131,7 +163,9 @@ stop_daemon() {
 
 # What the daemon's capture would have seen: one stdin line.
 daemon_sees() {
-    printf '%s\n' "$1" >&3
+    if [ "$e2e_input_source" = stdin ]; then
+        printf '%s\n' "$1" >&3
+    fi
 }
 
 daemon_alive() {
@@ -180,6 +214,36 @@ EOF
     start_sink e2e-a && start_daemon || return 2
     expand_in e2e-a "" ";sig" || return 2
     wait_until 30 sink_text_is e2e-a "Best regards"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+scenario_input_method_expansion() {
+    write_config <<'EOF'
+[[expansion]]
+trigger = "sig"
+replacement = "signature"
+EOF
+    start_sink e2e-a && start_daemon || return 2
+    wait_until 50 sink_text_input_active e2e-a || return 2
+    expand_in e2e-a "" "sig" || return 2
+    wait_until 50 sink_text_is e2e-a "signature"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+scenario_input_method_password_field() {
+    write_config <<'EOF'
+[[expansion]]
+trigger = "sig"
+replacement = "signature"
+EOF
+    start_password_sink e2e-a && start_daemon || return 2
+    wait_until 50 sink_text_input_active e2e-a || return 2
+    expand_in e2e-a "" "sig" || return 2
+    wait_until 50 sink_text_is e2e-a "sig"
     result=$?
     describe e2e-a
     return "$result"
