@@ -79,7 +79,7 @@ pub enum PackError {
     EmptyField(&'static str),
     #[error("pack has no snippets directory")]
     MissingSnippets,
-    #[error("could not read pack file {path}: {source}")]
+    #[error("pack file operation failed for {path}: {source}")]
     Read {
         path: PathBuf,
         source: std::io::Error,
@@ -118,13 +118,6 @@ pub enum PackError {
     BadSignature(String),
     #[error("could not run ssh-keygen for pack signatures: {0}")]
     SignatureTool(String),
-    #[error(
-        "pack signature {path} was replaced, but its parent directory could not be synced; durability is uncertain: {source}"
-    )]
-    SignatureDurabilityUncertain {
-        path: PathBuf,
-        source: std::io::Error,
-    },
 }
 
 fn read_bounded_text(path: &Path, maximum: usize) -> Result<String, PackError> {
@@ -697,11 +690,14 @@ fn write_signature_atomic_with_sync(
             let _ = fs::remove_file(&temporary);
             return committed;
         }
-        return sync_directory(&parent_directory).map_err(|source| {
-            PackError::SignatureDurabilityUncertain {
+        return sync_directory(&parent_directory).map_err(|error| PackError::Read {
                 path: path.to_owned(),
-                source,
-            }
+                source: io::Error::new(
+                    error.kind(),
+                    format!(
+                        "signature was replaced, but its parent directory could not be synced; durability is uncertain: {error}"
+                    ),
+                ),
         });
     }
     Err(PackError::Read {
@@ -955,8 +951,10 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            error,
-            PackError::SignatureDurabilityUncertain { .. }
+            &error,
+            PackError::Read { source, .. }
+                if source.to_string().contains("signature was replaced")
+                    && source.to_string().contains("durability is uncertain")
         ));
         assert_eq!(fs::read(&signature).unwrap(), b"new signature");
         fs::remove_dir_all(directory).unwrap();
