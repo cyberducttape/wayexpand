@@ -299,6 +299,18 @@ fn command_exists(name: &str) -> bool {
 }
 
 fn make_report(result: HarnessResult) -> serde_json::Value {
+    make_report_for_build(
+        result,
+        env!("WAYEXPAND_BUILD_VERSION"),
+        env!("WAYEXPAND_COMMIT"),
+    )
+}
+
+fn make_report_for_build(
+    result: HarnessResult,
+    build_version: &str,
+    reporter_commit: &str,
+) -> serde_json::Value {
     let mut checks = vec![check(
         "simple-trigger-insertion",
         result
@@ -417,10 +429,9 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "not-tested",
         "The test harness supplies trigger input over stdin; it does not test physical keyboard capture.",
     ));
-    let build_matches_reporter = result
-        .tested_commit
-        .as_deref()
-        .is_some_and(|commit| commit != "unknown" && commit == env!("WAYEXPAND_COMMIT"));
+    let build_matches_reporter = result.tested_commit.as_deref().is_some_and(|commit| {
+        commit != "unknown" && reporter_commit != "unknown" && commit == reporter_commit
+    });
     let build_identity_status = match result.tested_commit.as_deref() {
         Some(_) if build_matches_reporter => "passed",
         Some(_) => "failed",
@@ -475,8 +486,8 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "schema": 1,
         "generated_at_unix": generated_at_unix,
         "wayexpand": {
-            "version": env!("WAYEXPAND_BUILD_VERSION"),
-            "commit": env!("WAYEXPAND_COMMIT"),
+            "version": build_version,
+            "commit": reporter_commit,
         },
         "overall": overall,
         "certified": false,
@@ -674,25 +685,26 @@ mod tests {
 
     #[test]
     fn compatibility_report_records_the_negotiated_test_route() {
-        let report = make_report(HarnessResult {
-            status: "completed",
-            version: Some("6.6.6".into()),
-            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
-            capture_source: Some("stdin".into()),
-            injection_backend: Some("libei".into()),
-            insertion_mode: Some("libei keysym fallback".into()),
-            backend_mode: Some("ei_keyboard keysym fallback (12ms key pacing)".into()),
-            sensitive_field_detection: Some(false),
-            outcomes: all_completed_scenarios(),
-            reason: None,
-        });
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei keysym fallback".into()),
+                backend_mode: Some("ei_keyboard keysym fallback (12ms key pacing)".into()),
+                sensitive_field_detection: Some(false),
+                outcomes: all_completed_scenarios(),
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
 
         assert!(report["generated_at_unix"].as_u64().unwrap() > 0);
-        assert_eq!(
-            report["wayexpand"]["version"],
-            env!("WAYEXPAND_BUILD_VERSION")
-        );
-        assert_eq!(report["wayexpand"]["commit"], env!("WAYEXPAND_COMMIT"));
+        assert_eq!(report["wayexpand"]["version"], "test-version");
+        assert_eq!(report["wayexpand"]["commit"], "test-commit");
         assert_eq!(report["test_session"]["capture_route"], "stdin simulation");
         assert_eq!(report["test_session"]["capture_source"], "stdin");
         assert_eq!(report["test_session"]["injection_backend"], "libei");
@@ -706,7 +718,7 @@ mod tests {
         );
         assert_eq!(report["test_session"]["sensitive_field_detection"], false);
         assert_eq!(report["harness"]["build_matches_reporter"], true);
-        assert_eq!(report["harness"]["tested_commit"], env!("WAYEXPAND_COMMIT"));
+        assert_eq!(report["harness"]["tested_commit"], "test-commit");
         assert_eq!(report["certified"], false);
         assert_eq!(
             report["checks"]
@@ -751,18 +763,22 @@ mod tests {
     fn missing_focus_safety_scenario_keeps_the_report_incomplete() {
         let mut outcomes = all_completed_scenarios();
         outcomes.remove("target-closes-during-expansion");
-        let report = make_report(HarnessResult {
-            status: "completed",
-            version: Some("6.6.6".into()),
-            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
-            capture_source: Some("stdin".into()),
-            injection_backend: Some("libei".into()),
-            insertion_mode: Some("libei ei_text".into()),
-            backend_mode: Some("ei_keyboard and ei_text".into()),
-            sensitive_field_detection: Some(false),
-            outcomes,
-            reason: None,
-        });
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes,
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
 
         assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["certified"], false);
@@ -781,18 +797,22 @@ mod tests {
     fn missing_reload_scenario_keeps_the_report_incomplete() {
         let mut outcomes = all_completed_scenarios();
         outcomes.remove("config-reload");
-        let report = make_report(HarnessResult {
-            status: "completed",
-            version: Some("6.6.6".into()),
-            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
-            capture_source: Some("stdin".into()),
-            injection_backend: Some("libei".into()),
-            insertion_mode: Some("libei ei_text".into()),
-            backend_mode: Some("ei_keyboard and ei_text".into()),
-            sensitive_field_detection: Some(false),
-            outcomes,
-            reason: None,
-        });
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes,
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
 
         assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["certified"], false);
@@ -809,18 +829,22 @@ mod tests {
 
     #[test]
     fn stale_cli_cannot_claim_partial_certification_of_newer_test_binaries() {
-        let report = make_report(HarnessResult {
-            status: "completed",
-            version: Some("6.6.6".into()),
-            tested_commit: Some("different-build".into()),
-            capture_source: Some("stdin".into()),
-            injection_backend: Some("libei".into()),
-            insertion_mode: Some("libei ei_text".into()),
-            backend_mode: Some("ei_keyboard and ei_text".into()),
-            sensitive_field_detection: Some(false),
-            outcomes: all_completed_scenarios(),
-            reason: None,
-        });
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("different-build".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes: all_completed_scenarios(),
+                reason: None,
+            },
+            "test-version",
+            "reporter-commit",
+        );
 
         assert_eq!(report["overall"], "failed");
         assert_eq!(report["certified"], false);
@@ -834,5 +858,29 @@ mod tests {
                 .unwrap()["status"],
             "failed"
         );
+    }
+
+    #[test]
+    fn unknown_build_identity_cannot_claim_partial_certification() {
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("unknown".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes: all_completed_scenarios(),
+                reason: None,
+            },
+            "test-version",
+            "unknown",
+        );
+
+        assert_eq!(report["overall"], "failed");
+        assert_eq!(report["certified"], false);
+        assert_eq!(report["harness"]["build_matches_reporter"], false);
     }
 }

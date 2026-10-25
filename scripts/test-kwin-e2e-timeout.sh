@@ -14,7 +14,10 @@ for executable in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
     chmod 0755 "$helpers/$executable"
 done
 for executable in wayexpand wayexpand-daemon; do
-    : >"$apps/$executable"
+    cat >"$apps/$executable" <<'EOF'
+#!/bin/sh
+printf '%s 1.3.3 (commit timeout-test-build)\n' "${0##*/}"
+EOF
     chmod 0755 "$apps/$executable"
 done
 
