@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   queue is full and uses one deadline for queue admission and durable-write
   confirmation; queue exhaustion remains visible as a counted, explicit audit
   failure.
+- Mandatory audit now persists an action-start marker before executing a
+  command and records the result afterward. If the start marker cannot be
+  confirmed, the broker refuses to run the action.
 - Certification report unit tests now use explicit build identities, so they
   remain meaningful for source archives without Git metadata; the KWin timeout
   harness now gives its fake CLI and daemon matching identities as required by

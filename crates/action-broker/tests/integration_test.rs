@@ -216,10 +216,17 @@ timeout_ms = 60000
     );
 
     let audit_contents = fs::read_to_string(&audit_path).expect("required audit was flushed");
-    let audit: serde_json::Value = serde_json::from_str(audit_contents.trim()).unwrap();
-    assert_eq!(audit["action_id"], "stream");
-    assert_eq!(audit["exit_status"], serde_json::Value::Null);
-    assert_eq!(audit["timed_out"], false);
+    let audit: Vec<serde_json::Value> = audit_contents
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(audit.len(), 2);
+    assert_eq!(audit[0]["event_type"], "action_starting");
+    assert_eq!(audit[0]["action_id"], "stream");
+    assert_eq!(audit[1]["event_type"], "action_completed");
+    assert_eq!(audit[1]["action_id"], "stream");
+    assert_eq!(audit[1]["exit_status"], serde_json::Value::Null);
+    assert_eq!(audit[1]["timed_out"], false);
 
     fs::remove_dir_all(directory).unwrap();
 }

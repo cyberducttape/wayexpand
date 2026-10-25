@@ -353,6 +353,15 @@ fn mandatory_audit_failure_response(
     }
 }
 
+fn mandatory_audit_start_failure_response(action_id: &str) -> action_broker::ActionResponse {
+    action_broker::ActionResponse::Error(ActionError::ActionBlocked {
+        action_id: action_id.to_owned(),
+        reason:
+            "action was not run because its mandatory audit start record could not be persisted"
+                .to_owned(),
+    })
+}
+
 fn broker_health_path(socket_path: &Path) -> PathBuf {
     socket_path
         .parent()
@@ -718,17 +727,51 @@ async fn run() -> Result<()> {
             };
             let _permit = permit;
             let started_at = unix_time_ms();
-            let started = Instant::now();
-            let mut action_response = match executor
-                .execute_cancellable(request, shutdown_requested)
-                .await
-            {
-                Ok(output) => output,
-                Err(error) => action_broker::ActionResponse::Error(error),
+            let audit_start_recorded = match (&audit_logger, audit_required) {
+                (Some(logger), true) => {
+                    let event = AuditEvent {
+                        event_type: "action_starting",
+                        timestamp: started_at,
+                        request_id: &request_id,
+                        action_id: &action_id,
+                        caller_pid: peer.pid,
+                        caller_executable: peer.executable.as_deref(),
+                        policy_hash: logger.policy_hash(),
+                        start: started_at,
+                        finish: started_at,
+                        duration_ms: 0,
+                        exit_status: None,
+                        timed_out: false,
+                        output_size: 0,
+                    };
+                    match tokio::task::block_in_place(|| logger.record_required(&event)) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            error!(request_id = %request_id, error = %error, "could not persist mandatory action start record; action was not run");
+                            false
+                        }
+                    }
+                }
+                (_, false) => true,
+                (None, true) => false,
+            };
+            let action_started = Instant::now();
+            let mut action_response = if audit_start_recorded {
+                match executor
+                    .execute_cancellable(request, shutdown_requested)
+                    .await
+                {
+                    Ok(output) => output,
+                    Err(error) => action_broker::ActionResponse::Error(error),
+                }
+            } else {
+                mandatory_audit_start_failure_response(&action_id)
             };
             if let Some(logger) = &audit_logger {
+                if audit_start_recorded {
                 let finished_at = unix_time_ms();
                 let event = AuditEvent {
+                    event_type: "action_completed",
                     timestamp: started_at,
                     request_id: &request_id,
                     action_id: &action_id,
@@ -737,7 +780,7 @@ async fn run() -> Result<()> {
                     policy_hash: logger.policy_hash(),
                     start: started_at,
                     finish: finished_at,
-                    duration_ms: started.elapsed().as_millis() as u64,
+                    duration_ms: action_started.elapsed().as_millis() as u64,
                     exit_status: audit_exit_status(&action_response),
                     timed_out: matches!(
                         action_response,
@@ -762,6 +805,7 @@ async fn run() -> Result<()> {
                             &error,
                         );
                     }
+                }
                 }
                 if let Err(error) = write_broker_health(&health_path, Some(logger), audit_required, true) {
                     warn!(error = %error, path = %health_path.display(), "failed to publish broker health");
@@ -810,6 +854,18 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mandatory_audit_start_failure_blocks_action_before_execution() {
+        let response = mandatory_audit_start_failure_response("restart-service");
+        assert!(matches!(
+            response,
+            action_broker::ActionResponse::Error(ActionError::ActionBlocked {
+                action_id,
+                reason
+            }) if action_id == "restart-service" && reason.contains("action was not run")
+        ));
+    }
 
     #[test]
     fn required_audit_failure_warns_not_to_retry_a_successful_action() {

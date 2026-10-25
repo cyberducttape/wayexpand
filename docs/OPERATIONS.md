@@ -178,14 +178,16 @@ environment values, and command output. `wayexpand doctor` reports broker
 health, queue drops, and audit write failures. See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](ACTION_BROKER_ARCHITECTURE.md).
 For managed use, set `audit_required = true` under `[broker]` and configure
-`audit_path`; the broker then waits for each event to be synced before
-reporting action success. Required mode syncs file contents and the parent
+`audit_path`; the broker syncs an action-starting record before execution and
+the result record before reporting success. Each record has a two-second
+deadline, so strict mode can add up to four seconds of latency. It syncs file contents and the parent
 directory when the log is created or rotated; startup fails if that durability
 cannot be established. If the final audit write fails or cannot be confirmed
 after a successful command, the response explicitly says the action already
 completed and warns against automatic retry. Verify the action's effects
 before retrying. Unconfirmed writes also make broker audit health unhealthy.
-This mode adds filesystem sync latency and should be used only when the
+If the start record cannot be persisted, the broker refuses to execute the
+action. This mode adds filesystem sync latency and should be used only when the
 durability contract is required.
 
 **GUI command previews:** when a systemd user manager is available, the

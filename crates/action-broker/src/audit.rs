@@ -31,6 +31,7 @@ pub struct CallerIdentity {
 
 #[derive(Debug, Serialize)]
 pub struct AuditEvent<'a> {
+    pub event_type: &'a str,
     pub timestamp: u64,
     pub request_id: &'a str,
     pub action_id: &'a str,
@@ -576,6 +577,7 @@ mod tests {
         let logger = AuditLogger::new(&path, "policy-hash".to_string()).unwrap();
         logger
             .record(&AuditEvent {
+                event_type: "completed",
                 timestamp: 1,
                 request_id: "request-1",
                 action_id: "cluster-status",
@@ -593,6 +595,7 @@ mod tests {
         drop(logger);
         let line = std::fs::read_to_string(&path).expect("audit writer should flush on drop");
         let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(value["event_type"], "completed");
         assert_eq!(value["action_id"], "cluster-status");
         assert!(value.get("stdout").is_none());
         assert!(value.get("arguments").is_none());
@@ -609,6 +612,7 @@ mod tests {
         let logger = AuditLogger::new_required(&path, "policy-hash".to_string()).unwrap();
         logger
             .record_required(&AuditEvent {
+                event_type: "completed",
                 timestamp: 1,
                 request_id: "request-1",
                 action_id: "required",

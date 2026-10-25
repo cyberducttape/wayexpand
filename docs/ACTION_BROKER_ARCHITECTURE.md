@@ -156,10 +156,12 @@ What's implemented:
     dropped events and writer failures are counted and reported to the service
     journal
   - Managed deployments can set `[broker] audit_required = true`. The broker
-    waits up to two seconds for each event to be synced before returning action
-    success; file creation and rotation also sync the parent directory. Startup
-    fails if required directory durability is unavailable. If the action
-    succeeded but persistence could not be confirmed,
+    durably records an action-starting marker before execution and its result
+    afterward. Each record has a two-second bound, so strict auditing can add
+    up to four seconds to a request. File creation and rotation also sync the
+    parent directory. Startup fails if required directory durability is
+    unavailable. If the start marker cannot be persisted, the action is not
+    run. If the action succeeded but its result could not be confirmed,
     the error says the action already completed and warns against automatic
     retry; audit health becomes unhealthy.
 
@@ -299,10 +301,10 @@ missing broker service from an unknown or disabled action.
   the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
   and persistence failures are journaled. In default best-effort mode they do
   not block action execution. `audit_required = true` adds a bounded durability
-  acknowledgment before a successful response, waits within one two-second
-  deadline for temporary queue pressure to clear and for the write to sync,
-  syncs directory entries on file creation and rotation, and can add up to two
-  seconds of action-response latency. If capacity or persistence remains
+  acknowledgment before execution and its result, waits within one two-second
+  deadline per record for temporary queue pressure to clear and for the write
+  to sync, and syncs directory entries on file creation and rotation. The two
+  records can add up to four seconds of response latency. If capacity or persistence remains
   unavailable through that deadline, the loss counter is incremented and the
   caller receives an explicit uncertain-outcome response.
 
