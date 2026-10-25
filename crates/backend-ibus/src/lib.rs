@@ -116,6 +116,7 @@ pub struct IbusKeyResult {
 pub struct IbusEngineAdapter {
     engine: ExpansionEngine,
     enabled: bool,
+    output_retired: bool,
     policy: OrganizationPolicy,
     client_capabilities: u32,
     surrounding: Option<SurroundingText>,
@@ -149,6 +150,7 @@ impl IbusEngineAdapter {
         Self {
             engine,
             enabled: true,
+            output_retired: false,
             policy,
             client_capabilities: 0,
             surrounding: None,
@@ -303,10 +305,12 @@ impl IbusEngineAdapter {
         Ok(())
     }
 
-    /// A context gained focus. ibus-daemon follows FocusIn with Enable,
-    /// SetCapabilities and SetContentType, so capture stays off until that
-    /// content type arrives; a refocus never reuses an older field's type.
+    /// A context gained focus. This is the only lifecycle event that clears
+    /// output retirement after an uncertain partial emission. ibus-daemon
+    /// follows FocusIn with Enable, SetCapabilities and SetContentType, so
+    /// capture stays off until that content type arrives.
     pub fn focus_in(&mut self) {
+        self.output_retired = false;
         self.enabled = true;
         self.surrounding = None;
         self.engine
@@ -318,6 +322,15 @@ impl IbusEngineAdapter {
         self.surrounding = None;
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
+    }
+
+    /// Apply IBus `Enable` without treating it as proof that focus changed.
+    /// In particular, it cannot reactivate an engine retired after uncertain
+    /// output; only [`Self::focus_in`] clears that latch.
+    pub fn enable(&mut self) {
+        if !self.output_retired {
+            self.enabled = true;
+        }
     }
 
     /// IBus `Reset`: the cursor may have moved, so the trigger buffer and the
@@ -333,6 +346,7 @@ impl IbusEngineAdapter {
     /// so an emission error cannot prove the client document is unchanged.
     /// A fresh focus lifecycle is required before matching resumes.
     pub fn output_failed(&mut self) {
+        self.output_retired = true;
         self.enabled = false;
         self.reset();
     }
@@ -1398,6 +1412,7 @@ timeout_ms = 1000
     fn output_failure_disables_matching_until_a_new_focus_lifecycle() {
         let mut adapter = adapter();
         adapter.output_failed();
+        adapter.enable();
         assert!(!adapter.process_key_event(':' as u32, 0, 0).handled);
 
         // IBus calls FocusIn, Enable, capabilities, and content type for a

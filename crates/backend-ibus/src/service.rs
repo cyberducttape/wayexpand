@@ -315,7 +315,7 @@ impl EngineObject {
     }
     async fn enable(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
-            adapter.focus_in();
+            adapter.enable();
         }
         self.require_surrounding_text().await;
     }
@@ -670,6 +670,7 @@ replacement = "signature"
         // The service must retire this engine rather than processing a
         // partial trigger if more keys arrive in the same focus context.
         assert!(!zbus::block_on(engine.process_key_event('s' as u32, 0, 0)));
+        zbus::block_on(engine.enable());
         assert!(
             !adapter
                 .lock()
