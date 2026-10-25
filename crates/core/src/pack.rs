@@ -12,7 +12,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
@@ -589,6 +589,73 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
     })
 }
 
+fn write_signature_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "signature target must be a regular, non-symlink file",
+                ));
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error);
+        }
+    }
+    let parent_directory = fs::File::open(parent)?;
+    if !parent_directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotADirectory,
+            "signature parent is not a directory",
+        ));
+    }
+
+    for attempt in 0..16 {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary = parent.join(format!(
+            ".{}.tmp.{}.{}.{}",
+            SIGNATURE_FILE,
+            std::process::id(),
+            nonce,
+            attempt
+        ));
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            file.write_all(contents)?;
+            file.sync_all()?;
+            fs::rename(&temporary, path)?;
+            parent_directory.sync_all()
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        return result;
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a unique signature temporary file",
+    ))
+}
+
 /// Sign a pack with an SSH private key, writing [`SIGNATURE_FILE`].
 pub fn sign_pack(path: impl AsRef<Path>, key: &Path) -> Result<(), PackError> {
     let path = path.as_ref();
@@ -605,7 +672,7 @@ pub fn sign_pack(path: impl AsRef<Path>, key: &Path) -> Result<(), PackError> {
         ));
     }
     let signature_path = path.join(SIGNATURE_FILE);
-    fs::write(&signature_path, &output.stdout).map_err(|source| PackError::Read {
+    write_signature_atomic(&signature_path, &output.stdout).map_err(|source| PackError::Read {
         path: signature_path,
         source,
     })
@@ -781,6 +848,39 @@ mod tests {
             read_signature_tool_output(&vec![b'x'; MAX_SIGNATURE_TOOL_OUTPUT_BYTES + 1][..])
                 .is_err()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signing_refuses_a_symlink_target_and_atomically_replaces_regular_signature() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = test_pack_path();
+        fs::create_dir_all(&directory).unwrap();
+        let signature = directory.join(SIGNATURE_FILE);
+        let target = directory.join("unrelated-file");
+        fs::write(&target, b"preserve me").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        symlink(&target, &signature).unwrap();
+
+        let error = write_signature_atomic(&signature, b"signature")
+            .expect_err("a symlink must not be followed when signing");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(fs::read(&target).unwrap(), b"preserve me");
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+
+        fs::remove_file(&signature).unwrap();
+        fs::write(&signature, b"old signature").unwrap();
+        write_signature_atomic(&signature, b"new signature").unwrap();
+        assert_eq!(fs::read(&signature).unwrap(), b"new signature");
+        assert_eq!(
+            fs::metadata(&signature).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(unix)]

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Pack signing now refuses symlink/non-file signature targets and atomically
+  replaces regular signatures with private, synced output.
 - Added an Action Broker regression test proving continuous stderr output cannot
   starve the configured child-process deadline.
 - The Action Broker now poisons its audit writer if a failed batch cannot be
