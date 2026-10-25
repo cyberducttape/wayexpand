@@ -81,6 +81,7 @@ fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Durat
     let mut command = Command::new(program);
     command
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     configure_process_group(&mut command);
@@ -244,6 +245,22 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "registry probe waited on an inherited stdout pipe: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registry_probe_bounds_continuous_output_and_time() {
+        let started = Instant::now();
+        assert!(!registry_command_contains_engine(
+            "/bin/sh",
+            &["-c", "while :; do printf 'wayexpand\\n'; done"],
+            Duration::from_millis(500),
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "continuous registry output exceeded its bounded probe: {:?}",
             started.elapsed()
         );
     }
