@@ -118,6 +118,13 @@ pub enum PackError {
     BadSignature(String),
     #[error("could not run ssh-keygen for pack signatures: {0}")]
     SignatureTool(String),
+    #[error(
+        "pack signature {path} was replaced, but its parent directory could not be synced; durability is uncertain: {source}"
+    )]
+    SignatureDurabilityUncertain {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 fn read_bounded_text(path: &Path, maximum: usize) -> Result<String, PackError> {
@@ -589,7 +596,15 @@ fn run_ssh_keygen(args: &[&str], input: &str) -> Result<Output, PackError> {
     })
 }
 
-fn write_signature_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+fn write_signature_atomic(path: &Path, contents: &[u8]) -> Result<(), PackError> {
+    write_signature_atomic_with_sync(path, contents, |directory| directory.sync_all())
+}
+
+fn write_signature_atomic_with_sync(
+    path: &Path,
+    contents: &[u8],
+    sync_directory: impl FnOnce(&fs::File) -> io::Result<()>,
+) -> Result<(), PackError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -597,23 +612,42 @@ fn write_signature_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "signature target must be a regular, non-symlink file",
-                ));
+                return Err(PackError::Read {
+                    path: path.to_owned(),
+                    source: io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "signature target must be a regular, non-symlink file",
+                    ),
+                });
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error);
+        Err(source) => {
+            return Err(PackError::Read {
+                path: path.to_owned(),
+                source,
+            });
         }
     }
-    let parent_directory = fs::File::open(parent)?;
-    if !parent_directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotADirectory,
-            "signature parent is not a directory",
-        ));
+    let parent_directory = fs::File::open(parent).map_err(|source| PackError::Read {
+        path: parent.to_owned(),
+        source,
+    })?;
+    if !parent_directory
+        .metadata()
+        .map_err(|source| PackError::Read {
+            path: parent.to_owned(),
+            source,
+        })?
+        .is_dir()
+    {
+        return Err(PackError::Read {
+            path: parent.to_owned(),
+            source: io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "signature parent is not a directory",
+            ),
+        });
     }
 
     for attempt in 0..16 {
@@ -637,23 +671,46 @@ fn write_signature_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
+            Err(source) => {
+                return Err(PackError::Read {
+                    path: temporary,
+                    source,
+                });
+            }
         };
-        let result = (|| {
-            file.write_all(contents)?;
-            file.sync_all()?;
-            fs::rename(&temporary, path)?;
-            parent_directory.sync_all()
+        let committed = (|| -> Result<(), PackError> {
+            file.write_all(contents).map_err(|source| PackError::Read {
+                path: temporary.clone(),
+                source,
+            })?;
+            file.sync_all().map_err(|source| PackError::Read {
+                path: temporary.clone(),
+                source,
+            })?;
+            fs::rename(&temporary, path).map_err(|source| PackError::Read {
+                path: path.to_owned(),
+                source,
+            })?;
+            Ok(())
         })();
-        if result.is_err() {
+        if committed.is_err() {
             let _ = fs::remove_file(&temporary);
+            return committed;
         }
-        return result;
+        return sync_directory(&parent_directory).map_err(|source| {
+            PackError::SignatureDurabilityUncertain {
+                path: path.to_owned(),
+                source,
+            }
+        });
     }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "could not allocate a unique signature temporary file",
-    ))
+    Err(PackError::Read {
+        path: path.to_owned(),
+        source: io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique signature temporary file",
+        ),
+    })
 }
 
 /// Sign a pack with an SSH private key, writing [`SIGNATURE_FILE`].
@@ -672,10 +729,7 @@ pub fn sign_pack(path: impl AsRef<Path>, key: &Path) -> Result<(), PackError> {
         ));
     }
     let signature_path = path.join(SIGNATURE_FILE);
-    write_signature_atomic(&signature_path, &output.stdout).map_err(|source| PackError::Read {
-        path: signature_path,
-        source,
-    })
+    write_signature_atomic(&signature_path, &output.stdout)
 }
 
 /// Check that an administrator signers file can be trusted: a regular file
@@ -865,7 +919,11 @@ mod tests {
 
         let error = write_signature_atomic(&signature, b"signature")
             .expect_err("a symlink must not be followed when signing");
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(matches!(
+            error,
+            PackError::Read { source, .. }
+                if source.kind() == io::ErrorKind::PermissionDenied
+        ));
         assert_eq!(fs::read(&target).unwrap(), b"preserve me");
         assert_eq!(
             fs::metadata(&target).unwrap().permissions().mode() & 0o777,
@@ -880,6 +938,27 @@ mod tests {
             fs::metadata(&signature).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signature_directory_sync_failure_reports_that_replacement_happened() {
+        let directory = test_pack_path();
+        fs::create_dir_all(&directory).unwrap();
+        let signature = directory.join(SIGNATURE_FILE);
+        fs::write(&signature, b"old signature").unwrap();
+
+        let error = write_signature_atomic_with_sync(&signature, b"new signature", |_| {
+            Err(io::Error::other("injected directory sync failure"))
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PackError::SignatureDurabilityUncertain { .. }
+        ));
+        assert_eq!(fs::read(&signature).unwrap(), b"new signature");
         fs::remove_dir_all(directory).unwrap();
     }
 

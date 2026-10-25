@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
 - Portal-token persistence now identifies a directory-sync failure after token
   replacement as an uncertain durability outcome, rather than implying the
   restoration token was not installed.
+- Snippet-pack signing now reports when the signature was replaced but the
+  parent directory could not be synced, so callers can distinguish that
+  uncertain durability outcome from a failed signature write.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,
