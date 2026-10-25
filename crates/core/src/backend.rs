@@ -760,10 +760,18 @@ impl BackendStatus {
     pub fn permission(&self) -> &'static str {
         match self.state {
             BackendState::RequiresPermission => "Required",
+            BackendState::Available
+                if matches!(
+                    self.kind,
+                    BackendKind::Evdev | BackendKind::Libei | BackendKind::Uinput
+                ) =>
+            {
+                "Granted"
+            }
             BackendState::NotImplemented
             | BackendState::Unavailable
-            | BackendState::Implemented => "NotApplicable",
-            BackendState::Available => "Granted",
+            | BackendState::Implemented
+            | BackendState::Available => "NotApplicable",
         }
     }
 }
@@ -1227,6 +1235,34 @@ mod tests {
                 status.permission(),
                 "Granted" | "Required" | "NotApplicable"
             ));
+        }
+    }
+
+    #[test]
+    fn detected_protocols_do_not_claim_permission_grants() {
+        for kind in [
+            BackendKind::InputMethodV2,
+            BackendKind::WlrootsVirtualKeyboard,
+            BackendKind::WindowTracker,
+        ] {
+            let status = BackendStatus {
+                kind,
+                state: BackendState::Available,
+                detail: String::new(),
+            };
+            assert_eq!(status.permission(), "NotApplicable", "{kind}");
+        }
+    }
+
+    #[test]
+    fn available_permission_bearing_routes_report_a_grant() {
+        for kind in [BackendKind::Evdev, BackendKind::Libei, BackendKind::Uinput] {
+            let status = BackendStatus {
+                kind,
+                state: BackendState::Available,
+                detail: String::new(),
+            };
+            assert_eq!(status.permission(), "Granted", "{kind}");
         }
     }
 }
