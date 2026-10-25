@@ -92,16 +92,19 @@ impl GuiApp {
                     &self.compositor_info,
                     palette.muted,
                 );
-                let permission_color = if self.permission_health.starts_with("granted") {
-                    palette.success
-                } else if self
-                    .permission_health
-                    .starts_with("OS permission not reported/applicable")
-                {
-                    palette.muted
-                } else {
-                    palette.warning
-                };
+                let permission_color =
+                    if self.permission_health.starts_with("active route connected")
+                        || self.permission_health.starts_with("granted")
+                    {
+                        palette.success
+                    } else if self
+                        .permission_health
+                        .starts_with("OS permission not reported/applicable")
+                    {
+                        palette.muted
+                    } else {
+                        palette.warning
+                    };
                 dashboard_value(
                     &mut columns[1],
                     self.strings.permission_health(),

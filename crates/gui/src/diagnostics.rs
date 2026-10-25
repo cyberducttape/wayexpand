@@ -117,6 +117,20 @@ pub(crate) fn permission_health(
     if source.is_empty() || output_backend.is_empty() {
         return "unknown · daemon route unavailable".into();
     }
+    if capabilities.is_some() {
+        match status.route_state() {
+            Some(wayexpand_core::DaemonRouteState::Connected) => {
+                return format!("active route connected · {source} + {output_backend}");
+            }
+            Some(wayexpand_core::DaemonRouteState::PermissionRequired) => {
+                return format!("permission required · {source} + {output_backend}");
+            }
+            Some(wayexpand_core::DaemonRouteState::PortalRevoked) => {
+                return format!("portal authorization revoked · {source} + {output_backend}");
+            }
+            _ => {}
+        }
+    }
     let mut checks = Vec::new();
     for route in [source, output_backend] {
         if let Some(backend) = backends
@@ -253,6 +267,39 @@ mod tests {
 
     fn route_status() -> &'static str {
         "source=stdin\nbackend=libei\n"
+    }
+
+    #[test]
+    fn active_daemon_route_is_the_authority_for_current_permission_health() {
+        let backends = [
+            backend(BackendKind::Evdev, BackendState::Implemented),
+            backend(BackendKind::Libei, BackendState::Implemented),
+        ];
+        let capabilities = crate::runtime::DaemonCapabilities::default();
+        assert_eq!(
+            super::permission_health(
+                &backends,
+                Some(&capabilities),
+                "state=connected\nsource=evdev\nbackend=libei\n",
+            ),
+            "active route connected · evdev + libei"
+        );
+        assert_eq!(
+            super::permission_health(
+                &backends,
+                Some(&capabilities),
+                "state=permission_required\nsource=evdev\nbackend=libei\n",
+            ),
+            "permission required · evdev + libei"
+        );
+        assert_eq!(
+            super::permission_health(
+                &backends,
+                Some(&capabilities),
+                "state=portal_revoked\nsource=evdev\nbackend=libei\n",
+            ),
+            "portal authorization revoked · evdev + libei"
+        );
     }
 
     #[test]

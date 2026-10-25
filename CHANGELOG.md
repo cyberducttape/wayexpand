@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - The GUI diagnostics dashboard no longer reports permissions as available when
   environment probes say they are not applicable; granted, required, and
   unreported/not-applicable states are now distinct.
+- GUI permission health now follows the validated live daemon route, including
+  explicit permission-required and portal-revoked states.
 - Backend diagnostics now report a grant only for permission-bearing routes;
   compositor protocol and window-tracker availability no longer imply an OS
   permission grant.
