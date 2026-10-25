@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `doctor --certify` now validates its argument shape without removing user
+  arguments during dispatch; CLI regression coverage confirms invalid
+  positional arguments stop before the isolated compositor is started.
 - Added input-method-v2 fault injection at the atomic replacement flush
   boundary, verifying the delete, commit, and `done` requests are queued before
   an acknowledgement error is returned. Its errors remain non-replayable.

@@ -4,7 +4,7 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 binary=${1:-"$project_dir/target/debug/wayexpand"}
 report=$(mktemp "${TMPDIR:-/tmp}/wayexpand-doctor-certify.XXXXXX")
-trap 'rm -f "$report"' EXIT INT TERM
+trap 'rm -f "$report" "$report.invalid"' EXIT INT TERM
 
 command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required' >&2
@@ -14,6 +14,12 @@ command -v jq >/dev/null 2>&1 || {
     printf '%s\n' "error: WayExpand binary is not executable: $binary" >&2
     exit 2
 }
+
+if "$binary" doctor --certify unexpected >"$report.invalid" 2>&1; then
+    printf '%s\n' 'doctor --certify accepted an unexpected positional argument' >&2
+    exit 1
+fi
+grep -F 'usage: wayexpand doctor --certify [--json]' "$report.invalid" >/dev/null
 
 "$binary" doctor --certify --json >"$report"
 jq -e '

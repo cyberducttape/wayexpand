@@ -93,10 +93,8 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
 pub(crate) fn doctor_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
-    let live_certify = rest.iter().position(|argument| argument == "--certify");
-    if let Some(index) = live_certify {
-        rest.remove(index);
-        if !rest.is_empty() {
+    if rest.iter().any(|argument| argument == "--certify") {
+        if rest.len() != 1 {
             usage_bail!("usage: wayexpand doctor --certify [--json]");
         }
         return crate::doctor::live_certification::run(requested_json);
