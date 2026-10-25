@@ -85,14 +85,6 @@ fn record_kill_failure(pid: libc::pid_t, error: &io::Error) {
     }
 }
 
-pub fn kill_process_group_by_pid(pid: u32) {
-    if let Ok(pid) = libc::pid_t::try_from(pid) {
-        // Callers pass the PID of a process group leader created by
-        // `configure_process_group`.
-        kill_group_by_leader(pid);
-    }
-}
-
 pub struct ChildSupervisor {
     child: Option<Child>,
     pid: Option<u32>,
@@ -242,18 +234,18 @@ mod tests {
         let mut command = Command::new("/bin/true");
         configure_process_group(&mut command);
         let mut child = command.spawn().unwrap();
-        let pid = child.id();
+        let pid = libc::pid_t::try_from(child.id()).expect("test child PID fits pid_t");
         child.wait().unwrap();
         let before = kill_failures_total();
-        kill_process_group_by_pid(pid); // ESRCH: the group is gone
+        kill_group_by_leader(pid); // ESRCH: the group is gone
         assert_eq!(kill_failures_total(), before);
     }
 
     #[test]
     fn leader_ids_that_would_signal_everything_are_refused_and_counted() {
         let before = kill_failures_total();
-        kill_process_group_by_pid(0);
-        kill_process_group_by_pid(1);
+        kill_group_by_leader(0);
+        kill_group_by_leader(1);
         assert_eq!(kill_failures_total(), before + 2);
     }
 

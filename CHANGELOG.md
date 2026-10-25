@@ -6,7 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Process supervision now exposes child stdout without exposing raw `Child`
   lifecycle methods, preventing callers from reaping a leader before its group
-  cleanup and invalidating the PID-reuse safety guarantee.
+  cleanup and invalidating the PID-reuse safety guarantee. Raw process-group
+  killing by caller-supplied PID is no longer exported.
 - Pack signing now refuses symlink/non-file signature targets and atomically
   replaces regular signatures with private, synced output.
 - Added an Action Broker regression test proving continuous stderr output cannot
