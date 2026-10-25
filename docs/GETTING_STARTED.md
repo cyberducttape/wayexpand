@@ -27,6 +27,29 @@ text only), and app-filtered snippets currently have a working window tracker
 only on KWin. See the [support matrix](SUPPORT_MATRIX.md) before adopting
 WayExpand for composition-heavy or app-scoped workflows.
 
+### Check insertion compatibility in isolation
+
+Before relying on a route, run the reproducible desktop smoke check:
+
+```sh
+wayexpand doctor --certify
+```
+
+It starts a private, headless KWin session and verifies what isolated Wayland
+test clients actually receive. The report shows the negotiated injection
+route and marks each scenario **Pass**, **Fail**, or **Not tested**. Save the
+machine-readable report when sharing results:
+
+```sh
+wayexpand doctor --certify --json > wayexpand-compatibility.json
+```
+
+This test does not change the active desktop or configuration. It simulates
+keyboard capture, so it does not certify physical key capture, password-field
+behavior, suspend/resume, or your configured desktop session. An overall
+“Partial certification” is expected for this smoke test; use the
+[certification guide](CERTIFICATION.md) for real-session release evidence.
+
 ### 2. Open the terminal editor
 
 ```sh

@@ -6,7 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - `wayexpand doctor --certify` runs an isolated KWin test session and verifies
   received output from real Wayland test clients, reporting insertion, focus,
-  and Unicode outcomes without claiming to certify the active desktop.
+  and Unicode outcomes without claiming to certify the active desktop. The
+  getting-started guide now explains how to run it and save its JSON report.
 - Atomic input-method replacement errors after submission are now reported as
   an unknown application outcome. The daemon refuses automatic replay when a
   compositor may have applied the replacement but its acknowledgement was
