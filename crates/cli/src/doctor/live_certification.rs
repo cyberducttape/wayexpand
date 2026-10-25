@@ -16,6 +16,8 @@ const SCENARIOS: &[&str] = &[
     "expansion-replaces-trigger",
     "unicode-insertion",
     "app-filter-follows-focus",
+    "focus-change-during-expansion",
+    "target-closes-during-expansion",
     "unreachable-character-is-refused",
 ];
 
@@ -298,6 +300,24 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "Two isolated clients checked that focus and app filtering target the intended window.",
     ));
     checks.push(check(
+        "focus-change-during-expansion",
+        result
+            .outcomes
+            .get("focus-change-during-expansion")
+            .copied()
+            .unwrap_or("not-run"),
+        "A delayed expansion is cancelled after focus moves; the old trigger remains and the newly focused client receives no output.",
+    ));
+    checks.push(check(
+        "target-closes-during-expansion",
+        result
+            .outcomes
+            .get("target-closes-during-expansion")
+            .copied()
+            .unwrap_or("not-run"),
+        "Closing the target during a delayed expansion must not send output to the client that receives focus, and the daemon must remain alive.",
+    ));
+    checks.push(check(
         "unicode-insertion",
         result
             .outcomes
@@ -326,9 +346,19 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "The test harness supplies trigger input over stdin; it does not test physical keyboard capture.",
     ));
 
-    let required_checks_passed = [0, 1, 3]
-        .into_iter()
-        .all(|index| checks[index]["status"] == "passed");
+    let required_checks_passed = [
+        "simple-trigger-insertion",
+        "focus-switching",
+        "focus-change-during-expansion",
+        "target-closes-during-expansion",
+        "unavailable-unicode-refusal",
+    ]
+    .into_iter()
+    .all(|name| {
+        checks
+            .iter()
+            .any(|item| item["name"] == name && item["status"] == "passed")
+    });
     let route_evidence_complete = result.capture_source.as_deref() == Some("stdin")
         && result.injection_backend.as_deref() == Some("libei")
         && result.insertion_mode.is_some()
@@ -387,6 +417,8 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
         "simple-trigger-insertion" => "Simple trigger insertion",
         "unicode-insertion" => "Unicode insertion",
         "focus-switching" => "Focus switching",
+        "focus-change-during-expansion" => "Focus change during expansion",
+        "target-closes-during-expansion" => "Target closes during expansion",
         "unavailable-unicode-refusal" => "Unavailable character refusal",
         "suspend-resume" => "Suspend/resume",
         "keyboard-capture" => "Keyboard capture",
@@ -569,6 +601,24 @@ mod tests {
         );
         assert_eq!(report["test_session"]["sensitive_field_detection"], false);
         assert_eq!(report["certified"], false);
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "focus-change-during-expansion")
+                .unwrap()["status"],
+            "passed"
+        );
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "target-closes-during-expansion")
+                .unwrap()["status"],
+            "passed"
+        );
     }
 
     #[test]
@@ -587,5 +637,34 @@ mod tests {
 
         assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["certified"], false);
+    }
+
+    #[test]
+    fn missing_focus_safety_scenario_keeps_the_report_incomplete() {
+        let mut outcomes = all_completed_scenarios();
+        outcomes.remove("target-closes-during-expansion");
+        let report = make_report(HarnessResult {
+            status: "completed",
+            version: Some("6.6.6".into()),
+            capture_source: Some("stdin".into()),
+            injection_backend: Some("libei".into()),
+            insertion_mode: Some("libei ei_text".into()),
+            backend_mode: Some("ei_keyboard and ei_text".into()),
+            sensitive_field_detection: Some(false),
+            outcomes,
+            reason: None,
+        });
+
+        assert_eq!(report["overall"], "incomplete");
+        assert_eq!(report["certified"], false);
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "target-closes-during-expansion")
+                .unwrap()["status"],
+            "not-run"
+        );
     }
 }

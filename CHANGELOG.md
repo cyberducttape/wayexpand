@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand doctor --certify` now includes in-flight focus-change and target-
+  close checks. The partial compatibility report requires these safety
+  scenarios to pass before reporting a successful run.
 - The GUI now flags a running daemon built from a different commit and explains
   that the user service must be restarted before relying on the editor's newer
   behavior; matching or unidentifiable build identities are kept distinct.

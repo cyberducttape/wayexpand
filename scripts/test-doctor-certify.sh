@@ -34,6 +34,8 @@ jq -e '
     (.test_session.sensitive_field_detection | type == "boolean") and
     ([.checks[] | select(.name == "simple-trigger-insertion") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "focus-switching") | .status] == ["passed"]) and
+    ([.checks[] | select(.name == "focus-change-during-expansion") | .status] == ["passed"]) and
+    ([.checks[] | select(.name == "target-closes-during-expansion") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unavailable-unicode-refusal") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unicode-insertion") | .status] | length == 1 and
         (.[0] == "passed" or .[0] == "not-tested")) and
