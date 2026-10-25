@@ -292,7 +292,9 @@ impl AuditWriter {
             &mut self.file,
             open_audit_file(&self.path)?,
         ));
-        let _ = std::fs::remove_file(&rotated);
+        // On Unix rename atomically replaces an existing file or symlink.
+        // Removing the backup first would destroy the last retained audit
+        // history if moving the active log then failed.
         std::fs::rename(&self.path, &rotated)?;
         self.file = open_audit_file(&self.path)?;
         Ok(())
