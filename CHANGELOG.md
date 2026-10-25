@@ -13,6 +13,8 @@ All notable changes to WayExpand are documented here.
 - GUI command-preview transient units now grant the same resolved XDG config
   and state paths as installed daemon units, with paths quoted against spaces
   and systemd specifier expansion.
+- `doctor --json` now describes an unhealthy readiness or runtime result
+  accurately instead of implying the configuration or control socket failed.
 - In managed safe mode, snippet-pack imports can no longer replace the
   organization’s required signer list with a caller-supplied `--signers` file.
 - The GUI’s managed-action picker now bounds broker-policy reads, avoids

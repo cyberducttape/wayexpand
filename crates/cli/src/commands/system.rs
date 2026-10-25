@@ -112,7 +112,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
     if requested_json {
         let healthy = print_json_diagnostics(&config_path)?;
         if !healthy {
-            bail!("doctor found configuration, policy, or control-socket problems");
+            bail!("doctor reported unhealthy host readiness or runtime health; inspect the JSON checks for details");
         }
         return Ok(());
     }
