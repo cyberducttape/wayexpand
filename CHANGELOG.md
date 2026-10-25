@@ -24,6 +24,11 @@ All notable changes to WayExpand are documented here.
   instead of preserving a potentially inconsistent backup.
 - Snippet-pack signing no longer joins its stdin writer after the signing
   process times out, and bounds the writer completion handshake after exit.
+- Preserved a current-build `doctor --certify` report for commit
+  `bdf55e97993c`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
+  refusal checks passed using libei keysym fallback. Unicode insertion,
+  physical keyboard capture, and suspend/resume remain untested; the report is
+  partial and does not certify the active desktop.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,
