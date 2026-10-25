@@ -137,18 +137,29 @@ pub(crate) fn permission_health(
             .collect::<Vec<_>>()
             .join(" · ");
     }
+    let granted = checks
+        .iter()
+        .filter(|(_, permission)| *permission == "Granted")
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>();
+    if !granted.is_empty() {
+        return format!("granted · {}", granted.join(" · "));
+    }
+    // `NotApplicable` means the environment probe did not verify a permission
+    // grant. In particular, it must not be promoted into a green health claim
+    // merely because a daemon status response exists. Portal authorization is
+    // a separate capability and is reflected by the active route status.
     if capabilities.is_some() && !checks.is_empty() {
-        format!(
-            "available · {}",
+        return format!(
+            "OS permission not required · {} (portal/compositor authorization is separate)",
             checks
                 .iter()
-                .map(|(name, permission)| format!("{name} {permission}"))
+                .map(|(name, _)| *name)
                 .collect::<Vec<_>>()
                 .join(" · ")
-        )
-    } else {
-        "unknown · route permission was not reported".into()
+        );
     }
+    "unknown · route permission was not reported".into()
 }
 
 /// Probe compositor protocols without mutating GUI state. Keeping this work
@@ -229,6 +240,51 @@ fn ibus_detail_for(available: bool) -> String {
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
+
+    use wayexpand_core::{BackendKind, BackendState, BackendStatus};
+
+    fn backend(kind: BackendKind, state: BackendState) -> BackendStatus {
+        BackendStatus {
+            kind,
+            state,
+            detail: String::new(),
+        }
+    }
+
+    fn route_status() -> &'static str {
+        "source=stdin\nbackend=libei\n"
+    }
+
+    #[test]
+    fn permission_dashboard_does_not_call_not_applicable_available() {
+        let backends = [backend(BackendKind::Libei, BackendState::Implemented)];
+        let health = super::permission_health(
+            &backends,
+            Some(&crate::runtime::DaemonCapabilities::default()),
+            route_status(),
+        );
+        assert!(health.starts_with("OS permission not required"), "{health}");
+        assert!(!health.starts_with("available"), "{health}");
+    }
+
+    #[test]
+    fn permission_dashboard_reports_grants_and_requirements_explicitly() {
+        let capabilities = crate::runtime::DaemonCapabilities::default();
+        let granted = [backend(BackendKind::Libei, BackendState::Available)];
+        assert_eq!(
+            super::permission_health(&granted, Some(&capabilities), route_status()),
+            "granted · libei"
+        );
+
+        let required = [backend(
+            BackendKind::Libei,
+            BackendState::RequiresPermission,
+        )];
+        assert_eq!(
+            super::permission_health(&required, Some(&capabilities), route_status()),
+            "libei: permission required"
+        );
+    }
 
     #[test]
     fn socket_based_wayland_sessions_are_recognized_by_the_probe_gate() {

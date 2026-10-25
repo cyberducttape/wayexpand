@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The GUI diagnostics dashboard no longer reports permissions as available when
+  environment probes say they are not applicable; granted, required, and
+  not-required states are now distinct.
 - Isolated desktop certification reports now identify the private session as
   headless KWin instead of KDE Plasma, so saved evidence cannot imply that the
   Plasma desktop shell was exercised.

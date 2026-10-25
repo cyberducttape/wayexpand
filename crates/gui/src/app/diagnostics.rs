@@ -92,8 +92,13 @@ impl GuiApp {
                     &self.compositor_info,
                     palette.muted,
                 );
-                let permission_color = if self.permission_health.starts_with("available") {
+                let permission_color = if self.permission_health.starts_with("granted") {
                     palette.success
+                } else if self
+                    .permission_health
+                    .starts_with("OS permission not required")
+                {
+                    palette.muted
                 } else {
                     palette.warning
                 };
