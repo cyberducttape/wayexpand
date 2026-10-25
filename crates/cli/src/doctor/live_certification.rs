@@ -98,41 +98,49 @@ fn run_harness() -> HarnessResult {
     let mut insertion_mode = None;
     let mut backend_mode = None;
     let mut sensitive_field_detection = None;
-    let mut malformed_scenario_output = false;
+    let mut malformed_harness_output = false;
     for line in stdout.lines() {
         if let Some(value) = line.strip_prefix("tested-build commit ") {
-            tested_commit = nonempty(value);
+            malformed_harness_output |= record_once(&mut tested_commit, nonempty(value));
             continue;
         }
         if let Some(value) = line.strip_prefix("tested-build source-tree ") {
-            source_tree_state = match value {
-                "clean" | "dirty" | "unknown" => Some(value.to_owned()),
-                _ => None,
-            };
+            if matches!(value, "clean" | "dirty" | "unknown") {
+                malformed_harness_output |=
+                    record_once(&mut source_tree_state, Some(value.to_owned()));
+            } else {
+                malformed_harness_output = true;
+            }
             continue;
         }
         if let Some(value) = line.strip_prefix("route capture-source ") {
-            capture_source = nonempty(value);
+            malformed_harness_output |= record_once(&mut capture_source, nonempty(value));
             continue;
         }
         if let Some(value) = line.strip_prefix("route injection-backend ") {
-            injection_backend = nonempty(value);
+            malformed_harness_output |= record_once(&mut injection_backend, nonempty(value));
             continue;
         }
         if let Some(value) = line.strip_prefix("route insertion-mode ") {
-            insertion_mode = nonempty(value);
+            malformed_harness_output |= record_once(&mut insertion_mode, nonempty(value));
             continue;
         }
         if let Some(value) = line.strip_prefix("route backend-mode ") {
-            backend_mode = nonempty(value);
+            malformed_harness_output |= record_once(&mut backend_mode, nonempty(value));
             continue;
         }
         if let Some(value) = line.strip_prefix("route sensitive-field-detection ") {
-            sensitive_field_detection = match value {
+            let parsed = match value {
                 "true" => Some(true),
                 "false" => Some(false),
                 _ => None,
             };
+            if let Some(parsed) = parsed {
+                malformed_harness_output |=
+                    record_once(&mut sensitive_field_detection, Some(parsed));
+            } else {
+                malformed_harness_output = true;
+            }
             continue;
         }
         let mut fields = line.split_whitespace();
@@ -142,7 +150,7 @@ fn run_harness() -> HarnessResult {
         if !SCENARIOS.contains(&name) {
             continue;
         }
-        malformed_scenario_output |= record_scenario_outcome(&mut outcomes, status, name);
+        malformed_harness_output |= record_scenario_outcome(&mut outcomes, status, name);
     }
     let version = stdout
         .lines()
@@ -151,7 +159,7 @@ fn run_harness() -> HarnessResult {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
-    if malformed_scenario_output {
+    if malformed_harness_output {
         return HarnessResult {
             status: "failed",
             version,
@@ -163,7 +171,7 @@ fn run_harness() -> HarnessResult {
             backend_mode,
             sensitive_field_detection,
             outcomes,
-            reason: Some("the harness produced duplicate or invalid scenario records"),
+            reason: Some("the harness produced duplicate or invalid evidence records"),
         };
     }
     if !timeout.status.success() && outcomes.is_empty() {
@@ -316,6 +324,19 @@ fn unavailable(reason: &'static str) -> HarnessResult {
 
 fn nonempty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Accept one metadata value. Repeated records are ambiguous and rejected,
+/// even when they agree, so later output cannot overwrite earlier evidence.
+fn record_once<T>(slot: &mut Option<T>, value: Option<T>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    if slot.is_some() {
+        return true;
+    }
+    *slot = Some(value);
+    false
 }
 
 /// Record one harness scenario line. Returns true if its status is invalid or
@@ -480,11 +501,15 @@ fn make_report_for_build(
     let build_matches_reporter = result.tested_commit.as_deref().is_some_and(|commit| {
         commit != "unknown" && reporter_commit != "unknown" && commit == reporter_commit
     });
-    let build_identity_status = match result.tested_commit.as_deref() {
-        Some(_) if result.source_tree_state.as_deref() == Some("dirty") => "not-tested",
-        Some(_) if build_matches_reporter => "passed",
-        Some(_) => "failed",
-        None => "not-tested",
+    let build_identity_status = match (
+        result.tested_commit.as_deref(),
+        result.source_tree_state.as_deref(),
+    ) {
+        (Some(_), Some("dirty")) => "not-tested",
+        (Some(_), Some("clean" | "unknown")) if build_matches_reporter => "passed",
+        (Some(_), Some("clean" | "unknown")) => "failed",
+        (None, _) => "not-tested",
+        _ => "not-tested",
     };
     checks.push(check(
         "tested-build-identity",
@@ -687,6 +712,15 @@ mod tests {
             "unknown",
             "unicode-insertion"
         ));
+    }
+
+    #[test]
+    fn duplicate_metadata_records_are_rejected_without_overwriting() {
+        let mut commit = None;
+        assert!(!record_once(&mut commit, Some("first")));
+        assert!(record_once(&mut commit, Some("second")));
+        assert_eq!(commit, Some("first"));
+        assert!(record_once::<String>(&mut None, None));
     }
 
     #[test]
@@ -985,6 +1019,30 @@ mod tests {
 
         assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["harness"]["source_tree_state"], "dirty");
+        assert_eq!(report["checks"][14]["status"], "not-tested");
+    }
+
+    #[test]
+    fn missing_source_tree_state_cannot_claim_tested_build_identity() {
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                source_tree_state: None,
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes: all_completed_scenarios(),
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
+
+        assert_eq!(report["overall"], "incomplete");
         assert_eq!(report["checks"][14]["status"], "not-tested");
     }
 }

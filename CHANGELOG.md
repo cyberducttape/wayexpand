@@ -8,7 +8,8 @@ All notable changes to WayExpand are documented here.
   records, preventing malformed harness output from overwriting a failure with
   a later pass.
 - Source-checkout certification reports whether the tested tree was clean;
-  dirty-tree results no longer count as an identified build.
+  dirty-tree results no longer count as an identified build, and duplicate or
+  missing build metadata cannot overwrite or satisfy the identity check.
 - Added backend failure-injection coverage proving libei and wlroots key
   sequences stop immediately after a mid-replacement send failure.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor

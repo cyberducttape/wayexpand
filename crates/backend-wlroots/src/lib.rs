@@ -630,7 +630,9 @@ mod tests {
             },
         );
 
-        assert!(matches!(result, Err(WlrootsError::Transport(message)) if message == "injected flush failure"));
+        assert!(
+            matches!(result, Err(WlrootsError::Transport(message)) if message == "injected flush failure")
+        );
         assert_eq!(sent, [BACKSPACE_KEYCODE, 11]);
     }
 
