@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Isolated `doctor --certify` now records the commit of the CLI and daemon
+  binaries it exercises, and rejects evidence produced by a different build
+  than the reporting CLI.
 - Process supervision now invalidates and cleans up the process group as part
   of `reap()`, preventing a later drop from signalling a recycled group ID
   when callers omit an explicit cleanup call; a regression test verifies a

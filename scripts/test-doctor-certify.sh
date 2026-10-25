@@ -38,6 +38,8 @@ jq -e '
     (.test_session.negotiated_insertion_mode | type == "string" and length > 0) and
     (.test_session.backend_mode_detail | type == "string" and length > 0) and
     (.test_session.sensitive_field_detection | type == "boolean") and
+    .harness.build_matches_reporter == true and
+    .harness.tested_commit == .wayexpand.commit and
     ([.checks[] | select(.name == "simple-trigger-insertion") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "word-boundary-delimiter") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "cursor-placement") | .status] == ["passed"]) and
@@ -49,6 +51,7 @@ jq -e '
     ([.checks[] | select(.name == "configuration-reload") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "daemon-restart") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unavailable-unicode-refusal") | .status] == ["passed"]) and
+    ([.checks[] | select(.name == "tested-build-identity") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unicode-insertion") | .status] | length == 1 and
         (.[0] == "passed" or .[0] == "not-tested")) and
     ([.checks[] | select(.name == "suspend-resume") | .status] == ["not-tested"]) and

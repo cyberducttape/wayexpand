@@ -113,6 +113,28 @@ mkdir -m 700 "$work/home"
 results="$work/results.txt"
 : >"$results"
 
+# Bind the evidence to the actual CLI/daemon binaries under test. In a source
+# checkout this script rebuilds the binaries, so the caller's CLI may be stale.
+cli_version=$("$app_bin/wayexpand" --version) || {
+    printf '%s\n' 'error: could not read the tested WayExpand CLI build identity' >&2
+    exit 2
+}
+daemon_version=$("$app_bin/wayexpand-daemon" --version) || {
+    printf '%s\n' 'error: could not read the tested WayExpand daemon build identity' >&2
+    exit 2
+}
+cli_commit=$(printf '%s\n' "$cli_version" |
+    sed -n 's/.* (commit \([^)]*\))$/\1/p')
+daemon_commit=$(printf '%s\n' "$daemon_version" |
+    sed -n 's/.* (commit \([^)]*\))$/\1/p')
+if [ -z "$cli_commit" ] || [ "$cli_commit" = unknown ] ||
+    [ -z "$daemon_commit" ] || [ "$daemon_commit" = unknown ] ||
+    [ "$cli_commit" != "$daemon_commit" ]; then
+    printf '%s\n' 'error: tested CLI and daemon build identities do not match' >&2
+    exit 2
+fi
+printf 'tested-build commit %s\n' "$cli_commit"
+
 session_status=0
 env -i \
     PATH="$PATH" \

@@ -44,6 +44,7 @@ pub(crate) fn run(json: bool) -> Result<()> {
 struct HarnessResult {
     status: &'static str,
     version: Option<String>,
+    tested_commit: Option<String>,
     capture_source: Option<String>,
     injection_backend: Option<String>,
     insertion_mode: Option<String>,
@@ -89,12 +90,17 @@ fn run_harness() -> HarnessResult {
     let stdout = String::from_utf8_lossy(&timeout.stdout);
     let stderr = String::from_utf8_lossy(&timeout.stderr);
     let mut outcomes = BTreeMap::new();
+    let mut tested_commit = None;
     let mut capture_source = None;
     let mut injection_backend = None;
     let mut insertion_mode = None;
     let mut backend_mode = None;
     let mut sensitive_field_detection = None;
     for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("tested-build commit ") {
+            tested_commit = nonempty(value);
+            continue;
+        }
         if let Some(value) = line.strip_prefix("route capture-source ") {
             capture_source = nonempty(value);
             continue;
@@ -154,6 +160,7 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "unavailable",
             version,
+            tested_commit,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -167,6 +174,7 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "unavailable",
             version,
+            tested_commit,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -183,6 +191,7 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "incomplete",
             version,
+            tested_commit,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -201,6 +210,7 @@ fn run_harness() -> HarnessResult {
         return HarnessResult {
             status: "failed",
             version,
+            tested_commit,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -215,6 +225,7 @@ fn run_harness() -> HarnessResult {
     HarnessResult {
         status: "completed",
         version,
+        tested_commit,
         capture_source,
         injection_backend,
         insertion_mode,
@@ -267,6 +278,7 @@ fn unavailable(reason: &'static str) -> HarnessResult {
     HarnessResult {
         status: "unavailable",
         version: None,
+        tested_commit: None,
         capture_source: None,
         injection_backend: None,
         insertion_mode: None,
@@ -405,6 +417,20 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "not-tested",
         "The test harness supplies trigger input over stdin; it does not test physical keyboard capture.",
     ));
+    let build_matches_reporter = result
+        .tested_commit
+        .as_deref()
+        .is_some_and(|commit| commit != "unknown" && commit == env!("WAYEXPAND_COMMIT"));
+    let build_identity_status = match result.tested_commit.as_deref() {
+        Some(_) if build_matches_reporter => "passed",
+        Some(_) => "failed",
+        None => "not-tested",
+    };
+    checks.push(check(
+        "tested-build-identity",
+        build_identity_status,
+        "The CLI build identity must match the CLI and daemon binaries exercised by the isolated harness.",
+    ));
 
     let required_checks_passed = [
         "simple-trigger-insertion",
@@ -418,6 +444,7 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "configuration-reload",
         "daemon-restart",
         "unavailable-unicode-refusal",
+        "tested-build-identity",
     ]
     .into_iter()
     .all(|name| {
@@ -468,6 +495,8 @@ fn make_report(result: HarnessResult) -> serde_json::Value {
         "harness": {
             "status": result.status,
             "reason": result.reason,
+            "tested_commit": result.tested_commit,
+            "build_matches_reporter": build_matches_reporter,
         },
         "checks": checks,
         "limitations": [
@@ -494,6 +523,7 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
         "unavailable-unicode-refusal" => "Unavailable character refusal",
         "suspend-resume" => "Suspend/resume",
         "keyboard-capture" => "Keyboard capture",
+        "tested-build-identity" => "Tested build identity",
         _ => name,
     };
     serde_json::json!({ "name": name, "label": label, "status": status, "evidence": evidence })
@@ -609,6 +639,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "incomplete",
             version: Some("test".into()),
+            tested_commit: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -627,6 +658,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "failed",
             version: Some("test".into()),
+            tested_commit: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -645,6 +677,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "completed",
             version: Some("6.6.6".into()),
+            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
             capture_source: Some("stdin".into()),
             injection_backend: Some("libei".into()),
             insertion_mode: Some("libei keysym fallback".into()),
@@ -672,6 +705,8 @@ mod tests {
             "ei_keyboard keysym fallback (12ms key pacing)"
         );
         assert_eq!(report["test_session"]["sensitive_field_detection"], false);
+        assert_eq!(report["harness"]["build_matches_reporter"], true);
+        assert_eq!(report["harness"]["tested_commit"], env!("WAYEXPAND_COMMIT"));
         assert_eq!(report["certified"], false);
         assert_eq!(
             report["checks"]
@@ -698,6 +733,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "completed",
             version: Some("6.6.6".into()),
+            tested_commit: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -718,6 +754,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "completed",
             version: Some("6.6.6".into()),
+            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
             capture_source: Some("stdin".into()),
             injection_backend: Some("libei".into()),
             insertion_mode: Some("libei ei_text".into()),
@@ -747,6 +784,7 @@ mod tests {
         let report = make_report(HarnessResult {
             status: "completed",
             version: Some("6.6.6".into()),
+            tested_commit: Some(env!("WAYEXPAND_COMMIT").into()),
             capture_source: Some("stdin".into()),
             injection_backend: Some("libei".into()),
             insertion_mode: Some("libei ei_text".into()),
@@ -766,6 +804,35 @@ mod tests {
                 .find(|check| check["name"] == "configuration-reload")
                 .unwrap()["status"],
             "not-run"
+        );
+    }
+
+    #[test]
+    fn stale_cli_cannot_claim_partial_certification_of_newer_test_binaries() {
+        let report = make_report(HarnessResult {
+            status: "completed",
+            version: Some("6.6.6".into()),
+            tested_commit: Some("different-build".into()),
+            capture_source: Some("stdin".into()),
+            injection_backend: Some("libei".into()),
+            insertion_mode: Some("libei ei_text".into()),
+            backend_mode: Some("ei_keyboard and ei_text".into()),
+            sensitive_field_detection: Some(false),
+            outcomes: all_completed_scenarios(),
+            reason: None,
+        });
+
+        assert_eq!(report["overall"], "failed");
+        assert_eq!(report["certified"], false);
+        assert_eq!(report["harness"]["build_matches_reporter"], false);
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "tested-build-identity")
+                .unwrap()["status"],
+            "failed"
         );
     }
 }

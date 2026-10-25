@@ -47,6 +47,10 @@ control the active desktop or its daemon.
 The JSON record includes the detected desktop, automatic input selection, the
 currently connected daemon route (reported separately from that selection),
 every check with a stable status, and the limitations of the selected backend.
+The isolated smoke report also records the commit of the CLI and daemon
+binaries exercised. A mismatch with the reporting CLI fails the evidence
+check, preventing a stale source-checkout CLI from claiming a partial pass for
+binaries rebuilt from a newer checkout.
 The active route is verified only when its status schema and `daemon_commit`
 match the CLI that produced the report; a stale daemon is reported as
 unavailable and must be restarted or updated first. A build without Git
