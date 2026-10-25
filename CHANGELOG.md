@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Process supervision now invalidates and cleans up the process group as part
   of `reap()`, preventing a later drop from signalling a recycled group ID
   when callers omit an explicit cleanup call.
+- Preserved a current-source `doctor --certify` run from commit `2111dba66512`:
+  11 isolated KWin insertion/focus checks passed using libei keysym fallback;
+  Unicode insertion, physical keyboard capture, and suspend/resume remain
+  untested. The artifact explicitly does not claim desktop certification.
 - Audit rotation now replaces the previous backup atomically, preserving it if
   moving the active log fails.
 - Clipboard worker startup and disconnected-job failures are now visible in
