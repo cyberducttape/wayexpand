@@ -96,6 +96,7 @@ fn run_harness() -> HarnessResult {
     let mut insertion_mode = None;
     let mut backend_mode = None;
     let mut sensitive_field_detection = None;
+    let mut malformed_scenario_output = false;
     for line in stdout.lines() {
         if let Some(value) = line.strip_prefix("tested-build commit ") {
             tested_commit = nonempty(value);
@@ -132,13 +133,7 @@ fn run_harness() -> HarnessResult {
         if !SCENARIOS.contains(&name) {
             continue;
         }
-        let status = match status {
-            "pass" => "passed",
-            "fail" => "failed",
-            "unverified" => "not-tested",
-            _ => "not-run",
-        };
-        outcomes.insert(name.to_owned(), status);
+        malformed_scenario_output |= record_scenario_outcome(&mut outcomes, status, name);
     }
     let version = stdout
         .lines()
@@ -147,6 +142,20 @@ fn run_harness() -> HarnessResult {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
+    if malformed_scenario_output {
+        return HarnessResult {
+            status: "failed",
+            version,
+            tested_commit,
+            capture_source,
+            injection_backend,
+            insertion_mode,
+            backend_mode,
+            sensitive_field_detection,
+            outcomes,
+            reason: Some("the harness produced duplicate or invalid scenario records"),
+        };
+    }
     if !timeout.status.success() && outcomes.is_empty() {
         let reason = if timeout.status.code() == Some(124) || timeout.status.code() == Some(137) {
             "the isolated harness exceeded its 16-minute deadline"
@@ -291,6 +300,29 @@ fn unavailable(reason: &'static str) -> HarnessResult {
 
 fn nonempty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+/// Record one harness scenario line. Returns true if its status is invalid or
+/// the scenario was already reported, since repeated lines are ambiguous
+/// evidence even when they happen to agree.
+fn record_scenario_outcome(
+    outcomes: &mut BTreeMap<String, &'static str>,
+    status: &str,
+    name: &str,
+) -> bool {
+    let Some(status) = (match status {
+        "pass" => Some("passed"),
+        "fail" => Some("failed"),
+        "unverified" => Some("not-tested"),
+        _ => None,
+    }) else {
+        return true;
+    };
+    if outcomes.contains_key(name) {
+        return true;
+    }
+    outcomes.insert(name.to_owned(), status);
+    false
 }
 
 fn command_exists(name: &str) -> bool {
@@ -616,6 +648,27 @@ mod tests {
             .iter()
             .map(|scenario| ((*scenario).to_owned(), "passed"))
             .collect()
+    }
+
+    #[test]
+    fn duplicate_or_invalid_scenario_records_are_rejected() {
+        let mut outcomes = BTreeMap::new();
+        assert!(!record_scenario_outcome(
+            &mut outcomes,
+            "fail",
+            "expansion-replaces-trigger"
+        ));
+        assert!(record_scenario_outcome(
+            &mut outcomes,
+            "pass",
+            "expansion-replaces-trigger"
+        ));
+        assert_eq!(outcomes["expansion-replaces-trigger"], "failed");
+        assert!(record_scenario_outcome(
+            &mut outcomes,
+            "unknown",
+            "unicode-insertion"
+        ));
     }
 
     #[test]
