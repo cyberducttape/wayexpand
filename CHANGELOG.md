@@ -19,6 +19,9 @@ All notable changes to WayExpand are documented here.
 - GUI preference saves use collision-resistant temporary names and sync their
   parent directory; post-replacement sync failures identify that preferences
   were saved with durability still uncertain.
+- Configuration backups compare the opened source file's identity and change
+  timestamps before and after copying, rejecting a same-size concurrent edit
+  instead of preserving a potentially inconsistent backup.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,

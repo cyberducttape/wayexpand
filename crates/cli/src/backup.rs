@@ -31,6 +31,15 @@ fn create_backup_with_sync(
     destination: &Path,
     sync_directory: impl FnOnce(&fs::File) -> io::Result<()>,
 ) -> Result<()> {
+    create_backup_with_hooks(source, destination, || {}, sync_directory)
+}
+
+fn create_backup_with_hooks(
+    source: &Path,
+    destination: &Path,
+    after_copy: impl FnOnce(),
+    sync_directory: impl FnOnce(&fs::File) -> io::Result<()>,
+) -> Result<()> {
     // Inspect the opened file, not the path, so the size checked below
     // belongs to the same file that is copied. O_NONBLOCK keeps a FIFO from
     // blocking the open before the regular-file check can reject it.
@@ -56,12 +65,22 @@ fn create_backup_with_sync(
     // synced. Failures before the directory sync remove incomplete file data;
     // a failure at the final sync leaves the complete backup in place and
     // reports its durability as uncertain below.
+    let mut after_copy = Some(after_copy);
     let written = io::copy(&mut source_file, &mut destination_file).and_then(|copied| {
         if copied != metadata.len() {
             return Err(io::Error::other(format!(
                 "copied {copied} of {} bytes; the configuration changed during backup",
                 metadata.len()
             )));
+        }
+        after_copy
+            .take()
+            .expect("backup copy hook is called once")();
+        let final_metadata = source_file.metadata()?;
+        if source_changed_during_backup(&metadata, &final_metadata) {
+            return Err(io::Error::other(
+                "configuration changed during backup; refusing to keep a possibly inconsistent copy",
+            ));
         }
         destination_file.sync_all()
     });
@@ -82,6 +101,16 @@ fn create_backup_with_sync(
         );
     }
     Ok(())
+}
+
+fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    before.dev() != after.dev()
+        || before.ino() != after.ino()
+        || before.len() != after.len()
+        || before.mtime() != after.mtime()
+        || before.mtime_nsec() != after.mtime_nsec()
+        || before.ctime() != after.ctime()
+        || before.ctime_nsec() != after.ctime_nsec()
 }
 
 #[cfg(test)]
@@ -113,6 +142,34 @@ mod tests {
         assert!(message.contains("backup"));
         assert!(message.contains("durability is uncertain"));
         assert_eq!(fs::read(&destination).unwrap(), b"configuration");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn same_size_source_modification_discards_the_backup() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-backup-source-change-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source = directory.join("source.toml");
+        let destination = directory.join("source.toml.bak");
+        fs::write(&source, b"first-config").unwrap();
+
+        let error = create_backup_with_hooks(
+            &source,
+            &destination,
+            || fs::write(&source, b"other-config").unwrap(),
+            |directory| directory.sync_all(),
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("configuration changed during backup"));
+        assert!(!destination.exists());
         fs::remove_dir_all(directory).unwrap();
     }
 }
