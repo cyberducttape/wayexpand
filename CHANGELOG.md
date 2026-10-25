@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
   reload, restart, and refusal checks passed. The report remains partial because
   keysym fallback, physical keyboard capture, and suspend/resume leave required
   behavior untested; see `docs/evidence/doctor-certify-6551bb4b7.json`.
+- Engine construction now reuses parsed app filters, hotkey chords, and undo
+  chord from the same validation pass that builds effective triggers, removing
+  separate runtime parsing of those validated fields.
 - Configuration saves now distinguish a failed parent-directory sync after
   atomic replacement from a pre-commit failure, warning that the new file is
   visible but crash durability is uncertain and should be verified before retry.

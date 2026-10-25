@@ -11,7 +11,7 @@ impl Config {
     pub(crate) fn validate_with_snippets(
         &self,
         snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
-    ) -> Result<EffectiveTriggers, ConfigError> {
+    ) -> Result<ValidatedConfig, ConfigError> {
         if self.expansion.len() > MAX_EXPANSIONS {
             return Err(ConfigError::TooManyExpansions {
                 count: self.expansion.len(),
@@ -42,6 +42,7 @@ impl Config {
             });
         }
         let mut hotkeys = Vec::new();
+        let mut parsed_hotkeys = Vec::new();
         for (index, binding) in self.hotkey.iter().enumerate() {
             let chord =
                 KeyChord::parse(&binding.chord).map_err(|_| ConfigError::InvalidHotkey {
@@ -93,6 +94,7 @@ impl Config {
             }
             if binding.enabled {
                 hotkeys.push((index, chord.to_string()));
+                parsed_hotkeys.push((chord, index));
             }
         }
         hotkeys.sort_unstable_by(|left, right| {
@@ -132,6 +134,7 @@ impl Config {
             .validation_template_context(snippets.unwrap_or_else(|| self.includable_snippets()));
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
+        let mut app_filters = Vec::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
             if !is_uuid(&expansion.id) {
                 return Err(ConfigError::InvalidExpansionId { index });
@@ -223,21 +226,25 @@ impl Config {
                     filter.trim().is_empty()
                         || filter.chars().count() > MAX_APP_FILTER_CHARS
                         || filter.contains('\0')
-                        || AppFilter::parse(filter).is_none()
                 })
             {
                 return Err(ConfigError::InvalidAppFilter { index });
             }
+            let parsed_filters: Vec<AppFilter> = expansion
+                .app_filter
+                .iter()
+                .filter_map(|filter| AppFilter::parse(filter))
+                .collect();
+            if parsed_filters.len() != expansion.app_filter.len() {
+                return Err(ConfigError::InvalidAppFilter { index });
+            }
             if self.organization.safe_mode
                 && !self.organization.allow_weak_app_filters
-                && expansion
-                    .app_filter
-                    .iter()
-                    .filter_map(|filter| AppFilter::parse(filter))
-                    .any(|filter| filter.is_weak())
+                && parsed_filters.iter().any(AppFilter::is_weak)
             {
                 return Err(ConfigError::InvalidAppFilter { index });
             }
+            app_filters.push(parsed_filters);
             if expansion.category.chars().count() > MAX_CATEGORY_CHARS
                 || expansion.category.contains('\0')
             {
@@ -358,7 +365,12 @@ impl Config {
             ));
         }
 
-        Ok(enabled)
+        Ok(ValidatedConfig {
+            effective_triggers: enabled,
+            app_filters,
+            undo_chord,
+            hotkeys: parsed_hotkeys,
+        })
     }
 
     /// Apply an active administrator-owned policy and validate the resulting

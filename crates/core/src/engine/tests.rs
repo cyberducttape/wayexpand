@@ -31,6 +31,43 @@ fn engine() -> ExpansionEngine {
     .unwrap()
 }
 
+#[test]
+fn engine_uses_the_parsed_filters_and_chords_from_validation() {
+    let config = Config::parse(
+        r#"
+        [settings]
+        undo_chord = "Ctrl+Z"
+
+        [[expansion]]
+        trigger = ":mail"
+        replacement = "person@example.com"
+        app_filter = ["app_id_exact:Org.Example.Editor", "app_id_glob:*WRITER*"]
+
+        [[hotkey]]
+        chord = "control + option + m"
+        [hotkey.command]
+        program = "/bin/true"
+        timeout_ms = 100
+        "#,
+    )
+    .unwrap();
+
+    let engine = ExpansionEngine::new(config).unwrap();
+
+    assert_eq!(
+        engine.app_filters[0],
+        [
+            AppFilter::AppIdExact("org.example.editor".into()),
+            AppFilter::AppIdGlob("*writer*".into()),
+        ]
+    );
+    assert_eq!(engine.undo_chord, KeyChord::parse("Ctrl+Z").ok());
+    assert_eq!(
+        engine.hotkeys,
+        [(KeyChord::parse("Ctrl+Alt+M").unwrap(), 0)]
+    );
+}
+
 fn dispatch_and_wait(
     engine: &mut ExpansionEngine,
     pending: PendingExpansionResult,

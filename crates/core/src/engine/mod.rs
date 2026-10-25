@@ -168,13 +168,18 @@ impl ExpansionEngine {
         // replacement. Validation builds these from `effective_triggers()`
         // and rejects collisions across exactly these variants, so its
         // result is reused here instead of being recomputed.
-        let enabled = config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
-        let matcher_indices = enabled.iter().map(|(index, _)| *index).collect();
-        let (clipboard, others): (Vec<_>, Vec<_>) = enabled.iter().partition(|(index, _)| {
-            let expansion = &config.expansion[*index];
-            expansion.command.is_none()
-                && crate::template_variables(&expansion.replacement).contains(&"clipboard")
-        });
+        let validated = config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
+        let matcher_indices = validated
+            .effective_triggers
+            .iter()
+            .map(|(index, _)| *index)
+            .collect();
+        let (clipboard, others): (Vec<_>, Vec<_>) =
+            validated.effective_triggers.iter().partition(|(index, _)| {
+                let expansion = &config.expansion[*index];
+                expansion.command.is_none()
+                    && crate::template_variables(&expansion.replacement).contains(&"clipboard")
+            });
         let clipboard_triggers = ClipboardTriggers::new(
             clipboard
                 .into_iter()
@@ -185,18 +190,13 @@ impl ExpansionEngine {
                 .map(|(_, trigger)| trigger.clone())
                 .collect(),
         );
-        let matcher = Matcher::new(enabled.into_iter().map(|(_, trigger)| trigger));
-        let app_filters: Vec<Vec<AppFilter>> = config
-            .expansion
-            .iter()
-            .map(|expansion| {
-                expansion
-                    .app_filter
-                    .iter()
-                    .filter_map(|filter| AppFilter::parse(filter))
-                    .collect()
-            })
-            .collect();
+        let matcher = Matcher::new(
+            validated
+                .effective_triggers
+                .into_iter()
+                .map(|(_, trigger)| trigger),
+        );
+        let app_filters = validated.app_filters;
         let app_filter_globs = app_filters
             .iter()
             .map(|filters| {
@@ -211,25 +211,9 @@ impl ExpansionEngine {
             .collect();
         let template_base = config.template_context_with_snippets(None, snippets);
         let max_buffer_chars = config.settings.max_buffer_chars;
-        // `validate()` above already confirmed this parses; a config that
-        // fails to load is never used to construct an engine.
-        let undo_chord = config
-            .settings
-            .undo_chord
-            .as_ref()
-            .and_then(|chord| KeyChord::parse(chord).ok());
         let command_cache = vec![None; config.expansion.len()];
-        let hotkeys = config
-            .hotkey
-            .iter()
-            .enumerate()
-            .filter(|(_, binding)| binding.enabled)
-            .filter_map(|(index, binding)| {
-                KeyChord::parse(&binding.chord)
-                    .ok()
-                    .map(|chord| (chord, index))
-            })
-            .collect();
+        let undo_chord = validated.undo_chord;
+        let hotkeys = validated.hotkeys;
         Ok(Self {
             config,
             app_filters,

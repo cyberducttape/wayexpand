@@ -189,8 +189,11 @@ Still open:
       template library and parsed templates, parsed hotkeys, normalized IDs,
       policy-resolved settings) during validation, and have the engine, reload
       and GUI consume it instead of recompiling, so validation and runtime
-      cannot disagree. Effective triggers
-      are already reused; app filters, hotkeys and IDs are still recompiled.
+      cannot disagree. Engine construction now consumes effective triggers,
+      parsed app filters, enabled hotkey chords, and the undo chord directly
+      from its validation pass. Template compilation, normalized IDs,
+      policy-resolved settings, and retaining the validated snapshot across
+      config loading/reload remain open.
 - [ ] Profiles/workspaces (personal, work, support, per-customer) switchable
       at runtime by hotkey or selected automatically from the environment.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).

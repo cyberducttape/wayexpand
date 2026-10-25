@@ -601,6 +601,16 @@ fn default_enabled() -> bool {
 /// computes this anyway, so engine construction reuses it for the matcher.
 pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
+/// Parsed runtime data produced by the same pass that validates a `Config`.
+/// Keeping these values together prevents the engine from parsing a subtly
+/// different view of filters or hotkeys after validation has succeeded.
+pub(crate) struct ValidatedConfig {
+    pub(crate) effective_triggers: EffectiveTriggers,
+    pub(crate) app_filters: Vec<Vec<AppFilter>>,
+    pub(crate) undo_chord: Option<KeyChord>,
+    pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+}
+
 impl Config {
     /// Validate and merge the primary configuration with every portable layer
     /// file next to it, so malformed files and cross-file collisions cannot be
