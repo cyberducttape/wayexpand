@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- `wayexpand doctor --certify` now reports p50/p95/p99 injector latency from
+  20 verified small-text replacements in the isolated KWin harness. The sample
+  excludes physical capture and client paint latency and is informational; it
+  does not change backend pacing or claim an SLO pass.
 - Isolated desktop certification now rejects duplicate or invalid scenario
   records, preventing malformed harness output from overwriting a failure with
   a later pass.

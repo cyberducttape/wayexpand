@@ -87,6 +87,7 @@ not physical keyboard certification.
 | `target-closes-during-expansion` | The target window closing mid-expansion: nothing is typed into the window that gains focus, and the daemon survives |
 | `config-reload` | An edited configuration takes effect without a restart |
 | `daemon-restart` | A killed daemon reconnects to libei and the tracker and expands again |
+| `output-latency` | Times at least 20 verified small replacements and reports injector p50/p95/p99; excludes capture and client paint and has no pass threshold |
 
 Each line of the summary is `pass`, `fail`, or `unverified` (the scenario
 could not set itself up). The script exits non-zero unless every selected
@@ -103,6 +104,11 @@ command's output is typed into window B.
 tracking on the tested KWin version, in a headless session, with capture
 simulated. They are not compositor certification and do not replace the
 real-desktop procedures below.
+
+The `output-latency` result is a backend measurement for like-for-like
+comparisons on this headless KWin harness. It measures the injector transaction
+only, so it is not end-to-end typing latency or a production SLO. It does not
+alter the configured key pacing.
 
 Findings from the private, default-configured KWin 6.6.6 session that this
 harness surfaced:

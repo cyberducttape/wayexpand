@@ -227,6 +227,41 @@ EOF
     return "$result"
 }
 
+scenario_output_latency() {
+    local latency_expected= sample=0 status profiles profile
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";lat"
+replacement = "x"
+EOF
+    start_sink e2e-a && start_daemon || return 2
+    while [ "$sample" -lt 20 ]; do
+        user_types e2e-a "${latency_expected};lat" ";lat" || return 1
+        daemon_sees ";lat"
+        latency_expected="${latency_expected}x"
+        wait_until 50 sink_text_is e2e-a "$latency_expected" || return 1
+        sample=$((sample + 1))
+    done
+    status=$(daemon_status) || return 2
+    profiles=$(printf '%s\n' "$status" | sed -n 's/^injection_latency_profiles=//p')
+    profile=$(printf '%s' "$profiles" | jq -ce '
+        to_entries[]
+        | select(.value.small.sample_count >= 20)
+        | {
+            backend_mode: .key,
+            size: "small",
+            sample_count: .value.small.sample_count,
+            window_count: .value.small.window_count,
+            p50_us: .value.small.p50_us,
+            p95_us: .value.small.p95_us,
+            p99_us: .value.small.p99_us
+          }
+    ' | head -n 1) || return 2
+    [ -n "$profile" ] || return 2
+    printf 'latency-profile=%s ' "$profile"
+    describe e2e-a
+}
+
 scenario_input_method_expansion() {
     write_config <<'EOF'
 [[expansion]]

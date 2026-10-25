@@ -100,5 +100,5 @@ if [ "$e2e_input_source" = input-method ]; then
 else
     run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
-command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart"
+command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart output-latency"
 fi
