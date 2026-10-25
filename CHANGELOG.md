@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - Release smoke testing now builds the binary archive, verifies its checksum,
   and checks that runtime binaries and certification helpers are present while
   excluded repository content stays out.
+- Certification matrix drivers now reject unknown, duplicate, and unsafe
+  keyboard-layout profile names before building per-cell log paths.
 - GUI compositor-version probes now read output without blocking, cap retained
   data, enforce their deadline, and terminate descendants that inherit the
   probe pipe.

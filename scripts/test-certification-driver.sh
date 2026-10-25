@@ -23,6 +23,26 @@ esac
 EOF
 chmod 0755 "$driver"
 
+for invalid_layout in \
+    'us,de,fr,altgr,multi-layout-switching,../../escaped' \
+    'us,de,fr,altgr,multi-layout-switching,extra' \
+    'us,de,fr,altgr,altgr'; do
+    invalid_output="$test_root/invalid-layout-output.txt"
+    if "$project_dir/scripts/run-certification-driver.sh" \
+        --driver "$driver" --compositor kde --version 6.6.2 \
+        --backend ibus --layout "$invalid_layout" \
+        --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
+        --output "$test_root/invalid-layout-results.txt" --log-dir "$test_root/invalid-layout-logs" \
+        --timeout 1 --deadline 1 >"$invalid_output" 2>&1; then
+        printf '%s\n' "driver accepted invalid keyboard-layout profiles: $invalid_layout" >&2
+        exit 1
+    fi
+    grep -F 'must contain each declared profile exactly once' "$invalid_output" >/dev/null || {
+        printf '%s\n' "driver did not reject invalid keyboard-layout profiles: $invalid_layout" >&2
+        exit 1
+    }
+done
+
 results="$test_root/results.txt"
 if "$project_dir/scripts/run-certification-driver.sh" \
     --driver "$driver" --compositor kde --version 6.6.2 \

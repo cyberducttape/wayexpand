@@ -91,17 +91,18 @@ done <<EOF
 $required_client_markers
 EOF
 
-layout_profiles_lower=$(printf '%s' "$keyboard_layout" | tr '[:upper:]' '[:lower:]')
-required_layout_profiles=$(jq -r '.required_layout_profiles[]' "$matrix")
-while IFS= read -r profile; do
-    [ -n "$profile" ] || continue
-    case ",$layout_profiles_lower," in
-        *,"$profile",*) ;;
-        *) printf '%s\n' "error: --layout must include required profile '$profile'" >&2; exit 2 ;;
-    esac
-done <<EOF
-$required_layout_profiles
-EOF
+required_layout_profiles=$(jq -c '.required_layout_profiles | map(ascii_downcase)' "$matrix")
+valid_layout_profiles=$(jq -en --arg profiles "$keyboard_layout" \
+    --argjson required "$required_layout_profiles" '
+    ($profiles | split(",") | map(ascii_downcase)) as $items |
+    ($items | all(.[]; test("^[a-z0-9][a-z0-9._+-]*$"))) and
+    ($items | unique | length == ($items | length)) and
+    ($items | sort == ($required | sort))
+' 2>/dev/null) || valid_layout_profiles=false
+[ "$valid_layout_profiles" = true ] || {
+    printf '%s\n' 'error: --layout must contain each declared profile exactly once, using simple profile names' >&2
+    exit 2
+}
 
 jq -e --arg compositor "$compositor" --arg backend "$backend" \
     'any(.targets[]; .id == $compositor and (.input_paths | index($backend) != null))' \
