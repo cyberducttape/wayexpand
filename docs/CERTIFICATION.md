@@ -154,6 +154,15 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-6551bb4b7.json`](evidence/doctor-certify-6551bb4b7.json)
+preserves the build-identity-checked `wayexpand doctor --certify --json` run
+from commit `6551bb4b7b77` on KWin 6.6.6. The private clients passed 12
+output, focus, configuration reload, daemon restart, refusal, and build
+identity checks. The route used libei keysym fallback with 12 ms pacing;
+Unicode insertion, physical keyboard capture, and suspend/resume were not
+tested. This partial result supports the headless output/focus path only and
+does not certify the active desktop or production keyboard-capture route.
+
 [`evidence/doctor-certify-bdf55e979.json`](evidence/doctor-certify-bdf55e979.json)
 preserves the build-identity-checked `wayexpand doctor --certify --json` run
 from commit `bdf55e97993c` on KWin 6.6.6. The private clients passed 12
