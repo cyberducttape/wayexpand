@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
 - Configuration backups now report when a parent-directory sync fails after
   the complete backup has been created, so an error does not imply the backup
   file is absent.
+- Portal-token persistence now identifies a directory-sync failure after token
+  replacement as an uncertain durability outcome, rather than implying the
+  restoration token was not installed.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,

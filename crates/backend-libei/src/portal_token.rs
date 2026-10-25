@@ -159,6 +159,14 @@ fn store_portal_token(token: &str) -> std::io::Result<()> {
 }
 
 pub(crate) fn store_portal_token_at(path: &Path, token: &str) -> std::io::Result<()> {
+    store_portal_token_at_with_sync(path, token, |parent| File::open(parent)?.sync_all())
+}
+
+fn store_portal_token_at_with_sync(
+    path: &Path,
+    token: &str,
+    sync_directory: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -209,7 +217,14 @@ pub(crate) fn store_portal_token_at(path: &Path, token: &str) -> std::io::Result
         file.sync_all()?;
         drop(file);
         fs::rename(&temporary, path)?;
-        File::open(parent)?.sync_all()?;
+        sync_directory(parent).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "portal restoration token was installed, but its parent directory could not be synced; durability is uncertain: {error}"
+                ),
+            )
+        })?;
         Ok(())
     })();
     if result.is_err() {
@@ -327,4 +342,39 @@ fn validate_token_metadata(path: &Path, metadata: &fs::Metadata) -> std::io::Res
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn directory_sync_failure_reports_that_token_was_installed() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!(
+            "wayexpand-token-durability-{}-{suffix}",
+            rustix::process::geteuid().as_raw()
+        ));
+        fs::create_dir(&parent).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = parent.join(PORTAL_TOKEN_FILENAME);
+
+        let error = store_portal_token_at_with_sync(&path, "new-token", |_| {
+            Err(std::io::Error::other("injected directory sync failure"))
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("token was installed"));
+        assert!(error.to_string().contains("durability is uncertain"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new-token");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(parent).unwrap();
+    }
 }
