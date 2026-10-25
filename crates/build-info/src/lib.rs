@@ -31,6 +31,28 @@ fn git_worktree_is_clean(root: &Path) -> bool {
         .is_ok_and(|output| output.status.success() && output.stdout.is_empty())
 }
 
+fn is_exact_release(
+    root: &Path,
+    package_version: &str,
+    commit: Option<&str>,
+    commit_overridden: bool,
+) -> bool {
+    commit.is_some()
+        && !commit_overridden
+        && git_output(
+            root,
+            &[
+                "describe",
+                "--tags",
+                "--exact-match",
+                "--match",
+                &format!("v{package_version}"),
+            ],
+        )
+        .is_some()
+        && git_worktree_is_clean(root)
+}
+
 /// Emit `WAYEXPAND_BUILD_VERSION` and `WAYEXPAND_COMMIT` for the calling
 /// crate, plus the rerun triggers that keep them current across commits.
 pub fn emit() {
@@ -64,23 +86,14 @@ pub fn emit() {
         }
     }
     let package_version = env::var("CARGO_PKG_VERSION").unwrap();
-    let sha = env::var("WAYEXPAND_BUILD_SHA")
+    let build_sha = env::var("WAYEXPAND_BUILD_SHA")
         .ok()
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.is_empty());
+    let sha = build_sha
+        .clone()
         .or_else(|| git_output(&root, &["rev-parse", "--short=12", "HEAD"]));
-    let exact_release = sha.is_some()
-        && git_output(
-            &root,
-            &[
-                "describe",
-                "--tags",
-                "--exact-match",
-                "--match",
-                &format!("v{package_version}"),
-            ],
-        )
-        .is_some()
-        && git_worktree_is_clean(&root);
+    let exact_release =
+        is_exact_release(&root, &package_version, sha.as_deref(), build_sha.is_some());
 
     let version = match sha.as_deref() {
         Some(_sha) if exact_release => package_version,
@@ -95,7 +108,7 @@ pub fn emit() {
 
 #[cfg(test)]
 mod tests {
-    use super::git_worktree_is_clean;
+    use super::{git_worktree_is_clean, is_exact_release};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -125,6 +138,7 @@ mod tests {
             fs::write(path.join("tracked.txt"), "initial\n").expect("write tracked file");
             git_ok(&path, &["add", "tracked.txt"]);
             git_ok(&path, &["commit", "--quiet", "-m", "initial"]);
+            git_ok(&path, &["tag", "v1.3.3"]);
             Self(path)
         }
     }
@@ -156,9 +170,27 @@ mod tests {
     fn release_cleanliness_rejects_staged_and_untracked_changes() {
         let repository = TestRepository::new();
         assert!(git_worktree_is_clean(&repository.0));
+        assert!(is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("native-commit"),
+            false
+        ));
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("override-commit"),
+            true
+        ));
 
         fs::write(repository.0.join("tracked.txt"), "unstaged edit\n").expect("edit tracked file");
         assert!(!git_worktree_is_clean(&repository.0));
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("native-commit"),
+            false
+        ));
 
         fs::write(repository.0.join("tracked.txt"), "staged edit\n").expect("edit tracked file");
         git_ok(&repository.0, &["add", "tracked.txt"]);
