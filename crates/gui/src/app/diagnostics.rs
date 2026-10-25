@@ -164,7 +164,7 @@ impl GuiApp {
                     ui.label(RichText::new(format!("{} · {}", trace.completion, trace.backend)).strong());
                     ui.label(
                         RichText::new(format!(
-                            "trigger recognized: {} · focus/admission: {} · backend selected: {} · erase acknowledged: {} · insertion attempted: {}",
+                            "trigger recognized: {} · output admission: {} · backend selected: {} · erase acknowledged: {} · insertion attempted: {}",
                             trace.trigger_recognized,
                             trace.focus_admission,
                             trace.backend_selected,

@@ -16,6 +16,9 @@ All notable changes to WayExpand are documented here.
   of caching the startup result, so a later-started manager cannot leave
   preview execution on the stale unsandboxed path. Once detected, a transient
   socket failure keeps previews on the sandbox route and fails closed.
+- Expansion failure traces now label the gate as output admission, avoiding
+  the implication that a successful admission always verified focused-client
+  identity; route-level focus assurance remains reported separately.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor
   protocol-probe statuses, so support diagnostics preserve why an integration
   route is unavailable without including raw daemon or configuration details.
