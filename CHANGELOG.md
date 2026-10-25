@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved the current-head `doctor --certify` report for commit
+  `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
+  refusal checks passed using libei keysym fallback. Unicode insertion,
+  physical keyboard capture, and suspend/resume remain untested; the report is
+  partial and does not certify the active desktop.
 - A timed-out daemon usage-statistics clear now says its outcome is unknown and
   directs the user to inspect statistics before retrying; the queued clear can
   still finish after the caller's response deadline.
