@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Mandatory Action Broker audit now applies bounded backpressure while the
+  queue is full and uses one deadline for queue admission and durable-write
+  confirmation; queue exhaustion remains visible as a counted, explicit audit
+  failure.
 - Preserved a current-build `doctor --certify` report for commit
   `480206ce7d1f`: 12 required isolated KWin 6.6.6 output, focus, reload,
   restart, and refusal scenarios passed using libei keysym fallback. Unicode,

@@ -9,11 +9,11 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, SyncSender},
+        mpsc::{self, SyncSender, TrySendError},
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const MAX_AUDIT_BYTES: u64 = 16 * 1024 * 1024;
@@ -129,18 +129,16 @@ impl AuditLogger {
             .ok_or_else(|| io::Error::other("audit writer is shutting down"))?;
         if required {
             let (ack_sender, ack_receiver) = mpsc::sync_channel(0);
-            if sender
-                .try_send(AuditMessage::Required(line, ack_sender))
-                .is_err()
-            {
-                self.dropped_events.fetch_add(1, Ordering::Relaxed);
-                return Err(io::Error::other(
-                    "audit writer is unavailable; event dropped",
-                ));
-            }
+            let deadline = Instant::now() + REQUIRED_AUDIT_ACK_TIMEOUT;
+            send_required_message(
+                sender,
+                AuditMessage::Required(line, ack_sender),
+                deadline,
+                &self.dropped_events,
+            )?;
             return receive_required_ack(
                 &ack_receiver,
-                REQUIRED_AUDIT_ACK_TIMEOUT,
+                deadline.saturating_duration_since(Instant::now()),
                 &self.write_failures,
             );
         }
@@ -187,6 +185,40 @@ impl AuditLogger {
         }
         if let Some(worker) = self.worker.take() {
             join_audit_worker(worker, AUDIT_SHUTDOWN_TIMEOUT, &self.write_failures);
+        }
+    }
+}
+
+/// Apply bounded backpressure for mandatory records. Ordinary diagnostic
+/// events remain best-effort, but a transiently full queue should not turn a
+/// durable audit into an immediate failure when the writer can make progress.
+fn send_required_message(
+    sender: &SyncSender<AuditMessage>,
+    mut message: AuditMessage,
+    deadline: Instant,
+    dropped_events: &AtomicU64,
+) -> io::Result<()> {
+    loop {
+        match sender.try_send(message) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(returned)) => {
+                message = returned;
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    dropped_events.fetch_add(1, Ordering::Relaxed);
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "audit queue remained full until the required-record deadline; event dropped",
+                    ));
+                }
+                thread::sleep(remaining.min(Duration::from_millis(1)));
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                dropped_events.fetch_add(1, Ordering::Relaxed);
+                return Err(io::Error::other(
+                    "audit writer is unavailable; event dropped",
+                ));
+            }
         }
     }
 }
@@ -607,6 +639,60 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert_eq!(failures.load(Ordering::Relaxed), 1);
         drop(ack_sender);
+    }
+
+    #[test]
+    fn required_audit_waits_briefly_for_a_full_queue_to_recover() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        assert!(sender
+            .send(AuditMessage::Event(b"queued\n".to_vec()))
+            .is_ok());
+        let consumer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            assert!(matches!(receiver.recv().unwrap(), AuditMessage::Event(_)));
+            receiver.recv().unwrap()
+        });
+        let (ack_sender, _ack_receiver) = mpsc::sync_channel(0);
+        let dropped = AtomicU64::new(0);
+        let started = Instant::now();
+
+        send_required_message(
+            &sender,
+            AuditMessage::Required(b"required\n".to_vec(), ack_sender),
+            started + Duration::from_millis(250),
+            &dropped,
+        )
+        .unwrap();
+
+        assert!(started.elapsed() >= Duration::from_millis(10));
+        assert!(matches!(
+            consumer.join().unwrap(),
+            AuditMessage::Required(_, _)
+        ));
+        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn required_audit_queue_wait_is_bounded_and_counted() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        assert!(sender
+            .send(AuditMessage::Event(b"queued\n".to_vec()))
+            .is_ok());
+        let (ack_sender, _ack_receiver) = mpsc::sync_channel(0);
+        let dropped = AtomicU64::new(0);
+        let started = Instant::now();
+
+        let error = send_required_message(
+            &sender,
+            AuditMessage::Required(b"required\n".to_vec(), ack_sender),
+            started + Duration::from_millis(20),
+            &dropped,
+        )
+        .expect_err("a permanently full queue must fail by its deadline");
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_millis(250));
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
     }
 
     #[test]

@@ -299,9 +299,12 @@ missing broker service from an unknown or disabled action.
   the Tokio runtime; clean shutdown flushes the accepted queue; queue drops
   and persistence failures are journaled. In default best-effort mode they do
   not block action execution. `audit_required = true` adds a bounded durability
-  acknowledgment before a successful response, syncs directory entries on
-  file creation and rotation, and can add up to two seconds of action-response
-  latency.
+  acknowledgment before a successful response, waits within one two-second
+  deadline for temporary queue pressure to clear and for the write to sync,
+  syncs directory entries on file creation and rotation, and can add up to two
+  seconds of action-response latency. If capacity or persistence remains
+  unavailable through that deadline, the loss counter is incremented and the
+  caller receives an explicit uncertain-outcome response.
 
 ## Implementation Status
 
