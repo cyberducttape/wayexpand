@@ -216,6 +216,7 @@ pub(crate) fn summarize_reports(
             "capabilities": copy(daemon, "capabilities"),
         },
         "backends": backends,
+        "protocol_probes": copy(doctor, "protocol_probes"),
         "certification": {
             "certified": copy(certification, "certified"),
             "desktop": copy(certification, "desktop"),
@@ -246,6 +247,12 @@ mod tests {
                 "permission": "NotApplicable", "detail": "token=private",
                 "policy_allowed": true
             }],
+            "protocol_probes": {
+                "input_method_v2": {
+                    "status": "unavailable",
+                    "detail": "input-method-v2 manager and Wayland seat probe"
+                }
+            },
             "expansions": [{ "trigger": ":secret", "replacement": "private snippet" }]
         });
         let certification = serde_json::json!({
@@ -273,5 +280,9 @@ mod tests {
             1
         );
         assert_eq!(summary["configuration"]["enforcement_enabled"], true);
+        assert_eq!(
+            summary["protocol_probes"]["input_method_v2"]["status"],
+            "unavailable"
+        );
     }
 }

@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Privacy-filtered `wayexpand support` summaries now retain the compositor
+  protocol-probe statuses, so support diagnostics preserve why an integration
+  route is unavailable without including raw daemon or configuration details.
 - `wayexpand doctor --json` now includes bounded live protocol-probe results
   for input-method-v2, wlroots virtual keyboard, and the KWin window tracker.
   This separates compositor availability from static backend implementation
