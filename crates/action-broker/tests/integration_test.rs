@@ -132,7 +132,8 @@ fn sigterm_cancels_running_action_and_flushes_required_audit() {
     let config_path = directory.join("sigterm-shutdown.toml");
     let marker_path = directory.join("sigterm-action-started");
     let action_command = format!(
-        ": > {}; while :; do printf x; done",
+        "grep -q '\"event_type\":\"action_starting\"' {} && : > {}; while :; do printf x; done",
+        shell_quote(&audit_path.to_string_lossy()),
         shell_quote(&marker_path.to_string_lossy())
     );
     let config = format!(
