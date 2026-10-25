@@ -9,7 +9,8 @@ All notable changes to WayExpand are documented here.
   a focus change cannot send the remaining replacement into another window;
   regression tests cover interruption before the next output event. A daemon
   actor regression verifies partial output is not replayed and the worker
-  remains usable after focus is refreshed.
+  remains usable after focus is refreshed. The checkpoint API and warning text
+  now describe both bounded text chunks and synthetic keystrokes.
 - `wayexpand doctor --certify` runs an isolated KWin test session and verifies
   received output from real Wayland test clients, reporting insertion, focus,
   and Unicode outcomes without claiming to certify the active desktop. The

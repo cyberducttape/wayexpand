@@ -28,10 +28,11 @@ pub fn keystroke_max_chars() -> usize {
     KEYSTROKE_MAX_CHARS.load(Ordering::Relaxed)
 }
 
-/// A check that paced output backends run before each synthesized character,
-/// so a long keystroke stream stops as soon as continuing is no longer safe
-/// (the focused window changed, or the daemon abandoned the transaction).
-/// A failure is the reason to stop; nothing further may be typed.
+/// A check that paced output backends run before each bounded output step,
+/// such as a synthesized character or direct-text chunk. This lets long
+/// streams stop as soon as continuing is no longer safe (the focused window
+/// changed, or the daemon abandoned the transaction). A failure means no
+/// further output may be sent.
 #[derive(Clone, Default)]
 pub struct OutputCheckpoint(Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>);
 

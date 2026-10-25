@@ -228,14 +228,14 @@ impl GuardState {
         Refusal::from_code(self.last_refusal.load(Ordering::Relaxed))
     }
 
-    /// Stops a keystroke stream that is already running when the tracker
+    /// Stops an output stream that is already running when the tracker
     /// reports a different window than the one the output was admitted for.
-    /// Unconfirmed focus was already decided by `decide` before typing.
+    /// Unconfirmed focus was already decided by `decide` before output.
     fn focus_checkpoint(guard: Arc<Self>) -> OutputCheckpoint {
         OutputCheckpoint::new(move || {
             if guard.focus() == FocusCheck::Changed {
-                warn!("focused window changed while typing; stopping output");
-                Err("the focused window changed while typing".into())
+                warn!("focused window changed during output; stopping output");
+                Err("the focused window changed during output".into())
             } else {
                 Ok(())
             }
