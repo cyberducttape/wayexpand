@@ -23,12 +23,26 @@ fn git_output(root: &Path, arguments: &[&str]) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
+fn git_worktree_is_clean(root: &Path) -> bool {
+    Command::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .current_dir(root)
+        .output()
+        .is_ok_and(|output| output.status.success() && output.stdout.is_empty())
+}
+
 /// Emit `WAYEXPAND_BUILD_VERSION` and `WAYEXPAND_COMMIT` for the calling
 /// crate, plus the rerun triggers that keep them current across commits.
 pub fn emit() {
     println!("cargo:rerun-if-env-changed=WAYEXPAND_BUILD_SHA");
 
     let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    // Source edits do not change Git's index. Watching the workspace source
+    // tree ensures this helper runs again after tracked edits or source files
+    // are added, so the release cleanliness check cannot reuse an old result.
+    for input in ["Cargo.toml", "Cargo.lock", "crates"] {
+        println!("cargo:rerun-if-changed={}", root.join(input).display());
+    }
     // `.git/HEAD` only names the current branch, so it does not change on a
     // commit; the branch ref (or `packed-refs`) does. Watching only HEAD left
     // `--version` reporting the previous commit after every commit. Paths are
@@ -66,11 +80,7 @@ pub fn emit() {
             ],
         )
         .is_some()
-        && Command::new("git")
-            .args(["diff", "--quiet"])
-            .current_dir(&root)
-            .status()
-            .is_ok_and(|status| status.success());
+        && git_worktree_is_clean(&root);
 
     let version = match sha.as_deref() {
         Some(_sha) if exact_release => package_version,
@@ -81,4 +91,82 @@ pub fn emit() {
 
     println!("cargo:rustc-env=WAYEXPAND_BUILD_VERSION={version}");
     println!("cargo:rustc-env=WAYEXPAND_COMMIT={commit}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::git_worktree_is_clean;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        process::{Command, Output},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestRepository(PathBuf);
+
+    impl TestRepository {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock is after Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "wayexpand-build-info-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("create temporary git repository");
+            git_ok(&path, &["init", "--quiet"]);
+            git_ok(&path, &["config", "user.name", "WayExpand Test"]);
+            git_ok(
+                &path,
+                &["config", "user.email", "wayexpand-test@example.invalid"],
+            );
+            fs::write(path.join("tracked.txt"), "initial\n").expect("write tracked file");
+            git_ok(&path, &["add", "tracked.txt"]);
+            git_ok(&path, &["commit", "--quiet", "-m", "initial"]);
+            Self(path)
+        }
+    }
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn git(root: &Path, arguments: &[&str]) -> Output {
+        Command::new("git")
+            .args(arguments)
+            .current_dir(root)
+            .output()
+            .expect("run git")
+    }
+
+    fn git_ok(root: &Path, arguments: &[&str]) {
+        let output = git(root, arguments);
+        assert!(
+            output.status.success(),
+            "git {arguments:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn release_cleanliness_rejects_staged_and_untracked_changes() {
+        let repository = TestRepository::new();
+        assert!(git_worktree_is_clean(&repository.0));
+
+        fs::write(repository.0.join("tracked.txt"), "unstaged edit\n").expect("edit tracked file");
+        assert!(!git_worktree_is_clean(&repository.0));
+
+        fs::write(repository.0.join("tracked.txt"), "staged edit\n").expect("edit tracked file");
+        git_ok(&repository.0, &["add", "tracked.txt"]);
+        assert!(!git_worktree_is_clean(&repository.0));
+
+        git_ok(&repository.0, &["reset", "--hard", "--quiet", "HEAD"]);
+        fs::write(repository.0.join("untracked-secret.txt"), "untracked\n")
+            .expect("write untracked file");
+        assert!(!git_worktree_is_clean(&repository.0));
+    }
 }

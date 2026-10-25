@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Exact-tag release version stamping now rejects staged changes and untracked
+  files as well as unstaged edits, preventing modified source trees from being
+  labeled as clean releases.
 - Git remote status and diagnostic output now redact the entire query string,
   avoiding credential leaks through vendor-specific parameter names or
   alternate query separators.
