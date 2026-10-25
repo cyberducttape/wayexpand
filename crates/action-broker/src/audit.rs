@@ -233,6 +233,11 @@ impl Drop for AuditLogger {
 struct AuditWriter {
     path: PathBuf,
     file: File,
+    poisoned: bool,
+    #[cfg(test)]
+    fail_next_batch_write: bool,
+    #[cfg(test)]
+    fail_next_rollback: bool,
 }
 
 impl AuditWriter {
@@ -241,12 +246,22 @@ impl AuditWriter {
         Ok(Self {
             path: path.to_owned(),
             file,
+            poisoned: false,
+            #[cfg(test)]
+            fail_next_batch_write: false,
+            #[cfg(test)]
+            fail_next_rollback: false,
         })
     }
 
     fn write_batch(&mut self, batch: &[Vec<u8>]) -> io::Result<()> {
         if batch.is_empty() {
             return Ok(());
+        }
+        if self.poisoned {
+            return Err(io::Error::other(
+                "audit writer is poisoned after an indeterminate rollback",
+            ));
         }
         let bytes = batch.iter().map(Vec::len).sum::<usize>() as u64;
         if bytes > MAX_AUDIT_BYTES {
@@ -256,24 +271,51 @@ impl AuditWriter {
             self.rotate()?;
         }
         let start_len = self.file.metadata()?.len();
-        let result = (|| {
-            for line in batch {
-                self.file.write_all(line)?;
-            }
-            self.file.sync_data()
-        })();
+        #[cfg(test)]
+        let inject_write_failure = std::mem::take(&mut self.fail_next_batch_write);
+        #[cfg(not(test))]
+        let inject_write_failure = false;
+        let result = if inject_write_failure {
+            let partial = &batch[0][..batch[0].len().min(4)];
+            self.file.write_all(partial)?;
+            Err(io::Error::other("injected audit batch write failure"))
+        } else {
+            (|| {
+                for line in batch {
+                    self.file.write_all(line)?;
+                }
+                self.file.sync_data()
+            })()
+        };
         if let Err(error) = result {
             // A write or sync failure may occur after bytes have reached the
             // file. Retrying the full batch without truncating would duplicate
             // records and make the audit log untrustworthy.
-            if let Err(rollback) = self.file.set_len(start_len) {
+            #[cfg(test)]
+            let inject_rollback_failure = std::mem::take(&mut self.fail_next_rollback);
+            #[cfg(not(test))]
+            let inject_rollback_failure = false;
+            let rollback = if inject_rollback_failure {
+                Err(io::Error::other("injected audit rollback failure"))
+            } else {
+                self.file.set_len(start_len)
+            };
+            if let Err(rollback) = rollback {
+                self.poisoned = true;
                 tracing::error!(
                     error = %rollback,
                     start_len,
                     "could not roll back a failed audit batch"
                 );
             } else {
-                let _ = self.file.sync_data();
+                if let Err(sync_error) = self.file.sync_data() {
+                    self.poisoned = true;
+                    tracing::error!(
+                        error = %sync_error,
+                        start_len,
+                        "could not sync the rollback of a failed audit batch"
+                    );
+                }
             }
             return Err(error);
         }
@@ -396,6 +438,9 @@ fn write_with_retry(
             Err(error) => {
                 write_failures.fetch_add(1, Ordering::Relaxed);
                 last_error = Some(error);
+                if writer.poisoned {
+                    break;
+                }
                 if let Ok(reopened) = AuditWriter::open(&writer.path) {
                     *writer = reopened;
                 }
@@ -518,6 +563,34 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert_eq!(failures.load(Ordering::Relaxed), 1);
         drop(ack_sender);
+    }
+
+    #[test]
+    fn failed_rollback_poisons_writer_and_prevents_a_false_durable_success() {
+        let directory = test_directory("poisoned-writer");
+        let path = directory.join("audit.jsonl");
+        let mut writer = AuditWriter::open(&path).unwrap();
+        writer.fail_next_batch_write = true;
+        writer.fail_next_rollback = true;
+        let failures = AtomicU64::new(0);
+
+        let first = write_with_retry(&mut writer, &[b"event-record\n".to_vec()], &failures)
+            .expect_err("indeterminate rollback must fail the required audit");
+        assert!(first
+            .to_string()
+            .contains("injected audit batch write failure"));
+        assert!(writer.poisoned);
+        assert_eq!(std::fs::read(&path).unwrap(), b"even");
+        assert_eq!(failures.load(Ordering::Relaxed), 1);
+
+        assert!(write_with_retry(&mut writer, &[b"later-event\n".to_vec()], &failures).is_err());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"even",
+            "a poisoned audit file must not receive later records"
+        );
+        assert_eq!(failures.load(Ordering::Relaxed), 2);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

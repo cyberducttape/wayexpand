@@ -6,6 +6,9 @@ All notable changes to WayExpand are documented here.
 
 - Added an Action Broker regression test proving continuous stderr output cannot
   starve the configured child-process deadline.
+- The Action Broker now poisons its audit writer if a failed batch cannot be
+  rolled back and synced, preventing later retries from reporting success over
+  a log with uncertain contents.
 - Preserved a current-build `doctor --certify` report for commit `611017a88cec`:
   11 isolated KWin 6.6.6 insertion, focus, reload, restart, and refusal checks
   passed using libei keysym fallback; Unicode insertion, physical keyboard
