@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
   lost, and discards its deferred trigger reservation before the next input.
 - Preserved a `doctor --certify --json` run from build `c9d9f3eac46c` on KWin
   6.6.6, including its partial outcomes and explicit keysym-fallback limits.
+- Recorded a current-source 11-scenario headless KWin run that passed output,
+  focus-transition, reload, and restart scenarios; physical capture and Unicode
+  remain outside the evidence.
 - The GUI diagnostics dashboard no longer reports permissions as available when
   environment probes say they are not applicable; granted, required, and
   unreported/not-applicable states are now distinct.

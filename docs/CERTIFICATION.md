@@ -147,6 +147,14 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/kwin-headless-2026-10-25.json`](evidence/kwin-headless-2026-10-25.json)
+records a current-source 11-scenario run against the production daemon, libei
+injector, and KWin window tracker on KWin 6.6.6. All scenarios passed,
+including focus change during expansion and target closure. Capture was
+simulated through stdin in a private headless session; the route negotiated
+keysym fallback, so Unicode insertion remains untested. This artifact supports
+output and focus behavior only and does not certify a compositor route.
+
 [`evidence/doctor-certify-2026-10-25.json`](evidence/doctor-certify-2026-10-25.json)
 is a preserved run of `wayexpand doctor --certify --json` from build
 `c9d9f3eac46c` on KWin 6.6.6. The private test clients verified simple
