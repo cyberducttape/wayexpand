@@ -33,7 +33,57 @@ fi
 
 CARGO_TARGET_DIR="$target_dir" cargo build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
-    -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui
+    -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui \
+    -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
+
+build_triple=${CARGO_BUILD_TARGET:-$(rustc -vV | sed -n 's/^host: //p')}
+case "$build_triple" in
+    x86_64-*) release_arch=x86_64 ;;
+    aarch64-*) release_arch=aarch64 ;;
+    *) printf '%s\n' "unsupported release smoke-test target: $build_triple" >&2; exit 1 ;;
+esac
+package_output="$test_root/packages"
+mkdir -m 0700 "$package_output"
+(cd "$project_dir" && \
+    CARGO_TARGET_DIR="$target_dir" \
+    WAYEXPAND_RELEASE_OUTPUT_DIR="$package_output" \
+        scripts/package-release-binaries.sh test "$release_arch")
+archive="$package_output/wayexpand-test-linux-$release_arch.tar.gz"
+checksum="$archive.sha256"
+(
+    cd "$package_output"
+    sha256sum -c "$(basename -- "$checksum")"
+)
+archive_listing="$test_root/release-archive.txt"
+tar -tzf "$archive" >"$archive_listing"
+extracted_archive="$test_root/extracted-release"
+mkdir -m 0700 "$extracted_archive"
+tar -xzf "$archive" -C "$extracted_archive"
+for path in \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand" \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand-daemon" \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand-action-broker" \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand-ui" \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand-gui" \
+    "wayexpand-test-linux-$release_arch/bin/wayexpand-ibus" \
+    "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-sink" \
+    "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-type" \
+    "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-eis-relay" \
+    "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/test-kwin-e2e.sh"; do
+    grep -Fxq "$path" "$archive_listing" || {
+        printf '%s\n' "release archive is missing $path" >&2
+        exit 1
+    }
+    test -x "$extracted_archive/$path" || {
+        printf '%s\n' "release archive entry is not executable: $path" >&2
+        exit 1
+    }
+done
+test "$(stat -c '%a' "$extracted_archive/wayexpand-test-linux-$release_arch/expansions.toml")" = 600
+if grep -E '(^|/)\.git(/|$)|(^|/)docs/archive(/|$)' "$archive_listing" >/dev/null; then
+    printf '%s\n' 'release archive contains excluded repository content' >&2
+    exit 1
+fi
 
 bin_dir="$test_root/home/.local/bin"
 config_dir="$test_root/home/.config/wayexpand"
