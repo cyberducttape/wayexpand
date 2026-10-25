@@ -164,9 +164,15 @@ fn prefetching_clipboard(
     });
     let (sender, receiver) = mpsc::sync_channel(1);
     let worker_shared = Arc::clone(&shared);
-    let _worker = std::thread::Builder::new()
+    let worker = std::thread::Builder::new()
         .name("wayexpand-clipboard".into())
         .spawn(move || clipboard_worker(receiver, worker_shared, read, max_age));
+    if let Err(error) = worker {
+        tracing::warn!(
+            %error,
+            "could not start clipboard reader worker; clipboard placeholders will be unavailable"
+        );
+    }
     let reader = {
         let shared = Arc::clone(&shared);
         let sender = sender.clone();
@@ -199,6 +205,7 @@ fn queue_read(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>, slot: &mut Sl
         .is_err()
     {
         slot.value = Prefetched::Unavailable { generation };
+        READ_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
         shared.ready.notify_all();
         return None;
     }
@@ -485,5 +492,21 @@ mod tests {
         }
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!((reader.0)().as_deref(), Some("value-2"));
+    }
+
+    #[test]
+    fn disconnected_clipboard_worker_fails_closed_without_waiting_for_deadline() {
+        let shared = Shared {
+            slot: Mutex::new(Slot::default()),
+            ready: Condvar::new(),
+        };
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+
+        let started = Instant::now();
+        let mut slot = lock(&shared);
+        assert_eq!(queue_read(&shared, &sender, &mut slot), None);
+        assert!(matches!(slot.value, Prefetched::Unavailable { .. }));
+        assert!(started.elapsed() < Duration::from_millis(50));
     }
 }

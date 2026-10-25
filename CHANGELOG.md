@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clipboard worker startup and disconnected-job failures are now visible in
+  diagnostics; a failed enqueue is counted and fails closed without waiting for
+  the clipboard deadline.
 - `doctor --certify` now validates its argument shape without removing user
   arguments during dispatch; CLI regression coverage confirms invalid
   positional arguments stop before the isolated compositor is started.
