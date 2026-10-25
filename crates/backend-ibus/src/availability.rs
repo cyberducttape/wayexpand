@@ -89,7 +89,7 @@ fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Durat
         return false;
     };
     let mut supervisor = ChildSupervisor::new(child);
-    let Some(mut stdout) = supervisor.child_mut().and_then(|child| child.stdout.take()) else {
+    let Some(mut stdout) = supervisor.take_stdout() else {
         return false;
     };
     if set_nonblocking(&stdout).is_err() {

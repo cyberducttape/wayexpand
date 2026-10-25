@@ -5,7 +5,7 @@
 //! the PID/PGID reuse window between observing exit and group cleanup.
 
 use std::io;
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, ChildStdout, Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -115,9 +115,10 @@ impl ChildSupervisor {
         }
     }
 
-    /// Access the supervised child while retaining group cleanup ownership.
-    pub fn child_mut(&mut self) -> Option<&mut Child> {
-        self.child.as_mut()
+    /// Take the child's stdout without exposing lifecycle methods that could
+    /// reap the leader before process-group cleanup.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.child.as_mut()?.stdout.take()
     }
 
     #[cfg(unix)]
@@ -327,12 +328,8 @@ mod tests {
         configure_process_group(&mut command);
         let child = command.spawn().expect("spawn test child");
         let mut supervisor = ChildSupervisor::new(child);
-        let mut stdout = std::io::BufReader::new(
-            supervisor
-                .child_mut()
-                .and_then(|child| child.stdout.take())
-                .expect("capture descendant PID"),
-        );
+        let mut stdout =
+            std::io::BufReader::new(supervisor.take_stdout().expect("capture descendant PID"));
         let mut descendant_pid = String::new();
         stdout
             .read_line(&mut descendant_pid)

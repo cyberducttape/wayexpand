@@ -586,7 +586,7 @@ fn run_form_helper_process(
     configure_process_group(&mut command);
     let child = command.spawn().context("could not start the form helper")?;
     let mut supervisor = ChildSupervisor::new(child);
-    let mut stdout = match supervisor.child_mut().and_then(|child| child.stdout.take()) {
+    let mut stdout = match supervisor.take_stdout() {
         Some(stdout) => stdout,
         None => {
             supervisor.kill_group();

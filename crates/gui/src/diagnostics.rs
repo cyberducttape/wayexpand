@@ -54,7 +54,7 @@ fn bounded_version(program: &str, args: &[&str]) -> Option<String> {
     configure_process_group(&mut command);
     let child = command.spawn().ok()?;
     let mut supervisor = ChildSupervisor::new(child);
-    let stdout = supervisor.child_mut()?.stdout.as_mut()?;
+    let mut stdout = supervisor.take_stdout()?;
     let flags = unsafe { libc::fcntl(stdout.as_raw_fd(), libc::F_GETFL) };
     if flags < 0
         || unsafe { libc::fcntl(stdout.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
@@ -70,7 +70,7 @@ fn bounded_version(program: &str, args: &[&str]) -> Option<String> {
     loop {
         if !eof {
             for _ in 0..4 {
-                match supervisor.child_mut()?.stdout.as_mut()?.read(&mut buffer) {
+                match stdout.read(&mut buffer) {
                     Ok(0) => {
                         eof = true;
                         break;
