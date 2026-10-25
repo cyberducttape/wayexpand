@@ -23,6 +23,14 @@ pub(crate) fn default_backup_destination(source: &Path) -> PathBuf {
 }
 
 pub(crate) fn create_backup(source: &Path, destination: &Path) -> Result<()> {
+    create_backup_with_sync(source, destination, |directory| directory.sync_all())
+}
+
+fn create_backup_with_sync(
+    source: &Path,
+    destination: &Path,
+    sync_directory: impl FnOnce(&fs::File) -> io::Result<()>,
+) -> Result<()> {
     // Inspect the opened file, not the path, so the size checked below
     // belongs to the same file that is copied. O_NONBLOCK keeps a FIFO from
     // blocking the open before the regular-file check can reject it.
@@ -44,8 +52,10 @@ pub(crate) fn create_backup(source: &Path, destination: &Path) -> Result<()> {
         .mode(0o600)
         .open(destination)
         .with_context(|| format!("creating configuration backup {}", destination.display()))?;
-    // A backup is only reported once it is complete and durable; anything
-    // less is removed so an incomplete file is never mistaken for one.
+    // A backup is only reported after its file and parent directory are
+    // synced. Failures before the directory sync remove incomplete file data;
+    // a failure at the final sync leaves the complete backup in place and
+    // reports its durability as uncertain below.
     let written = io::copy(&mut source_file, &mut destination_file).and_then(|copied| {
         if copied != metadata.len() {
             return Err(io::Error::other(format!(
@@ -65,8 +75,44 @@ pub(crate) fn create_backup(source: &Path, destination: &Path) -> Result<()> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .with_context(|| format!("syncing backup directory {}", parent.display()))?;
+    if let Err(error) = fs::File::open(parent).and_then(|directory| sync_directory(&directory)) {
+        bail!(
+            "configuration backup {} was created, but syncing its parent directory failed; durability is uncertain: {error}",
+            destination.display()
+        );
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn directory_sync_failure_reports_that_backup_was_created() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-backup-durability-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source = directory.join("source.toml");
+        let destination = directory.join("source.toml.bak");
+        fs::write(&source, b"configuration").unwrap();
+
+        let error = create_backup_with_sync(&source, &destination, |_| {
+            Err(io::Error::other("injected directory sync failure"))
+        })
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("backup"));
+        assert!(message.contains("durability is uncertain"));
+        assert_eq!(fs::read(&destination).unwrap(), b"configuration");
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

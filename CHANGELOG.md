@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Configuration saves now distinguish a failed parent-directory sync after
   atomic replacement from a pre-commit failure, warning that the new file is
   visible but crash durability is uncertain and should be verified before retry.
+- Configuration backups now report when a parent-directory sync fails after
+  the complete backup has been created, so an error does not imply the backup
+  file is absent.
 - Preserved the current-head `doctor --certify` report for commit
   `3e3ea129d7a5`: 12 isolated KWin 6.6.6 output, focus, reload, restart, and
   refusal checks passed using libei keysym fallback. Unicode insertion,
