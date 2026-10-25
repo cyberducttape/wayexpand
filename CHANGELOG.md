@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Process supervision now invalidates and cleans up the process group as part
+  of `reap()`, preventing a later drop from signalling a recycled group ID
+  when callers omit an explicit cleanup call.
 - Audit rotation now replaces the previous backup atomically, preserving it if
   moving the active log fails.
 - Clipboard worker startup and disconnected-job failures are now visible in

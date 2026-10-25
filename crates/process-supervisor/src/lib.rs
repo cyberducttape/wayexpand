@@ -183,7 +183,14 @@ impl ChildSupervisor {
         }
     }
 
+    /// Terminate any remaining members of the process group, invalidate its
+    /// identifier, then reap the leader. Calling this directly is safe; callers
+    /// do not need a separate `kill_group` first.
     pub fn reap(&mut self) -> io::Result<ExitStatus> {
+        // Keep the leader's PID/PGID from becoming reusable before group
+        // cleanup. On Linux, `has_exited` observes with WNOWAIT, so cleanup
+        // still targets the original group. Invalidate before signalling.
+        self.kill_group();
         #[cfg(not(target_os = "linux"))]
         if let Some(status) = self.observed_status.take() {
             self.child = None;
@@ -291,5 +298,24 @@ mod tests {
 
         // A repeated cleanup call cannot target a recycled process-group ID.
         supervisor.kill_group();
+    }
+
+    #[test]
+    fn reap_also_invalidates_group_identifier() {
+        let mut command = Command::new("true");
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test child");
+        let mut supervisor = ChildSupervisor::new(child);
+        wait_until_exited(&mut supervisor);
+
+        let status = supervisor.reap().expect("reap and clean up group");
+        assert!(status.success());
+        assert!(supervisor.pid.is_none());
+
+        // Once reaped, dropping or cleaning up again cannot signal a reused
+        // process-group identifier.
+        let before = kill_failures_total();
+        supervisor.kill_group();
+        assert_eq!(kill_failures_total(), before);
     }
 }
