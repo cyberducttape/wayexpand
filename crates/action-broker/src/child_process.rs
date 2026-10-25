@@ -286,6 +286,27 @@ mod tests {
     }
 
     #[test]
+    fn continuous_stderr_output_cannot_starve_the_action_deadline() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "yes wayexpand >&2"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn continuous-stderr child");
+        let stderr = child.stderr.take().expect("child stderr");
+        let started = Instant::now();
+        let result = run_child_unix(child, None, Some(stderr), Duration::from_millis(50));
+        assert!(matches!(result, Err(ChildRunError::Timeout)));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "continuous stderr output starved the timeout: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn broker_shutdown_cancels_a_continuous_action_promptly() {
         use std::sync::atomic::AtomicBool;
 

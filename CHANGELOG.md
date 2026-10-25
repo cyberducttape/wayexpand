@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added an Action Broker regression test proving continuous stderr output cannot
+  starve the configured child-process deadline.
 - Preserved a current-build `doctor --certify` report for commit `611017a88cec`:
   11 isolated KWin 6.6.6 insertion, focus, reload, restart, and refusal checks
   passed using libei keysym fallback; Unicode insertion, physical keyboard
