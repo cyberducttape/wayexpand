@@ -632,23 +632,7 @@ fn redact_query(tail: &str) -> String {
         .split('&')
         .map(|pair| {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            let key_lower = key.to_ascii_lowercase();
-            if [
-                "token",
-                "password",
-                "passwd",
-                "secret",
-                "auth",
-                "credential",
-                "api_key",
-                "access_key",
-                "key",
-                // Shared-access signatures (`sig=`, `X-Amz-Signature=`).
-                "sig",
-            ]
-            .iter()
-            .any(|sensitive| key_lower.contains(sensitive))
-            {
+            if query_key_is_sensitive(key) {
                 format!("{key}=[REDACTED]")
             } else if value.is_empty() {
                 key.to_owned()
@@ -659,6 +643,57 @@ fn redact_query(tail: &str) -> String {
         .collect::<Vec<_>>()
         .join("&");
     format!("{path}?{query}")
+}
+
+fn query_key_is_sensitive(key: &str) -> bool {
+    let key = key.as_bytes();
+    let mut decoded = Vec::with_capacity(key.len());
+    let mut index = 0;
+    while index < key.len() {
+        if key[index] == b'%' {
+            let Some(hex) = key.get(index + 1..index + 3) else {
+                // A malformed key cannot be classified safely. Hide its
+                // value rather than risk exposing a credential.
+                return true;
+            };
+            let (Some(high), Some(low)) = (hex_digit(hex[0]), hex_digit(hex[1])) else {
+                return true;
+            };
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(key[index]);
+            index += 1;
+        }
+    }
+    let Ok(key_lower) = std::str::from_utf8(&decoded) else {
+        return true;
+    };
+    let key_lower = key_lower.to_ascii_lowercase();
+    [
+        "token",
+        "password",
+        "passwd",
+        "secret",
+        "auth",
+        "credential",
+        "api_key",
+        "access_key",
+        "key",
+        // Shared-access signatures (`sig=`, `X-Amz-Signature=`).
+        "sig",
+    ]
+    .iter()
+    .any(|sensitive| key_lower.contains(sensitive))
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn redact_git_diagnostic(value: &str) -> String {
@@ -1864,6 +1899,14 @@ mod tests {
                 "https://store.example.invalid/lib.git?sv=2024&sig=abc%3D&X-Amz-Signature=def"
             ),
             "https://store.example.invalid/lib.git?sv=2024&sig=[REDACTED]&X-Amz-Signature=[REDACTED]"
+        );
+        assert_eq!(
+            redact_remote_url("https://store.example.invalid/lib.git?%74oken=private&ref=main"),
+            "https://store.example.invalid/lib.git?%74oken=[REDACTED]&ref=main"
+        );
+        assert_eq!(
+            redact_remote_url("https://store.example.invalid/lib.git?%ZZ=private&ref=main"),
+            "https://store.example.invalid/lib.git?%ZZ=[REDACTED]&ref=main"
         );
         let diagnostic = redact_git_diagnostic(
             "fatal: https://alice:topsecret@example.invalid/lib.git?password=hidden failed\n",

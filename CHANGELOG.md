@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Git remote diagnostics now redact credentials when sensitive query parameter
+  names are percent-encoded or malformed, closing a URL-encoding bypass in
+  synchronization status and error output.
 - `wayexpand doctor --certify` now reports p50/p95/p99 injector latency from
   20 verified small-text replacements in the isolated KWin harness. The sample
   excludes physical capture and client paint latency and is informational; it
