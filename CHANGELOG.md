@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI compositor-version probes now read output without blocking, cap retained
+  data, enforce their deadline, and terminate descendants that inherit the
+  probe pipe.
 - Isolated `wayexpand doctor --certify` reports now include the exact
   WayExpand build version, commit, and run timestamp, making saved compatibility
   results traceable to the binary that produced them.

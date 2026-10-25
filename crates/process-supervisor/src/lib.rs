@@ -115,6 +115,11 @@ impl ChildSupervisor {
         }
     }
 
+    /// Access the supervised child while retaining group cleanup ownership.
+    pub fn child_mut(&mut self) -> Option<&mut Child> {
+        self.child.as_mut()
+    }
+
     #[cfg(unix)]
     pub fn pidfd(&self) -> Option<&OwnedFd> {
         self.pidfd.as_ref()

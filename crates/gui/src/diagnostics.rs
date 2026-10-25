@@ -1,6 +1,7 @@
 use std::{
     env,
-    io::Read,
+    io::{self, Read},
+    os::fd::AsRawFd,
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -10,6 +11,7 @@ use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{load_organization_policy, BackendStatus};
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 pub(crate) fn compositor_info() -> String {
     let (name, command, args) = if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
@@ -42,29 +44,62 @@ pub(crate) fn compositor_info() -> String {
 /// Version probes run on the diagnostics worker and have a hard deadline and
 /// a tiny output cap. They are informational and never influence route choice.
 fn bounded_version(program: &str, args: &[&str]) -> Option<String> {
-    let mut child = Command::new(program)
+    const OUTPUT_LIMIT: usize = 256;
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let child = command.spawn().ok()?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let stdout = supervisor.child_mut()?.stdout.as_mut()?;
+    let flags = unsafe { libc::fcntl(stdout.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0
+        || unsafe { libc::fcntl(stdout.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+    {
+        supervisor.kill_group();
+        let _ = supervisor.reap();
+        return None;
+    }
     let deadline = Instant::now() + Duration::from_millis(400);
+    let mut output = Vec::with_capacity(OUTPUT_LIMIT);
+    let mut buffer = [0u8; 128];
+    let mut eof = false;
     loop {
-        if child.try_wait().ok().flatten().is_some() {
-            let mut output = String::new();
-            child
-                .stdout
-                .take()?
-                .take(256)
-                .read_to_string(&mut output)
-                .ok()?;
+        if !eof {
+            for _ in 0..4 {
+                match supervisor.child_mut()?.stdout.as_mut()?.read(&mut buffer) {
+                    Ok(0) => {
+                        eof = true;
+                        break;
+                    }
+                    Ok(count) => {
+                        let retain = count.min(OUTPUT_LIMIT.saturating_sub(output.len()));
+                        output.extend_from_slice(&buffer[..retain]);
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(_) => {
+                        supervisor.kill_group();
+                        let _ = supervisor.reap();
+                        return None;
+                    }
+                }
+            }
+        }
+        if supervisor.has_exited().ok()? {
+            // A version probe must not leave descendants holding its pipe
+            // open. Terminate the probe's process group before reaping it.
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            let output = String::from_utf8_lossy(&output);
             let line = output.lines().next()?.trim();
             return (!line.is_empty()).then(|| line.to_owned());
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            supervisor.kill_group();
+            let _ = supervisor.reap();
             return None;
         }
         thread::sleep(Duration::from_millis(10));
@@ -193,6 +228,8 @@ fn ibus_detail_for(available: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     #[test]
     fn socket_based_wayland_sessions_are_recognized_by_the_probe_gate() {
         assert!(super::wayland_session_from(false, true));
@@ -204,5 +241,14 @@ mod tests {
     fn ibus_diagnostics_expose_availability_without_claiming_certification() {
         assert!(super::ibus_detail_for(true).contains("not certified"));
         assert!(super::ibus_detail_for(false).starts_with("unsupported:"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compositor_version_probe_kills_descendant_holding_stdout() {
+        let started = Instant::now();
+        let version = super::bounded_version("sh", &["-c", "sleep 5 & printf 'KWin 99.1\\n'"]);
+        assert_eq!(version.as_deref(), Some("KWin 99.1"));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
