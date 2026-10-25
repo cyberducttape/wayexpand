@@ -45,6 +45,7 @@ struct HarnessResult {
     status: &'static str,
     version: Option<String>,
     tested_commit: Option<String>,
+    source_tree_state: Option<String>,
     capture_source: Option<String>,
     injection_backend: Option<String>,
     insertion_mode: Option<String>,
@@ -91,6 +92,7 @@ fn run_harness() -> HarnessResult {
     let stderr = String::from_utf8_lossy(&timeout.stderr);
     let mut outcomes = BTreeMap::new();
     let mut tested_commit = None;
+    let mut source_tree_state = None;
     let mut capture_source = None;
     let mut injection_backend = None;
     let mut insertion_mode = None;
@@ -100,6 +102,13 @@ fn run_harness() -> HarnessResult {
     for line in stdout.lines() {
         if let Some(value) = line.strip_prefix("tested-build commit ") {
             tested_commit = nonempty(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("tested-build source-tree ") {
+            source_tree_state = match value {
+                "clean" | "dirty" | "unknown" => Some(value.to_owned()),
+                _ => None,
+            };
             continue;
         }
         if let Some(value) = line.strip_prefix("route capture-source ") {
@@ -147,6 +156,7 @@ fn run_harness() -> HarnessResult {
             status: "failed",
             version,
             tested_commit,
+            source_tree_state,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -170,6 +180,7 @@ fn run_harness() -> HarnessResult {
             status: "unavailable",
             version,
             tested_commit,
+            source_tree_state,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -184,6 +195,7 @@ fn run_harness() -> HarnessResult {
             status: "unavailable",
             version,
             tested_commit,
+            source_tree_state,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -201,6 +213,7 @@ fn run_harness() -> HarnessResult {
             status: "incomplete",
             version,
             tested_commit,
+            source_tree_state,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -220,6 +233,7 @@ fn run_harness() -> HarnessResult {
             status: "failed",
             version,
             tested_commit,
+            source_tree_state,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -235,6 +249,7 @@ fn run_harness() -> HarnessResult {
         status: "completed",
         version,
         tested_commit,
+        source_tree_state,
         capture_source,
         injection_backend,
         insertion_mode,
@@ -288,6 +303,7 @@ fn unavailable(reason: &'static str) -> HarnessResult {
         status: "unavailable",
         version: None,
         tested_commit: None,
+        source_tree_state: None,
         capture_source: None,
         injection_backend: None,
         insertion_mode: None,
@@ -465,6 +481,7 @@ fn make_report_for_build(
         commit != "unknown" && reporter_commit != "unknown" && commit == reporter_commit
     });
     let build_identity_status = match result.tested_commit.as_deref() {
+        Some(_) if result.source_tree_state.as_deref() == Some("dirty") => "not-tested",
         Some(_) if build_matches_reporter => "passed",
         Some(_) => "failed",
         None => "not-tested",
@@ -539,6 +556,7 @@ fn make_report_for_build(
             "status": result.status,
             "reason": result.reason,
             "tested_commit": result.tested_commit,
+            "source_tree_state": result.source_tree_state,
             "build_matches_reporter": build_matches_reporter,
         },
         "checks": checks,
@@ -704,6 +722,7 @@ mod tests {
             status: "incomplete",
             version: Some("test".into()),
             tested_commit: None,
+            source_tree_state: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -723,6 +742,7 @@ mod tests {
             status: "failed",
             version: Some("test".into()),
             tested_commit: None,
+            source_tree_state: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -743,6 +763,7 @@ mod tests {
                 status: "completed",
                 version: Some("6.6.6".into()),
                 tested_commit: Some("test-commit".into()),
+                source_tree_state: Some("clean".into()),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei keysym fallback".into()),
@@ -799,6 +820,7 @@ mod tests {
             status: "completed",
             version: Some("6.6.6".into()),
             tested_commit: None,
+            source_tree_state: None,
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -821,6 +843,7 @@ mod tests {
                 status: "completed",
                 version: Some("6.6.6".into()),
                 tested_commit: Some("test-commit".into()),
+                source_tree_state: Some("clean".into()),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -855,6 +878,7 @@ mod tests {
                 status: "completed",
                 version: Some("6.6.6".into()),
                 tested_commit: Some("test-commit".into()),
+                source_tree_state: Some("clean".into()),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -887,6 +911,7 @@ mod tests {
                 status: "completed",
                 version: Some("6.6.6".into()),
                 tested_commit: Some("different-build".into()),
+                source_tree_state: Some("clean".into()),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -920,6 +945,7 @@ mod tests {
                 status: "completed",
                 version: Some("6.6.6".into()),
                 tested_commit: Some("unknown".into()),
+                source_tree_state: Some("clean".into()),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -935,5 +961,30 @@ mod tests {
         assert_eq!(report["overall"], "failed");
         assert_eq!(report["certified"], false);
         assert_eq!(report["harness"]["build_matches_reporter"], false);
+    }
+
+    #[test]
+    fn dirty_source_tree_cannot_claim_tested_build_identity() {
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                source_tree_state: Some("dirty".into()),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei ei_text".into()),
+                backend_mode: Some("ei_keyboard and ei_text".into()),
+                sensitive_field_detection: Some(false),
+                outcomes: all_completed_scenarios(),
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
+
+        assert_eq!(report["overall"], "incomplete");
+        assert_eq!(report["harness"]["source_tree_state"], "dirty");
+        assert_eq!(report["checks"][14]["status"], "not-tested");
     }
 }

@@ -73,10 +73,20 @@ if [ -n "${WAYEXPAND_E2E_PREBUILT_BIN:-}" ]; then
     mkdir -p "$work_parent"
     chmod 700 "$work_parent"
     work=$(mktemp -d "$work_parent/kwin-e2e.XXXXXX")
+    source_tree_state=unknown
 else
     # Pick up the repository's rust-toolchain.toml even when the user invoked
     # doctor from another working directory.
     cd "$project_dir"
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if [ -z "$(git status --porcelain --untracked-files=all)" ]; then
+            source_tree_state=clean
+        else
+            source_tree_state=dirty
+        fi
+    else
+        source_tree_state=unknown
+    fi
     target_dir=${CARGO_TARGET_DIR:-"$project_dir/target"}
     case "$target_dir" in
         /*) ;;
@@ -147,6 +157,7 @@ if [ -z "$cli_commit" ] || [ "$cli_commit" = unknown ] ||
     exit 2
 fi
 printf 'tested-build commit %s\n' "$cli_commit"
+printf 'tested-build source-tree %s\n' "$source_tree_state"
 
 session_status=0
 env -i \

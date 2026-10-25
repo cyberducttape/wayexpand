@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - Isolated desktop certification now rejects duplicate or invalid scenario
   records, preventing malformed harness output from overwriting a failure with
   a later pass.
+- Source-checkout certification reports whether the tested tree was clean;
+  dirty-tree results no longer count as an identified build.
 - Privacy-filtered `wayexpand support` summaries now retain the compositor
   protocol-probe statuses, so support diagnostics preserve why an integration
   route is unavailable without including raw daemon or configuration details.
