@@ -28,8 +28,8 @@ availability claims, and no target is certified without reviewed evidence.
 <!-- generated:desktop-certification-matrix:start -->
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | none | Unavailable | Not observed | **Not certified** |
 | `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
@@ -155,45 +155,22 @@ WayExpand requires Wayland and will not be actively supported on X11. Reasons:
 
 ## Testing Procedures
 
-### Candidate production route: KDE Plasma + input-method-v2
+### Production certification gate: no eligible compositor route
 
-The first production certification candidate is deliberately one narrow route:
-KDE Plasma/KWin, `input-method-v2`, and the required US, DE, FR, AltGr, and
-multi-layout profiles. This is a test target, not a certification claim; the
-checked-in matrix remains **Not certified** until a real session produces a
-reviewed artifact with sensitive-field, atomic-replacement, and full-Unicode
-capabilities verified by the live daemon status.
+There is currently no compositor/backend pair in the declared support matrix
+that meets the production certification contract. KWin and Mutter do not
+advertise `zwp_input_method_manager_v2`; the input-method-v2 implementation is
+therefore not a valid KDE or GNOME target. The live KWin probe in the current
+session also reported the manager unavailable after selecting the Plasma
+virtual keyboard. The remaining declared capture routes are IBus or evdev and
+do not meet the current production contract.
 
-Run the real client driver from a KDE session with GTK, Qt, a Chromium or
-Electron client, a terminal, a password field, and an editor available:
-
-```bash
-scripts/run-certification-driver.sh \
-  --driver /absolute/path/to/kde-golden-driver \
-  --compositor kde --version "$(plasmashell --version | head -n1)" \
-  --backend input-method-v2 \
-  --layout us,de,fr,altgr,multi-layout-switching \
-  --target-apps gtk,qt,chromium,electron,terminal,password,editor \
-  --output /tmp/wayexpand-kde-results.txt \
-  --log-dir /tmp/wayexpand-kde-logs
-
-scripts/certify-compositor.sh \
-  --compositor kde --version "$(plasmashell --version | head -n1)" \
-  --backend input-method-v2 \
-  --layout us,de,fr,altgr,multi-layout-switching \
-  --target-apps gtk,qt,chromium,electron,terminal,password,editor \
-  --results /tmp/wayexpand-kde-results.txt \
-  --format json --output docs/certification/kde-<date>.json
-```
-
-The driver must exercise every scenario in
-`tests/certification/compositor-matrix.json`, including pass-through for
-Escape, arrows, function keys, modifiers, restart/reconnection, suspend and
-resume, portal revocation, hotplug, Unicode/Compose, focus changes, password
-fields, and GTK/Qt/Electron clients. A report is publishable only when every
-in-scope scenario × layout × client cell is an observed `pass`, the doctor and
-daemon probes identify the requested KDE session and backend, and a reviewer
-checks the per-cell logs. `UNVERIFIED` is never a pass.
+The release certification workflow fails before runner discovery while this
+set is empty. Compatibility jobs and headless smoke reports cannot satisfy
+this release gate. When a compatible compositor/backend is demonstrated in a
+real session, add it to this matrix only after its protocol availability,
+sensitive-field behavior, atomic replacement, key pass-through, Unicode, and
+focus behavior are verified; then restore a required target and its driver.
 
 Focus changes and partial output are security-sensitive acceptance gates, not
 ordinary smoke-test cases. The evidence must show that a trigger detected in
@@ -297,7 +274,7 @@ composition remains outside the certification scope.
 ## Getting Help
 
 - **KDE Plasma:** See [docs/SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for KDE-specific setup
-- **GNOME:** See [docs/CAPTURE_BACKEND_TRADEOFFS.md](CAPTURE_BACKEND_TRADEOFFS.md) for input-method-v2 guide
+- **GNOME:** See [docs/SUPPORT_MATRIX.md](SUPPORT_MATRIX.md); input-method-v2 is implemented but unavailable in the currently tested Mutter protocol set
 - **Sway/Hyprland:** See [docs/BACKENDS.md](BACKENDS.md) for manual configuration
 - **Not certified?** Open an issue with testing results—we'd love to expand certification coverage
 

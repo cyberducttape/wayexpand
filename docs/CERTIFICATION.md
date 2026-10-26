@@ -268,29 +268,22 @@ artifact supports the output and focus paths only. It does not certify a
 compositor route and does not satisfy any real-session acceptance gate.
 
 The workflow's backend column identifies the path a runner driver exercises;
-it does not mean that path is currently eligible for production certification.
-Both evdev paths are explicitly ineligible because they cannot meet the
-safety contract, and IBus is ineligible everywhere except GNOME. The workflow
-therefore runs input-method-v2 as the production-required path on KDE.
-GNOME's compositor does not offer input-method-v2, so GNOME certifies on
-IBus as an optional job, and its evidence records what IBus still does not
-provide (`certification_limitations`): replacement is verified against the
-surrounding text but not atomic, application filters are unavailable without
-a window tracker, and external IME composition is unsupported. Sway and
-Hyprland remain compatibility-only candidate jobs; none of the three blocks
-a release. Input-method-v2 is
-still ineligible until the live daemon demonstrates the complete capability
-contract above. Therefore the workflow is a fail-closed candidate-path test,
-and its release gate requires durable certification evidence only for routes
-that can satisfy the production safety contract. No desktop is production-
-certified until its required evidence exists and passes.
+it does not mean that path is eligible for production certification. Both
+evdev paths lack sensitive-field awareness and atomic replacement. IBus
+verifies surrounding text but is non-atomic and lacks exact window identity
+and composition awareness. KWin and Mutter do not advertise
+`zwp_input_method_manager_v2`, so input-method-v2 is not a valid target for
+either desktop ([protocol support matrix](https://wayland.app/protocols/input-method-unstable-v2)). No declared compositor route currently meets the production
+contract. The release workflow therefore fails closed before runner discovery
+until a compatible real-session route is added. Compatibility reports remain
+useful evidence but cannot satisfy the release gate.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
-| KDE Plasma / KWin | input-method-v2 (production-required); KWin window tracker available for app-filter scenarios | Production-required candidate; requires live local dead-key/Compose tracking and the full input/output contract |
-| GNOME | IBus (optional) | Eligible; certified evidence lists its limitations: non-atomic (verified) replacement, no application filters, no external IME composition |
-| Sway | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
-| Hyprland | evdev plus wlroots virtual keyboard (compatibility-only) | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
+| KDE Plasma / KWin | Compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; input-method-v2 manager unavailable |
+| GNOME | IBus compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; IBus replacement is non-atomic and has no window tracker |
+| Sway | evdev plus wlroots compatibility path declared; jobs are not dispatched while the gate is blocked | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
+| Hyprland | evdev plus wlroots compatibility path declared; jobs are not dispatched while the gate is blocked | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
 
 The scenario contract still requires GTK and Qt clients, relevant password
 fields, and focus isolation on each desktop. Application-filter scenarios
@@ -332,15 +325,18 @@ daemon source/backend arguments in service configuration.
 
 ## Self-hosted workflow
 
-The `.github/workflows/certification.yml` workflow runs the four target
-desktops as a matrix on manual dispatch and weekly schedule. Each runner must provide an
+The `.github/workflows/certification.yml` workflow is the release-blocking
+gate. It currently fails before runner discovery because the matrix has no
+production-eligible route. Once one is established, the workflow runs the
+declared target desktops as a matrix on manual dispatch and weekly schedule.
+Each runner must provide an
 executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
-The preflight requires an online runner for every production-required
-compositor and fails without one; optional compositors (currently GNOME,
-Sway, and Hyprland) are certified only when their runner is online, so a missing
-optional runner neither fails nor stalls the workflow.
+The preflight will require an online runner for every production-required
+compositor and fail without one. Optional compositor jobs run only when their
+runner is online, so a missing optional runner neither fails nor stalls the
+workflow.
 Missing driver or session metadata fails the job; hosted CI is never treated as
 a substitute for a real compositor session. Runners certifying a keystroke
 route (`evdev+libei`, `evdev+wlroots`) must give consent in the configuration

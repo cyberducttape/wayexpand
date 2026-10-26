@@ -29,6 +29,13 @@ All notable changes to WayExpand are documented here.
   capability instead of treating missing evidence as support. The dashboard
   warns when the running daemon is stale or its build identity cannot be verified,
   and keeps its sensitive-field certification note translated in every GUI language.
+- Removed KWin and Mutter from the input-method-v2 certification target list
+  after live KWin probing and protocol-support checks showed those compositors
+  do not advertise the required manager. No declared desktop currently has a
+  production-eligible route, so the release certification workflow now fails
+  explicitly before runner discovery instead of treating the impossible KWin
+  target as a valid gate. Compatibility and headless evidence remain unable to
+  satisfy production certification.
 - Added current-source KWin 6.6.6 headless certification evidence. The
   supported output/focus scenarios passed, but keyboard capture, Unicode on
   the negotiated keysym route, suspend/resume, and production desktop

@@ -13,10 +13,10 @@ jq -e '
   ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and
   ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]) and (.requires_password_field_check == true))] | length == 4) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
-  ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 2) and
+  ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 0) and
   ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
-  ([.targets[] | select(.id == "kde" and .production_certification_required == true)] | length == 1) and
-  ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .production_certification_required == false)] | length == 3) and
+  ([.targets[] | select(.production_certification_required == true)] | length == 0) and
+  ([.targets[] | select(.production_certification_required == false)] | length == 4) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
   ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and
@@ -47,6 +47,7 @@ grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_TARGET_APPS' "$workflow" >/dev/null
+grep -F -- 'No declared compositor route currently meets WayExpand production certification requirements.' "$workflow" >/dev/null
 
 python3 - "$matrix" "$workflow" <<'PY'
 import json
@@ -69,9 +70,9 @@ for line in table.group(1).splitlines():
     workflow_flags[fields[0]] = fields[2] == "true"
     workflow_backends[fields[0]] = fields[1]
 if "evdev+libei" in workflow_backends.values():
-    raise SystemExit("certification workflow must not certify raw evdev")
-if workflow_backends.get("kde") != "input-method-v2":
-    raise SystemExit("KDE must be certified on the input-method-v2 route")
+    raise SystemExit("certification workflow must not use raw evdev as a certification candidate")
+if workflow_backends.get("kde") != "ibus":
+    raise SystemExit("KDE compatibility job must use a declared route")
 if workflow_backends.get("gnome") != "ibus":
     raise SystemExit("GNOME must be certified on the IBus route")
 
@@ -90,7 +91,7 @@ fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
 grep -F -- "backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'" "$project_dir/scripts/certify-compositor.sh" >/dev/null
-grep -F -- 'the workflow is a fail-closed candidate-path test' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'No declared compositor route currently meets' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 grep -F -- 'Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 
 release_workflow="$project_dir/.github/workflows/release.yml"

@@ -37,6 +37,17 @@ jobs:
           CERTIFICATION_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN }}
         run: |
           set -euo pipefail
+          production_targets=$(jq '[.targets[] | select(.production_certification_required == true)] | length' tests/certification/compositor-matrix.json)
+          if [ "$production_targets" -eq 0 ]; then
+            message='No declared compositor route currently meets WayExpand production certification requirements. The release gate remains blocked until a real-session route demonstrates sensitive-field handling, atomic replacement, and the required input/output contract.'
+            echo "$message" >&2
+            {
+              echo '## Production compositor certification blocked'
+              echo "$message"
+              echo 'Compatibility jobs cannot satisfy this gate. Do not mark a route production-certified from protocol availability or headless tests.'
+            } >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           if [ -z "$CERTIFICATION_RUNNER_TOKEN" ]; then
             message='Missing CERTIFICATION_RUNNER_TOKEN. Configure a fine-grained token with repository Administration: read permission, then store it as this repository secret.'
             echo "$message" >&2
@@ -57,13 +68,9 @@ jobs:
             } >>"$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          # compositor, certification backend, production required.
-          # Raw evdev is a compatibility fallback, not a production-safe
-          # certification route: it cannot observe sensitive fields or make
-          # replacement atomic, so KDE is validated on input-method-v2.
-          # GNOME's compositor does not offer input-method-v2; it is
-          # exercised on IBus and is not production-required.
-          targets='kde input-method-v2 true
+          # compositor, certification backend, production required. These
+          # compatibility jobs never satisfy the production release gate.
+          targets='kde ibus false
           gnome ibus false
           sway evdev+wlroots false
           hyprland evdev+wlroots false'

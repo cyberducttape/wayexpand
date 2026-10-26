@@ -94,10 +94,7 @@
       "focus_tracking": false,
       "status": "experimental",
       "setup_backend": "input-method",
-      "certification_targets": [
-        "kde",
-        "gnome"
-      ],
+      "certification_targets": [],
       "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification",
       "replacement_assurance": "verified"
     }

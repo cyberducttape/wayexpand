@@ -54,8 +54,8 @@ evidence exists.
 <!-- generated:desktop-certification-matrix:start -->
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei, input-method-v2 | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | none | Unavailable | Not observed | **Not certified** |
 | `sway` | Sway / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots | evdev+wlroots | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
