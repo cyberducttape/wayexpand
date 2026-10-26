@@ -158,6 +158,20 @@ impl GuiApp {
             capabilities,
             &self.permission_health,
         );
+        if self.daemon_reachable == Some(true) {
+            let build_warning = match runtime::daemon_build_state(&self.daemon_status) {
+                runtime::DaemonBuildState::Current => None,
+                runtime::DaemonBuildState::RestartRequired => {
+                    Some(self.strings.daemon_restart_required_help())
+                }
+                runtime::DaemonBuildState::Unverified => {
+                    Some(self.strings.daemon_build_unverified_help())
+                }
+            };
+            if let Some(warning) = build_warning {
+                ui.colored_label(palette.warning, RichText::new(warning).strong());
+            }
+        }
         let mut insertion_detail = match capabilities.and_then(|caps| caps.replacement_assurance) {
             Some(assurance) => self.strings.replacement_explanation(assurance).to_owned(),
             None => self.strings.insertion_assurance_unknown().to_owned(),

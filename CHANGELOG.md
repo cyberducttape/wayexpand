@@ -11,7 +11,8 @@ All notable changes to WayExpand are documented here.
   uncertain attempts stopped. The trace never records typed or inserted text,
   and distinguishes backend acknowledgement from proof of client display.
   Insertion readiness also stays unknown when the daemon omits its full-Unicode
-  capability instead of treating missing evidence as support.
+  capability instead of treating missing evidence as support. The dashboard
+  warns when the running daemon is stale or its build identity cannot be verified.
 - Added current-source KWin 6.6.6 headless certification evidence. The
   supported output/focus scenarios passed, but keyboard capture, Unicode on
   the negotiated keysym route, suspend/resume, and production desktop

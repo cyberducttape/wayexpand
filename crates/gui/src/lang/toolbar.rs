@@ -142,6 +142,14 @@ impl Strings {
         }
     }
 
+    pub fn daemon_build_unverified_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The running daemon's build identity is missing or unknown. Runtime safety guarantees cannot be matched to this GUI build.",
+            Language::Indonesian => "Identitas build daemon yang berjalan tidak tersedia atau tidak diketahui. Jaminan keamanan runtime tidak dapat dicocokkan dengan build GUI ini.",
+            Language::German => "Die Build-Identität des laufenden Daemons fehlt oder ist unbekannt. Laufzeit-Sicherheitsgarantien lassen sich diesem GUI-Build nicht zuordnen.",
+        }
+    }
+
     pub fn daemon_unreachable_status(&self) -> &'static str {
         match self.lang {
             Language::English => "Daemon: Unreachable",
