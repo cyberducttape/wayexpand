@@ -358,7 +358,12 @@ impl ReloadableConfig {
         let fleet_signature = self.fleet.then(standard_fleet_signature);
         let fleet_changed =
             fleet_signature.is_some_and(|signature| signature != self.fleet_signature);
-        if current == self.observed && !fleet_changed {
+        // A watcher event is itself evidence that configuration contents may
+        // have changed. Some filesystems expose coarse timestamps and can
+        // leave the metadata signature unchanged for a same-size in-place
+        // write. Reload on the debounced event; parsing and validation happen
+        // on the background worker, not on the input reactor.
+        if current == self.observed && !fleet_changed && !watch_due {
             return;
         }
         self.observed = current;
@@ -1183,6 +1188,32 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn watcher_event_reloads_when_metadata_stamp_is_unchanged() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+
+        // Model a filesystem whose timestamp granularity leaves the metadata
+        // stamp unchanged after an in-place write. The watcher notification
+        // must still cause a background read and validated engine swap.
+        write_config(&path, &config_text("new"));
+        config.observed = file_stamp(&path);
+        config.watch_check_after = Some(Instant::now() - WATCH_DEBOUNCE);
+        config.watch_dirty.store(true, Ordering::Release);
+        config.reload_if_changed();
+        config.finish_pending_reload();
+
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "new");
         let _ = fs::remove_file(path);
     }
 

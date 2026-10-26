@@ -22,6 +22,10 @@ All notable changes to WayExpand are documented here.
 - Made the nested fleet-file signature regression test replace files using the
   same atomic-rename pattern as configuration saves. It no longer depends on
   sub-second in-place timestamp updates from the build filesystem.
+- Debounced configuration watcher events now start the background reload even
+  when coarse filesystem timestamps leave the metadata signature unchanged.
+  This preserves detection of same-size in-place edits without reading config
+  contents on the keyboard reactor.
 - Verified the KWin window tracker in a live Plasma Wayland session on KWin
   6.6.6: it received the focused window identity, rejected an untrusted D-Bus
   focus event, and detected removal of its temporary script. This component
