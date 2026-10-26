@@ -204,7 +204,12 @@ currently discoverable input/output backends, including permission and
 Wayland-session hints. When a Wayland session is active, its refresh action
 also performs non-mutating input-method-v2 and wlroots virtual-keyboard
 protocol probes. It never opens a libei portal consent prompt from passive
-diagnostics.
+diagnostics. The active-route assessment summarizes capture availability,
+replacement guarantees, compositor/device permission state, and whether exact
+focus identity is visible. Recent content-free output traces show whether the
+backend acknowledged insertion or where it refused/stopped. An acknowledgement
+does not prove that the target application displayed the text; unmatched typing
+is never recorded. Use the editor's Matcher preview to explain a test input.
 
 `Import Espanso` accepts an existing Espanso YAML file, validates it, and
 previews a migration report: fully migrated snippets, snippets with semantic

@@ -152,30 +152,132 @@ impl GuiApp {
             );
         });
 
-        ui.collapsing(self.strings.recent_expansion_failures(), |ui| {
+        let assessment = diagnostics::assess_route(
+            self.daemon_reachable,
+            self.route_state,
+            capabilities,
+            &self.permission_health,
+        );
+        let insertion_detail = match capabilities.and_then(|caps| caps.replacement_assurance) {
+            Some(assurance) => self.strings.replacement_explanation(assurance).to_owned(),
+            None => self.strings.insertion_assurance_unknown().to_owned(),
+        };
+        let insertion_detail =
+            if capabilities.and_then(|caps| caps.inject_full_unicode) == Some(false) {
+                format!(
+                    "{insertion_detail} {}",
+                    self.strings.insertion_unicode_limited()
+                )
+            } else {
+                insertion_detail
+            };
+        theme::section_header(ui, "", self.strings.route_assessment_title());
+        theme::card(ui, palette, |ui| {
+            let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
+            render_assessment_row(
+                ui,
+                palette,
+                self.strings.capture_availability_label(),
+                assessment.capture,
+                &self
+                    .strings
+                    .capture_assessment_detail(self.route_state, source),
+                &self.strings,
+            );
+            render_assessment_row(
+                ui,
+                palette,
+                self.strings.insertion_safety_label(),
+                assessment.insertion,
+                &insertion_detail,
+                &self.strings,
+            );
+            render_assessment_row(
+                ui,
+                palette,
+                self.strings.compositor_permissions_label(),
+                assessment.permissions,
+                &self.permission_health,
+                &self.strings,
+            );
+            render_assessment_row(
+                ui,
+                palette,
+                self.strings.focus_visibility_label(),
+                assessment.focus,
+                &self.strings.focus_assessment_detail(
+                    capabilities.and_then(|caps| caps.window_tracker_connected),
+                    capabilities.and_then(|caps| caps.window_identity_exact),
+                ),
+                &self.strings,
+            );
+        });
+
+        ui.collapsing(self.strings.recent_expansion_outcomes(), |ui| {
             let traces = capabilities
-                .map(|caps| caps.recent_expansion_failures.as_slice())
+                .map(|caps| caps.recent_expansion_outcomes.as_slice())
                 .unwrap_or_default();
             if traces.is_empty() {
-                ui.label(self.strings.no_recent_failures());
+                ui.label(self.strings.no_recent_outcomes());
             }
             for trace in traces.iter().rev() {
+                let color = if trace.completion == "applied" {
+                    palette.success
+                } else if trace.completion.contains("unknown")
+                    || trace.completion.contains("failed")
+                {
+                    palette.danger
+                } else {
+                    palette.warning
+                };
                 ui.group(|ui| {
-                    ui.label(RichText::new(format!("{} · {}", trace.completion, trace.backend)).strong());
-                    ui.label(
-                        RichText::new(format!(
-                            "trigger recognized: {} · output admission: {} · backend selected: {} · erase acknowledged: {} · insertion attempted: {}",
-                            trace.trigger_recognized,
-                            trace.focus_admission,
-                            trace.backend_selected,
-                            trace.erase_acknowledged,
-                            if trace.insertion_attempted { "yes" } else { "no" },
-                        ))
-                        .small()
-                        .color(palette.muted),
+                    ui.colored_label(
+                        color,
+                        RichText::new(self.strings.trace_completion(&trace.completion)).strong(),
                     );
+                    ui.label(
+                        RichText::new(format!("{} · {}", trace.backend, trace.at_unix))
+                            .small()
+                            .color(palette.muted),
+                    );
+                    for (label, value) in [
+                        (
+                            self.strings.trace_trigger_matched(),
+                            trace.trigger_recognized.as_str(),
+                        ),
+                        (
+                            self.strings.trace_focus_admission(),
+                            trace.focus_admission.as_str(),
+                        ),
+                        (
+                            self.strings.trace_backend_selected(),
+                            trace.backend_selected.as_str(),
+                        ),
+                        (
+                            self.strings.trace_erase_acknowledgement(),
+                            trace.erase_acknowledged.as_str(),
+                        ),
+                        (
+                            self.strings.trace_insertion_attempted(),
+                            if trace.insertion_attempted {
+                                "yes"
+                            } else {
+                                "no"
+                            },
+                        ),
+                    ] {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(format!("{label}:")).small().strong());
+                            ui.label(RichText::new(value).small());
+                        });
+                    }
                 });
             }
+            ui.label(
+                RichText::new(self.strings.trace_privacy_and_limits())
+                    .small()
+                    .color(palette.muted),
+            );
         });
         ui.add_space(8.0);
         theme::section_header(ui, "", self.strings.compatibility_center());
@@ -536,6 +638,33 @@ fn compact_status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
         part.strip_prefix(key)
             .and_then(|part| part.strip_prefix('='))
     })
+}
+
+fn render_assessment_row(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    label: &str,
+    state: diagnostics::AssessmentState,
+    detail: &str,
+    strings: &Strings,
+) {
+    let color = match state {
+        diagnostics::AssessmentState::Ready => palette.success,
+        diagnostics::AssessmentState::Warning => palette.warning,
+        diagnostics::AssessmentState::Blocked => palette.danger,
+        diagnostics::AssessmentState::Unknown => palette.muted,
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(label).strong());
+        theme::pill(
+            ui,
+            strings.assessment_state(state),
+            color,
+            theme::tint(color, 34),
+        );
+    });
+    ui.add(egui::Label::new(RichText::new(detail).small()).wrap());
+    ui.add_space(4.0);
 }
 
 fn dashboard_value(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {

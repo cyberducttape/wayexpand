@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The Diagnostics dashboard now gives explicit active-route assessments for
+  capture availability, insertion safety, compositor/device permissions, and
+  focus visibility. It also shows recent content-free output transaction
+  outcomes, including acknowledged insertions and the stage where blocked or
+  uncertain attempts stopped. The trace never records typed or inserted text,
+  and distinguishes backend acknowledgement from proof of client display.
 - The pinned matcher playground now tests the current unsaved draft against the
   rest of the library, including aliases, match rules, app filters, and reusable
   snippet includes. Command-backed snippets remain disabled there. Successful

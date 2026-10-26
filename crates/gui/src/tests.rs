@@ -1702,7 +1702,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_refused_total: Some(2),
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
-        recent_expansion_failures: Vec::new(),
+        recent_expansion_outcomes: Vec::new(),
     });
     app.import_open = true;
     app.settings_open = true;

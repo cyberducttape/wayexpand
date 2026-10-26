@@ -144,7 +144,7 @@ pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> Trans
     let size = output_size_bucket(result.insert.chars().count());
     let mut traced = crate::failure_trace::TracedInjector::new(injector);
     let outcome = measure(mode, size, || ExpansionEngine::apply(&mut traced, result));
-    traced.record_failure(&outcome);
+    traced.record_outcome(&outcome);
     crate::output_health::note_outcome(&outcome);
     outcome
 }

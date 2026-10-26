@@ -145,6 +145,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "output_unsupported_total",
             "paused",
             "recent_expansion_failures",
+            "recent_expansion_outcomes",
             "replacement_assurance",
             "route_id",
             "source",

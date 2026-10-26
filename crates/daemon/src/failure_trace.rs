@@ -1,4 +1,4 @@
-//! Small, content-free history of failed expansion transactions.
+//! Small, content-free history of expansion output transactions.
 //!
 //! The trace records only transaction stages and the negotiated backend. It
 //! never stores triggers, replacement text, key events, or backend errors,
@@ -17,6 +17,8 @@ use wayexpand_core::{
 };
 
 const HISTORY_LIMIT: usize = 8;
+const FAILURE_STATUS_LIMIT: usize = 3;
+const OUTCOME_STATUS_LIMIT: usize = 4;
 
 #[derive(Clone, Debug)]
 pub(crate) struct FailureTrace {
@@ -55,10 +57,7 @@ impl<'a> TracedInjector<'a> {
         }
     }
 
-    pub(crate) fn record_failure(self, outcome: &TransactionOutcome) {
-        if matches!(outcome, TransactionOutcome::Applied) {
-            return;
-        }
+    pub(crate) fn record_outcome(self, outcome: &TransactionOutcome) {
         let completion = match outcome {
             TransactionOutcome::Applied => "applied",
             TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
@@ -194,8 +193,37 @@ pub(crate) fn recent_json() -> String {
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let traces = history
-        .iter()
+    traces_json(
+        history
+            .iter()
+            .filter(|trace| trace.completion != "applied")
+            .rev()
+            .take(FAILURE_STATUS_LIMIT)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev(),
+    )
+}
+
+/// Recent successful and blocked output transactions. Each record contains
+/// only stage outcomes and backend identity, never user text.
+pub(crate) fn recent_outcomes_json() -> String {
+    let history = history()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    traces_json(
+        history
+            .iter()
+            .rev()
+            .take(OUTCOME_STATUS_LIMIT)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev(),
+    )
+}
+
+fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
+    let traces = traces
         .map(|trace| {
             serde_json::json!({
                 "at_unix": trace.at_unix,
@@ -226,5 +254,47 @@ pub(crate) fn saturate_for_test() {
             insertion_attempted: true,
             completion: "inserted; cursor placement failed",
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockInjector;
+
+    impl TextInjector for MockInjector {
+        fn name(&self) -> &'static str {
+            "mock-output"
+        }
+
+        fn erase(&mut self, _trigger: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn successful_output_is_in_outcomes_and_excluded_from_failure_history() {
+        let mut injector = MockInjector;
+        TracedInjector::new(&mut injector).record_outcome(&TransactionOutcome::Applied);
+
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
+        assert!(outcomes
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|trace| trace["completion"] == "applied"));
+        let failures: serde_json::Value =
+            serde_json::from_str(&recent_json()).expect("failures should be JSON");
+        assert!(failures
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|trace| trace["completion"] != "applied"));
     }
 }

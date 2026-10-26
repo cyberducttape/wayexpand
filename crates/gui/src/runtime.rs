@@ -123,11 +123,11 @@ pub(crate) struct DaemonCapabilities {
     pub output_refused_total: Option<u64>,
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
-    pub recent_expansion_failures: Vec<FailureTrace>,
+    pub recent_expansion_outcomes: Vec<ExpansionTrace>,
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize, PartialEq, Eq)]
-pub(crate) struct FailureTrace {
+pub(crate) struct ExpansionTrace {
     pub at_unix: u64,
     pub backend: String,
     pub trigger_recognized: String,
@@ -266,10 +266,13 @@ impl DaemonCapabilities {
                 });
         capabilities.output_refused_total = status.u64_field("output_refused_total");
         capabilities.output_uncertain_total = status.u64_field("output_uncertain_total");
-        capabilities.recent_expansion_failures = status
-            .field("recent_expansion_failures")
+        let recent_outcomes = status
+            .field("recent_expansion_outcomes")
+            .or_else(|| status.field("recent_expansion_failures"));
+        capabilities.recent_expansion_outcomes = recent_outcomes
             .and_then(|value| serde_json::from_str(value).ok())
             .unwrap_or_default();
+        found |= recent_outcomes.is_some();
         found |= capabilities.replacement_assurance.is_some();
         for (key, slot) in [
             (
@@ -655,6 +658,15 @@ mod tests {
             Some(super::ReplacementAssurance::Blocked)
         );
         assert_eq!(blocked.output_last_refusal, None);
+
+        let traced = super::DaemonCapabilities::parse(
+            r#"status_schema=13
+recent_expansion_outcomes=[{"at_unix":1,"backend":"input-method-v2","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"atomic replacement acknowledged","insertion_attempted":true,"completion":"applied"}]
+"#,
+        )
+        .unwrap();
+        assert_eq!(traced.recent_expansion_outcomes.len(), 1);
+        assert_eq!(traced.recent_expansion_outcomes[0].completion, "applied");
     }
 
     #[test]

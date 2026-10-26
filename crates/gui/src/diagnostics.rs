@@ -13,6 +13,112 @@ use wayexpand_backend_wlroots::WlrootsInjector;
 use wayexpand_core::{load_organization_policy, BackendStatus};
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AssessmentState {
+    Ready,
+    Warning,
+    Blocked,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RouteAssessment {
+    pub capture: AssessmentState,
+    pub insertion: AssessmentState,
+    pub permissions: AssessmentState,
+    pub focus: AssessmentState,
+}
+
+/// Summarize the active route from daemon-reported state and capabilities.
+/// This never upgrades missing evidence to a green status.
+pub(crate) fn assess_route(
+    daemon_reachable: Option<bool>,
+    route_state: Option<crate::runtime::RouteState>,
+    capabilities: Option<&crate::runtime::DaemonCapabilities>,
+    permission_health: &str,
+) -> RouteAssessment {
+    use crate::runtime::ReplacementAssurance;
+    use AssessmentState::{Blocked, Ready, Unknown, Warning};
+
+    let capture = match (daemon_reachable, route_state) {
+        (Some(false), _) => Blocked,
+        (_, Some(crate::runtime::RouteState::Connected)) => Ready,
+        (
+            _,
+            Some(
+                crate::runtime::RouteState::PermissionRequired
+                | crate::runtime::RouteState::PortalRevoked
+                | crate::runtime::RouteState::Unsupported
+                | crate::runtime::RouteState::Failed
+                | crate::runtime::RouteState::Stopped,
+            ),
+        ) => Blocked,
+        (
+            _,
+            Some(
+                crate::runtime::RouteState::Reconnecting
+                | crate::runtime::RouteState::Starting
+                | crate::runtime::RouteState::Degraded,
+            ),
+        ) => Warning,
+        _ => Unknown,
+    };
+
+    let insertion = match capabilities.and_then(|caps| caps.replacement_assurance) {
+        Some(ReplacementAssurance::Verified)
+            if capabilities.and_then(|caps| caps.inject_full_unicode) != Some(false) =>
+        {
+            Ready
+        }
+        Some(ReplacementAssurance::Verified) => Warning,
+        Some(ReplacementAssurance::FocusTrackedBestEffort | ReplacementAssurance::Unverified) => {
+            Warning
+        }
+        Some(ReplacementAssurance::Blocked | ReplacementAssurance::Unavailable) => Blocked,
+        None if daemon_reachable == Some(false) => Blocked,
+        None => Unknown,
+    };
+
+    let permissions = if permission_health.starts_with("permission required")
+        || permission_health.starts_with("portal authorization revoked")
+    {
+        Blocked
+    } else if permission_health.starts_with("active route connected")
+        || permission_health.starts_with("granted")
+    {
+        Ready
+    } else if permission_health.starts_with("OS permission not reported/applicable")
+        || permission_health.starts_with("unknown")
+    {
+        Unknown
+    } else {
+        Warning
+    };
+
+    let focus = match capabilities {
+        Some(caps)
+            if caps.window_tracker_connected == Some(true)
+                && caps.window_identity_exact == Some(true) =>
+        {
+            Ready
+        }
+        Some(caps)
+            if caps.window_tracker_connected == Some(false)
+                || caps.window_identity_exact == Some(false) =>
+        {
+            Warning
+        }
+        Some(_) | None => Unknown,
+    };
+
+    RouteAssessment {
+        capture,
+        insertion,
+        permissions,
+        focus,
+    }
+}
+
 pub(crate) fn compositor_info() -> String {
     let (name, command, args) = if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
         ("Hyprland", Some("Hyprland"), vec!["--version"])
@@ -334,6 +440,52 @@ mod tests {
             super::permission_health(&required, Some(&capabilities), route_status()),
             "libei: permission required"
         );
+    }
+
+    #[test]
+    fn route_assessment_never_overstates_unknown_or_best_effort_guarantees() {
+        use super::AssessmentState::{Blocked, Ready, Unknown, Warning};
+        use crate::runtime::{DaemonCapabilities, ReplacementAssurance, RouteState};
+
+        let mut capabilities = DaemonCapabilities {
+            replacement_assurance: Some(ReplacementAssurance::Verified),
+            window_tracker_connected: Some(true),
+            window_identity_exact: Some(true),
+            inject_full_unicode: Some(true),
+            ..DaemonCapabilities::default()
+        };
+        let ready = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · input-method-v2 + input-method-v2",
+        );
+        assert_eq!(ready.capture, Ready);
+        assert_eq!(ready.insertion, Ready);
+        assert_eq!(ready.permissions, Ready);
+        assert_eq!(ready.focus, Ready);
+
+        capabilities.replacement_assurance = Some(ReplacementAssurance::FocusTrackedBestEffort);
+        capabilities.window_identity_exact = Some(false);
+        let best_effort = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "OS permission not reported/applicable · libei",
+        );
+        assert_eq!(best_effort.insertion, Warning);
+        assert_eq!(best_effort.permissions, Unknown);
+        assert_eq!(best_effort.focus, Warning);
+
+        let blocked = super::assess_route(
+            Some(true),
+            Some(RouteState::PermissionRequired),
+            Some(&DaemonCapabilities::default()),
+            "permission required · evdev",
+        );
+        assert_eq!(blocked.capture, Blocked);
+        assert_eq!(blocked.permissions, Blocked);
+        assert_eq!(blocked.insertion, Unknown);
     }
 
     #[test]
