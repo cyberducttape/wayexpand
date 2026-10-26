@@ -111,6 +111,28 @@ pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
     });
 }
 
+pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::CommandErrorKind) {
+    use wayexpand_core::CommandErrorKind as Kind;
+    let reason = match kind {
+        Kind::Timeout => "command timed out before output",
+        Kind::BrokerUnavailable => "action broker unavailable",
+        Kind::OutputTooLarge => "command output exceeded policy limit",
+        Kind::Policy => "command blocked by policy",
+        Kind::StaleInput => "command result became stale",
+        Kind::WindowIdentity => "command focus could not be verified",
+        Kind::QueueFull | Kind::WorkerUnavailable => "command worker queue unavailable",
+        Kind::Spawn
+        | Kind::ProcessWait
+        | Kind::BrokerProtocol
+        | Kind::BrokerRejected
+        | Kind::NonZeroExit
+        | Kind::InvalidOutput
+        | Kind::OutputChannel
+        | Kind::IncompleteOutput => "command execution failed before output",
+    };
+    record_blocked_expansion(backend, reason);
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -327,6 +349,7 @@ mod tests {
     #[test]
     fn pre_output_blocks_are_content_free_outcomes() {
         record_blocked_expansion("evdev+libei", "input arrived before output");
+        record_command_failure("input-method-v2", wayexpand_core::CommandErrorKind::Timeout);
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
@@ -347,5 +370,10 @@ mod tests {
             .unwrap();
         assert!(block.get("trigger").is_none());
         assert!(block.get("replacement").is_none());
+        assert!(outcomes.as_array().unwrap().iter().any(|trace| {
+            trace["backend"] == "input-method-v2"
+                && trace["completion"] == "command timed out before output"
+                && trace["insertion_attempted"] == false
+        }));
     }
 }

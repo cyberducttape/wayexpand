@@ -185,6 +185,14 @@ pub(crate) fn dispatch_pending_results(
             Ok(wayexpand_core::PendingExpansionDispatch::Ready(result)) => result,
             Ok(wayexpand_core::PendingExpansionDispatch::Queued) => continue,
             Err(error) => {
+                if has_command {
+                    failure_trace::record_command_failure(active_backend, error.kind());
+                } else {
+                    failure_trace::record_blocked_expansion(
+                        active_backend,
+                        "expansion could not be prepared",
+                    );
+                }
                 warn!(%error, "expansion could not be queued or completed");
                 continue;
             }

@@ -207,11 +207,11 @@ protocol probes. It never opens a libei portal consent prompt from passive
 diagnostics. The active-route assessment summarizes capture availability,
 replacement guarantees, compositor/device permission state, and whether exact
 focus identity is visible. Recent content-free expansion traces include
-organization/command policy blocks and evdev safety-gate blocks, and show
-whether the output backend acknowledged insertion or where it refused/stopped.
-An acknowledgement does not prove that the target application displayed the
-text; unmatched typing and typed or inserted content are never recorded. Use
-the editor's Matcher preview to explain a test input.
+organization/command policy blocks, command failures, and evdev safety-gate
+blocks, and show whether the output backend acknowledged insertion or where it
+refused/stopped. An acknowledgement does not prove that the target application
+displayed the text; unmatched typing and typed or inserted content are never
+recorded. Use the editor's Matcher preview to explain a test input.
 
 `Import Espanso` accepts an existing Espanso YAML file, validates it, and
 previews a migration report: fully migrated snippets, snippets with semantic

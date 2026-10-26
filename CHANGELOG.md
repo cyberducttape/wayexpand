@@ -11,10 +11,10 @@ All notable changes to WayExpand are documented here.
 - The Diagnostics dashboard now gives explicit active-route assessments for
   capture availability, insertion safety, compositor/device permissions, and
   focus visibility. It also shows recent content-free expansion outcomes,
-  including policy and evdev safety-gate blocks, acknowledged insertions, and
-  the stage where blocked or uncertain output attempts stopped. The trace never
-  records typed or inserted text, and distinguishes backend acknowledgement
-  from proof of client display.
+  including policy, command, and evdev safety-gate failures, acknowledged
+  insertions, and the stage where blocked or uncertain output attempts stopped.
+  The trace never records typed or inserted text, and distinguishes backend
+  acknowledgement from proof of client display.
   Insertion readiness also stays unknown when the daemon omits its full-Unicode
   capability instead of treating missing evidence as support. The dashboard
   warns when the running daemon is stale or its build identity cannot be verified,

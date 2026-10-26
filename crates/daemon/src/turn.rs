@@ -120,6 +120,9 @@ impl Daemon {
     pub(crate) fn apply_completed_commands(&mut self) -> Result<()> {
         self.declare_form_replacement_guarantee();
         let completed_commands = self.config.engine.drain_completed_commands();
+        for failure in self.config.engine.drain_command_failures() {
+            failure_trace::record_command_failure(self.active_backend, failure);
+        }
         if !completed_commands.is_empty() {
             // Apply evdev safety gating: ensure physical key-up was processed
             // and no competing input arrived during command execution.

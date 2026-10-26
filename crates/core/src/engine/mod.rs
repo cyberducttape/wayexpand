@@ -57,6 +57,7 @@ pub(crate) use crate::limits::{
 const MINIMAL_COMMAND_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 const ASYNC_COMMAND_WORKER_COUNT: usize = 4;
+const COMMAND_FAILURE_HISTORY_LIMIT: usize = 16;
 
 /// Maximum accepted size for opaque backend-provided toplevel identities.
 pub const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 192;
@@ -108,6 +109,9 @@ pub struct ExpansionEngine {
     /// reservation is released only after successful injection; otherwise it
     /// is restored before subsequent input is matched.
     deferred_matches: Vec<String>,
+    /// Bounded content-free categories for command completions that never
+    /// reached output. Hosts drain these into their diagnostics surfaces.
+    command_failures: VecDeque<CommandErrorKind>,
     input_generation: u64,
     shared_input_generation: Arc<AtomicU64>,
     async_commands: Option<AsyncCommandRuntime>,
@@ -240,6 +244,7 @@ impl ExpansionEngine {
             undo_chord,
             last_expansion: None,
             deferred_matches: Vec::new(),
+            command_failures: VecDeque::with_capacity(COMMAND_FAILURE_HISTORY_LIMIT),
             input_generation: 0,
             shared_input_generation: Arc::new(AtomicU64::new(0)),
             async_commands: None,
@@ -399,9 +404,13 @@ impl ExpansionEngine {
         for completion in completions {
             if let Some(origin) = &completion.form {
                 self.form_active = false;
-                let Ok(output) = completion.output else {
-                    self.restore_deferred_match(&completion.result.matched_text);
-                    continue;
+                let output = match completion.output {
+                    Ok(output) => output,
+                    Err(error) => {
+                        self.remember_command_failure(error.kind());
+                        self.restore_deferred_match(&completion.result.matched_text);
+                        continue;
+                    }
                 };
                 // Apply only where the form was opened: focus must be back in
                 // that exact toplevel, not merely another window of the same
@@ -412,14 +421,21 @@ impl ExpansionEngine {
                         && window.instance_id.as_deref() == Some(origin.instance_id.as_str())
                 });
                 let limit = self.config.organization.max_replacement_size;
-                if self.sensitive_focus
-                    || self.user_paused
-                    || !returned_to_origin
-                    || !self.form_target_verifiable()
-                    || (limit > 0 && output.len() > limit)
+                let target_verifiable = self.form_target_verifiable();
+                let exceeds_limit = (limit > 0 && output.len() > limit)
                     || (completion.additional_max_size > 0
-                        && output.len() > completion.additional_max_size)
-                {
+                        && output.len() > completion.additional_max_size);
+                let failure_kind = if self.sensitive_focus || self.user_paused {
+                    Some(CommandErrorKind::Policy)
+                } else if !returned_to_origin || !target_verifiable {
+                    Some(CommandErrorKind::WindowIdentity)
+                } else if exceeds_limit {
+                    Some(CommandErrorKind::OutputTooLarge)
+                } else {
+                    None
+                };
+                if let Some(kind) = failure_kind {
+                    self.remember_command_failure(kind);
                     self.restore_deferred_match(&completion.result.matched_text);
                     continue;
                 }
@@ -430,7 +446,8 @@ impl ExpansionEngine {
             }
             let output = match completion.output {
                 Ok(output) => output,
-                Err(_) => {
+                Err(error) => {
+                    self.remember_command_failure(error.kind());
                     self.restore_deferred_match(&completion.result.matched_text);
                     continue;
                 }
@@ -443,6 +460,16 @@ impl ExpansionEngine {
             // deep-copying the trigger, the replacement, and the command on
             // every completion -- although the check reads none of those.
             if !self.postflight_allows(completion.generation, &output) {
+                let kind = if self.config.organization.max_replacement_size > 0
+                    && output.len() > self.config.organization.max_replacement_size
+                {
+                    CommandErrorKind::OutputTooLarge
+                } else if self.sensitive_focus || self.user_paused {
+                    CommandErrorKind::Policy
+                } else {
+                    CommandErrorKind::StaleInput
+                };
+                self.remember_command_failure(kind);
                 self.restore_deferred_match(&completion.result.matched_text);
                 continue;
             }
@@ -450,6 +477,7 @@ impl ExpansionEngine {
             if completion.additional_max_size > 0
                 && validated_output.len() > completion.additional_max_size
             {
+                self.remember_command_failure(CommandErrorKind::OutputTooLarge);
                 self.restore_deferred_match(&completion.result.matched_text);
                 continue;
             }
@@ -475,6 +503,19 @@ impl ExpansionEngine {
             results.push(result);
         }
         results
+    }
+
+    /// Drain bounded, content-free reasons why completed command expansions
+    /// were discarded before reaching the output backend.
+    pub fn drain_command_failures(&mut self) -> Vec<CommandErrorKind> {
+        self.command_failures.drain(..).collect()
+    }
+
+    fn remember_command_failure(&mut self, kind: CommandErrorKind) {
+        if self.command_failures.len() == COMMAND_FAILURE_HISTORY_LIMIT {
+            self.command_failures.pop_front();
+        }
+        self.command_failures.push_back(kind);
     }
 
     /// Complete a deferred match after caller-side preflight policy approval.

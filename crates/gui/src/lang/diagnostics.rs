@@ -385,6 +385,55 @@ impl Strings {
                     "Blockiert, weil vor dem Ersetzen mehrere Eingaben eintrafen".into()
                 }
             },
+            (_, "command timed out before output") => match self.lang {
+                Language::English => "Command timed out before output".into(),
+                Language::Indonesian => "Perintah kehabisan waktu sebelum keluaran".into(),
+                Language::German => "Zeitüberschreitung des Befehls vor der Ausgabe".into(),
+            },
+            (_, "action broker unavailable") => match self.lang {
+                Language::English => "Action Broker was unavailable".into(),
+                Language::Indonesian => "Action Broker tidak tersedia".into(),
+                Language::German => "Action Broker war nicht verfügbar".into(),
+            },
+            (_, "command output exceeded policy limit") => match self.lang {
+                Language::English => "Command output exceeded the policy limit".into(),
+                Language::Indonesian => "Keluaran perintah melebihi batas kebijakan".into(),
+                Language::German => "Befehlsausgabe überschritt das Richtlinienlimit".into(),
+            },
+            (_, "command blocked by policy") => match self.lang {
+                Language::English => "Command was blocked by policy".into(),
+                Language::Indonesian => "Perintah diblokir oleh kebijakan".into(),
+                Language::German => "Befehl wurde durch Richtlinie blockiert".into(),
+            },
+            (_, "command result became stale") => match self.lang {
+                Language::English => "Command result was discarded after input changed".into(),
+                Language::Indonesian => "Hasil perintah dibuang setelah input berubah".into(),
+                Language::German => "Befehlsergebnis nach Eingabeänderung verworfen".into(),
+            },
+            (_, "command focus could not be verified") => match self.lang {
+                Language::English => {
+                    "Command result was discarded because focus was uncertain".into()
+                }
+                Language::Indonesian => {
+                    "Hasil perintah dibuang karena fokus tidak dapat dipastikan".into()
+                }
+                Language::German => "Befehlsergebnis wegen unklarem Fokus verworfen".into(),
+            },
+            (_, "command worker queue unavailable") => match self.lang {
+                Language::English => "Command workers were busy or unavailable".into(),
+                Language::Indonesian => "Worker perintah sibuk atau tidak tersedia".into(),
+                Language::German => "Befehlsworker waren ausgelastet oder nicht verfügbar".into(),
+            },
+            (_, "command execution failed before output") => match self.lang {
+                Language::English => "Command execution failed before output".into(),
+                Language::Indonesian => "Eksekusi perintah gagal sebelum keluaran".into(),
+                Language::German => "Befehlsausführung vor der Ausgabe fehlgeschlagen".into(),
+            },
+            (_, "expansion could not be prepared") => match self.lang {
+                Language::English => "Expansion could not be prepared".into(),
+                Language::Indonesian => "Ekspansi tidak dapat disiapkan".into(),
+                Language::German => "Expansion konnte nicht vorbereitet werden".into(),
+            },
             _ => completion.to_owned(),
         }
     }
@@ -543,6 +592,46 @@ impl Strings {
             (Language::German, BackendState::Implemented) => "Nicht geprüft",
             (Language::German, BackendState::Unavailable) => "Nicht verfügbar",
             (Language::German, BackendState::NotImplemented) => "Nicht implementiert",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expansion_failure_reasons_are_translated() {
+        let labels = [
+            (
+                "command timed out before output",
+                "Perintah kehabisan waktu sebelum keluaran",
+                "Zeitüberschreitung des Befehls vor der Ausgabe",
+            ),
+            (
+                "command output exceeded policy limit",
+                "Keluaran perintah melebihi batas kebijakan",
+                "Befehlsausgabe überschritt das Richtlinienlimit",
+            ),
+            (
+                "command result became stale",
+                "Hasil perintah dibuang setelah input berubah",
+                "Befehlsergebnis nach Eingabeänderung verworfen",
+            ),
+            (
+                "input arrived before output",
+                "Diblokir karena ada input baru sebelum penggantian",
+                "Blockiert, weil vor dem Ersetzen weitere Eingabe eintraf",
+            ),
+        ];
+
+        for (key, indonesian, german) in labels {
+            assert_eq!(
+                Strings::new(Language::Indonesian).trace_completion(key),
+                indonesian
+            );
+            assert_eq!(Strings::new(Language::German).trace_completion(key), german);
+            assert_ne!(Strings::new(Language::English).trace_completion(key), key);
         }
     }
 }

@@ -730,6 +730,9 @@ fn command_metrics_count_timeouts_and_failures() {
         assert!(Instant::now() < deadline, "command metrics did not update");
         thread::sleep(Duration::from_millis(5));
     }
+    let failures = engine.drain_command_failures();
+    assert!(failures.contains(&CommandErrorKind::Timeout));
+    assert!(failures.contains(&CommandErrorKind::NonZeroExit));
 }
 
 #[test]
