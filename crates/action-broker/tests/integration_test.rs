@@ -26,7 +26,12 @@ impl Drop for BrokerChild {
 }
 
 fn test_socket(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("wayexpand-broker-test-{}", std::process::id()));
+    // `temp_dir()` can resolve inside a packaging staging directory whose
+    // ancestors are owned by the build user rather than the test user. The
+    // broker correctly rejects that config/socket path; keep fixtures under
+    // the root-owned sticky directory instead.
+    let dir =
+        std::path::Path::new("/tmp").join(format!("wayexpand-broker-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     dir.join(name)
