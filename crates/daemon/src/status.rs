@@ -106,19 +106,23 @@ pub fn daemon_status_body_with_runtime_capabilities(
     // makes no insertion promise.
     let connected =
         injection.replacement_guarantee != wayexpand_core::ReplacementGuarantee::Unsupported;
-    let assurance = crate::assurance::Assurance::of(connected.then_some(&injection), guard.mode());
+    let assurance = crate::assurance::Assurance::of(
+        connected.then_some(&injection),
+        guard.mode(),
+        guard.focus(),
+    );
     let focus_assurance = match assurance {
         crate::assurance::Assurance::Verified => "protocol",
         crate::assurance::Assurance::Unavailable => "none",
-        crate::assurance::Assurance::Compatibility | crate::assurance::Assurance::Blocked => {
-            guard.focus_assurance()
-        }
+        crate::assurance::Assurance::FocusTrackedBestEffort
+        | crate::assurance::Assurance::Unverified
+        | crate::assurance::Assurance::Blocked => guard.focus_assurance(),
     };
     let output_health = crate::output_health::snapshot();
     let counters = crate::counters::snapshot();
     let route_id = wayexpand_backend_selection::route_id_for(source, backend);
     StatusBody(format!(
-        "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\nwindow_tracker_connected={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\ninsertion_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_overflow_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}",
+        "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\nwindow_tracker_connected={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\ninsertion_assurance={}\nreplacement_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_overflow_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}",
         build_info::COMMIT,
         paused,
         config_path.display(),
@@ -179,6 +183,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
         output_health.uncertain_total,
         output_health.retiring_workers,
         output_health.stalled_ms,
+        assurance.legacy_as_str(),
         assurance.as_str(),
         guard.mode().as_str(),
         focus_assurance,

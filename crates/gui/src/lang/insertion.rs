@@ -1,80 +1,60 @@
 use super::{Language, Strings};
-use crate::runtime::{InsertionAssurance, OutputRefusal};
+use crate::runtime::{OutputRefusal, ReplacementAssurance};
 use wayexpand_core::CompatibilityMode;
 
 impl Strings {
-    pub fn insertion_pill(&self, assurance: InsertionAssurance) -> &'static str {
+    pub fn replacement_pill(&self, assurance: ReplacementAssurance) -> &'static str {
         match (self.lang, assurance) {
-            (Language::English, InsertionAssurance::Verified) => "Insertion: Verified",
-            (Language::English, InsertionAssurance::Compatibility) => "Insertion: Compatibility",
-            (Language::English, InsertionAssurance::Blocked) => "Insertion: Blocked",
-            (Language::English, InsertionAssurance::Unavailable) => "Insertion: Unavailable",
-            (Language::German, InsertionAssurance::Verified) => "Einfügen: Verifiziert",
-            (Language::German, InsertionAssurance::Compatibility) => "Einfügen: Kompatibilität",
-            (Language::German, InsertionAssurance::Blocked) => "Einfügen: Blockiert",
-            (Language::German, InsertionAssurance::Unavailable) => "Einfügen: Nicht verfügbar",
-            (Language::Indonesian, InsertionAssurance::Verified) => "Penyisipan: Terverifikasi",
-            (Language::Indonesian, InsertionAssurance::Compatibility) => {
-                "Penyisipan: Kompatibilitas"
+            (Language::English, ReplacementAssurance::Verified) => {
+                "Replacement: Target text verified"
             }
-            (Language::Indonesian, InsertionAssurance::Blocked) => "Penyisipan: Diblokir",
-            (Language::Indonesian, InsertionAssurance::Unavailable) => "Penyisipan: Tidak tersedia",
+            (Language::English, ReplacementAssurance::FocusTrackedBestEffort) => {
+                "Replacement: Focus-tracked best effort"
+            }
+            (Language::English, ReplacementAssurance::Unverified) => "Replacement: Unverified",
+            (Language::English, ReplacementAssurance::Blocked) => "Replacement: Blocked",
+            (Language::English, ReplacementAssurance::Unavailable) => "Replacement: Unavailable",
+            (Language::German, ReplacementAssurance::Verified) => "Ersetzung: Zieltext verifiziert",
+            (Language::German, ReplacementAssurance::FocusTrackedBestEffort) => {
+                "Ersetzung: Fokusgeprüft, bestmöglich"
+            }
+            (Language::German, ReplacementAssurance::Unverified) => "Ersetzung: Unverifiziert",
+            (Language::German, ReplacementAssurance::Blocked) => "Ersetzung: Blockiert",
+            (Language::German, ReplacementAssurance::Unavailable) => "Ersetzung: Nicht verfügbar",
+            (Language::Indonesian, ReplacementAssurance::Verified) => {
+                "Penggantian: Teks tujuan terverifikasi"
+            }
+            (Language::Indonesian, ReplacementAssurance::FocusTrackedBestEffort) => {
+                "Penggantian: Upaya terbaik dengan pelacakan fokus"
+            }
+            (Language::Indonesian, ReplacementAssurance::Unverified) => {
+                "Penggantian: Tidak terverifikasi"
+            }
+            (Language::Indonesian, ReplacementAssurance::Blocked) => "Penggantian: Diblokir",
+            (Language::Indonesian, ReplacementAssurance::Unavailable) => {
+                "Penggantian: Tidak tersedia"
+            }
         }
     }
 
-    /// What the active route promises about the text it replaces.
-    /// `focus_tracked` is whether a window tracker confirms focus right now.
-    pub fn insertion_explanation(
-        &self,
-        assurance: InsertionAssurance,
-        focus_tracked: bool,
-    ) -> &'static str {
-        match (self.lang, assurance, focus_tracked) {
-            (Language::English, InsertionAssurance::Verified, _) => {
-                "Verified insertion: the input method checks the field's own text before replacing a trigger, and the edit is bound to that field."
-            }
-            (Language::English, InsertionAssurance::Compatibility, true) => {
-                "Compatibility mode: triggers are erased with keystrokes without seeing the field's text. The window tracker confirms focus right before typing; a focus change cancels the expansion."
-            }
-            (Language::English, InsertionAssurance::Compatibility, false) => {
-                "Compatibility mode: triggers are erased with keystrokes without seeing the field's text, and focus is not confirmed, so the text goes to whatever has focus."
-            }
-            (Language::English, InsertionAssurance::Blocked, _) => {
-                "Typed expansions are refused: this keystroke route cannot verify what it erases. Use a verified route, or allow compatibility mode in Settings → Engine."
-            }
-            (Language::English, InsertionAssurance::Unavailable, _) => {
-                "No output route is connected."
-            }
-            (Language::German, InsertionAssurance::Verified, _) => {
-                "Verifiziertes Einfügen: Die Eingabemethode prüft den Text des Feldes, bevor ein Auslöser ersetzt wird, und die Änderung ist an dieses Feld gebunden."
-            }
-            (Language::German, InsertionAssurance::Compatibility, true) => {
-                "Kompatibilitätsmodus: Auslöser werden per Tastenanschlag gelöscht, ohne den Text des Feldes zu sehen. Der Fenster-Tracker bestätigt den Fokus direkt vor dem Tippen; ein Fokuswechsel bricht die Erweiterung ab."
-            }
-            (Language::German, InsertionAssurance::Compatibility, false) => {
-                "Kompatibilitätsmodus: Auslöser werden per Tastenanschlag gelöscht, ohne den Text des Feldes zu sehen, und der Fokus wird nicht bestätigt. Der Text landet im gerade fokussierten Element."
-            }
-            (Language::German, InsertionAssurance::Blocked, _) => {
-                "Getippte Erweiterungen werden abgelehnt: Dieser Tastenanschlag-Weg kann nicht prüfen, was er löscht. Verwenden Sie einen verifizierten Weg oder erlauben Sie den Kompatibilitätsmodus unter Einstellungen → Engine."
-            }
-            (Language::German, InsertionAssurance::Unavailable, _) => {
-                "Kein Ausgabeweg ist verbunden."
-            }
-            (Language::Indonesian, InsertionAssurance::Verified, _) => {
-                "Penyisipan terverifikasi: metode input memeriksa teks kolom itu sendiri sebelum mengganti pemicu, dan suntingannya terikat pada kolom tersebut."
-            }
-            (Language::Indonesian, InsertionAssurance::Compatibility, true) => {
-                "Mode kompatibilitas: pemicu dihapus dengan penekanan tombol tanpa melihat teks kolom. Pelacak jendela memastikan fokus tepat sebelum mengetik; perpindahan fokus membatalkan ekspansi."
-            }
-            (Language::Indonesian, InsertionAssurance::Compatibility, false) => {
-                "Mode kompatibilitas: pemicu dihapus dengan penekanan tombol tanpa melihat teks kolom, dan fokus tidak dipastikan, sehingga teks masuk ke elemen mana pun yang sedang fokus."
-            }
-            (Language::Indonesian, InsertionAssurance::Blocked, _) => {
-                "Ekspansi yang diketik ditolak: jalur penekanan tombol ini tidak dapat memverifikasi apa yang dihapusnya. Gunakan jalur terverifikasi, atau izinkan mode kompatibilitas di Pengaturan → Mesin."
-            }
-            (Language::Indonesian, InsertionAssurance::Unavailable, _) => {
-                "Tidak ada jalur keluaran yang terhubung."
-            }
+    /// Explain exactly what the active route can establish before erasing.
+    pub fn replacement_explanation(&self, assurance: ReplacementAssurance) -> &'static str {
+        match (self.lang, assurance) {
+            (Language::English, ReplacementAssurance::Verified) => "The route checks the target field's surrounding text before deleting the trigger.",
+            (Language::English, ReplacementAssurance::FocusTrackedBestEffort) => "The window tracker confirms focus immediately before typing, but the route cannot verify that the text at the cursor is still the trigger. A focus change refuses or stops output.",
+            (Language::English, ReplacementAssurance::Unverified) => "This explicitly allowed keystroke route cannot verify the target field, focus, or text it erases. Strict mode refuses this operation.",
+            (Language::English, ReplacementAssurance::Blocked) => "Strict mode refuses keystroke replacement because the route cannot verify what it erases. Choose a verified route or explicitly allow a compatibility mode in Settings → Engine.",
+            (Language::English, ReplacementAssurance::Unavailable) => "No output route is connected.",
+            (Language::German, ReplacementAssurance::Verified) => "Der Weg prüft den umgebenden Text des Zielfelds, bevor der Auslöser gelöscht wird.",
+            (Language::German, ReplacementAssurance::FocusTrackedBestEffort) => "Der Fenster-Tracker bestätigt den Fokus direkt vor dem Tippen, aber der Weg kann nicht prüfen, ob am Cursor noch der Auslöser steht. Ein Fokuswechsel verweigert oder stoppt die Ausgabe.",
+            (Language::German, ReplacementAssurance::Unverified) => "Dieser ausdrücklich erlaubte Tastenanschlag-Weg kann Zielfeld, Fokus oder gelöschten Text nicht verifizieren. Der strikte Modus verweigert diesen Vorgang.",
+            (Language::German, ReplacementAssurance::Blocked) => "Der strikte Modus verweigert die Ersetzung per Tastenanschlag, weil der Weg den gelöschten Text nicht prüfen kann. Wählen Sie einen verifizierten Weg oder erlauben Sie ausdrücklich einen Kompatibilitätsmodus unter Einstellungen → Engine.",
+            (Language::German, ReplacementAssurance::Unavailable) => "Kein Ausgabeweg ist verbunden.",
+            (Language::Indonesian, ReplacementAssurance::Verified) => "Jalur ini memeriksa teks di sekitar pemicu pada kolom tujuan sebelum menghapusnya.",
+            (Language::Indonesian, ReplacementAssurance::FocusTrackedBestEffort) => "Pelacak jendela memastikan fokus tepat sebelum mengetik, tetapi jalur ini tidak dapat memastikan teks di kursor masih berupa pemicu. Perpindahan fokus akan menolak atau menghentikan keluaran.",
+            (Language::Indonesian, ReplacementAssurance::Unverified) => "Jalur tombol yang diizinkan secara eksplisit ini tidak dapat memastikan kolom tujuan, fokus, atau teks yang dihapus. Mode ketat menolak operasi ini.",
+            (Language::Indonesian, ReplacementAssurance::Blocked) => "Mode ketat menolak penggantian melalui tombol karena jalur ini tidak dapat memastikan teks yang dihapus. Pilih jalur terverifikasi atau izinkan mode kompatibilitas secara eksplisit di Pengaturan → Mesin.",
+            (Language::Indonesian, ReplacementAssurance::Unavailable) => "Tidak ada jalur keluaran yang terhubung.",
         }
     }
 

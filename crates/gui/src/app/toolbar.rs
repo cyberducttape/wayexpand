@@ -145,6 +145,7 @@ impl GuiApp {
                     &contract.status,
                     contract.sensitive_fields,
                     contract.atomic_replace,
+                    &contract.replacement_assurance,
                     contract.is_certified(),
                 ),
                 if contract.is_certified() {
@@ -238,20 +239,19 @@ impl GuiApp {
         // Whether replacing a trigger is verified against the field's text or
         // relies on keystrokes, shown wherever the route is visible.
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
-            if let Some(assurance) = capabilities.insertion_assurance {
+            if let Some(assurance) = capabilities.replacement_assurance {
                 let color = match assurance {
-                    runtime::InsertionAssurance::Verified => palette.success,
-                    runtime::InsertionAssurance::Compatibility => palette.warning,
-                    runtime::InsertionAssurance::Blocked => palette.danger,
-                    runtime::InsertionAssurance::Unavailable => palette.muted,
+                    runtime::ReplacementAssurance::Verified => palette.success,
+                    runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
+                    runtime::ReplacementAssurance::Unverified
+                    | runtime::ReplacementAssurance::Blocked => palette.danger,
+                    runtime::ReplacementAssurance::Unavailable => palette.muted,
                 };
-                let explanation = self
-                    .strings
-                    .insertion_explanation(assurance, capabilities.focus_tracked == Some(true));
+                let explanation = self.strings.replacement_explanation(assurance);
                 if ui
                     .add(
                         egui::Button::new(
-                            RichText::new(self.strings.insertion_pill(assurance)).color(color),
+                            RichText::new(self.strings.replacement_pill(assurance)).color(color),
                         )
                         .fill(theme::tint(color, 34))
                         .stroke(egui::Stroke::NONE)

@@ -171,6 +171,14 @@ fn tui_status_uses_the_shared_daemon_status_contract() {
         Some(InsertionAssurance::Compatibility)
     );
     assert_eq!(
+        insertion_from_status("running\nreplacement_assurance=focus-tracked-best-effort\n"),
+        Some(InsertionAssurance::FocusTrackedBestEffort)
+    );
+    assert_eq!(
+        insertion_from_status("running\nreplacement_assurance=unverified\n"),
+        Some(InsertionAssurance::Unverified)
+    );
+    assert_eq!(
         insertion_from_status("running\ninsertion_assurance=blocked\n"),
         Some(InsertionAssurance::Blocked)
     );

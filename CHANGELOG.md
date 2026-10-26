@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Replacement assurance is now explicit in backend route recommendations,
+  generated support tables, daemon status schema 13, `doctor`, and GUI/TUI
+  status. Live status distinguishes verified target-text checks,
+  focus-tracked best-effort replacement, unverified replacement, blocked
+  replacement, and unavailable output. Strict mode refuses keystroke
+  replacement before typing; regression coverage now includes hard-linked
+  configuration lock files. Security documentation maps the boundary tests
+  and states their real-desktop certification limits.
 - Daemon soak reports and isolated KWin certification now share source-tree
   cleanliness checks scoped to build and harness inputs. Unrelated generated
   files no longer make their evidence appear to come from a dirty source tree.

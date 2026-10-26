@@ -75,6 +75,7 @@ struct RouteRecommendation {
     focus_tracking: bool,
     sensitive_fields: bool,
     atomic_replace: bool,
+    replacement_assurance: &'static str,
     certified: bool,
 }
 
@@ -100,6 +101,7 @@ fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> 
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
+        replacement_assurance: &contract.replacement_assurance,
         certified: contract.is_certified(),
     })
 }

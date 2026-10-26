@@ -227,7 +227,11 @@ fn header(view: &View<'_>, width: usize) -> Line {
     right.push(span(daemon, daemon_style));
     if let Some(insertion) = view.insertion {
         let (text, color) = match insertion {
-            InsertionAssurance::Verified => ("Verified insertion", Color::Green),
+            InsertionAssurance::Verified => ("Target text verified", Color::Green),
+            InsertionAssurance::FocusTrackedBestEffort => {
+                ("Focus-tracked best effort", Color::Yellow)
+            }
+            InsertionAssurance::Unverified => ("Unverified replacement", Color::Red),
             InsertionAssurance::Compatibility => ("Compatibility insertion", Color::Yellow),
             InsertionAssurance::Blocked => ("Typed expansions blocked", Color::Red),
         };

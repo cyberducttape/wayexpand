@@ -119,9 +119,7 @@ pub(crate) struct DaemonCapabilities {
     pub inject_full_unicode: Option<bool>,
     pub inject_cursor_reposition: Option<bool>,
     pub inject_key_passthrough: Option<bool>,
-    pub insertion_assurance: Option<InsertionAssurance>,
-    /// A window tracker currently confirms focus for keystroke output.
-    pub focus_tracked: Option<bool>,
+    pub replacement_assurance: Option<ReplacementAssurance>,
     pub output_refused_total: Option<u64>,
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
@@ -142,11 +140,13 @@ pub(crate) struct FailureTrace {
 
 /// What the daemon's output route promises before it erases a trigger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InsertionAssurance {
-    /// The route checks the field's own text before erasing.
+pub(crate) enum ReplacementAssurance {
+    /// The route verifies the target text before erasing.
     Verified,
-    /// A keystroke route the user allowed; erasure is unverified.
-    Compatibility,
+    /// A tracker confirms the window, but the erased text is not verified.
+    FocusTrackedBestEffort,
+    /// Neither target text nor focused window is verified.
+    Unverified,
     /// A keystroke route without consent: typed expansions are refused.
     Blocked,
     Unavailable,
@@ -242,22 +242,17 @@ impl DaemonCapabilities {
                 found = true;
             }
         }
-        capabilities.insertion_assurance =
+        capabilities.replacement_assurance =
             status
-                .field("insertion_assurance")
+                .field("replacement_assurance")
                 .and_then(|value| match value {
-                    "verified" => Some(InsertionAssurance::Verified),
-                    "compatibility" => Some(InsertionAssurance::Compatibility),
-                    "blocked" => Some(InsertionAssurance::Blocked),
-                    "unavailable" => Some(InsertionAssurance::Unavailable),
-                    _ => None,
-                });
-        capabilities.focus_tracked =
-            status
-                .field("focus_assurance")
-                .and_then(|value| match value {
-                    "tracker" => Some(true),
-                    "unconfirmed" => Some(false),
+                    "verified" => Some(ReplacementAssurance::Verified),
+                    "focus-tracked-best-effort" => {
+                        Some(ReplacementAssurance::FocusTrackedBestEffort)
+                    }
+                    "unverified" => Some(ReplacementAssurance::Unverified),
+                    "blocked" => Some(ReplacementAssurance::Blocked),
+                    "unavailable" => Some(ReplacementAssurance::Unavailable),
                     _ => None,
                 });
         capabilities.output_last_refusal =
@@ -275,7 +270,7 @@ impl DaemonCapabilities {
             .field("recent_expansion_failures")
             .and_then(|value| serde_json::from_str(value).ok())
             .unwrap_or_default();
-        found |= capabilities.insertion_assurance.is_some();
+        found |= capabilities.replacement_assurance.is_some();
         for (key, slot) in [
             (
                 "capture_sensitive_focus",
@@ -573,7 +568,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=11\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=13\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -626,7 +621,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=11\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=13\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -635,16 +630,15 @@ mod tests {
     }
 
     #[test]
-    fn daemon_capability_parser_reads_insertion_assurance_and_refusals() {
+    fn daemon_capability_parser_reads_replacement_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=11\ninsertion_assurance=compatibility\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
+            "status_schema=13\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
         )
         .unwrap();
         assert_eq!(
-            capabilities.insertion_assurance,
-            Some(super::InsertionAssurance::Compatibility)
+            capabilities.replacement_assurance,
+            Some(super::ReplacementAssurance::FocusTrackedBestEffort)
         );
-        assert_eq!(capabilities.focus_tracked, Some(true));
         assert_eq!(capabilities.output_refused_total, Some(4));
         assert_eq!(
             capabilities.output_last_refusal,
@@ -653,14 +647,13 @@ mod tests {
         assert_eq!(capabilities.output_uncertain_total, Some(1));
 
         let blocked = super::DaemonCapabilities::parse(
-            "status_schema=11\ninsertion_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+            "status_schema=13\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
         )
         .unwrap();
         assert_eq!(
-            blocked.insertion_assurance,
-            Some(super::InsertionAssurance::Blocked)
+            blocked.replacement_assurance,
+            Some(super::ReplacementAssurance::Blocked)
         );
-        assert_eq!(blocked.focus_tracked, Some(false));
         assert_eq!(blocked.output_last_refusal, None);
     }
 

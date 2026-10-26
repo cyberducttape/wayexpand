@@ -189,8 +189,31 @@ fn doctor_explains_verified_compatibility_and_blocked_insertion() {
     assert!(verified["explanation"]
         .as_str()
         .unwrap()
-        .starts_with("verified:"));
+        .starts_with("target-text verified:"));
+    assert_eq!(verified["replacement_assurance"], "verified");
     assert!(verified["last_refusal"].is_null());
+
+    let tracked = insertion(serde_json::json!({
+        "replacement_assurance": "focus-tracked-best-effort",
+        "compatibility_mode": "tracked-focus",
+        "focus_assurance": "tracker",
+        "output_refused_total": 0,
+        "output_last_refusal": "none",
+    }));
+    assert!(tracked["explanation"]
+        .as_str()
+        .unwrap()
+        .contains("cannot verify that the text at the cursor"));
+
+    let unverified = insertion(serde_json::json!({
+        "replacement_assurance": "unverified",
+        "compatibility_mode": "untracked-focus",
+        "focus_assurance": "unconfirmed",
+    }));
+    assert!(unverified["explanation"]
+        .as_str()
+        .unwrap()
+        .starts_with("unverified replacement:"));
 
     let compatibility = insertion(serde_json::json!({
         "insertion_assurance": "compatibility",
@@ -354,7 +377,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=12\n\
+         status_schema=13\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -415,6 +438,7 @@ fn status_json_matches_documented_stable_contract() {
          output_retiring_workers=0\n\
          output_stalled_ms=0\n\
          insertion_assurance=verified\n\
+         replacement_assurance=verified\n\
          compatibility_mode=off\n\
          focus_assurance=protocol\n\
          output_refused_total=3\n\
@@ -478,6 +502,7 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["clipboard_read_max_duration_us"], 150_000);
     assert_eq!(value["output_uncertain_total"], 1);
     assert_eq!(value["insertion_assurance"], "verified");
+    assert_eq!(value["replacement_assurance"], "verified");
     assert_eq!(value["compatibility_mode"], "off");
     assert_eq!(value["focus_assurance"], "protocol");
     assert_eq!(value["output_refused_total"], 3);
@@ -605,6 +630,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_unsupported_total",
             "output_last_unsupported",
             "recent_expansion_failures",
+            "replacement_assurance",
             "output_reconnect_total",
             "input_reconnect_total",
             "input_overflow_total",

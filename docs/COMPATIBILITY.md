@@ -480,7 +480,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 12,
+  "status_schema": 13,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -548,6 +548,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_retiring_workers": 0,
   "output_stalled_ms": 0,
   "insertion_assurance": "verified",
+  "replacement_assurance": "verified",
   "compatibility_mode": "off",
   "focus_assurance": "protocol",
   "output_refused_total": 0,
@@ -570,7 +571,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -618,6 +619,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
 - `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
 - `insertion_assurance` (string): What the output route promises before it erases a trigger. `verified`: the route checks the field's own text first (input-method-v2, IBus). `compatibility`: a keystroke route (libei, wlroots virtual keyboard) that erases without seeing the text, allowed by `compatibility_mode`. `blocked`: a keystroke route without that consent; typed expansions are refused. `unavailable`: no route that can replace text. Added in status schema 8.
+- `replacement_assurance` (string): Precise live replacement status. `verified`: the route checks target text before deletion; `focus-tracked-best-effort`: a tracker confirms the window, but the route cannot inspect the text/cursor; `unverified`: untracked keystroke replacement was explicitly allowed; `blocked`: strict mode or a focus check refuses the operation; `unavailable`: no output route. `insertion_assurance` remains as a coarse compatibility field. Added in status schema 13.
 - `compatibility_mode` (string): The configured consent, `off`, `tracked-focus`, or `untracked-focus` (see `Settings::compatibility_mode`). Added in status schema 8.
 - `focus_assurance` (string): How focus is bound for output. `protocol` on verified routes; on keystroke routes, `tracker` while a window tracker confirms the exact focused window and `unconfirmed` otherwise; `none` without a route. Added in status schema 8.
 - `output_refused_total` (integer): Outputs refused before their first keystroke since daemon start: no consent, a focus change after the match, or focus no tracker could confirm. Nothing was erased or inserted for them and they are never retried. Added in status schema 8.

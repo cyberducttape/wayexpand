@@ -119,8 +119,8 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         raise ValueError("certification matrix targets must be an array")
     target_ids = {target.get("id") for target in targets if isinstance(target, dict)}
     rows = [
-        "| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     seen: set[str] = set()
     for route in routes:
@@ -128,7 +128,7 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
             raise ValueError("route contract must be an object")
         required = (
             "id", "label", "path", "capture", "injection", "sensitive_fields", "sensitive_field_support",
-            "atomic_replace", "app_identity", "focus_tracking", "status",
+            "replacement_assurance", "atomic_replace", "app_identity", "focus_tracking", "status",
             "setup_backend", "setup_detail", "certification_targets",
         )
         if any(key not in route for key in required):
@@ -142,6 +142,10 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
         for key in ("sensitive_fields", "atomic_replace", "focus_tracking"):
             if not isinstance(route[key], bool):
                 raise ValueError(f"{route_id}: {key} must be boolean")
+        if route["replacement_assurance"] not in {"verified", "unverified"}:
+            raise ValueError(f"{route_id}: invalid replacement_assurance")
+        if route["atomic_replace"] and route["replacement_assurance"] != "verified":
+            raise ValueError(f"{route_id}: atomic replacement requires verified assurance")
         support = route["sensitive_field_support"]
         if not isinstance(support, dict):
             raise ValueError(f"{route_id}: sensitive_field_support must be an object")
@@ -165,6 +169,7 @@ def render_routes(matrix: dict[str, object], route_catalog: dict[str, object]) -
             raise ValueError(f"{route_id}: certification targets must name known targets")
         rows.append(
             f"| `{route_id}` ({route['label']}) | {route['capture']} | {route['injection']} | "
+            f"{route['replacement_assurance']} | {'available' if route['focus_tracking'] else 'unavailable'} | "
             f"{'implemented' if support['implemented'] else 'not implemented'} | "
             f"{support['protocol_signal']} | {support['compositor_observation']} | "
             f"{'certified' if support['certified'] else 'not certified'} | "

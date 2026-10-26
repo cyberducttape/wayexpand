@@ -207,21 +207,18 @@ impl GuiApp {
                 .color(palette.muted),
         );
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
-            if let Some(assurance) = capabilities.insertion_assurance {
+            if let Some(assurance) = capabilities.replacement_assurance {
                 let color = match assurance {
-                    runtime::InsertionAssurance::Verified => palette.success,
-                    runtime::InsertionAssurance::Compatibility => palette.warning,
-                    runtime::InsertionAssurance::Blocked => palette.danger,
-                    runtime::InsertionAssurance::Unavailable => palette.muted,
+                    runtime::ReplacementAssurance::Verified => palette.success,
+                    runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
+                    runtime::ReplacementAssurance::Unverified
+                    | runtime::ReplacementAssurance::Blocked => palette.danger,
+                    runtime::ReplacementAssurance::Unavailable => palette.muted,
                 };
                 theme::card(ui, palette, |ui| {
-                    ui.colored_label(color, self.strings.insertion_pill(assurance));
+                    ui.colored_label(color, self.strings.replacement_pill(assurance));
                     ui.add(
-                        egui::Label::new(self.strings.insertion_explanation(
-                            assurance,
-                            capabilities.focus_tracked == Some(true),
-                        ))
-                        .wrap(),
+                        egui::Label::new(self.strings.replacement_explanation(assurance)).wrap(),
                     );
                     if let Some(refused) = capabilities.output_refused_total.filter(|n| *n > 0) {
                         ui.colored_label(

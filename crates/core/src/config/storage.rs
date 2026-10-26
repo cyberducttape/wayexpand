@@ -231,6 +231,34 @@ mod fallback_tests {
         fs::remove_dir(&real).unwrap();
         fs::remove_dir(root_path).unwrap();
     }
+
+    #[test]
+    fn config_lock_rejects_hard_linked_lock_files() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-hardlink-lock-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let target = root.join("expansions.toml");
+        let lock_path = root.join(".expansions.toml.wayexpand.lock");
+        let linked_path = root.join("linked-lock");
+        fs::write(&lock_path, b"").unwrap();
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::hard_link(&lock_path, &linked_path).unwrap();
+
+        assert!(matches!(
+            ConfigWriteLock::acquire(&target),
+            Err(ConfigError::InsecurePermissions { .. })
+        ));
+
+        fs::remove_file(linked_path).unwrap();
+        fs::remove_file(lock_path).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
 }
 
 pub(super) fn resolve_config_target(path: &Path) -> Result<std::path::PathBuf, ConfigError> {

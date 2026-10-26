@@ -19,8 +19,12 @@
       "focus_tracking": false,
       "status": "experimental",
       "setup_backend": "ibus",
-      "certification_targets": ["kde", "gnome"],
-      "setup_detail": "toolkit-aware committed text; capture stays off until the field reports a non-sensitive content type, and replacements require matching surrounding text; no raw keyboard access"
+      "certification_targets": [
+        "kde",
+        "gnome"
+      ],
+      "setup_detail": "toolkit-aware committed text; capture stays off until the field reports a non-sensitive content type, and replacements require matching surrounding text; no raw keyboard access",
+      "replacement_assurance": "verified"
     },
     {
       "id": "kde-evdev-libei",
@@ -40,8 +44,12 @@
       "focus_tracking": true,
       "status": "experimental",
       "setup_backend": "evdev",
-      "certification_targets": ["kde", "gnome"],
-      "setup_detail": "explicit evdev compatibility fallback with libei output; observes global keyboard input and has no password-field awareness"
+      "certification_targets": [
+        "kde",
+        "gnome"
+      ],
+      "setup_detail": "explicit evdev compatibility fallback with libei output; observes global keyboard input and has no password-field awareness",
+      "replacement_assurance": "unverified"
     },
     {
       "id": "sway-evdev-wlroots",
@@ -61,8 +69,12 @@
       "focus_tracking": false,
       "status": "experimental",
       "setup_backend": "evdev",
-      "certification_targets": ["sway", "hyprland"],
-      "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness"
+      "certification_targets": [
+        "sway",
+        "hyprland"
+      ],
+      "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness",
+      "replacement_assurance": "unverified"
     },
     {
       "id": "input-method-v2",
@@ -82,8 +94,12 @@
       "focus_tracking": false,
       "status": "experimental",
       "setup_backend": "input-method",
-      "certification_targets": ["kde", "gnome"],
-      "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification"
+      "certification_targets": [
+        "kde",
+        "gnome"
+      ],
+      "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification",
+      "replacement_assurance": "verified"
     }
   ]
 }

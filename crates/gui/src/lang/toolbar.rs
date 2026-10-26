@@ -172,6 +172,7 @@ impl Strings {
         maturity: &str,
         sensitive_fields: bool,
         atomic_replace: bool,
+        replacement_assurance: &str,
         certified: bool,
     ) -> String {
         let semantics = match (self.lang, sensitive_fields, atomic_replace) {
@@ -204,7 +205,15 @@ impl Strings {
             (Language::German, true) => "zertifiziert",
             (Language::German, false) => "Zertifizierung ausstehend",
         };
-        format!("{route} · {maturity} · {semantics} · {evidence}")
+        let assurance = match (self.lang, replacement_assurance) {
+            (Language::English, "verified") => "verified target text",
+            (Language::Indonesian, "verified") => "teks tujuan terverifikasi",
+            (Language::German, "verified") => "verifizierter Zieltext",
+            (Language::English, _) => "best-effort target text",
+            (Language::Indonesian, _) => "teks tujuan upaya terbaik",
+            (Language::German, _) => "Zieltext nach bestem Bemühen",
+        };
+        format!("{route} · {assurance} · {maturity} · {semantics} · {evidence}")
     }
 
     pub fn route_connected_status(&self) -> &'static str {
@@ -565,6 +574,9 @@ impl Strings {
                 }
                 if route.atomic_replace {
                     properties.push("atomic replacement".into());
+                } else {
+                    properties
+                        .push("best-effort replacement; strict mode blocks it by default".into());
                 }
                 if route.focus_tracking {
                     properties.push("application focus tracking".into());
@@ -586,6 +598,10 @@ impl Strings {
                 }
                 if route.atomic_replace {
                     properties.push("penggantian atomik".into());
+                } else {
+                    properties.push(
+                        "penggantian upaya terbaik; mode ketat memblokir secara default".into(),
+                    );
                 }
                 if route.focus_tracking {
                     properties.push("pelacakan fokus aplikasi".into());
@@ -605,6 +621,11 @@ impl Strings {
                 }
                 if route.atomic_replace {
                     properties.push("atomare Ersetzung".into());
+                } else {
+                    properties.push(
+                        "Ersetzung nach bestem Bemühen; strikter Modus blockiert standardmäßig"
+                            .into(),
+                    );
                 }
                 if route.focus_tracking {
                     properties.push("Verfolgung des App-Fokus".into());

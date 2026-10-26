@@ -83,8 +83,11 @@ impl Refusal {
 pub(crate) enum Assurance {
     /// The route checks the target's text before erasing.
     Verified,
-    /// Keystroke route with the user's consent; erasure is unverified.
-    Compatibility,
+    /// The tracker confirms the focused window, but the route cannot inspect
+    /// the text or cursor position it will erase.
+    FocusTrackedBestEffort,
+    /// The user allowed a keystroke route without confirmed target focus.
+    Unverified,
     /// Keystroke route without consent: typed expansions are refused.
     Blocked,
     /// No output route is connected.
@@ -92,19 +95,41 @@ pub(crate) enum Assurance {
 }
 
 impl Assurance {
-    pub(crate) fn of(capabilities: Option<&InjectorCapabilities>, mode: CompatibilityMode) -> Self {
+    pub(crate) fn of(
+        capabilities: Option<&InjectorCapabilities>,
+        mode: CompatibilityMode,
+        focus: FocusCheck,
+    ) -> Self {
         match capabilities {
             None => Self::Unavailable,
             Some(capabilities) if verifies_erasure(capabilities) => Self::Verified,
             Some(_) if mode == CompatibilityMode::Off => Self::Blocked,
-            Some(_) => Self::Compatibility,
+            Some(_) => match focus {
+                FocusCheck::Unchanged => Self::FocusTrackedBestEffort,
+                FocusCheck::Changed => Self::Blocked,
+                FocusCheck::Unconfirmed if mode == CompatibilityMode::UntrackedFocus => {
+                    Self::Unverified
+                }
+                FocusCheck::Unconfirmed => Self::Blocked,
+            },
         }
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Verified => "verified",
-            Self::Compatibility => "compatibility",
+            Self::FocusTrackedBestEffort => "focus-tracked-best-effort",
+            Self::Unverified => "unverified",
+            Self::Blocked => "blocked",
+            Self::Unavailable => "unavailable",
+        }
+    }
+
+    /// Preserve the older, coarser field for clients that predate schema 13.
+    pub(crate) fn legacy_as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::FocusTrackedBestEffort | Self::Unverified => "compatibility",
             Self::Blocked => "blocked",
             Self::Unavailable => "unavailable",
         }
@@ -164,7 +189,7 @@ impl GuardState {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = stamp;
     }
 
-    fn focus(&self) -> FocusCheck {
+    pub(crate) fn focus(&self) -> FocusCheck {
         let stamp = *self
             .stamp
             .lock()
@@ -613,19 +638,51 @@ mod tests {
             ..InjectorCapabilities::default()
         };
         assert_eq!(
-            Assurance::of(Some(&atomic), CompatibilityMode::Off),
+            Assurance::of(
+                Some(&atomic),
+                CompatibilityMode::Off,
+                FocusCheck::Unconfirmed
+            ),
             Assurance::Verified
         );
         assert_eq!(
-            Assurance::of(Some(&keystrokes), CompatibilityMode::Off),
+            Assurance::of(
+                Some(&keystrokes),
+                CompatibilityMode::Off,
+                FocusCheck::Unchanged
+            ),
             Assurance::Blocked
         );
         assert_eq!(
-            Assurance::of(Some(&keystrokes), CompatibilityMode::TrackedFocus),
-            Assurance::Compatibility
+            Assurance::of(
+                Some(&keystrokes),
+                CompatibilityMode::TrackedFocus,
+                FocusCheck::Unchanged
+            ),
+            Assurance::FocusTrackedBestEffort
         );
         assert_eq!(
-            Assurance::of(None, CompatibilityMode::UntrackedFocus),
+            Assurance::of(
+                Some(&keystrokes),
+                CompatibilityMode::TrackedFocus,
+                FocusCheck::Unconfirmed
+            ),
+            Assurance::Blocked
+        );
+        assert_eq!(
+            Assurance::of(
+                Some(&keystrokes),
+                CompatibilityMode::UntrackedFocus,
+                FocusCheck::Unconfirmed
+            ),
+            Assurance::Unverified
+        );
+        assert_eq!(
+            Assurance::of(
+                None,
+                CompatibilityMode::UntrackedFocus,
+                FocusCheck::Unconfirmed
+            ),
             Assurance::Unavailable
         );
     }

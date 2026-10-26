@@ -157,14 +157,14 @@ architectural boundary and the risks of an `EVIOCGRAB` proxy are documented in
 
 ### Insertion guarantees
 
-WayExpand distinguishes verified insertion from compatibility-mode
-insertion, and reports which one is active (`insertion_assurance` in
-`wayexpand status --json`, the `doctor` "Insertion" line, and the GUI and TUI
-headers).
+WayExpand reports replacement assurance in `replacement_assurance` in
+`wayexpand status --json`, in `doctor`, and prominently in the GUI and TUI.
+The older `insertion_assurance` field remains as a coarse compatibility value.
 
-- **Verified routes** (input-method-v2 and IBus) erase a trigger only after
-  checking the field's own surrounding text, and their edit is bound to that
-  field by the protocol, so it cannot land in another window.
+- **Target-text-verified routes** (input-method-v2 and IBus) check the field's
+  own surrounding text before erasing, and their edit is bound to that field
+  by the protocol. This assurance does not claim that erase and insert are a
+  single atomic transaction; IBus is not atomic.
 - **Keystroke routes** (evdev capture with libei or wlroots output) erase with
   Backspace without seeing the field's text. They never erase unless the user
   sets `compatibility_mode` (in the primary config, the user layer, or the
@@ -173,6 +173,12 @@ headers).
     same exact window, checked immediately before the first keystroke;
   - `untracked-focus` also erases when no tracker can confirm focus, and is
     labeled as such everywhere the route is shown.
+
+  Live status calls a tracker-confirmed operation
+  `focus-tracked-best-effort`, because it cannot establish that the cursor or
+  surrounding text still matches the trigger. An operation with no confirmed
+  focus is `unverified`; with `compatibility_mode = "off"`, the route is
+  `blocked` and refuses before sending any erase or insertion keystroke.
 
   In every mode, a focus change detected between matching the trigger and
   typing refuses the expansion, as does a tracker that disconnects or stops.
@@ -190,6 +196,27 @@ not yet reported, cannot be detected; and a keystroke route cannot detect a
 cursor moved by mouse within the same window. These are the reasons keystroke
 routes require explicit consent. Organizations can forbid them entirely with
 `minimum_replacement_guarantee = "verified"` in safe mode.
+
+### Security regression coverage
+
+Targeted Rust regression tests exercise important process and storage
+boundaries:
+
+| Boundary | Representative coverage |
+| --- | --- |
+| Executable trust | `pinned_shebang_launch_uses_the_validated_inode_after_path_replacement` |
+| Broker IPC | bounded/invalid frame tests and `ipc_concurrent_start_allows_only_one_owner` |
+| Sensitive fields | input-method and IBus password/unknown-purpose tests, including an in-flight transition to a password field |
+| Clipboard | bounded command environment, single worker, deadline, and disconnected-worker tests |
+| Environment forwarding | broker tests prove an empty allowlist does not inherit client variables and client values cannot override server-owned values |
+| Configuration saves | parent ownership/mode and symlink tests; `config_lock_rejects_hard_linked_lock_files`; concurrent-writer tests |
+| Process cancellation | descendant cleanup, inherited-stdout, and cancellation tests in the command runtime and CLI form helper |
+| Audit logs | private/single-link file, symlink-safe rotation, bounded required-audit backpressure, and rollback-failure tests |
+
+These tests establish code-level properties for their tested conditions. They
+do not certify sensitive-field behavior in a real compositor/client, validate
+every filesystem race on every supported filesystem, or replace desktop
+session testing. No compositor route is currently certified.
 
 Backends must document their permission requirements explicitly:
 

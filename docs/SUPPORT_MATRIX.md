@@ -61,20 +61,25 @@ evidence exists.
 <!-- generated:desktop-certification-matrix:end -->
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | verified | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | unverified | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | unverified | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | verified | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
-The evdev routes type keystrokes and cannot verify what they erase. They
-replace triggers only with the user's `compatibility_mode` consent:
-`tracked-focus` on KDE, where the KWin tracker confirms the focused window
-before typing, or `untracked-focus` on Sway, Hyprland, and GNOME, which have
-no tracker. Without consent they report `insertion_assurance=blocked` and
-refuse typed expansions. See [Insertion guarantees](../SECURITY.md#insertion-guarantees).
+Replacement assurance is an explicit route property and a live status. The
+route table's `verified` label means the protocol validates target text before
+deletion; it does not by itself mean the erase and insert form one atomic
+transaction. `unverified` is the baseline for keystroke routes. When a compositor
+tracker confirms the exact focused window, live status refines that to
+`focus-tracked-best-effort`: focus is checked, but the route still cannot
+confirm the cursor or text being erased. If focus is unconfirmed, untracked
+replacement is labeled `unverified` and requires explicit consent. With
+`compatibility_mode=off`, typed replacement on keystroke routes is refused
+before the first keystroke and status says `blocked`. See
+[Insertion guarantees](../SECURITY.md#insertion-guarantees).
 
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
 AltGr-heavy layout, and a multi-layout switching setup. A US-only run is not

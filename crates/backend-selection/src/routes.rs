@@ -46,6 +46,9 @@ pub struct RouteContract {
     pub injection: String,
     pub sensitive_fields: bool,
     pub sensitive_field_support: SensitiveFieldSupport,
+    /// Baseline replacement guarantee. Runtime focus confirmation can refine
+    /// an unverified keystroke route to focus-tracked best-effort.
+    pub replacement_assurance: String,
     pub atomic_replace: bool,
     pub app_identity: String,
     pub focus_tracking: bool,

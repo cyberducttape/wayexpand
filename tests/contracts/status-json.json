@@ -67,6 +67,7 @@
     "output_retiring_workers": "integer",
     "output_stalled_ms": "integer",
     "insertion_assurance": "string",
+    "replacement_assurance": "string",
     "compatibility_mode": "string",
     "focus_assurance": "string",
     "output_refused_total": "integer",

@@ -1102,13 +1102,21 @@ struct StatusSummary {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InsertionAssurance {
     Verified,
+    FocusTrackedBestEffort,
+    Unverified,
     Compatibility,
     Blocked,
 }
 
 fn insertion_from_status(response: &str) -> Option<InsertionAssurance> {
-    match DaemonStatus::parse(response).field("insertion_assurance")? {
+    let status = DaemonStatus::parse(response);
+    match status
+        .field("replacement_assurance")
+        .or_else(|| status.field("insertion_assurance"))?
+    {
         "verified" => Some(InsertionAssurance::Verified),
+        "focus-tracked-best-effort" => Some(InsertionAssurance::FocusTrackedBestEffort),
+        "unverified" => Some(InsertionAssurance::Unverified),
         "compatibility" => Some(InsertionAssurance::Compatibility),
         "blocked" => Some(InsertionAssurance::Blocked),
         _ => None,

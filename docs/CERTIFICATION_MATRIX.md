@@ -35,12 +35,12 @@ availability claims, and no target is certified without reviewed evidence.
 <!-- generated:desktop-certification-matrix:end -->
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | verified | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | unverified | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | unverified | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | verified | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
 ## Current evidence

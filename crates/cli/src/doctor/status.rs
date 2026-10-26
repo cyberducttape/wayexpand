@@ -154,22 +154,34 @@ pub(crate) fn output_health_from_status(snapshot: &serde_json::Value) -> serde_j
 /// what that means for the user's text.
 pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
     let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
-    let assurance = text("insertion_assurance");
+    let assurance = text("replacement_assurance").or_else(|| text("insertion_assurance"));
     let mode = text("compatibility_mode").unwrap_or("off");
     let focus = text("focus_assurance");
     let explanation = match assurance {
         Some("verified") => Some(
-            "verified: the input method checks the field's own text before replacing a \
+            "target-text verified: the input method checks the field's own text before replacing a \
              trigger, and the edit is bound to that field"
                 .to_owned(),
         ),
+        Some("focus-tracked-best-effort") => Some(
+            "focus-tracked best effort: the tracker confirms the focused window, but the route \
+             cannot verify that the text at the cursor still matches the trigger"
+                .to_owned(),
+        ),
+        Some("unverified") => Some(
+            "unverified replacement: this explicitly allowed keystroke route cannot verify the \
+             target field, focus, or text it erases"
+                .to_owned(),
+        ),
         Some("compatibility") => Some(format!(
-            "compatibility mode ({mode}): keystrokes erase the trigger without seeing the \
-             field's text; {}",
-            if focus == Some("tracker") {
-                "the window tracker confirms focus immediately before typing"
-            } else {
-                "focus cannot be confirmed right now, so the text may land in whatever has focus"
+            "legacy compatibility status ({mode}): keystrokes erase the trigger without seeing \
+             the field's text; {}",
+            match focus {
+                Some("tracker") =>
+                    "a window tracker confirms focus, but text and cursor remain unchecked",
+                Some("unconfirmed") => "focus cannot be confirmed",
+                Some("protocol") => "the protocol binds output to the text field",
+                _ => "focus assurance is unknown",
             }
         )),
         Some("blocked") => Some(
@@ -185,6 +197,7 @@ pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json:
     let last_refusal = text("output_last_refusal").filter(|reason| *reason != "none");
     serde_json::json!({
         "assurance": assurance,
+        "replacement_assurance": assurance,
         "compatibility_mode": text("compatibility_mode"),
         "focus": focus,
         "refused_total": snapshot.get("output_refused_total"),
@@ -323,14 +336,14 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     }
     let insertion = insertion_from_status(&snapshot);
     if let Some(explanation) = insertion["explanation"].as_str() {
-        println!("Insertion: {explanation}");
+        println!("Replacement assurance: {explanation}");
     }
     if let Some(refused) = insertion["refused_total"]
         .as_u64()
         .filter(|total| *total > 0)
     {
         println!(
-            "Insertion refusals: {refused} expansion(s) refused before typing (last: {}); \
+            "Replacement refusals: {refused} expansion(s) refused before typing (last: {}); \
              nothing was erased or inserted for them",
             insertion["last_refusal"].as_str().unwrap_or("unknown")
         );
