@@ -75,7 +75,7 @@ pub use policy::{
     validate_organization_policy_file, MAX_ORGANIZATION_POLICY_BYTES, ORGANIZATION_POLICY_DIR,
     ORGANIZATION_POLICY_PATH,
 };
-pub use store::{ConfigStore, ConfigStoreStatus};
+pub use store::{ConfigSnapshot, ConfigStore, ConfigStoreStatus};
 pub use template::{
     form_fields, render_template, render_template_preview, render_template_with_cursor,
     template_variables, ClipboardPrefetch, ClipboardReader, FormField, FormFieldKind,

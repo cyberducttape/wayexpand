@@ -23,6 +23,9 @@ All notable changes to WayExpand are documented here.
 - The matcher now tracks non-ASCII scalars in its bounded input buffer and
   skips repeated NFC scans for all-ASCII input. Regression coverage exercises
   append, eviction, backspace, and reset; before/after benchmarks are recorded.
+- Configuration stores now publish the validated configuration and generation
+  as one coherent snapshot, with replacement notifications ordered alongside
+  updates. The IBus service reads a single snapshot when applying reloads.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

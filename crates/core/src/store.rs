@@ -12,14 +12,21 @@ const MAX_RELOAD_ATTEMPTS: usize = 3;
 /// Shared validated configuration snapshot with generation notifications.
 pub struct ConfigStore {
     path: PathBuf,
-    config: RwLock<Arc<Config>>,
-    generation: Mutex<u64>,
+    snapshot: RwLock<ConfigSnapshot>,
     /// Metadata observed on the most recent poll, whether or not it parsed.
     /// Keeping this separate from `applied_stamp` prevents unchanged invalid
     /// content from being reparsed on every fallback-poll cycle.
     observed_stamp: Mutex<Option<FileStamp>>,
     reload_error: Mutex<Option<String>>,
     subscribers: Mutex<Vec<mpsc::SyncSender<u64>>>,
+}
+
+/// A coherent configuration and generation pair. Clone this once when both
+/// values must describe the same applied configuration.
+#[derive(Debug, Clone)]
+pub struct ConfigSnapshot {
+    pub config: Arc<Config>,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,23 +43,25 @@ impl ConfigStore {
         Ok(Arc::new(Self {
             observed_stamp: Mutex::new(metadata_stamp(&path)),
             path,
-            config: RwLock::new(Arc::new(loaded.config)),
-            generation: Mutex::new(0),
+            snapshot: RwLock::new(ConfigSnapshot {
+                config: Arc::new(loaded.config),
+                generation: 0,
+            }),
             reload_error: Mutex::new(None),
             subscribers: Mutex::new(Vec::new()),
         }))
     }
     pub fn config(&self) -> Arc<Config> {
-        self.config
+        self.snapshot().config
+    }
+    pub fn snapshot(&self) -> ConfigSnapshot {
+        self.snapshot
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
     pub fn generation(&self) -> u64 {
-        *self
-            .generation
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.snapshot().generation
     }
     pub fn status(&self) -> ConfigStoreStatus {
         let error = self
@@ -67,7 +76,7 @@ impl ConfigStore {
                 "ok"
             },
             error,
-            generation: self.generation(),
+            generation: self.snapshot().generation,
         }
     }
     pub fn subscribe(&self) -> mpsc::Receiver<u64> {
@@ -82,13 +91,14 @@ impl ConfigStore {
         receiver
     }
     pub fn atomically_replace(&self, config: Config) -> u64 {
-        *self.config.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(config);
-        let mut generation = self
-            .generation
-            .lock()
+        let mut snapshot = self
+            .snapshot
+            .write()
             .unwrap_or_else(PoisonError::into_inner);
-        *generation = generation.wrapping_add(1);
-        let value = *generation;
+        snapshot.config = Arc::new(config);
+        snapshot.generation = snapshot.generation.wrapping_add(1);
+        let value = snapshot.generation;
+        // Keep replacements and their bounded notifications ordered together.
         self.subscribers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -96,6 +106,7 @@ impl ConfigStore {
                 Ok(()) | Err(mpsc::TrySendError::Full(_)) => true,
                 Err(mpsc::TrySendError::Disconnected(_)) => false,
             });
+        drop(snapshot);
         value
     }
     /// Invalid edits leave the last valid snapshot active.
@@ -307,21 +318,35 @@ mod tests {
     }
 
     #[test]
-    fn poisoned_generation_lock_is_recovered_without_panicking() {
+    fn snapshots_keep_configuration_and_generation_coherent_during_replacements() {
         let path = path();
         write_private(
             &path,
             "[[expansion]]\ntrigger = ':x'\nreplacement = 'old'\n",
         );
         let store = ConfigStore::load(&path).unwrap();
-        let poisoned = Arc::clone(&store);
+        let writer = Arc::clone(&store);
         let join = thread::spawn(move || {
-            let _guard = poisoned.generation.lock().unwrap();
-            panic!("test poison");
-        })
-        .join();
-        assert!(join.is_err());
-        assert_eq!(store.generation(), 0);
+            for generation in 1..=500 {
+                let mut config = (*writer.config()).clone();
+                config.expansion[0].replacement = format!("generation-{generation}");
+                writer.atomically_replace(config);
+            }
+        });
+        while !join.is_finished() {
+            let snapshot = store.snapshot();
+            if snapshot.generation > 0 {
+                assert_eq!(
+                    snapshot.config.expansion[0].replacement,
+                    format!("generation-{}", snapshot.generation)
+                );
+            }
+            thread::yield_now();
+        }
+        join.join().unwrap();
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.generation, 500);
+        assert_eq!(snapshot.config.expansion[0].replacement, "generation-500");
         let _ = fs::remove_file(path);
     }
 

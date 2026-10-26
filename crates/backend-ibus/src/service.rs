@@ -391,14 +391,15 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let store = ConfigStore::load(&path)?;
     let policy =
         Arc::new(wayexpand_core::load_organization_policy().map_err(IbusServiceError::Policy)?);
+    let initial_snapshot = store.snapshot();
     let initial_status = store.status();
     info!(
         config_state = initial_status.state,
-        config_generation = initial_status.generation,
+        config_generation = initial_snapshot.generation,
         "IBus configuration loaded"
     );
     let connection_slot = Arc::new(Mutex::new(None));
-    let factory_config = Arc::new(Mutex::new((*store.config()).clone()));
+    let factory_config = Arc::new(Mutex::new((*initial_snapshot.config).clone()));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
     let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
@@ -478,7 +479,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                     }
                 }
                 while reload_receiver.try_recv().is_ok() {
-                    let config = (*reload_store.config()).clone();
+                    let snapshot = reload_store.snapshot();
+                    let config = (*snapshot.config).clone();
                     if let Ok(mut current) = reload_config.lock() {
                         *current = config.clone();
                     }
@@ -492,7 +494,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                                         warn!(
                                             config_state = status.state,
                                             adapter_error = %summary,
-                                            config_generation = status.generation,
+                                            config_generation = snapshot.generation,
                                             "IBus configuration could not be applied to an engine"
                                         );
                                         adapter_error = Some(summary);
