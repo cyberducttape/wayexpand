@@ -9,6 +9,10 @@ All notable changes to WayExpand are documented here.
   paths. Its SIGTERM integration test places private fixtures under `/tmp`, so
   Debian package builds do not depend on ownership of `TMPDIR` or the builder's
   `$HOME`.
+- Preserved a current-source, headless KWin smoke report for the broker-test
+  fixture fix. The isolated insertion, focus, reload, restart, and refusal
+  checks passed; keyboard capture, Unicode on the keysym fallback, and
+  suspend/resume remain untested, so this is not compositor certification.
 - The Diagnostics dashboard now gives explicit active-route assessments for
   capture availability, insertion safety, compositor/device permissions, and
   focus visibility. It also shows recent content-free expansion outcomes,

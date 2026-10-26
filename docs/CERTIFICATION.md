@@ -154,6 +154,15 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-061c3d366a9d.json`](evidence/doctor-certify-061c3d366a9d.json)
+preserves the build-identity-checked run from commit `061c3d366a9d` on KWin
+6.6.6. Ten isolated-client checks passed for insertion, focus transitions,
+reload, restart, and refusal; the keysym fallback measured 12,523 µs p50,
+12,607 µs p95, and 12,607 µs p99 for twenty small insertions inside the
+injector. Unicode insertion, physical keyboard capture, and suspend/resume
+were not tested. This partial headless evidence does not certify the active
+desktop or production capture route.
+
 [`evidence/doctor-certify-a4d699546.json`](evidence/doctor-certify-a4d699546.json)
 preserves a current-source run from commit `a4d69954676e` on KWin 6.6.6.
 The isolated clients passed ten insertion, focus, reload, restart, and refusal
