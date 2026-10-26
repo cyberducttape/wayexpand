@@ -802,9 +802,6 @@ impl InputMethodSource {
         release_virtual_keys_from_state(&mut self.state, injector);
     }
 
-    /// Poll for one event without indefinitely blocking lifecycle handling in
-    /// a daemon. This is intentionally an additive API; `InputSource::next_event`
-    /// remains the blocking interface for simple consumers.
     /// Install a non-blocking eventfd that ends [`Self::next_event_timeout`]
     /// early when another thread has work for the caller. The source drains
     /// it when it fires.
@@ -812,6 +809,9 @@ impl InputMethodSource {
         self.wake = wake;
     }
 
+    /// Poll for one event without indefinitely blocking lifecycle handling in
+    /// a daemon. This is intentionally an additive API; `InputSource::next_event`
+    /// remains the blocking interface for simple consumers.
     pub fn next_event_timeout(
         &mut self,
         timeout: Duration,
@@ -821,19 +821,7 @@ impl InputMethodSource {
             return Err(source_error(error));
         }
         if let Some(event) = self.state.events.pop_front() {
-            if matches!(event, InputEvent::Reset) {
-                let injector = self
-                    .key_pass_through
-                    .as_mut()
-                    .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                let result =
-                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector);
-                if result.is_err() {
-                    self.release_virtual_keys();
-                }
-                result?;
-            }
-            return Ok(Some(event));
+            return self.deliver_event(event);
         }
         if let Err(error) = self.transport.flush() {
             self.release_virtual_keys();
@@ -866,23 +854,28 @@ impl InputMethodSource {
             self.release_virtual_keys();
             return Err(source_error(error));
         }
-        if let Some(event) = self.state.events.pop_front() {
-            if matches!(event, InputEvent::Reset) {
-                let injector = self
-                    .key_pass_through
-                    .as_mut()
-                    .map(|injector| injector.as_mut() as &mut dyn TextInjector);
-                let result =
-                    pass_through_pending_key(&mut self.state.pending_key_pass_through, injector);
-                if result.is_err() {
-                    self.release_virtual_keys();
-                }
-                result?;
-            }
-            Ok(Some(event))
-        } else {
-            Ok(None)
+        match self.state.events.pop_front() {
+            Some(event) => self.deliver_event(event),
+            None => Ok(None),
         }
+    }
+
+    /// Hand a queued event to the caller. A `Reset` marks an unsupported key,
+    /// which is passed through before the matcher sees the boundary.
+    fn deliver_event(&mut self, event: InputEvent) -> Result<Option<InputEvent>, InputSourceError> {
+        if matches!(event, InputEvent::Reset) {
+            let injector = self
+                .key_pass_through
+                .as_mut()
+                .map(|injector| injector.as_mut() as &mut dyn TextInjector);
+            let result =
+                pass_through_pending_key(&mut self.state.pending_key_pass_through, injector);
+            if result.is_err() {
+                self.release_virtual_keys();
+            }
+            result?;
+        }
+        Ok(Some(event))
     }
 }
 

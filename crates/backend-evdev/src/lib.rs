@@ -169,10 +169,6 @@ impl EvdevSource {
         })
     }
 
-    /// One bounded poll of every open device. Returns without error (and
-    /// without changing `self.pending`) if `timeout` elapses with nothing
-    /// ready, so callers on the daemon's main loop can still service
-    /// stop/pause/reload requests at a steady cadence even while idle.
     /// Install a non-blocking eventfd that ends [`Self::next_event_timeout`]
     /// early when another thread has work for the caller. The source drains
     /// it when it fires. Key-release and quiet-period safety waits ignore it.
@@ -180,6 +176,10 @@ impl EvdevSource {
         self.wake = wake;
     }
 
+    /// One bounded poll of every open device. Returns without error (and
+    /// without changing `self.pending`) if `timeout` elapses with nothing
+    /// ready, so callers on the daemon's main loop can still service
+    /// stop/pause/reload requests at a steady cadence even while idle.
     fn poll_once(&mut self, timeout: Duration, with_wake: bool) -> Result<(), EvdevError> {
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);

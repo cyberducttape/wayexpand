@@ -300,7 +300,6 @@ impl ControlServer {
         })
     }
 
-    /// Take the pending insert request, if any.
     /// Take a pending explain request; the reactor answers it on `reply`.
     pub fn take_explain_request(&self) -> Option<ExplainRequest> {
         self.explain_requested
@@ -309,6 +308,7 @@ impl ControlServer {
             .and_then(|mut slot| slot.take())
     }
 
+    /// Take the pending insert request, if any.
     pub fn take_insert_request(&self) -> Option<InsertRequest> {
         self.insert_requested
             .lock()
@@ -332,9 +332,6 @@ impl ControlServer {
         self.path.as_ref()
     }
 
-    /// Publishes a status body. Taking `StatusBody` rather than any string
-    /// keeps `crate::status`'s builder the single producer of the documented
-    /// control-socket field set.
     /// Install the reactor's waker; requests that change daemon state then
     /// wake the loop immediately.
     pub fn set_waker(&self, waker: crate::waker::Waker) {
@@ -347,6 +344,9 @@ impl ControlServer {
         }
     }
 
+    /// Publishes a status body. Taking `StatusBody` rather than any string
+    /// keeps `crate::status`'s builder the single producer of the documented
+    /// control-socket field set.
     pub fn set_status(&self, status: crate::status::StatusBody) {
         if let Ok(mut current) = self.status.lock() {
             if current.as_str() != status.as_str() {
