@@ -51,6 +51,9 @@ impl ConfigStore {
             subscribers: Mutex::new(Vec::new()),
         }))
     }
+    /// Return only the configuration. Use [`Self::snapshot`] when its
+    /// corresponding generation is also needed.
+    #[deprecated(note = "use snapshot() to read configuration and generation coherently")]
     pub fn config(&self) -> Arc<Config> {
         self.snapshot().config
     }
@@ -60,6 +63,9 @@ impl ConfigStore {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+    /// Return only the generation. Use [`Self::snapshot`] when its
+    /// corresponding configuration is also needed.
+    #[deprecated(note = "use snapshot() to read configuration and generation coherently")]
     pub fn generation(&self) -> u64 {
         self.snapshot().generation
     }
@@ -80,9 +86,10 @@ impl ConfigStore {
         }
     }
     pub fn subscribe(&self) -> mpsc::Receiver<u64> {
-        // A subscriber only needs to learn that a newer snapshot exists; the
-        // current config and generation are read from the store. Capacity one
-        // prevents a stalled consumer from retaining an unbounded history.
+        // Notifications are invalidation signals, not a complete change log.
+        // A full channel retains its older value; consumers must read
+        // snapshot() for the authoritative latest config/generation pair.
+        // Capacity one prevents a stalled consumer from retaining history.
         let (sender, receiver) = mpsc::sync_channel(1);
         self.subscribers
             .lock()
@@ -254,7 +261,7 @@ mod tests {
         );
         assert!(store.reload_if_changed().unwrap());
         assert_eq!(receiver.recv().unwrap(), 1);
-        assert_eq!(store.config().expansion[0].replacement, "new");
+        assert_eq!(store.snapshot().config.expansion[0].replacement, "new");
         let _ = fs::remove_file(path);
     }
     #[test]
@@ -267,8 +274,9 @@ mod tests {
         let store = ConfigStore::load(&path).unwrap();
         write_private(&path, "replacement = [");
         assert!(store.reload_if_changed().is_err());
-        assert_eq!(store.config().expansion[0].replacement, "old");
-        assert_eq!(store.generation(), 0);
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.config.expansion[0].replacement, "old");
+        assert_eq!(snapshot.generation, 0);
         assert!(
             !store.reload_if_changed().unwrap(),
             "unchanged invalid content must not be reparsed"
@@ -291,8 +299,9 @@ mod tests {
             );
             assert!(store.reload_if_changed().unwrap());
         }
-        assert_eq!(store.config().expansion[0].replacement, "value-7");
-        assert_eq!(store.generation(), 8);
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.config.expansion[0].replacement, "value-7");
+        assert_eq!(snapshot.generation, 8);
         let _ = fs::remove_file(path);
     }
 
@@ -306,14 +315,15 @@ mod tests {
         let store = ConfigStore::load(&path).unwrap();
         let receiver = store.subscribe();
         for value in 0..64 {
-            let mut config = (*store.config()).clone();
+            let mut config = (*store.snapshot().config).clone();
             config.expansion[0].replacement = format!("value-{value}");
             store.atomically_replace(config);
         }
-        assert_eq!(store.generation(), 64);
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.generation, 64);
         assert_eq!(receiver.recv().unwrap(), 1);
         assert!(receiver.try_recv().is_err());
-        assert_eq!(store.config().expansion[0].replacement, "value-63");
+        assert_eq!(snapshot.config.expansion[0].replacement, "value-63");
         let _ = fs::remove_file(path);
     }
 
@@ -328,7 +338,7 @@ mod tests {
         let writer = Arc::clone(&store);
         let join = thread::spawn(move || {
             for generation in 1..=500 {
-                let mut config = (*writer.config()).clone();
+                let mut config = (*writer.snapshot().config).clone();
                 config.expansion[0].replacement = format!("generation-{generation}");
                 writer.atomically_replace(config);
             }

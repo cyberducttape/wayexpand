@@ -25,7 +25,10 @@ All notable changes to WayExpand are documented here.
   append, eviction, backspace, and reset; before/after benchmarks are recorded.
 - Configuration stores now publish the validated configuration and generation
   as one coherent snapshot, with replacement notifications ordered alongside
-  updates. The IBus service reads a single snapshot when applying reloads.
+  updates. The IBus service reads a single snapshot when applying reloads;
+  separate configuration and generation accessors are deprecated to prevent
+  callers from accidentally combining different versions. Full subscriber
+  channels are documented and tested as coalesced invalidation signals.
 - Strict-path Action Broker commands are opened and validated once, then
   launched through the pinned executable descriptor. This closes the
   validation-to-spawn path replacement race, including for shebang scripts.
