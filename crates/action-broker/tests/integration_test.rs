@@ -33,13 +33,14 @@ fn test_socket(name: &str) -> std::path::PathBuf {
 }
 
 fn private_test_directory(name: &str) -> std::path::PathBuf {
-    let home = std::env::var_os("HOME").expect("HOME is required for secure broker tests");
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let directory = std::path::PathBuf::from(home)
-        .join(format!(".wayexpand-{name}-{}-{suffix}", std::process::id()));
+    let directory = test_socket(&format!("private-{name}-{suffix}"))
+        .parent()
+        .expect("test socket has a parent directory")
+        .join(format!("private-{name}-{suffix}"));
     fs::create_dir(&directory).unwrap();
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
     directory

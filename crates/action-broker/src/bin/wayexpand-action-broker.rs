@@ -461,9 +461,16 @@ fn validate_config_ancestors(path: &Path) -> Result<()> {
             ));
         }
         if metadata.mode() & 0o022 != 0 {
-            return Err(anyhow!(
-                "config ancestor is writable by group or other users"
-            ));
+            // A root-owned sticky ancestor (/tmp, for example) protects
+            // entries belonging to other users. The config file itself and
+            // its ownership and permissions are checked separately.
+            if !(metadata.mode() & 0o1000 != 0
+                && is_user_or_root_owner(metadata.uid(), current_uid))
+            {
+                return Err(anyhow!(
+                    "config ancestor is writable by group or other users"
+                ));
+            }
         }
         if current == Path::new("/") {
             break;

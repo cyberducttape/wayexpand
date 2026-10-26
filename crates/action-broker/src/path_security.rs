@@ -72,7 +72,7 @@ pub(crate) fn validate_audit_path(path: &str) -> Result<(), String> {
         .ok_or_else(|| "audit_path has no parent directory".to_string())?;
     let parent = fs::canonicalize(parent)
         .map_err(|error| format!("audit_path parent cannot be resolved: {error}"))?;
-    validate_path_ancestors(&parent, "audit_path", false)?;
+    validate_path_ancestors(&parent, "audit_path", true)?;
     let parent_metadata = fs::metadata(&parent)
         .map_err(|error| format!("audit_path parent cannot be inspected: {error}"))?;
     let uid = rustix::process::geteuid().as_raw();
@@ -230,6 +230,10 @@ fn validate_path_ancestors(
             ));
         }
         if metadata.mode() & 0o022 != 0 {
+            // Trusted sticky directories such as /tmp prevent untrusted
+            // users from replacing entries owned by another user. Permit
+            // them as ancestors while still requiring the actual file's
+            // parent directory to be private for audit files.
             let trusted_sticky = allow_trusted_sticky
                 && metadata.mode() & 0o1000 != 0
                 && is_user_or_root_owner(metadata.uid(), uid);

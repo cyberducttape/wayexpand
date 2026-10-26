@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The action broker now accepts root-owned or user-owned sticky directories
+  such as `/tmp` as protected ancestors of private configuration and audit
+  paths. Its SIGTERM integration test uses a private temp directory, so Debian
+  package builds no longer depend on the ownership of the builder's `$HOME`.
 - The Diagnostics dashboard now gives explicit active-route assessments for
   capture availability, insertion safety, compositor/device permissions, and
   focus visibility. It also shows recent content-free expansion outcomes,
