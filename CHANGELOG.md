@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Configuration watcher events now reload only when they concern the
+  configuration file, its `snippets.d` layers, or the fleet directories.
+  Since watcher events started forcing a reload, any write in the
+  configuration's directory (usage statistics, preferences, logs) rebuilt the
+  engine and discarded running commands, so command-backed expansions could
+  never complete; the headless KWin `command-expansion-completes` scenario
+  caught it.
 - Waiting for a command that closed its stdout or stderr while still running
   no longer busy-polls the hung-up pipe; the worker previously used a full CPU
   core until the command exited or timed out. A command-backed match dropped

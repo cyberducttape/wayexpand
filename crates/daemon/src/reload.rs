@@ -180,23 +180,47 @@ fn stable_content_fingerprint(contents: &[u8]) -> u64 {
     })
 }
 
+/// The paths whose changes can alter the loaded configuration. The watcher
+/// covers whole directories (the configuration's parent, to see atomic
+/// replacement, and the fleet layers), and anything else written there --
+/// usage statistics, preferences, logs -- must not trigger a reload: every
+/// reload rebuilds the engine, which drops the typing buffer and discards a
+/// command that is still running.
+struct WatchFilter {
+    /// The configuration file as each watched directory reports it.
+    files: Vec<PathBuf>,
+    /// Directories whose whole contents are configuration layers.
+    trees: Vec<PathBuf>,
+}
+
+impl WatchFilter {
+    fn concerns(&self, path: &Path) -> bool {
+        self.files.iter().any(|file| file == path)
+            || self.trees.iter().any(|tree| path.starts_with(tree))
+    }
+}
+
 /// Whether a watcher notification may mean configuration contents changed.
 ///
-/// Every change-carrying event triggers a reload, so read-only access must not:
-/// the reload worker opens the file itself, and an `IN_OPEN` that requested
-/// another reload would rebuild the engine (and drop the typing buffer)
-/// forever. Errors can mean an event was lost (for example, the kernel watch
-/// queue overflowed), so they still request a rescan.
-fn event_requests_rescan(event: &notify::Result<notify::Event>) -> bool {
+/// Read-only access never does: the reload worker opens the file itself, and
+/// an `IN_OPEN` that requested another reload would rebuild the engine
+/// forever. Errors and rescan requests can mean an event was lost (for
+/// example, the kernel watch queue overflowed), and an event without paths
+/// cannot be attributed, so all three still request a rescan.
+fn event_requests_rescan(event: &notify::Result<notify::Event>, filter: &WatchFilter) -> bool {
     use notify::event::{AccessKind, AccessMode, EventKind};
-    match event {
-        Err(_) => true,
-        Ok(event) => match event.kind {
-            EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
-            EventKind::Access(_) => false,
-            _ => true,
-        },
+    let event = match event {
+        Err(_) => return true,
+        Ok(event) => event,
+    };
+    match event.kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => {}
+        EventKind::Access(_) => return false,
+        _ => {}
     }
+    event.need_rescan()
+        || event.paths.is_empty()
+        || event.paths.iter().any(|path| filter.concerns(path))
 }
 
 fn start_config_watcher(
@@ -204,10 +228,39 @@ fn start_config_watcher(
     fleet: bool,
     dirty: Arc<AtomicBool>,
 ) -> Option<RecommendedWatcher> {
+    let mut watched_paths = std::collections::HashSet::new();
+    let mut filter = WatchFilter {
+        files: vec![path.to_path_buf()],
+        trees: Vec::new(),
+    };
+    let file_name = path.file_name();
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    if let Some(file_name) = file_name {
+        filter.files.push(parent.join(file_name));
+    }
+    filter.trees.push(parent.join("snippets.d"));
+    watched_paths.insert(parent);
+    if let Ok(resolved) = fs::canonicalize(path) {
+        if let Some(parent) = resolved.parent() {
+            filter.trees.push(parent.join("snippets.d"));
+            watched_paths.insert(parent.to_path_buf());
+        }
+        filter.files.push(resolved);
+    }
+    let fleet_directories = if fleet {
+        FleetConfig::standard_source_directories()
+    } else {
+        Vec::new()
+    };
+    filter.trees.extend(fleet_directories.iter().cloned());
+
     let callback_dirty = Arc::clone(&dirty);
     let mut watcher = match notify::recommended_watcher(
         move |event: notify::Result<notify::Event>| {
-            if event_requests_rescan(&event) {
+            if event_requests_rescan(&event, &filter) {
                 callback_dirty.store(true, Ordering::Release);
             }
         },
@@ -220,20 +273,6 @@ fn start_config_watcher(
     };
 
     let mut watched_config = false;
-    let mut watched_paths = std::collections::HashSet::new();
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        watched_paths.insert(parent.to_path_buf());
-    } else {
-        watched_paths.insert(PathBuf::from("."));
-    }
-    if let Ok(resolved) = fs::canonicalize(path) {
-        if let Some(parent) = resolved.parent() {
-            watched_paths.insert(parent.to_path_buf());
-        }
-    }
     for directory in watched_paths {
         match watcher.watch(&directory, RecursiveMode::NonRecursive) {
             Ok(()) => watched_config = true,
@@ -247,14 +286,12 @@ fn start_config_watcher(
         return None;
     }
 
-    if fleet {
-        for directory in FleetConfig::standard_source_directories() {
-            if !directory.is_dir() {
-                continue;
-            }
-            if let Err(error) = watcher.watch(&directory, RecursiveMode::Recursive) {
-                warn!(%error, path = %directory.display(), "could not watch fleet configuration directory; integrity polling remains enabled");
-            }
+    for directory in fleet_directories {
+        if !directory.is_dir() {
+            continue;
+        }
+        if let Err(error) = watcher.watch(&directory, RecursiveMode::Recursive) {
+            warn!(%error, path = %directory.display(), "could not watch fleet configuration directory; integrity polling remains enabled");
         }
     }
     Some(watcher)
@@ -1210,32 +1247,50 @@ mod tests {
     }
 
     #[test]
-    fn read_only_access_does_not_request_a_rescan() {
+    fn only_changes_to_configuration_paths_request_a_rescan() {
         use notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
-        let event = |kind| Ok(notify::Event::new(kind));
-        assert!(!event_requests_rescan(&event(EventKind::Access(
-            AccessKind::Open(AccessMode::Any)
-        ))));
-        assert!(!event_requests_rescan(&event(EventKind::Access(
-            AccessKind::Close(AccessMode::Read)
-        ))));
-        assert!(event_requests_rescan(&event(EventKind::Access(
-            AccessKind::Close(AccessMode::Write)
-        ))));
-        assert!(event_requests_rescan(&event(EventKind::Modify(
-            ModifyKind::Any
-        ))));
-        assert!(event_requests_rescan(&event(EventKind::Create(
-            CreateKind::File
-        ))));
-        assert!(event_requests_rescan(&Err(notify::Error::generic("lost"))));
+        let filter = WatchFilter {
+            files: vec![PathBuf::from("/c/config.toml")],
+            trees: vec![PathBuf::from("/c/snippets.d")],
+        };
+        let event = |kind, path: &str| Ok(notify::Event::new(kind).add_path(path.into()));
+        let config = "/c/config.toml";
+        let rescan = |event| event_requests_rescan(&event, &filter);
+        assert!(!rescan(event(
+            EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            config
+        )));
+        assert!(!rescan(event(
+            EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            config
+        )));
+        assert!(rescan(event(
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            config
+        )));
+        assert!(rescan(event(EventKind::Modify(ModifyKind::Any), config)));
+        assert!(rescan(event(
+            EventKind::Create(CreateKind::File),
+            "/c/snippets.d/work.toml"
+        )));
+        // Other files in the watched directory, such as usage statistics.
+        assert!(!rescan(event(
+            EventKind::Modify(ModifyKind::Any),
+            "/c/usage-stats.json"
+        )));
+        assert!(!rescan(event(
+            EventKind::Create(CreateKind::File),
+            "/c/.config.toml.tmp.1"
+        )));
+        // Unattributable events and lost events still rescan.
+        assert!(rescan(Ok(notify::Event::new(EventKind::Any))));
+        assert!(rescan(Err(notify::Error::generic("lost"))));
     }
 
-    #[test]
-    fn reading_the_watched_config_does_not_mark_it_dirty() {
-        // The watcher covers the whole parent directory, so use a private one:
-        // other tests writing their configs into the shared temporary
-        // directory would otherwise mark this one dirty.
+    /// A private watched directory: other tests writing their configs into the
+    /// shared temporary directory must not be visible to this one. It is 0700
+    /// because the loader refuses a group-writable parent.
+    fn watched_test_config() -> (PathBuf, PathBuf, ReloadableConfig) {
         let directory = temporary_config().with_extension("d");
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1243,16 +1298,35 @@ mod tests {
         write_config(&path, &config_text("old"));
         let config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
-        if config._watcher.is_none() {
-            let _ = fs::remove_dir_all(directory);
-            return;
-        }
         // Let events from the initial write and load drain.
         thread::sleep(Duration::from_millis(200));
         config.watch_dirty.store(false, Ordering::Release);
-        let _ = fs::read(&path).unwrap();
-        thread::sleep(Duration::from_millis(200));
-        assert!(!config.watch_dirty.load(Ordering::Acquire));
+        (directory, path, config)
+    }
+
+    #[test]
+    fn reading_the_watched_config_does_not_mark_it_dirty() {
+        let (directory, path, config) = watched_test_config();
+        if config._watcher.is_some() {
+            let _ = fs::read(&path).unwrap();
+            thread::sleep(Duration::from_millis(200));
+            assert!(!config.watch_dirty.load(Ordering::Acquire));
+        }
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn writing_a_sibling_file_does_not_mark_the_config_dirty() {
+        let (directory, path, config) = watched_test_config();
+        if config._watcher.is_some() {
+            fs::write(directory.join("usage-stats.json"), "{}").unwrap();
+            thread::sleep(Duration::from_millis(200));
+            assert!(!config.watch_dirty.load(Ordering::Acquire));
+
+            write_config(&path, &config_text("new"));
+            thread::sleep(Duration::from_millis(200));
+            assert!(config.watch_dirty.load(Ordering::Acquire));
+        }
         let _ = fs::remove_dir_all(directory);
     }
 
