@@ -65,12 +65,13 @@ pub(crate) fn assess_route(
     };
 
     let insertion = match capabilities.and_then(|caps| caps.replacement_assurance) {
-        Some(ReplacementAssurance::Verified)
-            if capabilities.and_then(|caps| caps.inject_full_unicode) != Some(false) =>
-        {
-            Ready
+        Some(ReplacementAssurance::Verified) => {
+            match capabilities.and_then(|caps| caps.inject_full_unicode) {
+                Some(true) => Ready,
+                Some(false) => Warning,
+                None => Unknown,
+            }
         }
-        Some(ReplacementAssurance::Verified) => Warning,
         Some(ReplacementAssurance::FocusTrackedBestEffort | ReplacementAssurance::Unverified) => {
             Warning
         }
@@ -465,7 +466,26 @@ mod tests {
         assert_eq!(ready.permissions, Ready);
         assert_eq!(ready.focus, Ready);
 
+        capabilities.inject_full_unicode = None;
+        let unicode_unreported = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · input-method-v2 + input-method-v2",
+        );
+        assert_eq!(unicode_unreported.insertion, Unknown);
+
+        capabilities.inject_full_unicode = Some(false);
+        let unicode_limited = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · input-method-v2 + input-method-v2",
+        );
+        assert_eq!(unicode_limited.insertion, Warning);
+
         capabilities.replacement_assurance = Some(ReplacementAssurance::FocusTrackedBestEffort);
+        capabilities.inject_full_unicode = Some(true);
         capabilities.window_identity_exact = Some(false);
         let best_effort = super::assess_route(
             Some(true),

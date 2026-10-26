@@ -52,6 +52,14 @@ impl Strings {
         }
     }
 
+    pub fn insertion_unicode_unknown(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Full Unicode support has not been reported for this route.",
+            Language::Indonesian => "Dukungan Unicode penuh belum dilaporkan untuk rute ini.",
+            Language::German => "Volle Unicode-Unterstützung wurde für diese Route nicht gemeldet.",
+        }
+    }
+
     pub fn compositor_permissions_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Compositor permissions",

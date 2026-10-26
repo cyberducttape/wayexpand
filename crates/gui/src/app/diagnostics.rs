@@ -158,19 +158,23 @@ impl GuiApp {
             capabilities,
             &self.permission_health,
         );
-        let insertion_detail = match capabilities.and_then(|caps| caps.replacement_assurance) {
+        let mut insertion_detail = match capabilities.and_then(|caps| caps.replacement_assurance) {
             Some(assurance) => self.strings.replacement_explanation(assurance).to_owned(),
             None => self.strings.insertion_assurance_unknown().to_owned(),
         };
-        let insertion_detail =
-            if capabilities.and_then(|caps| caps.inject_full_unicode) == Some(false) {
-                format!(
-                    "{insertion_detail} {}",
-                    self.strings.insertion_unicode_limited()
-                )
-            } else {
-                insertion_detail
-            };
+        let unicode_detail = match (
+            capabilities.and_then(|caps| caps.replacement_assurance),
+            capabilities.and_then(|caps| caps.inject_full_unicode),
+        ) {
+            (Some(crate::runtime::ReplacementAssurance::Verified), None) => {
+                Some(self.strings.insertion_unicode_unknown())
+            }
+            (_, Some(false)) => Some(self.strings.insertion_unicode_limited()),
+            _ => None,
+        };
+        if let Some(detail) = unicode_detail {
+            insertion_detail = format!("{insertion_detail} {detail}");
+        }
         theme::section_header(ui, "", self.strings.route_assessment_title());
         theme::card(ui, palette, |ui| {
             let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
