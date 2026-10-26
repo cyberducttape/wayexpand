@@ -10,6 +10,10 @@ All notable changes to WayExpand are documented here.
   outcomes, including acknowledged insertions and the stage where blocked or
   uncertain attempts stopped. The trace never records typed or inserted text,
   and distinguishes backend acknowledgement from proof of client display.
+- Added current-source KWin 6.6.6 headless certification evidence. The
+  supported output/focus scenarios passed, but keyboard capture, Unicode on
+  the negotiated keysym route, suspend/resume, and production desktop
+  certification remain unverified.
 - The pinned matcher playground now tests the current unsaved draft against the
   rest of the library, including aliases, match rules, app filters, and reusable
   snippet includes. Command-backed snippets remain disabled there. Successful

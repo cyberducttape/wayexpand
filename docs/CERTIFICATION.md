@@ -154,6 +154,14 @@ the actual keymap and observed behavior.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-a4d699546.json`](evidence/doctor-certify-a4d699546.json)
+preserves a current-source run from commit `a4d69954676e` on KWin 6.6.6.
+The isolated clients passed ten insertion, focus, reload, restart, and refusal
+scenarios. The keysym fallback measured 12,521 µs p50, 12,827 µs p95, and
+12,827 µs p99 across twenty small insertions inside the injector. Unicode
+insertion, physical keyboard capture, and suspend/resume were not tested. This
+is partial headless evidence, not production compositor certification.
+
 [`evidence/doctor-certify-6551bb4b7.json`](evidence/doctor-certify-6551bb4b7.json)
 preserves the build-identity-checked `wayexpand doctor --certify --json` run
 from commit `6551bb4b7b77` on KWin 6.6.6. The private clients passed 12
