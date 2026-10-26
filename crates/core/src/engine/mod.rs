@@ -71,6 +71,9 @@ pub struct ExpansionEngine {
     matcher: Matcher,
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
+    /// Number of non-ASCII scalars in `buffer`. An all-ASCII buffer is
+    /// necessarily NFC, so matching can skip rescanning it on every input.
+    non_ascii_buffer_chars: usize,
     max_buffer_chars: usize,
     /// Set whenever the buffer evicts a character from the front because it
     /// exceeded `max_buffer_chars`, and cleared only by `buffer.clear()`
@@ -221,6 +224,7 @@ impl ExpansionEngine {
             matcher,
             matcher_indices,
             buffer: VecDeque::new(),
+            non_ascii_buffer_chars: 0,
             max_buffer_chars,
             buffer_truncated: false,
             user_paused: false,
@@ -770,10 +774,29 @@ impl ExpansionEngine {
     /// Append one character while maintaining the configured rolling-buffer
     /// bound and its word-boundary truncation metadata.
     fn push_buffered(&mut self, character: char) {
+        if !character.is_ascii() {
+            self.non_ascii_buffer_chars += 1;
+        }
         self.buffer.push_back(character);
         while self.buffer.len() > self.max_buffer_chars {
-            self.buffer.pop_front();
+            let evicted = self
+                .buffer
+                .pop_front()
+                .expect("buffer length exceeded its cap");
+            if !evicted.is_ascii() {
+                self.non_ascii_buffer_chars -= 1;
+            }
             self.buffer_truncated = true;
+        }
+    }
+
+    fn pop_buffered_back(&mut self) {
+        let removed = self
+            .buffer
+            .pop_back()
+            .expect("grapheme cleanup exceeded the buffer length");
+        if !removed.is_ascii() {
+            self.non_ascii_buffer_chars -= 1;
         }
     }
 
@@ -1000,6 +1023,7 @@ impl ExpansionEngine {
     /// is no longer relevant to word-boundary checks.
     fn clear_buffer(&mut self) {
         self.buffer.clear();
+        self.non_ascii_buffer_chars = 0;
         self.buffer_truncated = false;
         self.clipboard_prefetch_armed = false;
     }

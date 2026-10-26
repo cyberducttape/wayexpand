@@ -3609,6 +3609,53 @@ fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
 }
 
 #[test]
+fn non_ascii_buffer_count_tracks_edits_eviction_restoration_and_clear() {
+    let config = Config::parse(
+        r#"
+        [settings]
+        max_buffer_chars = 3
+
+        [[expansion]]
+        trigger = ":x"
+        replacement = "done"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    engine.process(InputEvent::Text("éab".into()));
+    assert_eq!(engine.non_ascii_buffer_chars, 1);
+
+    // The fourth scalar evicts the leading non-ASCII scalar.
+    engine.process(InputEvent::Text("c".into()));
+    assert_eq!(engine.non_ascii_buffer_chars, 0);
+
+    engine.process(InputEvent::Text("é".into()));
+    assert_eq!(engine.non_ascii_buffer_chars, 1);
+    engine.process(InputEvent::Backspace);
+    assert_eq!(engine.non_ascii_buffer_chars, 0);
+
+    // Backspace removes both scalars in a decomposed grapheme, while only
+    // the combining mark contributes to the non-ASCII count.
+    engine.process(InputEvent::Text("e\u{301}".into()));
+    assert_eq!(engine.non_ascii_buffer_chars, 1);
+    engine.process(InputEvent::Backspace);
+    assert_eq!(engine.non_ascii_buffer_chars, 0);
+
+    engine.process(InputEvent::Text("界".into()));
+    assert_eq!(engine.non_ascii_buffer_chars, 1);
+    engine.process(InputEvent::Reset);
+    assert_eq!(engine.non_ascii_buffer_chars, 0);
+    assert!(engine.buffer.is_empty());
+
+    engine.restore_buffered("éa");
+    assert_eq!(engine.non_ascii_buffer_chars, 1);
+    engine.restore_buffered("bc");
+    assert_eq!(engine.non_ascii_buffer_chars, 0);
+    assert_eq!(engine.buffer.iter().collect::<String>(), "abc");
+}
+
+#[test]
 fn deferred_dispatch_commits_undo_only_after_injection() {
     let config = Config::parse(
         r#"

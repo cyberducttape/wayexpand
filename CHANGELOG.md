@@ -20,6 +20,9 @@ All notable changes to WayExpand are documented here.
 - Extended the GUI benchmark to measure one draft keystroke plus live-preview
   computation at 100, 1,000, 5,000, and 10,000 snippets; recorded methodology
   and host-specific measurements in `docs/BENCHMARKS.md`.
+- The matcher now tracks non-ASCII scalars in its bounded input buffer and
+  skips repeated NFC scans for all-ASCII input. Regression coverage exercises
+  append, eviction, backspace, and reset; before/after benchmarks are recorded.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

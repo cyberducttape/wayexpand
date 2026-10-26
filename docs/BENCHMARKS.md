@@ -207,3 +207,28 @@ The preview computation stayed approximately constant with library size,
 consistent with the GUI reusing its prebuilt snippet library and constructing
 a one-expansion preview engine. Full saves remain size-dependent and
 asynchronous as shown above.
+
+### ASCII normalization fast path: 2026-10-25
+
+`ExpansionEngine` tracks the number of non-ASCII scalars in its bounded input
+buffer. When that count is zero, the buffer is necessarily NFC, so matching
+skips the Unicode normalization quick-check scan. Non-ASCII input still uses
+the existing Unicode-aware quick check and grapheme-normalization path. The
+counter is updated as characters are appended, evicted, deleted, restored, or
+cleared.
+
+Before and after measurements used Criterion with 10 samples, a 1 s warmup,
+and a 2 s measurement on the AMD Ryzen 7 7735U / Rust 1.96.0 host:
+
+| Benchmark | Before | After |
+| --- | ---: | ---: |
+| 4,096-character ASCII buffer, type and backspace | 6.358 µs | 65.690 ns |
+| Short trigger, 100 snippets | 8.096 µs | 7.148 µs |
+| Short trigger, 1,000 snippets | 8.035 µs | 4.587 µs |
+| Short trigger, 10,000 snippets | 4.911 µs | 4.751 µs |
+
+Criterion reported statistically significant improvements for these cases
+with this run's sample settings. A 4,096-character decomposed-accent buffer
+measured 69.429 µs after the change; this remains on the Unicode normalization
+path and is not a paired before/after comparison. These microbenchmarks are
+host-specific and do not measure end-to-end keyboard-to-client latency.

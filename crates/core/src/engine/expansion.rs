@@ -187,7 +187,7 @@ impl ExpansionEngine {
             }
         };
         for _ in 0..scalar_count {
-            self.buffer.pop_back();
+            self.pop_buffered_back();
         }
     }
 
@@ -304,8 +304,9 @@ impl ExpansionEngine {
         // The quick check proves almost all text is NFC without composing
         // it. `No` and `Maybe` take the bounded normalized path below, which
         // is also correct for text that turns out to be NFC already.
-        if unicode_normalization::is_nfc_quick(self.buffer.iter().copied())
-            == unicode_normalization::IsNormalized::Yes
+        if self.non_ascii_buffer_chars == 0
+            || unicode_normalization::is_nfc_quick(self.buffer.iter().copied())
+                == unicode_normalization::IsNormalized::Yes
         {
             let (index, length) = self
                 .matcher
